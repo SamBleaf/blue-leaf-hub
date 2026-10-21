@@ -45,6 +45,8 @@ function makeApi(base, send, fetcher, extras = {}) {
     updateSupplier: (id, body) => patch(`/suppliers/${id}`, body),   // HUB 019
     // HUB 014: save a product's company cladding default (office logins on the Hub and in the Worker app)
     saveCompanyDefault: (body) => post("/company-defaults", body),
+    // HUB 024: add an aluminium setup to the company products (same office logins; the server checks who may)
+    saveCompanyProduct: (body) => post("/company-products", body),
     // HUB 013 / HUB 020: open (and for Flashings, bring up to date) the section's working draft; discard a draft
     openOrder: (wsId, body) => post(`/workspaces/${wsId}/orders/open`, body),
     discardOrder: (orderId, body) => post(`/orders/${orderId}/discard`, body),

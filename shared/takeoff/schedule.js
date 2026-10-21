@@ -48,6 +48,8 @@ export const PROBLEM_TEXT = Object.freeze({
   wall_incomplete: "A wall is missing its length or heights.",
   measurement_unused: "A measurement assigned to this material can't be used by it — remove it or assign it to the right material.",
   line_stale_inputs: "What this line was worked out from has changed (measurements, openings, product or rules) — review it and update the line.",
+  // HUB 025: a save that would count the same item twice for one material (one live assignment per pair)
+  duplicate_assignment: "This item is already counted for the same material, so this change wasn't saved. Discard it, then add it again if you still need it.",
 });
 
 /** Stale-line wording for purchase lines (timber, sheets, bars, LM …) — PROBLEM_TEXT talks about flashing lengths. */

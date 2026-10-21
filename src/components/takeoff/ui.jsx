@@ -6,6 +6,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useFocusMode } from "./focusMode.js";
+import { nameChanges } from "./changeset.js";
 
 export function FocusMode() { useFocusMode(); return null; }
 
@@ -84,6 +85,40 @@ export function Banner({ tone = "info", children, action }) {
     <div role={tone === "error" ? "alert" : "status"} className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${cls}`}>
       <div className="min-w-0 flex-1">{children}</div>
       {action}
+    </div>
+  );
+}
+
+/**
+ * HUB 025: why the save chip isn't "Saved", on the screen you are on, with what to do next.
+ *   Conflict  → someone else saved first: names the edits not saved yet, keeps both versions until you choose
+ *               Apply my changes to latest / Discard mine and load latest (the same choices as the overview).
+ *   refused   → "Not saved: <reason>" with Try again / Discard (later edits keep saving).
+ *   otherwise → the save message as it is (no connection, server error).
+ * Renders nothing when there is nothing to explain (className spaces it only when it shows).
+ */
+export function SaveProblem({ ws, className = "" }) {
+  if (ws.status === "conflict") {
+    const names = nameChanges(ws.pending, ws.view, ws.server?.snapshot);
+    // the server's own conflict texts say "reload to compare" / "changed while loading — reload" (CONFLICT_RETRY);
+    // here the choice is right on this screen
+    const lead = !ws.saveError || /^(Someone else saved this takeoff|The takeoff changed while loading)/.test(ws.saveError) ? "Someone else saved this takeoff while you were working." : ws.saveError;
+    return (
+      <div data-testid="save-problem" className={className}>
+        <Banner tone="error" action={<div className="flex flex-wrap gap-2"><Btn onClick={ws.reloadFromServer}>Discard mine and load latest</Btn><Btn kind="primary" onClick={ws.applyMineOnLatest}>Apply my changes to latest</Btn></div>}>
+          {lead} Not saved yet: {names.join("; ") || "nothing"}. {ws.recovery?.available === false ? "Your version is kept while this screen stays open." : "Your version is kept on this device."}
+        </Banner>
+      </div>
+    );
+  }
+  // a refused change keeps its reason and choices even after a later edit saved (the chip still says Not saved)
+  const refused = ws.rejected?.error || null;
+  const other = ws.saveError && ws.saveError !== refused ? ws.saveError : null;
+  if (!refused && !other) return null;
+  return (
+    <div data-testid="save-problem" className={`space-y-2 ${className}`}>
+      {refused && <Banner tone="error" action={<div className="flex gap-1"><Btn onClick={ws.retryRejected}>Try again</Btn><Btn kind="ghost" onClick={ws.discardRejected}>Discard</Btn></div>}>Not saved: {refused}</Banner>}
+      {other && <Banner tone={ws.status === "unsynced" ? "warn" : "error"}>{other}</Banner>}
     </div>
   );
 }

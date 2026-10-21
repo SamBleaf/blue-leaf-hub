@@ -3,6 +3,7 @@
 //   HUB 003 Save as company standard in the drawing's More menu · HUB 004 perforation fields folded
 //   HUB 008 Add supplier from the order · HUB 011 show / hide takeoff lines on the plan · HUB 012 lengths in a flashing
 //   HUB 002 choose Flashings or Timber and cladding first; compact rows · HUB 007 separate orders per section
+//   HUB 024 Add to company products (aluminium) beside the company-product chooser
 import { test, expect } from "@playwright/test";
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
@@ -575,4 +576,284 @@ test("HUB 018: a new drawing cleared to nothing and closed leaves no blank flash
   await expect(page.locator("[data-material-row]").filter({ hasText: name })).toHaveCount(0);
   await expect.poll(async () => (await reviewMaterials(page)).filter((m) => !seeded.includes(m.id)).length).toBe(0);
   await expect(page.getByText(/Unfinished drawing on this device/)).toHaveCount(0);
+});
+
+// ── HUB 024: Add to company products (aluminium) ──────────────────────────────────────────────────────────────
+// Recording review 06 (1487.mp4 00:15–01:18): the company-product search said "Set one up here" with no way to.
+// The mock is one workspace that resets on reload, so a second aluminium item stands in for "another job" here;
+// the real-server API tests (takeoff-api "HUB 024 …") prove another job, reload and isolation.
+const ALU_NAME = "Aluminium angle 50 × 50 × 3";
+const aluSetup = (page) => page.getByRole("dialog", { name: "Aluminium" });
+const reviewPresets = (page) => page.evaluate(() => window.__takeoffReviewPresets());
+/** The fake server's snapshot (what autosave actually committed), from whichever shell the page is in. */
+const aluServer = (page, base = "/api/takeoff") => page.evaluate(async (b) => (await (await fetch(`${b}/workspaces/ws-1`)).json()).snapshot, base);
+async function addAluminium(page) {
+  await page.locator('[data-material-group="cladding"]').getByRole("button", { name: "Add aluminium" }).click();
+  const dlg = aluSetup(page);
+  await expect(dlg.locator('[data-setup="aluminium"]')).toBeVisible();
+  return dlg;
+}
+async function aluNum(scope, label, v) {
+  const f = scope.getByLabel(label, { exact: true });
+  await f.fill(String(v));
+  await f.press("Enter");
+}
+const ADD_PROMPT = "Add this setup to company products? Other jobs find it by this name. This job keeps its own copy.";
+const CLASH = `A company product called “${ALU_NAME}” already exists. OK = save this as its new version. Cancel = keep the existing one.`;
+/**
+ * Answer the next browser dialogs in order: each step accepts (a prompt with `value`, or the name it offers) unless
+ * `accept: false`. Returns what each dialog showed, to check once the tap has finished.
+ */
+function dialogs(page, steps) {
+  const seen = [];
+  const h = async (d) => {
+    const st = steps[seen.length] || { accept: false };
+    seen.push(d.type() === "prompt" ? { type: "prompt", message: d.message(), name: d.defaultValue() } : { type: d.type(), message: d.message() });
+    if (seen.length >= steps.length) page.off("dialog", h);
+    if (st.accept === false) await d.dismiss();
+    else await d.accept(d.type() === "prompt" ? (st.value ?? d.defaultValue()) : undefined);
+  };
+  page.on("dialog", h);
+  return seen;
+}
+const namePrompt = (name) => ({ type: "prompt", message: ADD_PROMPT, name });
+
+test("HUB 024: Add to company products sits beside the chooser; the saved product is found by name and restores its settings; the copy stays separate", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  const dlg = await addAluminium(page);
+  const add = dlg.getByRole("button", { name: "Add to company products" });
+  await expect(add).toBeInViewport();   // no scrolling on a 390 × 844 phone
+  const [btnBox, cardBox] = [await add.boundingBox(), await dlg.locator('[data-setup="aluminium"]').boundingBox()];
+  expect(btnBox.y + btnBox.height).toBeLessThanOrEqual(cardBox.y);   // above the setup card, beside the chooser
+  await expect(dlg.locator("[data-family-presets]")).toContainText("No company products for this yet. Finish the setup below, then tap Add to company products.");
+  await expect(dlg.locator("[data-family-presets]")).not.toContainText("Set one up here");
+  // finish the setup for this job: kerf 3, confirmed
+  const card = dlg.locator('[data-setup="aluminium"]');
+  await aluNum(card, "Saw kerf", 3);
+  await card.getByLabel("The saw kerf above is confirmed for this job").check();
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  const asked = dialogs(page, [{}]);   // the name starts as this item's name: OK keeps it
+  await add.click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toHaveText(new RegExp(`Added “${ALU_NAME}” to company products\\. Other jobs can use it; this job keeps its own copy\\.`));
+  expect(asked).toEqual([namePrompt(ALU_NAME)]);
+  await expect(dlg.locator('[data-preset-family="aluminium"] [data-preset]')).toHaveCount(1);
+  await expect(dlg.locator('[data-preset-family="aluminium"]')).toContainText(ALU_NAME);
+  let saved = (await reviewPresets(page)).find((p) => p.name === ALU_NAME);
+  expect(saved).toMatchObject({ revision: 1, methodKey: "linear_stock", spec: { family: "aluminium", stockLengthMm: 6500, kerfMm: 3, kerfConfirmed: false, profile: { aMm: 50, bMm: 50, tMm: 3 } } });
+  // the first item keeps its own confirmed setup and is not linked to the product
+  let snap = await aluServer(page);
+  const first = snap.materials.find((m) => m.spec?.family === "aluminium");
+  expect(first).toMatchObject({ name: ALU_NAME, spec: { kerfMm: 3, kerfConfirmed: true, stockLengthMm: 6500 } });
+  expect(first.fromPresetId ?? null).toBeNull();
+  await dlg.getByRole("button", { name: "Close" }).first().click();
+  await expect(dlg).toHaveCount(0);
+
+  // "another job": a second aluminium item finds it by name and Use on this job restores the saved settings
+  const dlg2 = await addAluminium(page);
+  await dlg2.getByLabel("Company products").fill("Aluminium angle");
+  const row = dlg2.locator('[data-preset-family="aluminium"] [data-preset]').filter({ hasText: ALU_NAME });
+  await expect(row).toHaveCount(1);
+  await row.getByRole("button", { name: "Use on this job" }).click();
+  const card2 = dlg2.locator('[data-setup="aluminium"]');
+  for (const [label, v] of [["Leg A", "50"], ["Leg B", "50"], ["Thickness", "3"], ["Stock length", "6500"], ["Saw kerf", "3"]]) await expect(card2.getByLabel(label, { exact: true })).toHaveValue(v);
+  // the kerf comes with the product, but this job still confirms it (the existing amber note)
+  await expect(card2.getByLabel("The saw kerf above is confirmed for this job")).not.toBeChecked();
+  await expect(card2).toContainText("An estimate can use the kerf as entered; an order needs it confirmed.");
+  await expect(dlg2.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  snap = await aluServer(page);
+  const copy = snap.materials.find((m) => m.fromPresetId === saved.id);
+  expect(copy).toMatchObject({ fromPresetRevision: 1, spec: { stockLengthMm: 6500, kerfMm: 3, kerfConfirmed: false } });
+  // change the copy: the company product and the first item stay as they were
+  await aluNum(card2, "Stock length", 6000);
+  await expect.poll(async () => (await aluServer(page)).materials.find((m) => m.id === copy.id)?.spec?.stockLengthMm).toBe(6000);
+  saved = (await reviewPresets(page)).find((p) => p.id === saved.id);
+  expect(saved).toMatchObject({ revision: 1, spec: { stockLengthMm: 6500 } });
+  expect((await aluServer(page)).materials.find((m) => m.id === first.id).spec.stockLengthMm).toBe(6500);
+});
+
+test("HUB 024: a Name typed and not yet applied is saved with the product (it applies first); job autosave carries on and the job is not linked", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  const dlg = await addAluminium(page);
+  const card = dlg.locator('[data-setup="aluminium"]');
+  const typed = `${ALU_NAME} mill`;
+  await card.getByLabel("Name", { exact: true }).fill(typed);   // still in the field — not applied yet
+  const asked = dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText(`Added “${typed}” to company products.`);
+  expect(asked).toEqual([namePrompt(typed)]);   // the typed name applied first, then offered as the product's name
+  const presets = await reviewPresets(page);
+  expect(presets.filter((p) => p.spec?.family === "aluminium").map((p) => p.name)).toEqual([typed]);
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  const mine = (await aluServer(page)).materials.filter((m) => m.spec?.family === "aluminium");
+  expect(mine).toHaveLength(1);
+  expect(mine[0].name).toBe(typed);
+  expect(mine[0].fromPresetId ?? null).toBeNull();
+  // nothing missing from the profile = nothing saved, and it says why
+  await aluNum(card, "Leg B", "");
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  let askedAgain = false;
+  page.once("dialog", (d) => { askedAgain = true; d.dismiss(); });
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="error"]')).toHaveText(/Enter the profile size \(e\.g\. 50 × 50 × 3\) first\. Nothing was saved\./);
+  expect(askedAgain).toBe(false);
+  expect((await reviewPresets(page)).filter((p) => p.spec?.family === "aluminium")).toHaveLength(1);
+});
+
+test("HUB 024: the same name saves as the product's next version only when asked; Cancel keeps the existing one", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  const dlg = await addAluminium(page);
+  dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toBeVisible();
+  const card = dlg.locator('[data-setup="aluminium"]');
+  await aluNum(card, "Stock length", 6100);
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  let asked = dialogs(page, [{}, { accept: false }]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect.poll(() => asked.length).toBe(2);
+  expect(asked).toEqual([namePrompt(ALU_NAME), { type: "confirm", message: CLASH }]);
+  let alu = (await reviewPresets(page)).filter((p) => p.spec?.family === "aluminium");
+  expect(alu.map((p) => [p.revision, p.spec.stockLengthMm])).toEqual([[1, 6500]]);
+  // Cancel on the name saves nothing either
+  asked = dialogs(page, [{ accept: false }]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect((await reviewPresets(page)).filter((p) => p.spec?.family === "aluminium").map((p) => p.revision)).toEqual([1]);
+  asked = dialogs(page, [{}, {}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText(`Saved a new version of “${ALU_NAME}”.`);
+  expect(asked).toEqual([namePrompt(ALU_NAME), { type: "confirm", message: CLASH }]);
+  alu = (await reviewPresets(page)).filter((p) => p.spec?.family === "aluminium");
+  expect(alu.map((p) => [p.revision, p.spec.stockLengthMm])).toEqual([[2, 6100]]);
+});
+
+test("HUB 024 review: a different size under the same name is asked for its own name; the 50 × 50 × 3 product is never overwritten", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  let dlg = await addAluminium(page);
+  dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toBeVisible();
+  await dlg.getByRole("button", { name: "Close" }).first().click();
+  // a second item keeps the default name but is set to 40 × 40 × 2
+  dlg = await addAluminium(page);
+  const card = dlg.locator('[data-setup="aluminium"]');
+  await aluNum(card, "Leg A", 40);
+  await aluNum(card, "Leg B", 40);
+  await aluNum(card, "Thickness", 2);
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  const ownName = { type: "prompt", message: `“${ALU_NAME}” is already the company product for a 50 × 50 × 3 angle. This setup is 40 × 40 × 2, so give it its own name.`, name: "Aluminium angle 40 × 40 × 2" };
+  let asked = dialogs(page, [{}, { accept: false }]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect.poll(() => asked.length).toBe(2);
+  expect(asked).toEqual([namePrompt(ALU_NAME), ownName]);   // never "save this as its new version"
+  const only50 = (ps) => ps.filter((p) => p.spec?.family === "aluminium").map((p) => [p.name, p.revision, p.spec.profile.aMm, p.spec.profile.bMm, p.spec.profile.tMm]);
+  expect(only50(await reviewPresets(page))).toEqual([[ALU_NAME, 1, 50, 50, 3]]);
+  // OK on the name it offers: a new product for the 40 × 40 × 2; the 50 × 50 × 3 one is untouched
+  asked = dialogs(page, [{}, {}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText("Added “Aluminium angle 40 × 40 × 2” to company products.");
+  expect(asked).toEqual([namePrompt(ALU_NAME), ownName]);
+  expect(only50(await reviewPresets(page))).toEqual([[ALU_NAME, 1, 50, 50, 3], ["Aluminium angle 40 × 40 × 2", 1, 40, 40, 2]]);
+  // the job item keeps its own name; nothing on the job changed
+  expect((await aluServer(page)).materials.filter((m) => m.spec?.family === "aluminium").map((m) => [m.name, m.spec.profile.aMm, m.fromPresetId ?? null]))
+    .toEqual([[ALU_NAME, 50, null], [ALU_NAME, 40, null]]);
+  // the fake server refuses it too, as the real one does (takeoff-api "HUB 024 review")
+  const p50 = (await reviewPresets(page)).find((p) => p.name === ALU_NAME);
+  const refused = await page.evaluate(async (b) => { const r = await fetch("/api/takeoff/company-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }); return [r.status, (await r.json()).error]; },
+    { name: ALU_NAME, methodKey: "linear_stock", methodVersion: 1, spec: { family: "aluminium", profile: { shape: "equal-angle", aMm: 40, bMm: 40, tMm: 2 }, stockLengthMm: 6500 }, rules: {}, presetId: p50.id, expectedRevision: 1 });
+  expect(refused).toEqual([400, `“${ALU_NAME}” is a 50 × 50 × 3 angle. Give this 40 × 40 × 2 setup its own name.`]);
+});
+
+test("HUB 024 review: when someone else saved the product a moment before, it says so, and the next tap saves (no close and reopen)", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  const dlg = await addAluminium(page);
+  dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toBeVisible();
+  await aluNum(dlg.locator('[data-setup="aluminium"]'), "Stock length", 6100);
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  await page.evaluate(() => { window.__takeoffReviewPresetRace = true; });   // another office login saves first
+  dialogs(page, [{}, {}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="error"]')).toHaveText(/Someone else saved that company product just now\. Nothing was saved\. Tap Add to company products again to save yours as its new version\./);
+  const alu = () => reviewPresets(page).then((ps) => ps.filter((p) => p.spec?.family === "aluminium").map((p) => [p.revision, p.spec.stockLengthMm]));
+  expect(await alu()).toEqual([[2, 6500]]);
+  // the very next tap saves over the latest version (before this fix it kept failing until the takeoff was left)
+  const asked = dialogs(page, [{}, {}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText(`Saved a new version of “${ALU_NAME}”.`);
+  expect(asked).toEqual([namePrompt(ALU_NAME), { type: "confirm", message: CLASH }]);
+  expect(await alu()).toEqual([[3, 6100]]);
+});
+
+test("HUB 024 review: saving a job's own copy as the product's new version doesn't flag that job as out of date; a real newer version still does", async ({ page }) => {
+  await open(page, { section: "timber_cladding" });
+  let dlg = await addAluminium(page);
+  dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toBeVisible();
+  await dlg.getByRole("button", { name: "Close" }).first().click();
+  // a job item that uses the product (rev 1), then confirms its kerf and changes the stock
+  dlg = await addAluminium(page);
+  await dlg.locator('[data-preset-family="aluminium"] [data-preset]').filter({ hasText: ALU_NAME }).getByRole("button", { name: "Use on this job" }).click();
+  const card = dlg.locator('[data-setup="aluminium"]');
+  await aluNum(card, "Saw kerf", 3);
+  await card.getByLabel("The saw kerf above is confirmed for this job").check();
+  await aluNum(card, "Stock length", 6000);
+  await expect(dlg.getByRole("status").first()).toHaveText("Saved", { timeout: 15_000 });
+  const preset = (await reviewPresets(page)).find((p) => p.name === ALU_NAME);
+  const copy = (await aluServer(page)).materials.find((m) => m.fromPresetId === preset.id);
+  expect(copy).toMatchObject({ fromPresetRevision: 1, spec: { kerfConfirmed: true, stockLengthMm: 6000 } });
+  const asked = dialogs(page, [{}, {}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText(`Saved a new version of “${ALU_NAME}”.`);
+  expect(asked).toEqual([namePrompt(ALU_NAME), { type: "confirm", message: CLASH }]);
+  expect((await reviewPresets(page)).find((p) => p.id === preset.id)).toMatchObject({ revision: 2, spec: { stockLengthMm: 6000, kerfConfirmed: false } });
+  await dlg.getByRole("button", { name: "Close" }).first().click();
+  const row = page.locator(`[data-material-row="${copy.id}"]`);
+  await expect(row).toBeVisible();
+  await expect(row).not.toContainText("The company standard was updated");
+  await expect(row.getByRole("button", { name: "Review update" })).toHaveCount(0);
+  // this job keeps its own copy and its kerf confirmation
+  expect((await aluServer(page)).materials.find((m) => m.id === copy.id)).toMatchObject({ fromPresetRevision: 1, spec: { kerfConfirmed: true, stockLengthMm: 6000 } });
+  // another office login then really changes the product: the row offers the update as before
+  const r = await page.evaluate(async (b) => (await fetch("/api/takeoff/company-products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })).status,
+    { name: ALU_NAME, methodKey: "linear_stock", methodVersion: 1, spec: { ...copy.spec, stockLengthMm: 5000 }, rules: {}, presetId: preset.id, expectedRevision: 2 });
+  expect(r).toBe(200);
+  await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => { window.history.pushState({}, "", "/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  await expect(page.locator(`[data-material-row="${copy.id}"]`)).toContainText("The company standard was updated (rev 3). This job still uses rev 1.");
+});
+
+test("HUB 024: the Worker-app office login has Add to company products; a leading hand has no button and no 'Set one up here'", async ({ page }) => {
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=timber_cladding&takeoffWorker=office");
+  await ready(page);
+  let dlg = await addAluminium(page);
+  const asked = dialogs(page, [{}]);
+  await dlg.getByRole("button", { name: "Add to company products" }).click();
+  await expect(dlg.locator('[data-company-product-msg="ok"]')).toContainText(`Added “${ALU_NAME}” to company products.`);
+  expect(asked).toEqual([namePrompt(ALU_NAME)]);
+  expect((await reviewPresets(page)).find((p) => p.name === ALU_NAME)).toMatchObject({ revision: 1, spec: { kerfConfirmed: false, stockLengthMm: 6500 } });
+  await expect(dlg.getByRole("button", { name: "New company product" })).toHaveCount(0);   // company standards stay on the Hub
+  // a leading hand (no office login): no button, no promise of one, and the server refuses it anyway
+  await page.goto("/worker/takeoff/carpentry/cjb-1?section=timber_cladding");
+  await ready(page);
+  dlg = await addAluminium(page);
+  const picker = dlg.locator("[data-family-presets]");
+  await expect(picker).toContainText("No company products for this yet.");
+  await expect(picker).not.toContainText("Set one up here");
+  await expect(picker).not.toContainText("Add to company products");
+  await expect(dlg.getByRole("button", { name: "Add to company products" })).toHaveCount(0);
+  const refused = await page.evaluate(async () => (await fetch("/api/worker/takeoff/company-products", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Sneaky", methodKey: "linear_stock", methodVersion: 1, spec: { family: "aluminium", profile: { aMm: 50, bMm: 50, tMm: 3 }, stockLengthMm: 6500 }, rules: {} }) })).status);
+  expect(refused).toBe(403);
+  // review: the leading hand's Timber chooser never points to a catalogue the Timber card doesn't have
+  await dlg.getByRole("button", { name: "Close" }).first().click();
+  await page.getByRole("button", { name: "Add timber" }).click();
+  await expect(page.locator('[data-setup="timber"]')).toBeVisible();
+  const timberPicker = page.locator("[data-family-presets]");
+  await expect(timberPicker).toContainText("No company products for this yet.");
+  await expect(timberPicker).not.toContainText("researched catalogue");
+  await expect(timberPicker).not.toContainText("Set one up here");
 });

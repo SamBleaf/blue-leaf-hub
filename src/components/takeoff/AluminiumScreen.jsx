@@ -4,9 +4,13 @@
 //   ws          useTakeoffWorkspace() result (view, computed, edit, capabilities, status)
 //   materialId  the aluminium job material
 //   onSetup(material)  open the material's setup card (profile, kerf, window preset); onClose()
-//   onMeasure()  OPTIONAL — open the plan to measure straight runs for this material (hidden when absent)
+//   onMeasure()  OPTIONAL — open the plan to measure straight runs for this material (hidden when absent, e.g. no plan)
 //
 // Builder workflow (11):
+//   Measure      HUB 026: "Measure runs on the plan" is the FIRST thing on the screen (above the summary), so it is
+//                reached without scrolling past the typed-size forms. It opens the plan's Run tool for this material
+//                (tap each corner; the Page chip changes page; a page with no scale is refused). Each straight leg
+//                is its own cut, never joined. Typing sizes (openings by size, straight cuts) stays below.
 //   Openings     add by numbers — the opening exists as soon as its width and height are valid (no Add step,
 //                like the wall editor); "How many of this size" then adds copies inside the same undo step —
 //                or tick openings that already exist on walls (role "opening" contribution; the
@@ -35,7 +39,7 @@ import { genericMaterialKey } from "../../../shared/takeoff/engine/dispatch.js";
 import { stockIdentityKey } from "../../../shared/takeoff/engine/families.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
-import { Banner, Btn, FocusedWindow, NumberField, SaveChip, TextField } from "./ui.jsx";
+import { Banner, Btn, FocusedWindow, NumberField, SaveChip, SaveProblem, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 
 const mm = (n) => `${fmtMm(n)} mm`;
@@ -801,6 +805,13 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain" onFocus={keepFieldVisible} onPointerDown={cancelFieldScroll} onInput={noteTyping} data-testid="aluminium-screen">
         <div className="mx-auto grid w-full max-w-6xl gap-3 p-3 pb-32 lg:grid-cols-2 lg:items-start [@media(pointer:coarse)]:pb-[45vh]">
           <div className="min-w-0 space-y-3">
+            {/* ── HUB 026: measuring on the plan comes first; typing sizes stays below ── */}
+            {canEdit && onMeasure && (
+              <div data-testid="alu-measure-first" className="space-y-1 rounded-card border border-primary/30 bg-primary/5 p-3">
+                <Btn kind="primary" className="w-full" onClick={leave(() => onMeasure())}>Measure runs on the plan</Btn>
+                <p className="text-[11px] text-muted">Tap each end of a side on a scaled plan, elevation or window schedule. Page not to scale? Type the sizes below.</p>
+              </div>
+            )}
             {/* ── summary ─────────────────────────────────────────── */}
             <Section title="Summary" aside={canEdit && onSetup ? <Btn kind="ghost" onClick={leave(() => onSetup(material))}>Profile &amp; cutting settings</Btn> : null}>
               {buyText ? (
@@ -827,8 +838,8 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
               )}
               {otherProblems.length > 0 && <Banner tone="error">{otherProblems.join(" ")}</Banner>}
               {ws.computed?.error && <Banner tone="error">{ws.computed.error}</Banner>}
-              {ws.saveError && <Banner tone={ws.status === "unsynced" ? "warn" : "error"}
-                action={ws.rejected ? <div className="flex gap-1"><Btn onClick={ws.retryRejected}>Try again</Btn><Btn kind="ghost" onClick={ws.discardRejected}>Discard</Btn></div> : null}>{ws.rejected ? `Not saved: ${ws.saveError}` : ws.saveError}</Banner>}
+              {/* HUB 025: a Conflict is explained here, with its choices, not only on the overview */}
+              <SaveProblem ws={ws} />
               <p className="text-[11px] text-muted" data-testid="alu-footnote">Square cuts only. Fixing and installation of this profile are not checked by the app. {canEdit ? "Changes save automatically to this job." : "You can view this cutting plan but not change it."}</p>
             </Section>
 
@@ -973,7 +984,6 @@ export default function AluminiumScreen({ ws, materialId, onSetup, onClose, onMe
                 <JustAdded key={`added-${draftReset}`} testId="alu-just-added-cut" text={`${mm(justCut.finishedLengthMm)}${justCut.label ? ` · ${justCut.label}` : ""}`}
                   countLabel="Cut quantity" count={justCut.quantity} max={500} onCount={setCutQuantity} />
               )}
-              {canEdit && onMeasure && <Btn className="w-full" onClick={leave(() => onMeasure())}>Measure runs on the plan</Btn>}
             </Section>
           </div>
 

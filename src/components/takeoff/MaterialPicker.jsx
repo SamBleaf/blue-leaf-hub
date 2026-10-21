@@ -125,10 +125,19 @@ function conditionNotes(p) {
  *   onEdit(preset)  open the catalogue editor on a company product (office staff)
  *   onNew(family)   start a new company product in the catalogue editor (office staff)
  *   onRetire(preset) optional
+ *   onAdd()         optional (HUB 024): add THIS job's setup to the company products; resolves { tone, text } or null
  */
-export function FamilyPresetPicker({ api, families, onUse, onEdit, onNew, onRetire, canEditStandards, reloadToken, notice, onDismissNotice }) {
+export function FamilyPresetPicker({ api, families, onUse, onEdit, onNew, onRetire, onAdd, canEditStandards, reloadToken, notice, onDismissNotice }) {
   const { presets, error, retry } = usePresets(api, reloadToken);
   const [q, setQ] = useState("");
+  const [addMsg, setAddMsg] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const canNew = !!(canEditStandards && onNew);
+  const add = async () => {
+    if (adding) return;
+    setAddMsg(null); setAdding(true);
+    try { const m = await onAdd(); if (m) setAddMsg(m); } finally { setAdding(false); }
+  };
   const famKey = (families && families.length ? families : [...GENERIC]).join(",");
   const fams = useMemo(() => famKey.split(","), [famKey]);
   const groups = useMemo(() => {
@@ -154,7 +163,13 @@ export function FamilyPresetPicker({ api, families, onUse, onEdit, onNew, onReti
           className="min-h-[44px] w-full rounded-lg border border-hairline px-3 text-base focus-ring" />
       </div>
       <AsyncState loading={presets === null && !error} error={error} onRetry={retry} empty={presets && !groups.length}
-        emptyText={total ? "No company products match." : "No company products for this yet. Set one up here, or add it from the researched catalogue in the setup card."}>
+        emptyText={total ? "No company products match."
+          : onAdd ? "No company products for this yet. Finish the setup below, then tap Add to company products."
+          : canNew ? "No company products for this yet. Set one up here, or add it from the researched catalogue in the setup card."
+          // no action here (e.g. a leading hand): never promise one. Only the cladding setup card has a researched
+          // catalogue; timber and aluminium don't
+          : fams.some((f) => f === "timber" || f === "aluminium") ? "No company products for this yet."
+          : "No company products for this yet. Add it from the researched catalogue in the setup card."}>
         <div className="space-y-3">
           {groups.map(([f, list]) => (
             <section key={f} aria-label={FAMILY_TITLE[f] || f} data-preset-family={f}>
@@ -188,11 +203,16 @@ export function FamilyPresetPicker({ api, families, onUse, onEdit, onNew, onReti
           ))}
         </div>
       </AsyncState>
-      {canEditStandards && onNew && (
+      {(canNew || onAdd) && (
         <div className="flex flex-wrap gap-2">
-          {fams.length === 1 ? <Btn onClick={() => onNew(fams[0])}>New company product</Btn>
-            : <Btn onClick={() => onNew(fams[0])}>New company product…</Btn>}
+          {/* HUB 024: this job's setup (name and settings) becomes a company product — beside the chooser, no scrolling */}
+          {onAdd && <Btn onClick={add} disabled={adding}>Add to company products</Btn>}
+          {canNew && (fams.length === 1 ? <Btn onClick={() => onNew(fams[0])}>New company product</Btn>
+            : <Btn onClick={() => onNew(fams[0])}>New company product…</Btn>)}
         </div>
+      )}
+      {addMsg && (
+        <div data-company-product-msg={addMsg.tone}><Banner tone={addMsg.tone === "ok" ? "ok" : "error"} action={<Btn kind="ghost" onClick={() => setAddMsg(null)}>Dismiss</Btn>}>{addMsg.text}</Banner></div>
       )}
       <p className="text-[11px] text-muted">The job gets its own copy. Changing it on this job never changes the company product or another job.</p>
     </div>

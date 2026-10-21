@@ -604,6 +604,229 @@ test("Timber setup: purpose, section, centres and pitch auto-apply; stock is the
   await expect(t.locator('[data-status="quantity"]')).toContainText("Not measured yet");
 });
 
+// ── HUB 027: timber "Size and grade" per purpose (owner's choices, 21 Oct 2026) ─────────────────────────────
+const timberCard = (page) => page.locator('[data-setup="timber"]');
+const sizeList = (t) => t.getByLabel("Size and grade");
+const sizeOptions = (t) => sizeList(t).locator("option").allTextContents();
+const tapPurpose = (t, name) => t.locator('[data-chips="purpose"]').getByRole("button", { name, exact: true }).click();
+/** Add timber with its own name (so its overview row can be found again), then tap a purpose. */
+async function addNamedTimber(page, name, purpose) {
+  await page.getByRole("button", { name: "Add timber" }).click();
+  const t = timberCard(page);
+  await expect(t).toBeVisible();
+  await enter(t.getByLabel("Name", { exact: true }), name);
+  await expect.poll(async () => (await genericMaterial(page)).name).toBe(name);
+  if (purpose) {
+    await tapPurpose(t, purpose);
+    await expect.poll(async () => (await genericMaterial(page)).spec.purpose).toBe(purpose.toLowerCase());
+  }
+  return t;
+}
+/** Close the card, leave the takeoff, come back and open the same timber material's setup again. */
+async function reopenTimber(page, name) {
+  await page.getByRole("button", { name: "Close" }).first().click();
+  await reopenTakeoff(page);
+  await (await openRow(page.locator("li").filter({ hasText: name }).first())).getByRole("button", { name: "Setup" }).click();
+  await expect(timberCard(page)).toBeVisible();
+  return timberCard(page);
+}
+const timberFields = async (t) => [await t.getByLabel("Section depth").inputValue(), await t.getByLabel("Section width").inputValue(),
+  await t.getByLabel("Grade (e.g. MGP10)").inputValue(), await t.getByLabel("Treatment (e.g. H3)").inputValue()];
+
+test("HUB 027: Studs → 90 × 45 MGP10 fills size and grade without typing, is one Undo step and survives leaving the takeoff", async ({ page }) => {
+  await openTakeoff(page);
+  const t = await addNamedTimber(page, "Studs 027", "Studs");
+  await expect(sizeList(t)).toHaveValue("");
+  await expect(t).toContainText("The app does not check structural adequacy."); // ordering setup, never a structural size
+  await sizeList(t).selectOption({ label: "90 × 45 MGP10" });
+  // nothing typed: the fields below fill together, treatment stays blank (no built-in row carries one)
+  await expect.poll(() => timberFields(t)).toEqual(["90", "45", "MGP10", ""]);
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section, m.spec.grade, m.spec.treatment ?? null, m.methodKey]; })
+    .toEqual([{ depthMm: 90, widthMm: 45 }, "MGP10", null, "wall_frame"]);
+  await expect(t.locator("[data-needs]")).toContainText("Enter the treatment");
+  await expect(t.locator("[data-needs]")).not.toContainText("Enter the timber section");
+  // one pick = one Undo step (section and grade together)
+  await t.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => timberFields(t)).toEqual(["", "", "", ""]);
+  await expect(sizeList(t)).toHaveValue("");
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section?.depthMm ?? null, m.spec.section?.widthMm ?? null, m.spec.grade ?? null, m.spec.purpose]; })
+    .toEqual([null, null, null, "studs"]);
+  await t.getByRole("button", { name: "Redo" }).click();
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section, m.spec.grade]; }).toEqual([{ depthMm: 90, widthMm: 45 }, "MGP10"]);
+  // leave the takeoff and come back: the saved fields, and the list shows the same choice
+  const again = await reopenTimber(page, "Studs 027");
+  await expect(sizeList(again)).toHaveValue("studs-90x45-mgp10");
+  await expect(sizeList(again).locator("option:checked")).toHaveText("90 × 45 MGP10");
+  expect(await timberFields(again)).toEqual(["90", "45", "MGP10", ""]);
+});
+
+test("HUB 027: each purpose lists its own choices; Rafters (the Add timber default) shows no list", async ({ page }) => {
+  await openTakeoff(page);
+  const t = await addNamedTimber(page, "Choices 027");
+  await expect(t.locator('[data-chips="purpose"]').getByRole("button", { name: "Rafters" })).toHaveAttribute("aria-pressed", "true");
+  await expect(sizeList(t)).toHaveCount(0);
+  const lists = [
+    ["Studs", ["90 × 35 MGP10", "90 × 45 MGP10", "120 × 35 MGP10", "120 × 45 MGP10"]],
+    ["Noggins", ["90 × 35"]],
+    ["Plates", ["90 × 45"]],
+    ["Battens", ["90 × 35", "70 × 35", "90 × 45", "70 × 45"]],
+  ];
+  for (const [purpose, list] of lists) {
+    await tapPurpose(t, purpose);
+    await expect.poll(() => sizeOptions(t), { message: purpose }).toEqual(["Choose a size…", ...list, "Custom (enter below)"]);
+    await expect(t.locator("[data-lvl-hint]")).toHaveCount(purpose === "Studs" ? 1 : 0);
+  }
+  for (const purpose of ["Rafters", "Joists", "Trim", "Other member"]) {
+    await tapPurpose(t, purpose);
+    await expect(sizeList(t), purpose).toHaveCount(0);
+  }
+  // the four fields stay on the card for every purpose
+  for (const label of ["Section depth", "Section width", "Grade (e.g. MGP10)", "Treatment (e.g. H3)"]) await expect(t.getByLabel(label)).toBeVisible();
+  // plates are never copied from studs: picking studs 90 × 35 then Plates keeps the section visible and editable
+  await tapPurpose(t, "Studs");
+  await sizeList(t).selectOption({ label: "90 × 35 MGP10" });
+  await expect.poll(async () => (await genericMaterial(page)).spec.section).toEqual({ depthMm: 90, widthMm: 35 });
+  await tapPurpose(t, "Plates");
+  await expect(sizeList(t)).toHaveValue("custom");
+  await expect(t.getByLabel("Section width")).toHaveValue("35");
+  await sizeList(t).selectOption({ label: "90 × 45" });
+  await expect.poll(() => timberFields(t)).toEqual(["90", "45", "MGP10", ""]); // size only: the grade entered stays
+});
+
+test("HUB 027: Custom keeps an unusual section; choosing Custom on a preset changes nothing", async ({ page }) => {
+  await openTakeoff(page);
+  let t = await addNamedTimber(page, "Custom 027", "Studs");
+  await enter(t.getByLabel("Section depth"), 140);
+  await enter(t.getByLabel("Section width"), 45);
+  await expect(sizeList(t)).toHaveValue("custom");
+  await expect.poll(async () => (await genericMaterial(page)).spec.section).toEqual({ depthMm: 140, widthMm: 45 });
+  t = await reopenTimber(page, "Custom 027");
+  await expect(sizeList(t)).toHaveValue("custom");
+  expect((await timberFields(t)).slice(0, 2)).toEqual(["140", "45"]);
+  // on a preset, Custom keeps every value (and saves nothing new)
+  await sizeList(t).selectOption({ label: "90 × 35 MGP10" });
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section, m.spec.grade]; }).toEqual([{ depthMm: 90, widthMm: 35 }, "MGP10"]);
+  const rev = await page.evaluate(() => window.__takeoffReviewState().revision);
+  await sizeList(t).selectOption("custom");
+  await expect(sizeList(t)).toHaveValue("custom");
+  expect(await timberFields(t)).toEqual(["90", "35", "MGP10", ""]);
+  await page.waitForTimeout(900); // longer than the autosave debounce
+  expect(await page.evaluate(() => window.__takeoffReviewState().revision), "Custom saves nothing").toBe(rev);
+  await enter(t.getByLabel("Section depth"), 100);
+  await expect.poll(async () => (await genericMaterial(page)).spec.section).toEqual({ depthMm: 100, widthMm: 35 });
+  await expect(sizeList(t)).toHaveValue("custom");
+});
+
+test("HUB 027: a batten product with a saved treatment restores it; the job copy never changes the product", async ({ page }) => {
+  await openTakeoff(page);
+  const content = { name: "Pine batten 70 × 35 H3", methodKey: "repeated_members", methodVersion: 2,
+    spec: { family: "timber", purpose: "battens", section: { depthMm: 70, widthMm: 35 }, grade: "MGP10", treatment: "H3", supplierName: "Supplier A" }, rules: {} };
+  const pid = (await postPreset(page, { content })).preset.presetId;
+  await reopenTakeoff(page); // company products load when the takeoff opens
+  let t = await addNamedTimber(page, "Battens 027", "Battens");
+  const opt = sizeList(t).locator(`option[data-company-product="${pid}"]`);
+  await expect(opt).toHaveText("Pine batten 70 × 35 H3 — 70 × 35 · MGP10 · H3"); // the treatment shows with the product
+  await expect(sizeList(t).locator('optgroup[label="Company products"] option')).toHaveCount(1);
+  await sizeList(t).selectOption(pid);
+  await expect.poll(() => timberFields(t)).toEqual(["70", "35", "MGP10", "H3"]);
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section, m.spec.grade, m.spec.treatment, m.spec.supplierName, m.spec.purpose]; })
+    .toEqual([{ depthMm: 70, widthMm: 35 }, "MGP10", "H3", "Supplier A", "battens"]);
+  t = await reopenTimber(page, "Battens 027");
+  await expect(sizeList(t)).toHaveValue(pid);
+  expect(await timberFields(t)).toEqual(["70", "35", "MGP10", "H3"]);
+  // change this job's treatment: the company product (and its revision) stays as saved
+  await enter(t.getByLabel("Treatment (e.g. H3)"), "H4");
+  await expect.poll(async () => (await genericMaterial(page)).spec.treatment).toBe("H4");
+  await expect(sizeList(t)).toHaveValue("battens-70x35"); // no longer that product: the plain size
+  const p = await page.evaluate(async (id) => (await (await fetch("/api/takeoff/presets")).json()).presets.find((x) => x.id === id), pid);
+  expect([p.spec.treatment, p.spec.section, p.revision]).toEqual(["H3", { depthMm: 70, widthMm: 35 }, 1]);
+  // a product saved for another purpose is not offered here
+  await tapPurpose(t, "Studs");
+  await expect(sizeList(t).locator(`option[data-company-product="${pid}"]`)).toHaveCount(0);
+});
+
+test("HUB 027: LVL comes only from a selected company product — no built-in LVL grade or treatment", async ({ page }) => {
+  await openTakeoff(page);
+  let t = await addNamedTimber(page, "LVL 027", "Studs");
+  expect((await sizeOptions(t)).filter((o) => /LVL/i.test(o))).toEqual([]);
+  await expect(t.locator("[data-lvl-hint]")).toHaveText("LVL: pick your supplier's LVL from the company products. The app doesn't assume an LVL grade or treatment.");
+  await sizeList(t).selectOption({ label: "90 × 45 MGP10" });
+  await enter(t.getByLabel("Treatment (e.g. H3)"), "H2");
+  await expect.poll(async () => (await genericMaterial(page)).spec.treatment).toBe("H2");
+  const content = { name: "Supplier B LVL 90 × 45", methodKey: "wall_frame", methodVersion: 1,
+    spec: { family: "timber", purpose: "studs", section: { depthMm: 90, widthMm: 45 }, grade: "LVL13", treatment: "H2-S", species: "LVL", supplierName: "Supplier B", productCode: "LVL9045" }, rules: {} };
+  const pid = (await postPreset(page, { content })).preset.presetId;
+  t = await reopenTimber(page, "LVL 027");
+  await expect(sizeList(t).locator(`option[data-company-product="${pid}"]`)).toHaveText("Supplier B LVL 90 × 45 — 90 × 45 · LVL13 · LVL · H2-S");
+  await sizeList(t).selectOption(pid);
+  // grade and treatment exactly as saved on the product — nothing kept from MGP10 / H2, nothing invented
+  await expect.poll(() => timberFields(t)).toEqual(["90", "45", "LVL13", "H2-S"]);
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.grade, m.spec.treatment, m.spec.species, m.spec.supplierName, m.spec.productCode]; })
+    .toEqual(["LVL13", "H2-S", "LVL", "Supplier B", "LVL9045"]);
+  // a built-in size afterwards drops the product's code and its species (both were for the LVL and neither shows on
+  // the card), keeps what is on screen; the list keeps showing the row picked, after leaving the takeoff too
+  await sizeList(t).selectOption({ label: "90 × 35 MGP10" });
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.section, m.spec.grade, m.spec.treatment, m.spec.productCode ?? null, m.spec.species ?? null]; })
+    .toEqual([{ depthMm: 90, widthMm: 35 }, "MGP10", "H2-S", null, null]);
+  await expect(sizeList(t)).toHaveValue("studs-90x35-mgp10");
+  t = await reopenTimber(page, "LVL 027");
+  await expect(sizeList(t)).toHaveValue("studs-90x35-mgp10");
+  const row = page.locator("li").filter({ hasText: "LVL 027" }).first();
+  await page.getByRole("button", { name: "Close" }).first().click();
+  await expect(row).toContainText("90 × 35 · MGP10 · H2-S");
+  await expect(row).not.toContainText("LVL ·");
+});
+
+test("HUB 027: two suppliers' battens of the same size, grade and treatment — the list shows the one picked, after a reload too", async ({ page }) => {
+  await openTakeoff(page);
+  const batten = (yard, code) => ({ name: `${yard} batten 70 × 35 H3`, methodKey: "repeated_members", methodVersion: 2,
+    spec: { family: "timber", purpose: "battens", section: { depthMm: 70, widthMm: 35 }, grade: "MGP10", treatment: "H3", supplierName: yard, productCode: code }, rules: {} });
+  const pA = (await postPreset(page, { content: batten("Yard A", "A-7035") })).preset.presetId;
+  const pB = (await postPreset(page, { content: batten("Yard B", "B-7035") })).preset.presetId;
+  await reopenTakeoff(page);
+  let t = await addNamedTimber(page, "Yards 027", "Battens");
+  await sizeList(t).selectOption(pB);
+  await expect.poll(async () => { const m = await genericMaterial(page); return [m.spec.supplierName, m.spec.productCode]; }).toEqual(["Yard B", "B-7035"]);
+  await expect(sizeList(t)).toHaveValue(pB);
+  await expect(sizeList(t).locator("option:checked")).toHaveText("Yard B batten 70 × 35 H3 — 70 × 35 · MGP10 · H3");
+  t = await reopenTimber(page, "Yards 027");
+  await expect(sizeList(t)).toHaveValue(pB);
+  await sizeList(t).selectOption(pA);
+  await expect.poll(async () => (await genericMaterial(page)).spec.productCode).toBe("A-7035");
+  await expect(sizeList(t)).toHaveValue(pA);
+  // the plain row with the same size: the job no longer carries a product's code, and the list stays on the plain row
+  await sizeList(t).selectOption({ label: "70 × 35" });
+  await expect.poll(async () => (await genericMaterial(page)).spec.productCode ?? null).toBeNull();
+  await expect(sizeList(t)).toHaveValue("battens-70x35");
+  t = await reopenTimber(page, "Yards 027");
+  await expect(sizeList(t)).toHaveValue("battens-70x35");
+  expect(await timberFields(t)).toEqual(["70", "35", "MGP10", "H3"]);
+});
+
+test("HUB 027 at 390 × 844: the Timber card on Studs with the size list has no sideways scroll and every control is at least 44 px", async ({ page }) => {
+  await openTakeoff(page);
+  const t = await addNamedTimber(page, "Layout 027", "Studs");
+  await sizeList(t).selectOption({ label: "120 × 45 MGP10" });
+  await expect.poll(() => timberFields(t)).toEqual(["120", "45", "MGP10", ""]);
+  const m = await page.evaluate(() => {
+    const small = [];
+    const cardEl = document.querySelector('[data-setup="timber"]');
+    for (const el of cardEl.querySelectorAll("button, input:not([type=checkbox]), select, summary")) {
+      const b = el.getBoundingClientRect();
+      if (b.width && b.height && b.height < 43.5) small.push(`${el.tagName} ${(el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 30)} ${b.height}`);
+    }
+    const sel = cardEl.querySelector("[data-timber-choice] select").getBoundingClientRect();
+    const sc = cardEl.closest(".overflow-y-auto");
+    return { doc: document.documentElement.scrollWidth, sc: sc ? sc.scrollWidth - sc.clientWidth : 0, small, selRight: sel.right, selH: sel.height };
+  });
+  expect(m.doc).toBeLessThanOrEqual(390);
+  expect(m.sc).toBeLessThanOrEqual(0);
+  expect(m.small).toEqual([]);
+  expect(m.selRight).toBeLessThanOrEqual(390);
+  expect(m.selH).toBeGreaterThanOrEqual(44);
+  await shot(page, "hub027-timber-size-list-390x844");
+});
+
 test("Aluminium setup: kerf must be confirmed before ordering; edits auto-apply", async ({ page }) => {
   await openTakeoff(page);
   await page.getByRole("button", { name: "Add aluminium" }).click();

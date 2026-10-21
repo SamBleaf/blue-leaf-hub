@@ -5,7 +5,8 @@
 // optimistically (and computed with shared/takeoff), then committed ~500 ms after the last
 // completed edit with the revision it was based on (CAS) and a per-batch idempotency key.
 //   Saving… / Saved / Not synced / Conflict — never a "Saved" before the server confirms.
-//   409 keeps every local edit and asks the user (reload vs. apply mine) — never auto-overwrites.
+//   A revision conflict (409 CONFLICT) keeps every local edit and asks the user (reload vs. apply mine) — never
+//   auto-overwrites. Any other refusal is parked with its reason; later edits keep saving (HUB 025).
 //   Network loss keeps edits visible and retries when back online.
 // Every completed edit is also written to the device recovery store immediately (not debounced)
 // so a reload, crash or service-worker update cannot lose it.
@@ -14,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computeWorkspace } from "../../../shared/takeoff/index.js";
 import { newId } from "../../lib/takeoffApi.js";
 import { clearRecovery, loadRecovery, rememberActor, saveRecovery } from "../../lib/takeoffRecovery.js";
-import { applyChanges, emptyChanges, fromPayload, isEmpty, mergeChanges, rebaseRecord, toPayload } from "./changeset.js";
+import { applyChanges, deferPairCollisions, emptyChanges, fromPayload, isEmpty, isSaveConflict, mergeChanges, rebaseRecord, toPayload } from "./changeset.js";
 
 export const SAVE_DEBOUNCE_MS = 500;
 
@@ -126,7 +127,10 @@ export function useTakeoffWorkspace(api, workspaceId) {
     }
     latest.current.inflight = null;
     setInflight(null);
-    if (r.status === 409 || r.code === "CONFLICT") {
+    // HUB 025: only a real "someone else saved first" is a Conflict (CONFLICT or CONFLICT_RETRY, see isSaveConflict).
+    // Any other 409 (DUPLICATE_ASSIGNMENT, IMMUTABLE …) is a refusal of THIS change: it is parked below with its plain
+    // reason and later edits keep saving.
+    if (isSaveConflict(r)) {
       // A real verdict: fold the batch back in front of newer edits (nothing is lost) and ask the user.
       latest.current.queue = mergeChanges(batch.changes, latest.current.queue);
       setQueue(latest.current.queue);
@@ -163,8 +167,10 @@ export function useTakeoffWorkspace(api, workspaceId) {
       setHeld(null);
     } else {
       if (isEmpty(q)) return;
-      batch = { changes: q, key: `c-${newId()}`, baseRevision: srv.snapshot.workspace.revision };
-      latest.current.queue = emptyChanges();
+      // HUB 025: an assignment that re-uses a pair this batch frees waits for the next save (after the archive lands)
+      const { now, later } = deferPairCollisions(q, srv.snapshot.contributions);
+      batch = { changes: now, key: `c-${newId()}`, baseRevision: srv.snapshot.workspace.revision };
+      latest.current.queue = later;
       setQueue(latest.current.queue);
     }
     latest.current.inflight = batch;

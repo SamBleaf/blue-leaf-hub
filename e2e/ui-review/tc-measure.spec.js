@@ -1789,6 +1789,115 @@ test.describe("HUB 023 Rectangle, Area and pages — phone", () => {
   });
 });
 
+test.describe("HUB 026 aluminium measuring first — phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const ELEV = `${MIXED}&takeoffElevation=1`;   // page 2 has no scale; page 3 is a scaled elevation (cal-elev)
+  const snap = (page) => page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot);
+  const subtitle = (page) => page.locator("[data-takeoff-focus]").first();
+  const aluScreen = (page) => page.getByRole("dialog", { name: /Window angle/ });
+  /** The Page chip (HUB 023): the page picker, then one tap on a page — straight back to measuring on it. */
+  async function toPage(page, n) {
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.locator("[data-page-chip]").click();
+    await page.getByRole("button", { name: `Measure on page ${n}`, exact: true }).click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await page.waitForTimeout(250);
+    await expect(page.locator("[data-page-chip]")).toHaveText(`Page ${n} ▾`);
+  }
+  /** Centre a plan point (no zoom change) and tap it there: the viewport centre is a whole px, so the tap is exact. */
+  async function centreTap(page, p, times = 1) {
+    await zoomOn(page, p, 1);
+    const s = await screenOf(page, p);
+    for (let i = 0; i < times; i++) await page.touchscreen.tap(s.x, s.y);
+  }
+  /** Each opening's label and its finished cut lengths (bar numbers left out: a new piece can renumber the bars). */
+  const openingCuts = (screen) => screen.getByTestId("alu-opening").evaluateAll((els) => els.map((el) => ({
+    label: el.getAttribute("data-label"), cuts: [...el.querySelectorAll("[data-testid=alu-cuts] button > span:first-child")].map((s) => s.textContent) })));
+
+  test("acceptance 1–2: from the selected profile, Measure runs on the plan is the first thing on Openings & cutting (no scrolling; typing sizes still below); it opens the Run tool for that aluminium; a page with no scale gives no length; a 1,800 side on a scaled elevation lands on that profile's cutting sheet", async ({ page }) => {
+    await page.goto(ELEV);
+    await ready(page);
+    // the selected profile → Setup → Openings & cutting
+    const row = page.getByRole("listitem").filter({ hasText: "Window angle 50 × 50 × 3" });
+    const t = row.locator("button[aria-expanded]").first();
+    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+    await row.getByRole("button", { name: "Setup" }).click();
+    await page.getByRole("dialog", { name: "Aluminium" }).getByRole("button", { name: "Openings & cutting" }).click();
+    const screen = aluScreen(page);
+    const scroller = screen.getByTestId("aluminium-screen");
+    await expect(scroller).toBeVisible();
+    await expect(screen.getByTestId("alu-required")).toHaveText("7,300 mm");
+    // first on the screen, in view without scrolling, above both typed-size forms
+    expect(await scroller.evaluate((el) => el.scrollTop), "opened at the top").toBe(0);
+    const measure = screen.getByRole("button", { name: "Measure runs on the plan" });
+    await expect(measure).toHaveCount(1);
+    await expect(measure).toBeVisible();
+    await expect(screen.getByTestId("alu-measure-first").getByRole("button", { name: "Measure runs on the plan" })).toHaveCount(1);
+    await expect(screen.getByTestId("alu-measure-first")).toContainText("Page not to scale? Type the sizes below.");
+    const mb = await measure.boundingBox();
+    expect(mb.y + mb.height, "inside the 844 px screen").toBeLessThanOrEqual(844);
+    const byOpenings = await screen.locator("legend", { hasText: "Add openings by size" }).boundingBox();
+    const byCut = await screen.locator("legend", { hasText: "Add a straight cut" }).boundingBox();
+    expect(mb.y, "above Add openings by size").toBeLessThan(byOpenings.y);
+    expect(mb.y, "above Add a straight cut").toBeLessThan(byCut.y);
+    // typing sizes is kept
+    await expect(screen.getByLabel("Opening width", { exact: true })).toHaveCount(1);
+    await expect(screen.getByLabel("Finished cut length", { exact: true })).toHaveCount(1);
+    await shot(page, "hub026-measure-first-390x844");
+    const cuts0 = await openingCuts(screen);
+    expect(cuts0.map((o) => o.label)).toEqual(["W1", "W2"]);
+    const before = new Set((await snap(page)).measurements.map((m) => m.id));
+    // the existing Run tool for this aluminium (the same tap-each-corner action as Line)
+    const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await measure.click();
+    await page.waitForFunction((r) => (window.__takeoffViewerStats?.renders || 0) > r, renders, { timeout: 30_000 });
+    await page.waitForTimeout(250);
+    await expect(page.getByRole("button", { name: /^Material:/ })).toHaveText(/Window angle 50 × 50 × 3/);
+    const plan = page.getByRole("dialog").filter({ hasText: "Material: Window angle 50 × 50 × 3" });
+    await expect(plan).toBeVisible();
+    expect(await page.getByRole("radiogroup", { name: "Tool" }).getByRole("radio").allInnerTexts()).toEqual(["Run", "Select", "Pan"]);
+    await expect(page.getByRole("radio", { name: "Run" })).toHaveAttribute("aria-checked", "true");
+    // a page with no scale gives no length: said once at the top, and a tap saves nothing
+    await toPage(page, 2);
+    await expect(subtitle(page)).toContainText("page 2 · not scaled");
+    await expect(page.getByText("This page has no scale yet. Scale it before measuring.")).toBeVisible();
+    const s0 = await reviewState(page);
+    await tapPdf(page, at(1000, 1000));
+    await expect(page.getByText("Scale this page before measuring runs.")).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.locator("[data-path-draft]")).toHaveCount(0);
+    expect((await reviewState(page)).commits, "nothing saved").toBe(s0.commits);
+    // a scaled elevation: the Run tool carries on; tap one end, double-tap the other
+    await toPage(page, 3);
+    await expect(subtitle(page)).toContainText("page 3 · scaled");
+    await expect(page.getByRole("radio", { name: "Run" })).toHaveAttribute("aria-checked", "true");
+    await zoomOn(page, at(1900, 1000), 8);
+    await centreTap(page, at(1000, 1000));
+    await page.waitForTimeout(400);
+    await centreTap(page, at(2800, 1000), 2);
+    await saved(page);
+    expect((await reviewState(page)).commits - s0.commits, "one save").toBe(1);
+    const s = await snap(page);
+    const added = s.measurements.filter((m) => !before.has(m.id) && !m.archived);
+    expect(added.map((m) => [m.kind, m.pageIndex, m.calibrationId, m.points.length])).toEqual([["polyline", 2, "cal-elev", 2]]);
+    expect(s.contributions.filter((c) => c.measurementId === added[0].id && !c.archived).map((c) => `${c.jobMaterialId}:${c.role}`)).toEqual(["mat-al:primary"]);
+    // the same engine as the server: one 1,800 cut on that profile, never joined, on the same 6,500 bars
+    const res = computeWorkspace(s).materialResults["mat-al"];
+    const dem = res.demands.filter((d) => d.sourceRefs?.[0]?.measurementId === added[0].id);
+    expect(dem.map((d) => [d.role, Math.round(d.lengthMm * 1000) / 1000, d.noSplice, d.stockPolicy.lengthMm])).toEqual([["run", 1800, true, 6500]]);
+    // Done: back on the same cutting sheet with the side on a bar; the window cuts unchanged
+    await plan.getByRole("button", { name: "Done" }).click();
+    const back = aluScreen(page);
+    await expect(back.getByTestId("alu-required")).toHaveText("9,100 mm");
+    const runRow = back.getByTestId("alu-run");
+    await expect(runRow).toHaveCount(1);
+    await expect(runRow).toContainText("1,800 mm");
+    await expect(runRow).toContainText(/Bar \d/);
+    expect(await openingCuts(back), "W1 / W2 cuts unchanged").toEqual(cuts0);
+    await shot(page, "hub026-measured-side-390x844");
+  });
+});
+
 test.describe("schedule \"Show on plan\" (highlightIds)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const openSchedule = async (page, url = MIXED) => {

@@ -1,5 +1,5 @@
 ---
-sop_version: 1.2
+sop_version: 1.4
 last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
@@ -49,7 +49,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 ## 4. Before you start
 
 - The takeoff is open (SOP 20-01) and, for anything traced on the plan, the page is scaled and shows **Ready** (SOP 20-02).
-- Know the **section** (e.g. 90 × 45), **grade** (e.g. MGP10) or species, and **treatment** (e.g. H2, H3 or "untreated") — take them from the drawings or engineer's schedule. The app does not choose them.
+- Know the **section** (e.g. 90 × 45), **grade** (e.g. MGP10) or species, and **treatment** (e.g. H2, H3 or "untreated") — take them from the drawings or engineer's schedule. The app does not choose them. For studs, noggins, plates and battens you pick the usual size from a list, but you still check it against the drawings.
 - For rafters measured on the floor/roof plan: know the **roof pitch** from the drawings. A pitch is never read off the plan.
 - For walls: know the **stud cut length** (or frame height and the plate thicknesses), and for noggins the **number of noggin rows** from the framing detail.
 - You have edit access (Section 1).
@@ -64,18 +64,28 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 1. On the takeoff overview, in **Materials**, tap **Add timber**. The **Timber** setup card opens ("Timber · this job only"). A material called **Timber** is created straight away — there is no Save button; every valid change saves automatically ("Changes save automatically to this job only."). **Undo** / **Redo** at the top undo changes made in this card.
 2. **Name** — e.g. "Rafters 90 × 45".
 3. **Purpose** — tap one: **Rafters**, **Joists**, **Studs**, **Plates**, **Noggins**, **Battens**, **Trim** or **Other member**. The purpose decides the measuring tools (Section 5B–5E).
-4. **Section depth** and **Section width** (mm), **Grade (e.g. MGP10)**, **Treatment (e.g. H3)**. The card says "Size: **manual selection** … The app does not check structural adequacy."
-5. Repeated members (rafters, joists, battens) and studs: **Centres** (default 600 mm) and **Spacing** — **Fixed centres** or **Equal spacing** (equal bays no bigger than the centres).
-6. Rafters / joists / battens — **Member length from**:
+4. **Size and grade** (shown for Studs, Noggins, Plates and Battens, and for any purpose that has a company timber product saved for it). Tap the list and pick the size. It fills **Section depth**, **Section width** and, for studs, **Grade** in one go. You don't type them.
+   - **Studs:** 90 × 35 MGP10, 90 × 45 MGP10, then the less common 120 × 35 MGP10 and 120 × 45 MGP10.
+   - **Noggins:** 90 × 35. **Plates:** 90 × 45. **Battens:** 90 × 35, 70 × 35, 90 × 45, 70 × 45. These fill the size only. Type the grade yourself.
+   - **Company products** (under its own heading in the list): your timber products saved for this purpose, each with its size, grade and treatment shown. Picking one fills its size, grade, treatment, species, supplier and supplier code exactly as saved. Two suppliers' products of the same size stay apart: the list shows the one you picked.
+   - Picking one of the plain sizes after a company product clears that product's supplier code and species (for example "LVL"). Neither shows on the card, so a plain "90 × 35 MGP10" never goes on the order as LVL. The treatment and supplier stay, because you can see and change them.
+   - **LVL:** on Studs the card says "LVL: pick your supplier's LVL from the company products. The app doesn't assume an LVL grade or treatment." Office staff save the supplier's LVL once with **New company product** (SOP 20-12). Then pick it here.
+   - **Custom (enter below):** for an unusual size. It changes nothing. Type the size in the fields below.
+   - One pick is one change: **Undo** takes it back. It saves straight away, and after you leave and come back the list shows the same choice.
+5. **Section depth** and **Section width** (mm), **Grade (e.g. MGP10)**, **Treatment (e.g. H3)** stay on the card under the list, so you can always check or change them. A size from the list never sets a treatment: type it (for example H2, H3 or "untreated"), or pick a company product that has one. The card says "Size: **manual selection** … The app does not check structural adequacy." The list is for ordering only. It is not a structural size.
+6. Repeated members (rafters, joists, battens) and studs: **Centres** (default 600 mm) and **Spacing** — **Fixed centres** or **Equal spacing** (equal bays no bigger than the centres).
+7. Rafters / joists / battens — **Member length from**:
    - **Measure projection** (rafters only) — you measure the rafter **in plan**; enter the **Pitch** (°). The true length = plan length ÷ cos(pitch).
    - **Measure true length** (rafters) / **Measure length** (joists, battens) — you measure the real member length (e.g. on a section). Pitch is never applied again.
    - **Enter cut length** — type the **Cut length**; no member line is needed.
-7. **Stock** (fixed): "1200 mm, then every 600 mm (1800, 2400, 3000 …) — same at every supplier." Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
-8. **More (offsets, allowance, ends, plies, supplier)** — **Start offset**, **End offset**, **End allowance (true length)** (0 unless you set one — no hidden allowance), **Plies**, **First member** / **Last member** (Included / Excluded), **Supplier**, **Size reference (schedule/drawing)** (records where the size came from, e.g. "S-101 engineer schedule"), **Availability**.
-9. Read the bottom of the card: **Needs…** (what is still missing before it can be ordered — you can keep measuring), **On the order now (this job)** and the three statuses **Quantity / Installation / Procurement**. With nothing measured, Quantity reads **Not measured yet**.
-10. Tap **Measure members**. Rafters / joists / battens / trim / other open the plan; studs / plates / noggins open the **Walls** screen.
+8. **Stock** (fixed): "1200 mm, then every 600 mm (1800, 2400, 3000 …) — same at every supplier." Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
+9. **More (offsets, allowance, ends, plies, supplier)** — **Start offset**, **End offset**, **End allowance (true length)** (0 unless you set one — no hidden allowance), **Plies**, **First member** / **Last member** (Included / Excluded), **Supplier**, **Size reference (schedule/drawing)** (records where the size came from, e.g. "S-101 engineer schedule"), **Availability**.
+10. Read the bottom of the card: **Needs…** (what is still missing before it can be ordered — you can keep measuring), **On the order now (this job)** and the three statuses **Quantity / Installation / Procurement**. With nothing measured, Quantity reads **Not measured yet**.
+11. Tap **Measure members**. Rafters / joists / battens / trim / other open the plan; studs / plates / noggins open the **Walls** screen.
 
 > 💡 **Tip:** Changing the purpose to Joists or Battens switches the length source from "Measure projection" to a measured length — joists and battens on a plan are already their length, so no pitch is asked.
+
+> 💡 **Tip:** Changing the purpose keeps the size you have. Plates are never copied from the studs: on Plates pick 90 × 45 (or Custom) and check the size shown.
 
 [insert screenshot: Timber setup card — Purpose chips, section, grade, treatment, centres, Member length from, Pitch, Stock fieldset]
 
@@ -143,6 +153,8 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 | Treating the stud count as the full framing package | The wall shows studs | Base studs only — add kings, jacks, trimmers and lintels from the framing detail |
 | Typing a cut length in **Add lengths** and expecting that exact length to be ordered | The help text says "used exactly" | For timber the cut length goes up to the next stock length (Section 12) |
 | Expecting the app to pick the section | It looks like a design tool | Section, grade and treatment come from the drawings / engineer |
+| Picking a size from **Size and grade** and leaving the treatment blank | The list fills the size and grade only | Type the treatment, or pick a company product that has one |
+| Typing an LVL grade on a stud | There is no LVL row in the list | Pick the supplier's LVL from the company products (ask the office to save it once) |
 | Leaving **Noggin rows** blank | Assuming it follows cladding support spacing | Enter the rows from the framing detail |
 
 ---
@@ -151,7 +163,10 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 
 | Problem the user sees | Most likely cause | Fix |
 |----------------------|-------------------|-----|
-| "Enter the timber section (e.g. 90 × 45)." / "Enter the grade or species." / "Enter the treatment (or "untreated")." | Setup incomplete | Fill those fields in the setup card |
+| "Enter the timber section (e.g. 90 × 45)." / "Enter the grade or species." / "Enter the treatment (or "untreated")." | Setup incomplete | Pick from **Size and grade** or fill those fields in the setup card |
+| No **Size and grade** list on the card | Rafters, Joists, Trim and Other member have no built-in sizes, and no company timber product is saved for that purpose | Type the size in the fields, or ask the office to save a company product for that purpose |
+| The list shows **Custom (enter below)** | The size or grade typed matches no row (for example 140 × 45, or MGP12 on a stud) | Nothing is wrong. Pick a row to change it, or leave it |
+| A company product isn't in the list | It was saved for another purpose, or it was retired | Save it for this purpose, or use **Company products** above the card |
 | "Pitch is required." (schedule, no rafter line) | Projected rafters with no pitch | Enter the pitch (setup card **Pitch** or plan **Roof pitch**) |
 | "Measure one member (the member line) or enter the cut length." | No member line | Draw one with **Member**, or choose **Enter cut length** |
 | "Draw the distribution run the members are spaced along." | No distribution run | Draw one with **Distribution** |
@@ -207,6 +222,14 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 ---
 
 ## 12. Edge cases and limits
+
+- **Size and grade list (HUB 027, Sam's choices 21 Oct 2026):** studs 90 × 35, 90 × 45, 120 × 35 and 120 × 45, all MGP10; noggins 90 × 35; plates 90 × 45; battens 90 × 35, 70 × 35, 90 × 45 and 70 × 45. Rafters, joists, trim and other members have no built-in sizes.
+- **Still to confirm with Sam:** a grade for noggins, plates and battens (none was stated, so those rows fill the size only); whether 120 × 35 and 120 × 45 studs are MGP10 (built as MGP10); which LVL products and treatments to save; a treatment for battens ("as applicable" was stated, so no row sets one).
+- The list never sets a treatment and has no LVL row. An LVL grade and treatment only ever come from a saved company product.
+- The choice itself is not saved. The list shows the row that matches the saved fields: a company product when the job holds exactly what it fills (size, grade, treatment, species, supplier and supplier code), else the plain size row. **Custom** shows when nothing matches. While the card is open the list keeps showing the row just picked, even if two rows hold the same values.
+- A company product picked from the list fills its size, grade, treatment, species, supplier and supplier code only. It does not bring centres or other settings, and the job isn't linked to it for company updates. **Use on this job** under **Company products** (above the card) still copies the whole product.
+- Picking a built-in size after a company product keeps the treatment and supplier shown on the card, but clears that product's supplier code and species (`spec.productCode`, `spec.species`: neither has a field on the Timber card, and both belonged to the product).
+- Plates are never copied from the studs. The plate size stays on the card to check and change.
 
 - **Known issue — Roof pitch on the plan screen:** blanking the **Roof pitch** field on the Member panel saves **0°** (the setup card's **Pitch** field correctly treats blank as "not entered"). Always type a value there. Reported to the owner 2026-10-14.
 - **Known wording issue — Add lengths for timber:** the form's help says "Entered lengths are used exactly — no allowance or rounding." For timber the entered length is a **cut length** that is ordered on the next stock length (2,350 → 2,400). The schedule shows the stock length and the cut list shows the cut.
@@ -328,6 +351,27 @@ Next review date: 2027-04-14
 3. Tap three points of an L-shaped wall run, then double-tap the last point. Expected: two walls ("Wall N", "Wall N+1"), each one straight leg; the first wall's elevation opens, as before.
 4. **‹ Walls**: the two walls are listed on their own (timber walls have no run); open one → **Materials on this wall** shows **✓ Uses Studs …**.
 5. Screen test: e2e/ui-review/tc-measure.spec.js "Wall tool (timber studs)".
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Size and grade list (HUB 027)**
+1. Overview → **Add timber**. Read the card on **Rafters**, then tap **Studs**.
+2. Tap **Size and grade** and read the list. Pick **90 × 45 MGP10**.
+3. Tap **Undo**, then **Redo**. Close the card, leave the takeoff, come back and open the material's **Setup**.
+4. Tap **Noggins**, **Plates** and **Battens** in turn and read each list. Then **Plates** → pick **90 × 45**.
+5. Tap **Studs**, type **Section depth** 140 and **Section width** 45. Then pick **90 × 35 MGP10** and then **Custom (enter below)**.
+6. As office staff, save a company timber product (SOP 20-12) for **Battens**: 70 × 35, MGP10, treatment H3, supplier "Supplier A". Reopen the takeoff, **Add timber** → **Battens** → pick it from **Company products** in the list. Then change **Treatment** to H4.
+7. Expected result: step 1 — no list on Rafters; step 2 — list "Choose a size…", 90 × 35 MGP10, 90 × 45 MGP10, 120 × 35 MGP10, 120 × 45 MGP10, Custom (enter below); the line "LVL: pick your supplier's LVL from the company products. The app doesn't assume an LVL grade or treatment."; after the pick **Section depth** 90, **Section width** 45, **Grade** MGP10, **Treatment** blank, Needs says "Enter the treatment"; step 3 — one Undo clears all three, Redo puts them back, after coming back the list still shows 90 × 45 MGP10; step 4 — noggins 90 × 35, plates 90 × 45, battens 90 × 35, 70 × 35, 90 × 45, 70 × 45 (each list ends with Custom (enter below); "Choose a size…" only shows while no size or grade is entered), and on Plates picking 90 × 45 keeps the grade MGP10 from before; step 5 — the list reads Custom for 140 × 45 and still after coming back; Custom after 90 × 35 MGP10 changes no value and saves nothing; step 6 — the option reads "<name> — 70 × 35 · MGP10 · H3", picking it fills **Treatment** H3, it is still H3 after coming back; after H4 the list shows 70 × 35 and the company product still says H3.
+8. Expected record: step 2 → the material's `spec.section` { depthMm 90, widthMm 45 }, `spec.grade` "MGP10", no `spec.treatment`, `methodKey` "wall_frame", `spec.stock` still the 1200 + 600 grid; no new field is stored for the choice. Step 6 → `spec.treatment` "H3", `spec.supplierName` "Supplier A"; after H4 the company product (`GET /api/takeoff/presets`) keeps `spec.treatment` "H3" and revision 1. Live DB: `takeoff_job_materials.spec` holds section, grade and treatment as above.
+9. Screen tests: e2e/ui-review/tc-catalogue.spec.js "HUB 027: …" (7 tests); node: scripts/tests/takeoff-tc-hub027.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Size and grade: two suppliers, and a plain size after an LVL product (HUB 027 review)**
+1. As office staff, save two company timber products for **Battens**, both 70 × 35, MGP10, H3: "Yard A batten 70 × 35 H3" (supplier Yard A, code A-7035) and "Yard B batten 70 × 35 H3" (supplier Yard B, code B-7035). Save a third for **Studs**: "Supplier B LVL 90 × 45" (90 × 45, grade LVL13, treatment H2-S, species LVL, code LVL9045).
+2. Reopen the takeoff. **Add timber** → **Battens** → pick **Yard B …** in **Size and grade**. Close, leave the takeoff, come back and open its **Setup**. Pick **Yard A …**, then the plain **70 × 35**. Leave and come back again.
+3. **Add timber** → **Studs** → pick **Supplier B LVL 90 × 45**, then the plain **90 × 35 MGP10**. Leave and come back, then **Close** and read the overview row.
+4. Expected result: step 2 — the list shows **Yard B …** after the pick and after coming back; then **Yard A …**; then **70 × 35**, still after coming back, with the fields 70 / 35 / MGP10 / H3. Step 3 — the list shows **90 × 35 MGP10** after the pick and after coming back; the row reads "90 × 35 · MGP10 · H2-S", never "LVL".
+5. Expected record: step 2 → after Yard B `spec.supplierName` "Yard B", `spec.productCode` "B-7035"; after the plain 70 × 35 `spec.productCode` null. Step 3 → `spec.grade` "MGP10", `spec.treatment` "H2-S", `spec.species` null, `spec.productCode` null.
+6. Screen tests: e2e/ui-review/tc-catalogue.spec.js "HUB 027: two suppliers' battens …" and "HUB 027: LVL comes only from a selected company product …"; node: scripts/tests/takeoff-tc-hub027.test.mjs ("review: …").
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

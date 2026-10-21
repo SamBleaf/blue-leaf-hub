@@ -1,6 +1,6 @@
 ---
-sop_version: 1.2
-last_reviewed: 2026-10-20
+sop_version: 1.4
+last_reviewed: 2026-10-21
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -53,15 +53,15 @@ Takeoffs save automatically about half a second after each change — there is n
 
 ### A. Read the save chip
 
-The chip appears in the takeoff header, the Measure screen header and the Length schedule header.
+The chip appears in the takeoff header, the Measure screen header, the Length schedule header and the aluminium screens (the setup and **Openings & cutting**).
 
 | Chip | Meaning | What to do |
 |---|---|---|
 | **Saved** | The server has everything | Nothing |
 | **Saving…** | Your latest change is being sent | Wait a moment |
 | **Not synced** | Changes are waiting — usually no signal | Keep working; it saves when the connection is back. Don't close the app if you also see "Recovery unavailable" |
-| **Conflict** | Someone else saved this takeoff first | Go to the overview and choose (Section E) |
-| **Not saved** | The server refused the change for another reason | Read the message; tap **Try again** on the overview |
+| **Conflict** | Someone else saved this takeoff first | Read the red banner: it names what isn't saved yet and has both choices. It shows on the overview, the aluminium setup and **Openings & cutting**; from other screens go back to the overview (Section E) |
+| **Not saved** | The server refused the change for another reason | Read the message; tap **Try again** or **Discard** on the banner. Your other edits keep saving |
 
 ### B. Working normally
 
@@ -88,18 +88,20 @@ The chip appears in the takeoff header, the Measure screen header and the Length
 
 ### E. Resolve a conflict
 
-1. If you are in the Measure or schedule screen, tap **Done** / **Back** to return to the overview (the choice is made there). While the chip says **Conflict**, new edits are held on the device but not sent.
-2. The red banner reads "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare." followed by "Your unsaved changes: …" (e.g. "2 measurement(s) added or changed; 1 material(s) added or changed").
+1. Choose right where you are. The overview, the aluminium setup and **Openings & cutting** show the red banner with both choices on that screen (HUB 025). From the Measure, Walls or schedule screen, tap **Done** / **Back** to get to the overview and choose there. While the chip says **Conflict**, new edits are held on the device but not sent.
+2. The red banner names what isn't saved yet:
+   - on the aluminium screens: "Someone else saved this takeoff while you were working. Not saved yet: Window angle 50 × 50 × 3 setup. Your version is kept on this device." (other examples: "MINE added to Window angle 50 × 50 × 3", "which openings Window angle 50 × 50 × 3 uses (W2)");
+   - on the overview: "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare." followed by "Your unsaved changes: …" with the same names.
 3. Choose one:
    - **Apply my changes to latest** — loads the other person's version and then re-sends your changes on top of it. The server re-checks everything. Where you both changed the **same** item, your version of that item wins. Use this when your changes are additions (new runs, counts, materials) that don't clash.
-   - **Load latest (keep mine as a copy)** — throws your changes off the screen and shows the other person's version. Your changes are put back in this device's recovery store and will be offered again (Section D) **the next time you open this takeoff — but only if you don't make and save any new changes first** (the device keeps one recovery copy per takeoff).
+   - **Discard mine and load latest** — throws your changes off the screen and shows the other person's version. Your changes are put back in this device's recovery store and will be offered again (Section D) **the next time you open this takeoff — but only if you don't make and save any new changes first** (the device keeps one recovery copy per takeoff).
 4. Check the result and that the chip returns to **Saved**.
 
-[insert screenshot: overview conflict banner with "Load latest (keep mine as a copy)" and "Apply my changes to latest"]
+[insert screenshot: aluminium setup conflict banner "Not saved yet: Window angle 50 × 50 × 3 setup." with "Discard mine and load latest" and "Apply my changes to latest"]
 
 ### F. "Not saved" and other errors
 
-1. A red banner on the overview shows the reason (for example "That material is not in this takeoff." if someone removed it).
+1. A red banner shows the reason (for example "That material is not in this takeoff." if someone removed it). A change the server refuses for a reason it gives shows **Not saved: <reason>** with **Try again** and **Discard**, and your other edits keep saving (for example "This item is already counted for the same material, so this change wasn't saved. Discard it, then add it again if you still need it.").
 2. If it looks temporary (server busy, a brief outage), tap **Try again** — the same change is sent again exactly as before.
 3. If **Try again** keeps failing with the **same** message, the server is refusing that change itself (it will never be accepted as it is). Newer edits wait behind it and won't save either. To clear it:
    1. Write down what you changed since the last **Saved**.
@@ -147,7 +149,7 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 |---------|---------------|-----------------|
 | Closing the app while it says **Not synced** with "Recovery unavailable" showing | Expecting the device to keep it | Wait for **Saved** |
 | Tapping **Discard** on the recovery banner without reading it | It looks like a nuisance | Restore unless you know the changes are wrong |
-| Choosing **Load latest** and then measuring straight away | Expecting the old changes to be kept | New saved edits replace the kept copy — restore it first, or use **Apply my changes to latest** |
+| Choosing **Discard mine and load latest** and then measuring straight away | Expecting the old changes to be kept | New saved edits replace the kept copy — restore it first, or use **Apply my changes to latest** |
 | Two people measuring the same takeoff at once | Nobody knows the other is in | Agree who is measuring; use separate takeoffs for separate areas if needed |
 | Signing out of the Hub with unsaved changes | Sign-out clears device drafts | Check the chip says **Saved** first |
 | Expecting the takeoff to work fully offline | Plans already opened reopen offline, but opening the takeoff itself, exports and orders need a connection | Open the takeoff and each plan while you have signal; export and record orders online |
@@ -164,12 +166,14 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 | "These recovered changes were made on an older version. Review, then choose how to apply them." | Restored changes from an older version | Section E |
 | "Recovery unavailable on this device (storage blocked or full). Your edits are kept while this screen stays open." | Browser storage blocked or full | Section G |
 | "You can view this takeoff but not change it." | Your access is view-only | Ask an Admin, Supervisor or leading hand |
-| "The takeoff changed while loading — reload." / "The takeoff is busy — try again." | Someone saved while it was loading | Reload / **Try again** |
+| "The takeoff changed while loading — reload." on the overview, with **Conflict** | Another device kept saving while yours was being saved | Section E: choose **Apply my changes to latest** or **Discard mine and load latest** (no reload needed). On the aluminium setup and **Openings & cutting** the banner says "Someone else saved this takeoff while you were working." |
+| "The takeoff is busy — try again." | Someone saved while it was loading | Section E |
 | "This takeoff is archived." | The takeoff has been archived | Use another takeoff |
 | "That takeoff item was not found." | An item was removed by someone else | Reload the takeoff |
 | "That item isn't part of this job's takeoff." | A change pointed at another job's item | Reload; report if it repeats |
 | "That record is frozen and can't be changed." | Tried to change a scale, export or placed order | Make a new one instead (re-scale / new export / new order) |
-| "That was already saved." | Duplicate save | Nothing to do — reload to check |
+| "This item is already counted for the same material, so this change wasn't saved. Discard it, then add it again if you still need it." | The same item was added to the same material twice in one save. The app no longer sends this when you untick and tick an opening again (HUB 025); an older copy of the app on a phone still can until it updates | Tap **Discard** on the banner, then add the item again if you still need it. Your other edits keep saving |
+| "That was already saved." | A duplicate record outside autosave (rare). Autosave no longer shows it (HUB 025) | Reload to check; report it if it repeats |
 | "Missing takeoff revision." / "Invalid idempotency key." | App/API version mismatch | Reload the app (Hub: refresh; Worker app: close and reopen) |
 | "Takeoffs aren't switched on yet." while saving | Feature switched off mid-session | Your changes stay in device recovery; ask the Director (SOP 20-01) |
 | **Try again** keeps failing with the same message | The server refuses that particular change | Section 5F step 3 |
@@ -199,7 +203,8 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 
 - **Autosave:** completed edits are merged into a pending change-set and committed ~500 ms after the last edit: `POST /api/takeoff/workspaces/:id/commit` (Worker app: `/api/worker/takeoff/workspaces/:id/commit`) with `{ expectedRevision, idempotencyKey: "c-<uuid>", changes }`. One key per batch; a retried batch with the same key returns the original result (`replayed: true`) and never applies twice.
 - **Server:** recalculates everything from the saved data, then the `takeoff_commit` database function locks the takeoff row, checks `revision = expectedRevision` (compare-and-swap) and applies all changes in **one transaction**; `takeoff_workspaces.revision` + 1, `updated_by_type` / `updated_by_user_id` or `updated_by_employee_id` set; the key is recorded in `takeoff_idempotency` (`operation` 'commit').
-- **Conflict:** revision mismatch → HTTP 409 `CONFLICT`. The app keeps every local edit and waits for the user's choice; it never overwrites automatically.
+- **Conflict:** revision mismatch → HTTP 409 `CONFLICT`. The app keeps every local edit and waits for the user's choice; it never overwrites automatically. Every `CONFLICT…` code is a Conflict: `CONFLICT`, and `CONFLICT_RETRY` ("The takeoff changed while loading — reload.", when other saves keep landing while the server reads the takeoff). So is a 409 with no code (`isSaveConflict` in src/components/takeoff/changeset.js). Any other 409 (`DUPLICATE_ASSIGNMENT`, `IMMUTABLE`) is a refusal of that change (**Not saved** with **Try again** / **Discard**) and later edits keep saving (HUB 025).
+- **One live assignment per (measurement, material)** (`takeoff_contrib_unique_active`): `takeoff_commit` adds assignments before it archives, so "stop using W2" and "use W2 again" under a new id in one save would collide. The app keeps the two halves in separate saves (`deferPairCollisions` in `src/components/takeoff/changeset.js`): an assignment added and removed in the same save is just removed, and a new one for a pair this save frees goes in the next save. A real duplicate still reaches the server, which answers 409 `DUPLICATE_ASSIGNMENT` with the plain message (no migration).
 - **No answer (network drop or server error):** the batch is **held** and resent **unchanged** — same idempotency key, same base revision — so a save whose reply was lost is replayed (`replayed: true`) instead of looking like someone else's save. Newer edits queue behind it. Network → **Not synced** (the app keeps retrying roughly every half second and immediately when the browser reports it is back online); server error → **Not saved** until **Try again**.
 - **Device recovery store:** IndexedDB database `blh-takeoff-recovery`, store `drafts`, one record per **actor + takeoff** (`key` = "<actorKey>|<workspaceId>"; actorKey = `staff:<user id>`, `employee:<employee id>` or `preview:<employee id>`) holding `baseRevision`, the pending `changes` and `savedAt`. Written immediately after every completed edit and when the app is hidden or closed (visibility change / page hide). Deleted when the server confirms everything is saved, on **Discard**, after 7 days, or on Hub sign-out (for the last actor remembered in `localStorage` key `blhub_takeoff_actor`). It never contains tokens, passwords or signed plan URLs.
 - **Recovery offer:** only shown after the takeoff has loaded with your login and permissions; same base revision → plain Restore; different base → Restore leads to the Conflict choice.
@@ -211,7 +216,9 @@ A flashing drawing saves itself as you draw — there is no Apply or Save step. 
 
 - **Known limit:** an edit made within a fraction of a second of the app being killed (before the device write finishes) may not be in recovery.
 - Recovery is not offline sync: there is no background sync, and opening the takeoff, exports / placements and the first open of a plan need a connection. Plans already opened are kept on the device (IndexedDB `blh-takeoff-plans`, keyed by the document and its stored hash; at most 250 MB / 12 plans, least recently used first, dropped after 30 days unused, cleared on sign-out) — HUB 021.
-- One recovery copy per takeoff per login per device — a newer unsaved edit replaces the previous copy (including a copy kept by **Load latest (keep mine as a copy)**).
+- One recovery copy per takeoff per login per device — a newer unsaved edit replaces the previous copy (including a copy kept by **Discard mine and load latest**).
+- **Known limit (HUB 025):** the server itself still adds assignments before archives. A phone with an older copy of the app can still send an untick and re-tick in one save until the app updates; it gets the plain "already counted" message but still shows **Conflict**. Letting the server accept that save from any app needs a database migration (owner's decision).
+- The aluminium screens name the edits that aren't saved yet, but not the other person's values. **Apply my changes to latest** merges a material field by field; measurements and assignments are last write wins.
 - Recovery records expire after 7 days.
 - Changes kept on one device or browser are invisible to other devices until saved.
 - **Apply my changes to latest** re-sends your version of each changed item; if the other person changed the same item, yours replaces theirs for that item. Items only they changed are kept.
@@ -276,9 +283,9 @@ Next review date: 2027-04-13
 **TC-06 — Two writers (A08)**
 1. Both sessions open the takeoff at revision R. Session B adds a count and saves (R+1).
 2. Session A (still on R) adds a run.
-3. Expected result: Session A chip **Conflict**; overview banner "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare. Your unsaved changes: 1 measurement(s) added or changed; assignments / splits changed."; HTTP 409 `CONFLICT` in Network; DB shows only Session B's change (revision R+1).
+3. Expected result: Session A chip **Conflict**; overview banner "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare. Your unsaved changes: a run added to <flashing name>."; HTTP 409 `CONFLICT` in Network; DB shows only Session B's change (revision R+1).
 4. Session A taps **Apply my changes to latest** → revision R+2 containing both the count and the run.
-5. Repeat steps 1–2 and choose **Load latest (keep mine as a copy)** → Session A shows only Session B's version; the IndexedDB record still holds Session A's run; reopening the takeoff offers "… made on an older version …".
+5. Repeat steps 1–2 and choose **Discard mine and load latest** → Session A shows only Session B's version; the IndexedDB record still holds Session A's run; reopening the takeoff offers "… made on an older version …".
 - [ ] Pass  [ ] Fail
 
 **TC-07 — Short network loss (A18)**
@@ -312,8 +319,8 @@ Next review date: 2027-04-13
 3. Expected result: no recovery banner; the record is deleted.
 - [ ] Pass  [ ] Fail
 
-**TC-12 — "Keep mine as a copy" is replaced by new edits (documents current behaviour)**
-1. Create a conflict and choose **Load latest (keep mine as a copy)**.
+**TC-12 — "Discard mine and load latest" copy is replaced by new edits (documents current behaviour)**
+1. Create a conflict and choose **Discard mine and load latest**.
 2. Without reopening, add a new manual length and let it save.
 3. Reopen the takeoff.
 4. Expected result (current code): no recovery banner — the kept copy was overwritten by the newer edit and then cleared when it saved. Record the result; this is a known gap reported to the owner.
@@ -343,6 +350,28 @@ Next review date: 2027-04-13
 2. **Done** → **‹ Back** → **Flashings** → **Measure**, then reload and **Measure** again, on a slow connection. Expected: "Opening plan…" only, never "Downloading plan"; no second download.
 3. Turn the connection off and re-enter → **Measure**. Expected: the plan opens with no error.
 4. Replace the stored plan (new hash). Expected: "Downloading plan" shows once; the next open reuses the new copy. With device storage unavailable the plan still opens by downloading each time. Spec: e2e/ui-review/tc-plan-reuse.spec.js; node: takeoff-tc-hub021; API: the content route sends X-Content-Sha256 and `Cache-Control: private, no-store`.
+- [ ] Pass  [ ] Fail
+
+**TC-17 — Untick and re-tick an opening in one save just saves (HUB 025, UI Review + API)**
+1. UI Review, mixed seed (`/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=mixed`): **Window angle 50 × 50 × 3** → **Setup** → **Openings & cutting**. Untick **W2** under **Openings already on walls** and tick it straight back (within half a second, or while another save is still going).
+2. Expected result: the chip goes **Not synced** / **Saving…** then **Saved**; it never shows **Conflict** or **Not saved**, and "That was already saved." never appears. W2 stays ticked and is counted once.
+3. **Profile & cutting settings** → change **Saw kerf** to 4 and tick "The saw kerf above is confirmed for this job". Expected: **Saved**. Leave the takeoff and open it again: W1 and W2 ticked, kerf 4 confirmed.
+4. Expected API (real server): the app sends two saves, the archive of the old assignment, then the new one. Sending both in ONE save returns HTTP 409 `{ code: "DUPLICATE_ASSIGNMENT", error: "This item is already counted for the same material, so this change wasn't saved. …" }` and the revision is unchanged. A no-change save returns 200; the same key again returns 200 `replayed: true`; an older base returns 409 `CONFLICT`. Specs: e2e/ui-review/tc-hub025.spec.js A–C; node: takeoff-tc-hub025; API: takeoff-api "HUB 025".
+- [ ] Pass  [ ] Fail
+
+**TC-18 — A real conflict on the aluminium setup keeps both versions (HUB 025, UI Review)**
+1. Mixed seed → **Window angle 50 × 50 × 3** → **Setup**. From another session (or `fetch` to the commit route) change the aluminium's **Finish / colour** to "Anodised clear". Then change **Saw kerf** to 4 in this session.
+2. Expected result: the setup window itself shows **Conflict** and the red banner "Someone else saved this takeoff while you were working. Not saved yet: Window angle 50 × 50 × 3 setup. Your version is kept on this device." with **Discard mine and load latest** and **Apply my changes to latest**. The server still has "Anodised clear" and kerf 3; this screen still shows kerf 4; nothing is sent while you decide.
+3. Tap **Apply my changes to latest**. Expected: **Saved**; the server has "Anodised clear" AND kerf 4.
+4. Repeat on **Openings & cutting**: the other session adds a straight cut "THEIRS" 900, this session adds "MINE" 1234. Expected: the same banner on that screen ("Not saved yet: MINE added to Window angle 50 × 50 × 3"). **Discard mine and load latest** shows THEIRS and not MINE; IndexedDB `blh-takeoff-recovery` › `drafts` still holds MINE (offered the next time the takeoff opens).
+- [ ] Pass  [ ] Fail
+
+**TC-19 — "The takeoff changed while loading" is a Conflict, never Not saved (HUB 025 review, UI Review)**
+1. Mixed seed → **Window angle 50 × 50 × 3** → **Setup** → **Openings & cutting**. In the console run `window.__takeoffReviewRefuse = { status: 409, error: "The takeoff changed while loading — reload.", code: "CONFLICT_RETRY" }` (the server's answer when another device's saves keep landing while it reads this one).
+2. Add a straight cut: label "RETRY", length 1333.
+3. Run `window.__takeoffReviewRefuse = 0`, then tap **Apply my changes to latest**.
+4. Expected result: step 2 — the chip shows **Conflict** (never **Not saved**); the banner reads "Someone else saved this takeoff while you were working. Not saved yet: RETRY added to Window angle 50 × 50 × 3. Your version is kept on this device." with **Discard mine and load latest** and **Apply my changes to latest** (no **Try again**); RETRY is still on the screen. Step 3 — **Saved**, the banner goes and the cut is saved once.
+5. Expected record: `window.__takeoffReviewState().measurements` one more after step 3, none more after step 2. Specs: e2e/ui-review/tc-hub025.spec.js G; node: takeoff-tc-hub025 ("isSaveConflict …").
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

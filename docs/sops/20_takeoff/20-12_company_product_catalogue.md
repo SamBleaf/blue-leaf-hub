@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-10-20
+sop_version: 1.4
+last_reviewed: 2026-10-21
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -27,6 +27,7 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 | See company products in a setup card | Yes | Yes | Yes | Yes |
 | **Use on this job** (make this job's copy) | Yes | Yes | Yes | No |
 | **New company product…**, **Edit company product**, **Save as standard**, **Save company version** | Yes | Yes | **No** | No |
+| **Add to company products** (aluminium card only, HUB 024) | Yes | Yes | **No** (a Worker-app login linked to an Admin or Supervisor account: **Yes**) | No |
 | **Review update** → **Update this job's copy** / **Keep this job's copy** | Yes | Yes | Yes | No |
 
 Without edit-standards permission the editor is read-only: "Only office staff can change company standards. You can use this product on a job; the job keeps its own copy."
@@ -93,6 +94,8 @@ Company products live in one catalogue, grouped by kind (Timber, Fibre cement cl
 2. Check every value the product **brings** for this job's conditions (wind class, substrate, wall heights) — they are never trusted silently.
 3. Changes you make on the job now apply to this job only.
 
+> 💡 **Timber (HUB 027):** a company timber product also shows in the timber card's **Size and grade** list, under **Company products**, for the purpose it was saved for (a Battens product on Battens only). Picking it there fills only its size, grade, treatment, species, supplier and supplier code (SOP 20-08 Section 5A step 4). **Use on this job** here still copies the whole product. Save each supplier's LVL as a company timber product for Studs, with its own grade and treatment: the app has no built-in LVL grade or treatment.
+
 ### E. Make a new company version
 
 1. In a setup card tap **Edit company product** on the product (Hub office staff).
@@ -106,6 +109,16 @@ Company products live in one catalogue, grouped by kind (Timber, Fibre cement cl
 4. **Quantity impact on this job** shows **Now** and **With rev 2** — the quantities and the three statuses — and "Draft order lines are recalculated; orders already exported or placed never change."
 5. Tap **Update this job's copy to rev 2** to take the new version, or **Keep this job's copy** to leave the job as it is. Nothing changes until you tap Update.
 6. Flashing standards use **Update this job's copy** straight from the banner (SOP 20-04).
+
+### G. Add an aluminium setup to the company products (HUB 024)
+
+1. In the **Aluminium** card, finish this job's setup, then tap **Add to company products** (beside **New company product**, under the search).
+2. It asks for the product's name, starting with this item's name ("Add this setup to company products? Other jobs find it by this name. This job keeps its own copy."), then saves this job's profile, finish, stock length, cutting settings and window detail under it. Full steps: SOP 20-10 Section 5F.
+3. The kerf value is kept but its confirmation is not: every job that uses the product ticks **The saw kerf above is confirmed for this job** itself.
+4. The same name with the same angle size asks first: "A company product called “…” already exists. OK = save this as its new version. Cancel = keep the existing one."
+5. The same name with a different size is never overwritten: the app asks for the setup's own name and offers one (e.g. "Aluminium angle 40 × 40 × 2"). The server refuses it too.
+6. If someone else saved that product a moment before, nothing is saved and the next tap of **Add to company products** saves yours as its new version.
+7. This job is not linked to the product. It keeps its own copy, so a later change on this job never reaches the company product. A job that saves its own copy as the new version isn't told its company standard was updated.
 
 ---
 
@@ -143,7 +156,12 @@ Company products live in one catalogue, grouped by kind (Timber, Fibre cement cl
 | "Check these — they belonged to the previous choice and are NOT being used" | Kind / product / method / orientation changed | **Use** only if it applies; these are not saved unless you choose Use |
 | No **New company product** / **Edit company product** / **Save as standard** | Leading hand / view-only | Ask office staff |
 | "Only office staff can change company standards …" | Editor opened without permission | Ask office staff |
-| "No company products for this yet. …" | Nothing saved for that kind | Create one (Section 5B) |
+| "No company products for this yet. Set one up here, or add it from the researched catalogue in the setup card." | Nothing saved for that kind (Hub office staff) | Create one (Section 5B) |
+| "No company products for this yet. Finish the setup below, then tap Add to company products." | Nothing saved for aluminium yet (office staff) | Finish the setup, then **Add to company products** (Section 5G) |
+| "No company products for this yet." (aluminium and timber) or "… Add it from the researched catalogue in the setup card." (cladding kinds), with no buttons | Leading hand, or a login that can't create products here | Ask office staff |
+| "Someone else saved that company product just now. Nothing was saved. Tap Add to company products again to save yours as its new version." | Another office login saved the same aluminium product a moment before | Tap **Add to company products** again |
+| "“…” is a 50 × 50 × 3 angle. Give this 40 × 40 × 2 setup its own name." | A new version was sent for a product of another size | Give the setup its own name (SOP 20-10 Section 5F) |
+| "Only office staff can add company products." | Not an office login | Ask office staff |
 | "No researched assembly lists this product, method and orientation — supports and fixings need a reviewed project detail." | Custom product | Record the project detail on the job |
 | "Can't preview: …" in Quantity impact | The new version can't be calculated on this job | Keep the job copy; fix the company product |
 | A save error such as "Someone else changed …" | Two people saved the same product | Reopen the product and redo the change |
@@ -179,13 +197,15 @@ Company products live in one catalogue, grouped by kind (Timber, Fibre cement cl
 - **Use on this job / Update** → a job-material upsert with `fromPreset` { presetId, revision }; the server copies that exact revision into `takeoff_job_materials` (`from_preset_id`, `from_preset_revision`) — a deep snapshot, never a live link.
 - **Review update** compares the job copy with the latest revision field by field and runs the real calculation twice on this job (`computeWorkspace`) for the quantity impact — read-only until **Update**.
 - **Drafts:** an unsaved company product is kept in this device's storage (`blh:takeoff:catalogue-draft:…`).
+- **Add to company products** (aluminium, HUB 024) → `POST …/company-products` on the Hub and the Worker app (capability `addCompanyProducts`; never preview). Aluminium `linear_stock` only, complete profile size, `spec.kerfConfirmed` forced false, `rules.carried` / `defaultsFrom` / `companyDefault` dropped, `sourceReview` "user_entered", then `takeoff_save_preset`. It revises only an active aluminium company product (same name, `expectedRevision`) with the same profile (a different Leg A / Leg B / Thickness is refused 400), never a flashing standard or company default, and never retires. `POST /api/takeoff/presets` stays Hub-only. No migration.
 - No email, notification or file is created.
 
 ---
 
 ## 12. Edge cases and limits
 
-- **No duplicate-name check** for timber / cladding / aluminium products: saving "New company product" twice with the same name makes two products. (Flashing standards ask before saving over a same-name standard.)
+- **No duplicate-name check** for timber / cladding / aluminium products saved from the editor: saving "New company product" twice with the same name makes two products. (Flashing standards, and **Add to company products** on the aluminium card, ask before saving over a same-name product.)
+- **Save as standard** and **New company product** (the editor) keep an aluminium kerf's confirmation tick in the product, although the editor says "Each job still confirms it before ordering." **Add to company products** never does. Not changed in HUB 024; reported to the owner 2026-10-21.
 - **No Retire button** for these products in this build (only flashing standards can be retired, in **Choose flashing**). Reported to the owner 2026-10-14.
 - **Keep this job's copy** only closes the review — the "company standard was updated" banner shows again next time while the job is on an older revision.
 - A product can't hold job conditions (project detail, existing supports, "check these" flags); older products that carry them show them as **Brings …** notes to check.
@@ -280,6 +300,13 @@ Next review date: 2027-04-14
 2. After the reload (if the overview also offers "Unsaved changes … were found on this device", either button is fine for this test): **Add cladding** → **New company product…** again.
 3. Tap **Restore**. Then tap **Cancel**, and open **New company product…** once more.
 4. Expected result: step 2 — banner "Unsaved changes to this product from <date, time> were kept on this device." with **Restore** / **Discard**; step 3 — Restore puts "BLH TEST draft" back in the name; after **Cancel** the reopened editor offers nothing (the kept draft was cleared). Nothing was added to the presets list.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Add to company products (aluminium, HUB 024)**
+1. Default job → **Add aluminium** → **Saw kerf** 3 (Enter), tick confirmed → **Add to company products** → **OK** on the name offered.
+2. Read the **Company products** list and the presets list.
+3. Supervisor (`reviewRole=supervisor`) and the Worker-app office login (`/worker/takeoff/carpentry/cjb-1?section=timber_cladding&takeoffWorker=office`) → **Add aluminium**; then the leading hand (`/worker/takeoff/carpentry/cjb-1?section=timber_cladding`) → **Add aluminium**, **Close**, **Add timber**.
+4. Expected result: step 1 — "Added “Aluminium angle 50 × 50 × 3” to company products. Other jobs can use it; this job keeps its own copy."; step 2 — listed under **ALUMINIUM PROFILES** with **rev 1**; the preset has `spec.kerfMm` 3, `spec.kerfConfirmed` false, `spec.stockLengthMm` 6500 and no `rules.carried` / `defaultsFrom` / `companyDefault`; the job material keeps its confirmed tick and has no `fromPresetId`; step 3 — **Add to company products** shows for the supervisor and the office login (no **New company product** in the Worker app); the leading hand has neither button and reads "No company products for this yet." (never "Set one up here"), and on **Add timber** the same, never "researched catalogue". Full flow: SOP 20-10 TC-13; the review fixes (a different size, someone else saving first, a job's own new version): SOP 20-10 TC-15.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

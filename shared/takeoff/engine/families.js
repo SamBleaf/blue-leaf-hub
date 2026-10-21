@@ -17,6 +17,88 @@ export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "pla
 export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 600 });
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
 
+// ── HUB 027: timber size choices per purpose (owner, 21 Oct 2026) ─────────────────────────────────────────────
+// ORDERING setup only, never a structural size: a row fills the section, and the grade only where the owner named
+// one (studs: MGP10). No row carries a treatment, and there is no built-in LVL row: an LVL grade and treatment come
+// only from a saved company product. Rafters, joists, trim and other members have no stated choices.
+export const TIMBER_PRESETS_SOURCE = "OWNER-2026-10-21";
+const tp = (purpose, depthMm, widthMm, grade = null) =>
+  Object.freeze({ id: `${purpose}-${depthMm}x${widthMm}${grade ? `-${grade.toLowerCase()}` : ""}`, depthMm, widthMm, grade });
+export const TIMBER_PRESETS = Object.freeze({
+  studs: Object.freeze([tp("studs", 90, 35, "MGP10"), tp("studs", 90, 45, "MGP10"), tp("studs", 120, 35, "MGP10"), tp("studs", 120, 45, "MGP10")]),
+  noggins: Object.freeze([tp("noggins", 90, 35)]),
+  plates: Object.freeze([tp("plates", 90, 45)]),
+  battens: Object.freeze([tp("battens", 90, 35), tp("battens", 70, 35), tp("battens", 90, 45), tp("battens", 70, 45)]),
+});
+
+const low = (v) => (v == null ? "" : String(v).trim().toLowerCase());
+const sameNum = (a, b) => (a == null || a === "" ? null : Number(a)) === (b == null || b === "" ? null : Number(b));
+
+/** The built-in size choices for one timber purpose ([] when the owner stated none). */
+export function timberPresetsFor(purpose) {
+  return TIMBER_PRESETS[purpose] || [];
+}
+
+/** "90 × 45 MGP10" / "90 × 35" — how a built-in choice reads in the list. */
+export function timberPresetLabel(preset) {
+  return `${preset.depthMm} × ${preset.widthMm}${preset.grade ? ` ${preset.grade}` : ""}`;
+}
+
+/**
+ * A built-in choice applied to a timber spec: the section, and the grade only when the choice names one (a size-only
+ * row leaves an entered grade alone). Treatment, supplier, stock, plies and sizing (still "manual") are never touched.
+ * A built-in row is a size, not a product: the supplier code and species can only come from a saved company product
+ * and neither shows on the Timber card, so picking a built-in row clears both. An order never carries one product's
+ * code or species (e.g. "LVL") on a plain "90 × 35 MGP10" line, and the list keeps showing the row picked.
+ */
+export function applyTimberPreset(spec, preset) {
+  const s = spec || {};
+  const section = { ...(s.section || {}), depthMm: preset.depthMm, widthMm: preset.widthMm };
+  const grade = preset.grade || s.grade || null;
+  const next = { ...s, section, grade };
+  if (s.productCode) next.productCode = null;
+  if (s.species) next.species = null;
+  return next;
+}
+
+/** A saved company timber product's identity copied onto a job spec exactly as saved (nothing assumed or kept). */
+export function timberProductFill(spec, productSpec) {
+  const p = productSpec || {};
+  return { ...(spec || {}),
+    section: { depthMm: p.section?.depthMm ?? null, widthMm: p.section?.widthMm ?? null },
+    grade: p.grade ?? null, treatment: p.treatment ?? null, species: p.species ?? null,
+    supplierName: p.supplierName ?? null, productCode: p.productCode ?? null };
+}
+
+/** Does a job's timber spec hold exactly what this company product fills (everything timberProductFill writes)? */
+export function timberProductMatches(spec, product) {
+  const s = spec || {}, ps = product?.spec || {};
+  return sameNum(ps.section?.depthMm, s.section?.depthMm) && sameNum(ps.section?.widthMm, s.section?.widthMm)
+    && ["grade", "treatment", "species", "supplierName", "productCode"].every((k) => low(ps[k]) === low(s[k]));
+}
+
+/** Does a job's timber spec hold this built-in row (the same section, and the same grade when the row names one)? */
+export function timberPresetMatches(spec, preset) {
+  const s = spec || {};
+  return sameNum(preset?.depthMm, s.section?.depthMm) && sameNum(preset?.widthMm, s.section?.widthMm) && (!preset.grade || low(preset.grade) === low(s.grade));
+}
+
+/**
+ * Which choice the saved fields match (the choice itself is never stored, so it survives a reload as the fields do):
+ * a company product id when the job holds exactly what that product fills (section, grade, treatment, species,
+ * supplier and supplier code, so two suppliers' same-size products stay apart), else a built-in id (same section, and
+ * the same grade when the row names one), "custom" when a section or grade is entered that matches nothing, null
+ * when empty.
+ */
+export function matchTimberChoice(spec, presets = [], products = []) {
+  const s = spec || {};
+  const d = s.section?.depthMm, w = s.section?.widthMm;
+  if ((d == null || d === "") && (w == null || w === "") && !low(s.grade)) return null;
+  for (const p of products || []) if (timberProductMatches(s, p)) return p.id;
+  for (const p of presets || []) if (timberPresetMatches(s, p)) return p.id;
+  return "custom";
+}
+
 /** Method per family/purpose (versioned keys from 06). */
 export function methodFor(spec) {
   switch (spec?.family) {

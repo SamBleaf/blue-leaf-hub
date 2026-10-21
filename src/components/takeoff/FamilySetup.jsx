@@ -1,6 +1,8 @@
 // =============================================================================
 // FamilySetup — compact setup cards for the TC-R04 families (02 §2–3, 05, 11, 12; 07 UX03 / CL05):
-//   * TimberSetup    — purpose → section/grade/treatment → centres / length source / pitch → 1200 + 600n stock
+//   * TimberSetup    — purpose → "Size and grade" list (HUB 027: the owner's sizes for that purpose + company timber
+//                      products saved for it, or Custom) → section/grade/treatment (always shown, editable) →
+//                      centres / length source / pitch → 1200 + 600n stock
 //   * CladdingSetup  — material → product (searchable catalogue; Walsc first for AAC) → orientation → assembly
 //                      → stock / spares / supplier. Also hosts the support-batten layer and the accessory card.
 //   * BattenSetup    — support layer: product/section, orientation, max spacing (required), offsets, existing
@@ -21,7 +23,8 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, familyProblems, methodFor, normaliseFamilySpec } from "../../../shared/takeoff/index.js";
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, applyTimberPreset, describeFamilySpec, familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec,
+  timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches } from "../../../shared/takeoff/index.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
 import { FOAM_TAPE, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
@@ -1007,7 +1010,54 @@ function AvailabilityChips({ value, onChange }) {
 }
 
 // ── Timber ───────────────────────────────────────────────────────────────────────────────────────────────────
-export function TimberSetup({ value, onChange, result, lines }) {
+/**
+ * HUB 027 "Size and grade": one list right after Purpose. Built-in rows are the owner's sizes for that purpose
+ * (studs MGP10; the others size only, no treatment, no LVL); company rows are timber products saved for the same
+ * purpose and fill their own section, grade, treatment, species and supplier exactly as saved. A built-in pick clears
+ * a product's hidden supplier code and species. A pick is ONE change (one Undo step, autosaved). Custom changes
+ * nothing: the fields below stay for an unusual size. The list shows the choice the saved fields match exactly
+ * (nothing new is stored). Ordering setup only, never a structural size.
+ */
+function TimberSizeChoice({ d, presets }) {
+  const s = d.cur.spec || {};
+  const builtIn = timberPresetsFor(s.purpose);
+  const products = useMemo(() => (presets || []).filter((p) => p?.isActive !== false && p?.spec?.family === "timber" && p.spec.purpose === s.purpose && p.rules?.companyDefault !== true), [presets, s.purpose]);
+  // the row last picked here: shown while the fields still hold it (two choices can hold the same fields), "custom"
+  // until another row is picked; otherwise the list shows what the saved fields match
+  const [picked, setPicked] = useState(null);
+  const id = useId();
+  if (!builtIn.length && !products.length) return null;
+  const match = matchTimberChoice(s, builtIn, products);
+  const holds = picked === "custom" || builtIn.some((x) => x.id === picked && timberPresetMatches(s, x)) || products.some((x) => x.id === picked && timberProductMatches(s, x));
+  const shown = holds ? picked : match || "";
+  const pick = (v) => {
+    setPicked(v);
+    if (v === "custom") return;
+    const preset = builtIn.find((x) => x.id === v);
+    if (preset) { d.update((c) => ({ ...c, spec: applyTimberPreset(c.spec, preset) })); return; }
+    const product = products.find((x) => x.id === v);
+    if (product) d.update((c) => ({ ...c, spec: timberProductFill(c.spec, product.spec) }));
+  };
+  return (
+    <div data-timber-choice={shown || "none"}>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">Size and grade</label>
+      <select id={id} value={shown} onChange={(e) => pick(e.target.value)}
+        className="min-h-[44px] w-full min-w-0 rounded-lg border border-hairline bg-white px-3 text-base text-ink focus-ring">
+        {!shown && <option value="" disabled>Choose a size…</option>}
+        {builtIn.map((p) => <option key={p.id} value={p.id}>{timberPresetLabel(p)}</option>)}
+        {products.length > 0 && (
+          <optgroup label="Company products">
+            {products.map((p) => <option key={p.id} value={p.id} data-company-product={p.id}>{`${p.name} — ${describeFamilySpec(p.spec).line}`}</option>)}
+          </optgroup>
+        )}
+        <option value="custom">Custom (enter below)</option>
+      </select>
+      {s.purpose === "studs" && <p className="mt-1 text-[11px] text-muted" data-lvl-hint="">LVL: pick your supplier&apos;s LVL from the company products. The app doesn&apos;t assume an LVL grade or treatment.</p>}
+    </div>
+  );
+}
+
+export function TimberSetup({ value, onChange, result, lines, presets = null }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
   const pf = usePendingFields();
@@ -1029,6 +1079,7 @@ export function TimberSetup({ value, onChange, result, lines }) {
       <UndoBar d={d} pending={pf.pending} />
       <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => set({ name: t })} placeholder="e.g. Rafters 90 × 45" />
       <Chips label="Purpose" name="purpose" value={s.purpose} options={TIMBER_PURPOSES.map((p) => [p, PURPOSE_LABEL[p]])} onChange={setPurpose} />
+      <TimberSizeChoice key={s.purpose} d={d} presets={presets} />
       <div className="grid grid-cols-2 gap-2">
         <NumberField label="Section depth" value={s.section?.depthMm} onCommit={(n) => set({ spec: { section: { ...s.section, depthMm: n } } })} />
         <NumberField label="Section width" value={s.section?.widthMm} onCommit={(n) => set({ spec: { section: { ...s.section, widthMm: n } } })} />

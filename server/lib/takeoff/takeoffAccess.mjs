@@ -92,6 +92,7 @@ export function staffCapabilities(caller) {
     editStandards: staff,
     addSuppliers: staff,       // HUB 008: office staff add a supplier from the order
     saveCompanyDefaults: staff, // HUB 014: office staff save a product's company cladding default
+    addCompanyProducts: staff,  // HUB 024: office staff add an aluminium setup to the company products
     placeOrders: role === "admin",
     viewSupplierContacts: staff,
     isPreview: false,
@@ -125,6 +126,8 @@ export function workerCapabilities(emp, isPreview, linkedRole) {
     addSuppliers: preparer && !isPreview && (linkedRole === "admin" || linkedRole === "supervisor"),
     // HUB 014: the same office logins save a product's company cladding default (never a flashing standard)
     saveCompanyDefaults: preparer && !isPreview && (linkedRole === "admin" || linkedRole === "supervisor"),
+    // HUB 024: the same office logins add an aluminium setup to the company products (never a flashing standard)
+    addCompanyProducts: preparer && !isPreview && (linkedRole === "admin" || linkedRole === "supervisor"),
     placeOrders: false,        // recording a placed order is admin-only (staff route)
     // Leading hands send the supplier PDF themselves, so they see the supplier's order contact
     // (name/email/phone) — the same details printed on that PDF. Never account terms or notes.

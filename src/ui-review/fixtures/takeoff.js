@@ -17,6 +17,15 @@
  * walls of 6, 4, 6 and 4 m at 2,700 with three windows and a door, plus a 6 m gable that needs an H joint — so its
  * automatic battens, foam tape and H-flashing show on the walls, the schedule and the order with nothing set up;
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
+ * HUB 025 (commits behave like the server's): a repeated idempotencyKey returns the original result with replayed:true
+ * before the revision check; a save that would leave two live assignments on one (measurement, material) pair is refused
+ * whole with 409 DUPLICATE_ASSIGNMENT (takeoff_contrib_unique_active, checked in the RPC's order: assignments are added
+ * before archives); window.__takeoffReviewDropResponse = true applies the next commit, then loses its reply like a
+ * dropped connection (once); window.__takeoffReviewCommitDelayMs = N answers each commit N ms late (a slow phone signal);
+ * window.__takeoffReviewRefuse = 401 refuses every commit as an expired sign-in, or = { status, error, code } with that
+ * refusal (e.g. the 409 DUPLICATE_ASSIGNMENT an older app could still cause). window.__takeoffReviewPresetRace = true
+ * makes another office login save the aluminium company product a moment before the next "Add to company products"
+ * save of it lands (once), so that save is refused 409 like the server's stale-revision check (HUB 024).
  * Exports freeze a snapshot (like buildExportSnapshot: generic items by unit + the site appendix);
  * GET …/exports/:id/appendix serves a small text-only stub PDF rendered from THAT frozen snapshot.
  */
@@ -28,6 +37,7 @@ import {
   SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
+import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
 import { BLUE_LEAF_JH_DEFAULTS } from "../../../shared/takeoff/companyDefaults.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
 
@@ -195,10 +205,11 @@ const caps = (worker) => {
     const ordinary = qs().get("takeoffWorker") === "ordinary";
     // ?takeoffWorker=office — a Worker-app login linked to an Admin / Supervisor account (office staff on a phone)
     const office = qs().get("takeoffWorker") === "office";
-    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, addSuppliers: office, saveCompanyDefaults: office, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
+    return { view: !ordinary, edit: !ordinary, export: !ordinary, editStandards: false, addSuppliers: office, saveCompanyDefaults: office, addCompanyProducts: office, placeOrders: false, viewSupplierContacts: false, isPreview: false, actorKey: "employee:emp-4" };
   }
   const role = reviewRole();
-  return { view: true, edit: true, export: true, editStandards: true, addSuppliers: role === "admin" || role === "supervisor", saveCompanyDefaults: role === "admin" || role === "supervisor", placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
+  const office = role === "admin" || role === "supervisor";
+  return { view: true, edit: true, export: true, editStandards: true, addSuppliers: office, saveCompanyDefaults: office, addCompanyProducts: office, placeOrders: role === "admin", viewSupplierContacts: true, isPreview: false, actorKey: `staff:review-${role}` };
 };
 const fail = (status, error, code) => ({ __status: status, body: { ok: false, error, code } });
 /**
@@ -232,11 +243,30 @@ function serverOpeningInputs(i) {
 
 function applyCommit(body) {
   if (window.__takeoffReviewOffline) throw new TypeError("Failed to fetch"); // simulate a dropped connection
-  if (window.__takeoffReviewRefuse) { state.commitCount = (state.commitCount || 0) + 1; return fail(window.__takeoffReviewRefuse, "Your sign-in has expired.", "UNAUTHENTICATED"); } // simulate a 4xx refusal
+  if (window.__takeoffReviewRefuse) { // simulate a 4xx refusal: a status (expired sign-in), or { status, error, code } (HUB 025)
+    const r = window.__takeoffReviewRefuse;
+    state.commitCount = (state.commitCount || 0) + 1;
+    return typeof r === "object" ? fail(r.status, r.error, r.code) : fail(r, "Your sign-in has expired.", "UNAUTHENTICATED");
+  }
   state.commitCount = (state.commitCount || 0) + 1;
+  // like the server: a retry of an already-committed key returns the original result, never re-applies (HUB 025)
+  const idem = body.idempotencyKey ? String(body.idempotencyKey) : null;
+  if (idem && state.idem?.[idem] != null) {
+    const snap = snapshot();
+    return { ok: true, commit: { revision: state.idem[idem], replayed: true }, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status() };
+  }
   if (qs().get("takeoffConflict") === "1" && !state.conflicted) { state.conflicted = true; state.revision += 1; return fail(409, "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare.", "CONFLICT"); }
   if (body.expectedRevision !== state.revision) return fail(409, "Someone else saved this takeoff first. Your changes are kept on this device — reload to compare.", "CONFLICT");
   const ch = body.changes || {};
+  // like takeoff_contrib_unique_active in the RPC's order (assignments are added BEFORE archives): one live assignment
+  // per (measurement, material) at every step, or the whole save is refused before anything changes (HUB 025)
+  const livePair = new Map(state.contributions.map((c) => [c.id, `${c.measurementId}|${c.jobMaterialId}`]));
+  for (const c of ch.contributions?.upsert || []) {
+    const rec = { ...(state.contributions.find((x) => x.id === c?.id) || {}), ...c };
+    const pair = `${rec.measurementId}|${rec.jobMaterialId}`;
+    livePair.set(rec.id, pair);
+    for (const [id, p] of livePair) if (id !== rec.id && p === pair) return fail(409, PROBLEM_TEXT.duplicate_assignment, "DUPLICATE_ASSIGNMENT");
+  }
   try {
     if (ch.workspace) {
       const w = ch.workspace;
@@ -253,7 +283,8 @@ function applyCommit(body) {
     }
     const up = (list, recs, map = (r) => r) => { for (const r of recs || []) { const i = list.findIndex((x) => x.id === r.id); const v = map(r); if (i >= 0) list[i] = { ...list[i], ...v }; else list.push(v); } };
     up(state.materials, ch.materials?.upsert, (m) => {
-      if (m.fromPreset) { const p = state.presets.find((x) => x.id === m.fromPreset.presetId); return { id: m.id, name: p.name, methodKey: p.methodKey, methodVersion: p.methodVersion, spec: p.spec, rules: p.rules, profile: p.profile, fromPresetId: p.id, fromPresetRevision: p.revision }; }
+      // like the server: the job gets its own COPY of the preset revision (HUB 024: a later job edit never reaches it)
+      if (m.fromPreset) { const p = state.presets.find((x) => x.id === m.fromPreset.presetId); return { id: m.id, name: p.name, methodKey: p.methodKey, methodVersion: p.methodVersion, spec: structuredClone(p.spec), rules: structuredClone(p.rules), profile: p.profile ? structuredClone(p.profile) : p.profile, fromPresetId: p.id, fromPresetRevision: p.revision }; }
       // TC-R04 families keep their own rules (centres, pitch, heights …); flashing rules are normalised as before
       return m.spec?.family && m.spec.family !== "flashing" ? { ...m, rules: { ...(m.rules || {}) } } : { ...m, rules: normaliseFlashingRules(m.rules) };
     });
@@ -285,6 +316,9 @@ function applyCommit(body) {
     state.contributions = drop(state.contributions, ch.contributions?.archive).filter((c) => state.measurements.some((m) => m.id === c.measurementId) && state.materials.some((m) => m.id === c.jobMaterialId));
   } catch (e) { return fail(400, e.message, "INVALID"); }
   state.revision += 1;
+  if (idem) state.idem = { ...(state.idem || {}), [idem]: state.revision };
+  // HUB 025 review knob: the server applied this commit but its reply never arrives (once)
+  if (window.__takeoffReviewDropResponse) { window.__takeoffReviewDropResponse = false; throw new TypeError("Failed to fetch"); }
   const snap = snapshot();
   return { ok: true, commit: { revision: state.revision, replayed: false }, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status() };
 }
@@ -426,6 +460,28 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       state.presets.push({ id, revision: 1, isActive: true, updatedAt: new Date().toISOString(), ...content });
       return { ok: true, preset: { presetId: id, revision: 1 } };
     });
+    // HUB 024: add an aluminium setup to the company products (as the server: office logins only; aluminium only; the
+    // kerf confirmation never travels; only an aluminium company product of the same name is revised, on its revision)
+    route("POST", `${base}/company-products`, ({ bodyJson }) => {
+      if (!caps(worker).addCompanyProducts) return fail(403, "Only office staff can add company products.", "FORBIDDEN");
+      const b = bodyJson || {};
+      if (b.spec?.family !== "aluminium" || b.methodKey !== "linear_stock") return fail(400, "Only an aluminium setup can be added here.", "INVALID");
+      if (!(b.spec.profile?.aMm && b.spec.profile?.bMm && b.spec.profile?.tMm)) return fail(400, "Enter the profile size (e.g. 50 × 50 × 3).", "INVALID");
+      if (!String(b.name || "").trim()) return fail(400, "Give the material a name.", "INVALID");
+      const rules = structuredClone(b.rules || {});
+      delete rules.carried; delete rules.defaultsFrom; delete rules.companyDefault;
+      const content = { name: String(b.name).trim(), methodKey: b.methodKey, methodVersion: Number(b.methodVersion || 1), spec: { ...structuredClone(b.spec), kerfConfirmed: false }, rules, profile: null, sourceReview: { status: "user_entered" } };
+      const ex = b.presetId ? state.presets.find((x) => x.id === b.presetId) : null;
+      if (b.presetId && (!ex || ex.isActive === false || ex.spec?.family !== "aluminium" || ex.rules?.companyDefault)) return fail(400, "That isn't an aluminium company product.", "INVALID");
+      if (ex && !sameAluminiumProfile(ex.spec, content.spec)) return fail(400, `“${ex.name}” is a ${profileSizeText(ex.spec) || "different"} angle. Give this ${profileSizeText(content.spec)} setup its own name.`, "INVALID");
+      // review knob: another office login saves this product a moment before this save lands (once)
+      if (ex && window.__takeoffReviewPresetRace) { window.__takeoffReviewPresetRace = false; ex.revision += 1; ex.updatedAt = new Date().toISOString(); }
+      if (ex && Number(b.expectedRevision) !== ex.revision) return fail(409, "This standard was changed by someone else — reload it", "CONFLICT");
+      if (ex) { Object.assign(ex, content, { revision: ex.revision + 1, updatedAt: new Date().toISOString() }); return { ok: true, preset: { presetId: ex.id, revision: ex.revision } }; }
+      const id = `pre-product-${state.presets.length + 1}`;
+      state.presets.push({ id, revision: 1, isActive: true, updatedAt: new Date().toISOString(), ...content });
+      return { ok: true, preset: { presetId: id, revision: 1 } };
+    });
     // HUB 008: office staff add a supplier from the order (as the server: refused for everyone else; same name = reuse)
     route("POST", `${base}/suppliers`, ({ bodyJson }) => {
       if (!caps(worker).addSuppliers) return fail(403, "Only office staff can add suppliers.", "FORBIDDEN");
@@ -462,7 +518,11 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       const snap = snapshot();
       return { ok: true, snapshot: snap, computed: computeWorkspace(snap), orderStatus: status(), capabilities: caps(worker), jobLabel: "1 Example Street, Testville SA (Synthetic)", jobAddress: "1 Example Street, Testville SA" };
     });
-    route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => applyCommit(bodyJson || {}));
+    route("POST", `${base}/workspaces/:id/commit`, ({ bodyJson }) => {
+      const late = Number(window.__takeoffReviewCommitDelayMs) || 0; // HUB 025: a slow signal keeps a save in flight
+      if (!late) return applyCommit(bodyJson || {});
+      return new Promise((res, rej) => { setTimeout(() => { try { res(applyCommit(bodyJson || {})); } catch (e) { rej(e); } }, late); });
+    });
     // as the server: the stored hash in X-Content-Sha256 (the device copy is keyed by it), never HTTP-cached
     route("GET", `${base}/documents/:docId/content`, async () => {
       const r = await fetch(planUrl, { cache: "no-store" });
@@ -621,7 +681,12 @@ export function _resetTakeoffFixture() { seed(); }
 // HUB 014 evidence: the company defaults, what was saved through "Save as company default", and the cladding materials
 if (typeof window !== "undefined") window.__takeoffReviewDefaults = () => ({ defaults: state.presets.filter((p) => p.rules?.companyDefault).map((p) => ({ id: p.id, revision: p.revision, rules: p.rules, spareRate: p.spec?.spareRate })),
   saves: state.companyDefaultSaves || [], materials: state.materials.filter((m) => m.spec?.family === "cladding").map((m) => ({ id: m.id, name: m.name, spareRate: m.spec?.spareRate, rules: m.rules })) });
+// HUB 024 evidence: the company products as the fake server holds them (review only)
+if (typeof window !== "undefined") window.__takeoffReviewPresets = () => structuredClone(state.presets);
 if (typeof window !== "undefined") window.__takeoffReviewState = () => ({ revision: state.revision, commits: state.commitCount || 0, measurements: state.measurements.length, appendixRequests: [...state.appendixRequests],
   // HUB 018 evidence: every material's profile as the fake server holds it (review only)
   materials: state.materials.map(({ id, name, methodKey, profile }) => ({ id, name, methodKey, profile: profile ?? null })),
+  // HUB 025 evidence: live assignments and each material's spec as the fake server holds them
+  contributions: state.contributions.map(({ id, measurementId, jobMaterialId, role }) => ({ id, measurementId, jobMaterialId, role })),
+  specs: Object.fromEntries(state.materials.map((m) => [m.id, m.spec ?? null])),
   planDownloads: state.planDownloads || 0 });

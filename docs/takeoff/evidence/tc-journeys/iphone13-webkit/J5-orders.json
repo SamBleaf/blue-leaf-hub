@@ -2,8 +2,8 @@
   "ok": true,
   "orders": [
     {
-      "id": "1dd8107c-dafe-480a-895a-3a954bee448b",
-      "workspaceId": "06408f21-b104-453f-ae39-88d93e0f943b",
+      "id": "49fbfe9a-d969-4e3b-aaa8-8f41b08100f0",
+      "workspaceId": "3895ae55-1ac0-4f71-a275-4c1c861b64f2",
       "orderRef": "FO-001001",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
@@ -21,28 +21,28 @@
       "category": "timber_cladding",
       "status": "draft",
       "revision": 3,
-      "createdAt": "2026-10-21 09:11:41.311653+10:30",
-      "updatedAt": "2026-10-21 09:11:41.588205+10:30",
+      "createdAt": "2026-10-21 23:50:59.760297+10:30",
+      "updatedAt": "2026-10-21 23:51:00.054727+10:30",
       "lines": [
         {
-          "id": "780f932c-c6ad-46de-8778-b7fe6527abc3",
-          "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|1f168838-b497-4f22-ba2c-b4989678dbc9|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+          "id": "46a2006e-ba09-49e5-a693-7ceee7cc76df",
+          "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|ac1c8cf0-8c03-4829-9caa-4a78b7cb8aa5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
           "specKey": "{\"identity\":\"{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}}\",\"material\":\"{\\\"identity\\\":{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}},\\\"method\\\":\\\"linear_stock@1\\\"}\",\"unit\":\"bar\"}",
-          "jobMaterialId": "1f168838-b497-4f22-ba2c-b4989678dbc9",
+          "jobMaterialId": "ac1c8cf0-8c03-4829-9caa-4a78b7cb8aa5",
           "finishedLengthMm": 6500,
           "quantity": 1,
           "unit": "bar",
           "item": {
             "description": "equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)",
-            "dependencyKey": "0b7598c8",
+            "dependencyKey": "47ffa743",
             "stockLengthMm": 6500
           }
         },
         {
-          "id": "e82e4b89-93b3-4a38-b13e-bbf0809fca6f",
-          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+          "id": "a7a7edce-8f7b-4bf3-a462-be5f689d9284",
+          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
           "specKey": "{\"identity\":\"{\\\"coating\\\":null,\\\"endCondition\\\":null,\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"grade\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"profile\\\":\\\"Axon 133 smooth\\\",\\\"sku\\\":\\\"403932\\\",\\\"species\\\":null,\\\"stockLengthMm\\\":2750,\\\"stockWidthMm\\\":1200,\\\"supplier\\\":null,\\\"thicknessMm\\\":9,\\\"treatment\\\":null,\\\"unit\\\":\\\"sheet\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"sheet\"}",
-          "jobMaterialId": "a4be1216-c391-40e4-b6ad-573cc91d1521",
+          "jobMaterialId": "97e28156-fcdf-431b-a779-5aa382d7ddef",
           "finishedLengthMm": 2750,
           "quantity": 4,
           "unit": "sheet",
@@ -50,77 +50,77 @@
             "sku": "403932",
             "widthMm": 1200,
             "description": "James Hardie Axon 133 smooth SKU 403932 — 2,750 × 1,200 mm",
-            "dependencyKey": "5b4de8dc",
+            "dependencyKey": "e4ff8a26",
             "stockLengthMm": 2750
           }
         },
         {
-          "id": "d06be2c1-b03e-4a2d-8422-799d7288f426",
-          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
+          "id": "74a6527f-4e40-4749-a3ed-810ba1bcf89f",
+          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
           "specKey": "{\"identity\":\"{\\\"family\\\":\\\"batten\\\",\\\"follower\\\":\\\"battens\\\",\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Hardie Cavity Batten\\\",\\\"sku\\\":\\\"405307\\\",\\\"thicknessMm\\\":19,\\\"widthMm\\\":70}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"piece\"}",
-          "jobMaterialId": "a4be1216-c391-40e4-b6ad-573cc91d1521",
+          "jobMaterialId": "97e28156-fcdf-431b-a779-5aa382d7ddef",
           "finishedLengthMm": 3000,
           "quantity": 14,
           "unit": "piece",
           "item": {
             "note": "36.60 m of battens on 1 wall, cut with offcuts shared across the walls · fixings to the studs not counted",
             "description": "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
-            "dependencyKey": "513b96d9",
+            "dependencyKey": "07e12c48",
             "stockLengthMm": 3000
           }
         },
         {
-          "id": "d9798966-64a5-43e9-9769-3280bfe70218",
-          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
+          "id": "fd224588-38de-4097-a9d5-07027632a297",
+          "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
           "specKey": "{\"identity\":\"{\\\"family\\\":\\\"accessory\\\",\\\"follower\\\":\\\"tape\\\",\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Hardie™ 50mm Foam Back Sealing Tape\\\",\\\"rollMm\\\":25000,\\\"sku\\\":\\\"304560\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"roll\"}",
-          "jobMaterialId": "a4be1216-c391-40e4-b6ad-573cc91d1521",
+          "jobMaterialId": "97e28156-fcdf-431b-a779-5aa382d7ddef",
           "finishedLengthMm": null,
           "quantity": 1,
           "unit": "roll",
           "item": {
             "note": "8.10 m behind the vertical sheet joins → 1 roll of 25 m",
             "description": "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560",
-            "dependencyKey": "513b96d9",
+            "dependencyKey": "07e12c48",
             "stockLengthMm": null
           }
         },
         {
-          "id": "2e37a3a0-830c-4269-b8d2-ec089fe6263d",
-          "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|6d64aa4d-d4de-4994-8b2d-4460895ed994|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+          "id": "9e58d159-4949-47ff-8cd5-9866cabf2239",
+          "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|a19f7f44-08d3-4b98-8525-6c41e34207fa|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
           "specKey": "{\"identity\":\"{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"MGP10\\\",\\\"section\\\":\\\"90x45\\\",\\\"species\\\":null,\\\"treatment\\\":\\\"H3\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"mgp10\\\",\\\"productCode\\\":null,\\\"section\\\":{\\\"depthMm\\\":90,\\\"widthMm\\\":45},\\\"species\\\":null,\\\"treatment\\\":\\\"h3\\\"},\\\"method\\\":\\\"repeated_members@2\\\"}\",\"unit\":\"piece\"}",
-          "jobMaterialId": "6d64aa4d-d4de-4994-8b2d-4460895ed994",
+          "jobMaterialId": "a19f7f44-08d3-4b98-8525-6c41e34207fa",
           "finishedLengthMm": 5400,
           "quantity": 18,
           "unit": "piece",
           "item": {
             "description": "90 × 45 MGP10 H3 — 5,400 mm length",
-            "dependencyKey": "ab093993",
+            "dependencyKey": "06d25672",
             "stockLengthMm": 5400
           }
         }
       ],
       "exports": [
         {
-          "id": "21374134-54c6-4623-a135-0e0f9e40b9be",
-          "orderId": "1dd8107c-dafe-480a-895a-3a954bee448b",
+          "id": "48ae2958-519d-44b2-a47f-0a5da6733569",
+          "orderId": "49fbfe9a-d969-4e3b-aaa8-8f41b08100f0",
           "exportNo": 1,
           "isDraft": false,
-          "snapshotSha256": "6163babe4c27c3c6bfffc690dadcd6155c81795b13414e85e8909bd4956eb7ac",
+          "snapshotSha256": "f8e9f678f721e61a35eaf6c1c73d47a476c136322a76a76bfba81f429f6fdd06",
           "calculationVersion": "takeoff-calc@3",
           "workspaceRevision": 26,
           "orderRevision": 3,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "9c39b873e71892aa2dd4113accf620219dbd4a22ecf7cd6ee8b71c34e2a38907",
+          "pdfSha256": "a69f1056d99736caf71425a0666f87547f4d0e743cfa80697a99ec43223b8cf2",
           "rendererVersion": "takeoff-pdf@4",
-          "createdAt": "2026-10-21 09:11:41.790682+10:30"
+          "createdAt": "2026-10-21 23:51:00.255097+10:30"
         }
       ],
       "placements": []
     },
     {
-      "id": "4242f97a-cc53-4f42-8a26-4c094b90ff21",
-      "workspaceId": "06408f21-b104-453f-ae39-88d93e0f943b",
+      "id": "8b0df4a8-4052-474b-9d01-b98c78e02a22",
+      "workspaceId": "3895ae55-1ac0-4f71-a275-4c1c861b64f2",
       "orderRef": "FO-001002",
       "supplierId": "5a4db0c5-0000-4000-8000-00000000f001",
       "delivery": {
@@ -138,24 +138,24 @@
       "category": "flashings",
       "status": "draft",
       "revision": 3,
-      "createdAt": "2026-10-21 09:11:44.588749+10:30",
-      "updatedAt": "2026-10-21 09:11:45.622412+10:30",
+      "createdAt": "2026-10-21 23:51:03.120942+10:30",
+      "updatedAt": "2026-10-21 23:51:04.136703+10:30",
       "lines": [
         {
-          "id": "0e670724-251c-43a6-8dca-dffe34199753",
+          "id": "71aa993c-917a-4cf8-ac57-0b2c98d44f82",
           "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|5400",
           "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
-          "jobMaterialId": "ec83b35b-1430-4b56-a5da-efdaec435994",
+          "jobMaterialId": "8cc3cf1d-7c67-4759-8dc9-40bd830a39a9",
           "finishedLengthMm": 5400,
           "quantity": 2,
           "unit": "piece",
           "item": null
         },
         {
-          "id": "57a0aad2-5b3d-4c0c-af10-d71d60fac097",
+          "id": "f4338c8f-8fd5-4b86-96a4-96f9b836268f",
           "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3300",
           "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
-          "jobMaterialId": "ec83b35b-1430-4b56-a5da-efdaec435994",
+          "jobMaterialId": "8cc3cf1d-7c67-4759-8dc9-40bd830a39a9",
           "finishedLengthMm": 3300,
           "quantity": 1,
           "unit": "piece",
@@ -164,19 +164,19 @@
       ],
       "exports": [
         {
-          "id": "4f23a935-3a59-4701-82e9-e849acdac590",
-          "orderId": "4242f97a-cc53-4f42-8a26-4c094b90ff21",
+          "id": "3de28797-029e-46c9-87cb-8d83defa11e3",
+          "orderId": "8b0df4a8-4052-474b-9d01-b98c78e02a22",
           "exportNo": 1,
           "isDraft": false,
-          "snapshotSha256": "1f9ff8c0a2c4261f2cb196b75d5504592d03ab7f6b114f682721f472d97a3039",
+          "snapshotSha256": "a05e7fdbc230ce256a29e3bc88a9ac120f9369af2f341336a2922ed7e4348cb2",
           "calculationVersion": "takeoff-calc@3",
           "workspaceRevision": 26,
           "orderRevision": 3,
           "artifactStatus": "ready",
           "artifactError": null,
-          "pdfSha256": "363e5fed9eff8599d70d48d2da4e8390b0369d5b87c6b6cd445caeaeab07d6b3",
+          "pdfSha256": "560045cbb76ed30192e6e03bfa6f59d986e40176528f1581cc7dc7b3fd05877b",
           "rendererVersion": "takeoff-pdf@4",
-          "createdAt": "2026-10-21 09:11:45.804942+10:30"
+          "createdAt": "2026-10-21 23:51:04.321099+10:30"
         }
       ],
       "placements": []
@@ -206,7 +206,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|1f168838-b497-4f22-ba2c-b4989678dbc9|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|ac1c8cf0-8c03-4829-9caa-4a78b7cb8aa5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
       "required": 1,
       "ordered": 0,
       "remaining": 1,
@@ -217,7 +217,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
       "required": 4,
       "ordered": 0,
       "remaining": 4,
@@ -228,7 +228,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
       "required": 14,
       "ordered": 0,
       "remaining": 14,
@@ -239,7 +239,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
       "required": 1,
       "ordered": 0,
       "remaining": 1,
@@ -250,7 +250,7 @@
       ]
     },
     {
-      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|6d64aa4d-d4de-4994-8b2d-4460895ed994|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|a19f7f44-08d3-4b98-8525-6c41e34207fa|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
       "required": 18,
       "ordered": 0,
       "remaining": 18,
@@ -266,12 +266,12 @@
       "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|5400",
       "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "ec83b35b-1430-4b56-a5da-efdaec435994"
+        "8cc3cf1d-7c67-4759-8dc9-40bd830a39a9"
       ],
       "finishedLengthMm": 5400,
       "quantity": 2,
       "contributionIds": [
-        "b4a6f482-82fd-4095-9fbb-02b71c5b36ce"
+        "bfe93dc3-9fa1-434a-93d9-e19d1117f58e"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
@@ -281,19 +281,19 @@
       "bucketKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}|3300",
       "specKey": "{\"item\":null,\"method\":\"flashing_runs@1\",\"profile\":\"{\\\"coated\\\":\\\"left\\\",\\\"end\\\":\\\"none\\\",\\\"legs\\\":[140,90],\\\"start\\\":\\\"none\\\",\\\"turns\\\":[-90],\\\"v\\\":1}\",\"spec\":{\"bmt\":0.55,\"colour\":\"monument\",\"colourCode\":null,\"construction\":\"solid\",\"finish\":null,\"finishId\":\"colorbond\",\"perforation\":null,\"product\":\"flashing\",\"productCode\":null}}",
       "jobMaterialIds": [
-        "ec83b35b-1430-4b56-a5da-efdaec435994"
+        "8cc3cf1d-7c67-4759-8dc9-40bd830a39a9"
       ],
       "finishedLengthMm": 3300,
       "quantity": 1,
       "contributionIds": [
-        "3e2954df-03fa-4a18-a03c-16144175a207"
+        "06545940-70b0-4026-8418-2ccd9560e397"
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
       "problems": []
     },
     {
-      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|1f168838-b497-4f22-ba2c-b4989678dbc9|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
+      "bucketKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}|ac1c8cf0-8c03-4829-9caa-4a78b7cb8aa5|bar|6500|{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}}",
       "specKey": "{\"identity\":\"{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}}\",\"material\":\"{\\\"identity\\\":{\\\"alloyTemper\\\":null,\\\"colour\\\":null,\\\"family\\\":\\\"aluminium\\\",\\\"finish\\\":null,\\\"productCode\\\":null,\\\"profile\\\":{\\\"aMm\\\":50,\\\"bMm\\\":50,\\\"shape\\\":\\\"equal-angle\\\",\\\"tMm\\\":3}},\\\"method\\\":\\\"linear_stock@1\\\"}\",\"unit\":\"bar\"}",
       "materialKey": "{\"identity\":{\"alloyTemper\":null,\"colour\":null,\"family\":\"aluminium\",\"finish\":null,\"productCode\":null,\"profile\":{\"aMm\":50,\"bMm\":50,\"shape\":\"equal-angle\",\"tMm\":3}},\"method\":\"linear_stock@1\"}",
       "generic": true,
@@ -305,22 +305,22 @@
       "item": {
         "description": "equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)",
         "stockLengthMm": 6500,
-        "dependencyKey": "0b7598c8"
+        "dependencyKey": "47ffa743"
       },
       "jobMaterialIds": [
-        "1f168838-b497-4f22-ba2c-b4989678dbc9"
+        "ac1c8cf0-8c03-4829-9caa-4a78b7cb8aa5"
       ],
       "contributionIds": [
-        "30aeaff4-978c-417f-95ed-1673212e4416"
+        "9e816fd1-ae12-4812-8715-6edffba472d8"
       ],
       "problems": [],
       "notes": [],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "0b7598c8"
+      "dependencyKey": "47ffa743"
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|sheet|2750|1200|{\"coating\":null,\"endCondition\":null,\"family\":\"cladding\",\"finish\":null,\"grade\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"profile\":\"Axon 133 smooth\",\"sku\":\"403932\",\"species\":null,\"stockLengthMm\":2750,\"stockWidthMm\":1200,\"supplier\":null,\"thicknessMm\":9,\"treatment\":null,\"unit\":\"sheet\"}",
       "specKey": "{\"identity\":\"{\\\"coating\\\":null,\\\"endCondition\\\":null,\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"grade\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"profile\\\":\\\"Axon 133 smooth\\\",\\\"sku\\\":\\\"403932\\\",\\\"species\\\":null,\\\"stockLengthMm\\\":2750,\\\"stockWidthMm\\\":1200,\\\"supplier\\\":null,\\\"thicknessMm\\\":9,\\\"treatment\\\":null,\\\"unit\\\":\\\"sheet\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"sheet\"}",
       "materialKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}",
       "generic": true,
@@ -334,13 +334,13 @@
         "stockLengthMm": 2750,
         "widthMm": 1200,
         "sku": "403932",
-        "dependencyKey": "5b4de8dc"
+        "dependencyKey": "e4ff8a26"
       },
       "jobMaterialIds": [
-        "a4be1216-c391-40e4-b6ad-573cc91d1521"
+        "97e28156-fcdf-431b-a779-5aa382d7ddef"
       ],
       "contributionIds": [
-        "775231b3-8169-407a-8f6b-0a5b558ce48c"
+        "7d624c93-63c5-4a52-aae0-5882b4c3ee8d"
       ],
       "problems": [],
       "notes": [
@@ -350,10 +350,10 @@
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "5b4de8dc"
+      "dependencyKey": "e4ff8a26"
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|piece|3000|{\"family\":\"batten\",\"follower\":\"battens\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie Cavity Batten\",\"sku\":\"405307\",\"thicknessMm\":19,\"widthMm\":70}",
       "specKey": "{\"identity\":\"{\\\"family\\\":\\\"batten\\\",\\\"follower\\\":\\\"battens\\\",\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Hardie Cavity Batten\\\",\\\"sku\\\":\\\"405307\\\",\\\"thicknessMm\\\":19,\\\"widthMm\\\":70}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"piece\"}",
       "materialKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}",
       "generic": true,
@@ -366,13 +366,13 @@
         "description": "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
         "stockLengthMm": 3000,
         "note": "36.60 m of battens on 1 wall, cut with offcuts shared across the walls · fixings to the studs not counted",
-        "dependencyKey": "513b96d9"
+        "dependencyKey": "07e12c48"
       },
       "jobMaterialIds": [
-        "a4be1216-c391-40e4-b6ad-573cc91d1521"
+        "97e28156-fcdf-431b-a779-5aa382d7ddef"
       ],
       "contributionIds": [
-        "775231b3-8169-407a-8f6b-0a5b558ce48c"
+        "7d624c93-63c5-4a52-aae0-5882b4c3ee8d"
       ],
       "problems": [],
       "notes": [
@@ -383,10 +383,10 @@
       "handlingFlag": false,
       "ceilingExceeded": false,
       "follower": "battens",
-      "dependencyKey": "513b96d9"
+      "dependencyKey": "07e12c48"
     },
     {
-      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|a4be1216-c391-40e4-b6ad-573cc91d1521|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
+      "bucketKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}|97e28156-fcdf-431b-a779-5aa382d7ddef|roll||{\"family\":\"accessory\",\"follower\":\"tape\",\"manufacturer\":\"James Hardie\",\"name\":\"Hardie™ 50mm Foam Back Sealing Tape\",\"rollMm\":25000,\"sku\":\"304560\"}",
       "specKey": "{\"identity\":\"{\\\"family\\\":\\\"accessory\\\",\\\"follower\\\":\\\"tape\\\",\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Hardie™ 50mm Foam Back Sealing Tape\\\",\\\"rollMm\\\":25000,\\\"sku\\\":\\\"304560\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"coating\\\":null,\\\"effectiveCoverMm\\\":1200,\\\"endCondition\\\":\\\"square\\\",\\\"family\\\":\\\"cladding\\\",\\\"finish\\\":null,\\\"manufacturer\\\":\\\"James Hardie\\\",\\\"name\\\":\\\"Axon 133 smooth\\\",\\\"orientation\\\":\\\"vertical\\\",\\\"productCode\\\":null,\\\"sku\\\":null,\\\"thicknessMm\\\":9,\\\"widthMm\\\":1200},\\\"method\\\":\\\"sheet_layout@2\\\"}\",\"unit\":\"roll\"}",
       "materialKey": "{\"identity\":{\"coating\":null,\"effectiveCoverMm\":1200,\"endCondition\":\"square\",\"family\":\"cladding\",\"finish\":null,\"manufacturer\":\"James Hardie\",\"name\":\"Axon 133 smooth\",\"orientation\":\"vertical\",\"productCode\":null,\"sku\":null,\"thicknessMm\":9,\"widthMm\":1200},\"method\":\"sheet_layout@2\"}",
       "generic": true,
@@ -399,13 +399,13 @@
         "description": "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560",
         "stockLengthMm": null,
         "note": "8.10 m behind the vertical sheet joins → 1 roll of 25 m",
-        "dependencyKey": "513b96d9"
+        "dependencyKey": "07e12c48"
       },
       "jobMaterialIds": [
-        "a4be1216-c391-40e4-b6ad-573cc91d1521"
+        "97e28156-fcdf-431b-a779-5aa382d7ddef"
       ],
       "contributionIds": [
-        "775231b3-8169-407a-8f6b-0a5b558ce48c"
+        "7d624c93-63c5-4a52-aae0-5882b4c3ee8d"
       ],
       "problems": [],
       "notes": [
@@ -416,10 +416,10 @@
       "handlingFlag": false,
       "ceilingExceeded": false,
       "follower": "tape",
-      "dependencyKey": "513b96d9"
+      "dependencyKey": "07e12c48"
     },
     {
-      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|6d64aa4d-d4de-4994-8b2d-4460895ed994|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
+      "bucketKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}|a19f7f44-08d3-4b98-8525-6c41e34207fa|piece|5400|{\"family\":\"timber\",\"grade\":\"MGP10\",\"section\":\"90x45\",\"species\":null,\"treatment\":\"H3\"}",
       "specKey": "{\"identity\":\"{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"MGP10\\\",\\\"section\\\":\\\"90x45\\\",\\\"species\\\":null,\\\"treatment\\\":\\\"H3\\\"}\",\"material\":\"{\\\"identity\\\":{\\\"family\\\":\\\"timber\\\",\\\"grade\\\":\\\"mgp10\\\",\\\"productCode\\\":null,\\\"section\\\":{\\\"depthMm\\\":90,\\\"widthMm\\\":45},\\\"species\\\":null,\\\"treatment\\\":\\\"h3\\\"},\\\"method\\\":\\\"repeated_members@2\\\"}\",\"unit\":\"piece\"}",
       "materialKey": "{\"identity\":{\"family\":\"timber\",\"grade\":\"mgp10\",\"productCode\":null,\"section\":{\"depthMm\":90,\"widthMm\":45},\"species\":null,\"treatment\":\"h3\"},\"method\":\"repeated_members@2\"}",
       "generic": true,
@@ -431,13 +431,13 @@
       "item": {
         "description": "90 × 45 MGP10 H3 — 5,400 mm length",
         "stockLengthMm": 5400,
-        "dependencyKey": "ab093993"
+        "dependencyKey": "06d25672"
       },
       "jobMaterialIds": [
-        "6d64aa4d-d4de-4994-8b2d-4460895ed994"
+        "a19f7f44-08d3-4b98-8525-6c41e34207fa"
       ],
       "contributionIds": [
-        "9e8db73f-f7ea-43d6-aea4-ea7b715d2651"
+        "9f950506-5f79-44c1-8d5a-329c1448d0bd"
       ],
       "problems": [],
       "notes": [
@@ -445,7 +445,7 @@
       ],
       "handlingFlag": false,
       "ceilingExceeded": false,
-      "dependencyKey": "ab093993"
+      "dependencyKey": "06d25672"
     }
   ],
   "unplaced": [],

@@ -23,6 +23,7 @@ import { verificationReusesReference } from "../../../shared/takeoff/calibration
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { methodReads } from "../../../shared/takeoff/engine/dispatch.js";
 import { gableInputProblem } from "../../../shared/takeoff/engine/wall.js";
+import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
 import { docInOwner, isUuid, ownerColumns, ownerFromRow, scopeQuery } from "./takeoffAccess.mjs";
 
@@ -609,6 +610,11 @@ export async function commitWorkspace(sb, ctx, body) {
   const { data, error } = await sb.rpc("takeoff_commit", {
     p_workspace_id: ctx.ws.id, p_expected_revision: expected, p_changes: out, p_actor: ctx.actor, p_idempotency_key: idem,
   });
+  // HUB 025: one live assignment per (measurement, material) — say so plainly; it is a refusal of this change, never
+  // "already saved" and never a revision conflict (the client parks it and keeps saving later edits)
+  if (error?.code === "23505" && /takeoff_contrib_unique_active/.test(`${error.message || ""} ${error.details || ""}`)) {
+    throw new TakeoffHttpError(409, PROBLEM_TEXT.duplicate_assignment, "DUPLICATE_ASSIGNMENT");
+  }
   if (error) throw error;
   const fresh = await loadSnapshotFresh(sb, ctx.ws.id);
   return { revision: data.revision, replayed: !!data.replayed, snapshot: fresh.snapshot, computed: computeWorkspace(fresh.snapshot) };
@@ -666,6 +672,42 @@ export async function saveCompanyDefault(sb, ctx, body) {
     if (error) throw error;
     const rev = p ? (await q(sb.from("takeoff_material_preset_revisions").select("*").eq("preset_id", presetId).eq("revision", p.current_revision)))[0] : null;
     must(rev && rev.rules?.companyDefault === true && rev.spec?.product?.id === productId, "That isn't this product's company default.");
+  }
+  const { data, error } = await sb.rpc("takeoff_save_preset", {
+    p_preset_id: presetId, p_expected_revision: presetId ? Number(body.expectedRevision) : 0, p_content: content,
+    p_user_id: ctx.actor.userId || ctx.emp?.user_id || null, p_active: null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * HUB 024: add an aluminium setup to the company products (or save it as the next version of the same-named one).
+ * Office staff on the Hub, and Worker-app logins linked to an Admin / Supervisor account. Narrow on purpose: aluminium
+ * only, never a flashing standard or a company default, never retire. The kerf VALUE is kept but its confirmation is
+ * not: "confirmed for this job" is each job's own tick (Recording review 06 — the per-job kerf rule is kept as is).
+ */
+export async function saveCompanyProduct(sb, ctx, body) {
+  if (!ctx.caps.addCompanyProducts) throw new TakeoffHttpError(403, "Only office staff can add company products.", "FORBIDDEN");
+  must(body && typeof body === "object", "Nothing to save.");
+  const content = { ...cleanMaterialContent(body), sourceReview: { status: "user_entered" } };
+  must(content.spec?.family === "aluminium" && content.methodKey === "linear_stock", "Only an aluminium setup can be added here.");
+  const pr = content.spec.profile || {};
+  must(pr.aMm && pr.bMm && pr.tMm, "Enter the profile size (e.g. 50 × 50 × 3).");
+  content.spec = { ...content.spec, kerfConfirmed: false };
+  // another job's open flags, company-default links and site facts never travel into a company product
+  const rules = { ...content.rules };
+  delete rules.carried; delete rules.defaultsFrom; delete rules.companyDefault;
+  content.rules = rules;
+  const presetId = body.presetId || null;
+  if (presetId) {
+    must(isUuid(presetId), "That isn't an aluminium company product.");
+    const { data: p, error } = await sb.from("takeoff_material_presets").select("*").eq("id", presetId).maybeSingle();
+    if (error) throw error;
+    const rev = p?.is_active ? (await q(sb.from("takeoff_material_preset_revisions").select("*").eq("preset_id", presetId).eq("revision", p.current_revision)))[0] : null;
+    must(rev && rev.spec?.family === "aluminium" && rev.method_key === "linear_stock" && rev.rules?.companyDefault !== true, "That isn't an aluminium company product.");
+    // other jobs find a product by its name: a new version never turns one size's product into another angle
+    must(sameAluminiumProfile(rev.spec, content.spec), `“${rev.name}” is a ${profileSizeText(rev.spec) || "different"} angle. Give this ${profileSizeText(content.spec)} setup its own name.`);
   }
   const { data, error } = await sb.rpc("takeoff_save_preset", {
     p_preset_id: presetId, p_expected_revision: presetId ? Number(body.expectedRevision) : 0, p_content: content,

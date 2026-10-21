@@ -12,10 +12,11 @@ import { createPortal } from "react-dom";
 import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
+import { companyVersionDiffers, findAluminiumProduct, profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
 import { clearEditorDraft, listEditorDrafts } from "../../lib/takeoffRecovery.js";
 import { draftCardText, editorDraftCard, materialForDraft } from "./editorDrafts.js";
 import { newId } from "../../lib/takeoffApi.js";
-import { describeChanges, partial } from "./changeset.js";
+import { describeChanges, nameChanges, partial } from "./changeset.js";
 import { useTakeoffWorkspace } from "./useTakeoffWorkspace.js";
 import { usePlanDocument } from "./usePlanDocument.js";
 import CalibrationScreen from "./CalibrationScreen.jsx";
@@ -32,7 +33,7 @@ import AluminiumScreen from "./AluminiumScreen.jsx";
 import OrdersScreen from "./OrdersScreen.jsx";
 import PlanSetup from "./PlanSetup.jsx";
 import RescaleReview from "./RescaleReview.jsx";
-import { AsyncState, Banner, Btn, FocusedWindow, FocusMode, NumberField, SaveChip } from "./ui.jsx";
+import { AsyncState, Banner, Btn, FocusedWindow, FocusMode, NumberField, SaveChip, SaveProblem } from "./ui.jsx";
 import { docLabel, fmtLm, fmtMm } from "./format.js";
 
 // "return to where I was" applies to a real page RELOAD only, once per page load (not to a fresh visit or an in-app reopen)
@@ -342,7 +343,8 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
             )}
           </div>
         )}
-        {std && std.revision > (m.fromPresetRevision || 0) && caps.edit && (
+        {/* HUB 024: an aluminium copy that already holds that version (e.g. the one this job just saved) has nothing to update */}
+        {std && std.revision > (m.fromPresetRevision || 0) && (fam !== "aluminium" || companyVersionDiffers(m, std)) && caps.edit && (
           <Banner tone="info" action={fam ? <Btn onClick={() => setReviewUpdate(m.id)}>Review update</Btn>
             : <Btn onClick={() => ws.edit(partial({ materials: [{ ...m, fromPreset: { presetId: std.id, revision: std.revision }, name: std.name, spec: std.spec, rules: std.rules, profile: std.profile }] }))}>Update this job&apos;s copy</Btn>}>
             The company standard was updated (rev {std.revision}). This job still uses rev {m.fromPresetRevision}.
@@ -460,6 +462,48 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     const cur = currentMat(m);
     upsertMaterial({ ...cur, rules: { ...(cur.rules || {}), defaultsFrom: { presetId: r.data.preset?.presetId || existing?.id || null, revision: r.data.preset?.revision ?? null, productId: m.spec.product.id } } });
     return { tone: "ok", text: `Saved as the company default for ${label}. New takeoffs will use it; jobs already set up keep their own.` };
+  }
+
+  /**
+   * HUB 024: add this job's aluminium setup (its settings, under a name that starts as the job item's) to the company
+   * products. The job material is not changed or linked: it keeps its own copy and autosave carries on as before. The
+   * kerf value goes with it; "confirmed for this job" does not (the server clears it, so each job still confirms its
+   * kerf). Other jobs find a product by name, so a name never ends up holding a different angle: a same-named product
+   * gets a new version only for the same profile; a different size is asked for its own name. The company list is
+   * read fresh first (another office login may have saved since this takeoff opened), and again after a refusal.
+   */
+  async function addToCompanyProducts(m) {
+    const cur = currentMat(m);
+    const size = profileSizeText(cur.spec);
+    if (!size) return { tone: "error", text: "Enter the profile size (e.g. 50 × 50 × 3) first. Nothing was saved." };
+    const reload = async () => { const x = await api.presets(); if (x.ok) { setPresets(x.data.presets || []); return x.data.presets || []; } return null; };
+    let name = window.prompt("Add this setup to company products? Other jobs find it by this name. This job keeps its own copy.", String(cur.name || "").trim());
+    if (name == null) return null;
+    const list = (await reload()) || presets;
+    let same = null;
+    for (;;) {
+      name = String(name).trim();
+      if (!name) return { tone: "error", text: "Give the company product a name. Nothing was saved." };
+      same = findAluminiumProduct(list, name);
+      if (!same || sameAluminiumProfile(same.spec, cur.spec)) break;
+      // that name already belongs to another size: never save this angle under it
+      const suggest = `Aluminium angle ${size}`;
+      const taken = findAluminiumProduct(list, suggest);
+      name = window.prompt(`“${same.name}” is already the company product for a ${profileSizeText(same.spec) || "different"} angle. This setup is ${size}, so give it its own name.`,
+        taken && !sameAluminiumProfile(taken.spec, cur.spec) ? name : suggest);
+      if (name == null) return null;
+    }
+    if (same && !window.confirm(`A company product called “${same.name}” already exists. OK = save this as its new version. Cancel = keep the existing one.`)) return null;
+    const r = await api.saveCompanyProduct({ name, methodKey: cur.methodKey, methodVersion: cur.methodVersion || 1, spec: cur.spec, rules: cur.rules || {},
+      ...(same ? { presetId: same.id, expectedRevision: same.revision } : {}) });
+    if (!r.ok) {
+      if (r.status !== 409) return { tone: "error", text: r.error };
+      await reload(); // the next tap saves over the version just saved by someone else
+      return { tone: "error", text: "Someone else saved that company product just now. Nothing was saved. Tap Add to company products again to save yours as its new version." };
+    }
+    await reload();
+    return { tone: "ok", text: same ? `Saved a new version of “${name}”. This job and jobs already using it keep their own copy.`
+      : `Added “${name}” to company products. Other jobs can use it; this job keeps its own copy.` };
   }
 
   const leaveEditor = (how) => {
@@ -587,17 +631,20 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       <FocusedWindow title={title} subtitle={`${m.name} · this job only`} onClose={leaveEditor} closeLabel="Close"
         actions={<><SaveChip status={ws.status} /><Btn kind="primary" onClick={() => toLengths(m)}>{fam === "timber" ? "Measure members" : fam === "aluminium" ? "Openings & cutting" : "Walls"}</Btn></>}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {/* HUB 025: the aluminium setup explains its save chip (a Conflict names the edit and offers both choices here) */}
+          {fam === "aluminium" && <SaveProblem ws={ws} className="mb-3" />}
           {caps.edit && (
             <div className="mb-3">
               <FamilyPresetPicker api={api} families={families} canEditStandards={caps.editStandards} reloadToken={presets}
                 // a company product is COPIED onto this job material (same id: its measurements stay attached)
                 onUse={(rec) => { const next = { ...rec, id: m.id }; ws.edit(partial({ materials: [next] })); setEditing({ material: next, stage: "family" }); }}
                 onEdit={(pr) => setCatalogue({ preset: pr, value: pr })}
-                onNew={(f) => setCatalogue({ preset: null, value: { spec: { family: f } } })} />
+                onNew={(f) => setCatalogue({ preset: null, value: { spec: { family: f } } })}
+                onAdd={fam === "aluminium" && caps.addCompanyProducts && api.saveCompanyProduct ? () => addToCompanyProducts(m) : undefined} />
             </div>
           )}
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
-            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : {})}
+            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : Setup === TimberSetup ? { presets } : {})}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
         </div>
       </FocusedWindow>
@@ -798,7 +845,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
       {!ws.recovery.available && <Banner tone="warn">Recovery unavailable on this device (storage blocked or full). Your edits are kept while this screen stays open.</Banner>}
       {ws.status === "conflict" && (
         <Banner tone="error" action={<div className="flex flex-wrap gap-2"><Btn onClick={ws.reloadFromServer}>Discard mine and load latest</Btn><Btn kind="primary" onClick={ws.applyMineOnLatest}>Apply my changes to latest</Btn></div>}>
-          {ws.saveError || "Someone else saved this takeoff first."} Your unsaved changes: {describeChanges(ws.pending).join("; ") || "none"}.
+          {ws.saveError || "Someone else saved this takeoff first."} Your unsaved changes: {nameChanges(ws.pending, ws.view, ws.server?.snapshot).join("; ") || "none"}.
         </Banner>
       )}
       {ws.status === "error" && <Banner tone="error" action={<Btn onClick={ws.retry}>Try again</Btn>}>{ws.saveError}</Banner>}

@@ -714,6 +714,9 @@ await t("TC J1 over HTTP: distribution + member roles persist; the SERVER comput
     ] },
     contributions: { upsert: [{ id: t5.cd, measurementId: t5.dist, jobMaterialId: t5.tim, role: "distribution" }, { id: t5.cm, measurementId: t5.mem, jobMaterialId: t5.tim, role: "member" }] } } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
+  // HUB 027: what a "Size and grade" pick writes (section + grade; treatment typed or from a product) is kept by the server
+  const tm = r.data.snapshot.materials.find((x) => x.id === t5.tim);
+  assert.deepEqual([tm.spec.section, tm.spec.grade, tm.spec.treatment], [{ depthMm: 90, widthMm: 45 }, "MGP10", "H3"]);
   const roles = await q("SELECT role FROM takeoff_contributions WHERE job_material_id=$1 ORDER BY role", [t5.tim]);
   assert.deepEqual(roles.rows.map((x) => x.role), ["distribution", "member"]);
   const m = r.data.snapshot.measurements.find((x) => x.id === t5.dist);
@@ -1390,6 +1393,250 @@ await t("wall-by-wall step 4: the REAL server works out an Axon's battens, foam 
   assert.deepEqual(snap.items[0].lines.filter((l) => /code (405307|305613|304560)/.test(l.description)).map((l) => l.unit), ["piece", "piece", "roll"]);
   const pdf = await S(`/exports/${e.data.export.exportId}/pdf`);
   assert.equal(pdf.data.subarray(0, 4).toString(), "%PDF");
+});
+
+await t("HUB 025: untick + re-tick an opening in ONE save is a plain DUPLICATE_ASSIGNMENT refusal (never 'That was already saved.' or a Conflict); the two halves as two saves just save; no-change save, replay and a real conflict behave", async () => {
+  const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
+  const { PROBLEM_TEXT } = await import("../../shared/takeoff/index.js");
+  const w = id(), alu = id(), wall = id(), op = id(), c1 = id(), c2 = id();
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB025" });
+  const snapOf = async () => (await S(`/workspaces/${w}`)).data.snapshot;
+  const commit = (body) => SP(`/workspaces/${w}/commit`, body);
+  const mat = { id: alu, name: "Aluminium angle 50 × 50 × 3", methodKey: "linear_stock", methodVersion: 1, spec: { ...aluminiumPreset(), kerfMm: 3, kerfConfirmed: true }, rules: {} };
+  let r = await commit({ expectedRevision: (await snapOf()).workspace.revision, idempotencyKey: `h25-setup-${w}`, changes: {
+    materials: { upsert: [mat] },
+    measurements: { upsert: [{ id: wall, kind: "wall", inputs: { kind: "rect", widthMm: 4000, heightMm: 2700, name: "North" } },
+      { id: op, kind: "opening", parentId: wall, inputs: { xMm: 500, sillMm: 900, widthMm: 900, heightMm: 1200, label: "W01", type: "window" } }] },
+    contributions: { upsert: [{ id: c1, measurementId: op, jobMaterialId: alu, role: "opening" }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const rev0 = r.data.commit.revision;
+  // (i) the recorded batch: stop using W01 (archive c1) and use it again under a new id (c2), in one save
+  r = await commit({ expectedRevision: rev0, idempotencyKey: `h25-retick-${w}`, changes: { contributions: { upsert: [{ id: c2, measurementId: op, jobMaterialId: alu, role: "opening" }], archive: [c1] } } });
+  assert.equal(r.status, 409);
+  assert.equal(r.data.code, "DUPLICATE_ASSIGNMENT");
+  assert.equal(r.data.error, PROBLEM_TEXT.duplicate_assignment);
+  assert.notEqual(r.data.error, "That was already saved.");
+  assert.equal((await snapOf()).workspace.revision, rev0, "nothing saved");
+  // (ii) what the client now sends: the archive, then the new assignment in the next save
+  r = await commit({ expectedRevision: rev0, idempotencyKey: `h25-half1-${w}`, changes: { contributions: { upsert: [], archive: [c1] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await commit({ expectedRevision: r.data.commit.revision, idempotencyKey: `h25-half2-${w}`, changes: { contributions: { upsert: [{ id: c2, measurementId: op, jobMaterialId: alu, role: "opening" }], archive: [] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const live = await q("SELECT id FROM takeoff_contributions WHERE measurement_id=$1 AND job_material_id=$2 AND archived_at IS NULL", [op, alu]);
+  assert.deepEqual(live.rows.map((x) => x.id), [c2], "W01 counted once");
+  // (iii) a no-change save (the material re-sent as it is) just saves
+  let snap = await snapOf();
+  const m = snap.materials.find((x) => x.id === alu);
+  const same = { id: m.id, name: m.name, methodKey: m.methodKey, methodVersion: m.methodVersion, spec: m.spec, rules: m.rules };
+  const noChange = { expectedRevision: snap.workspace.revision, idempotencyKey: `h25-same-${w}`, changes: { materials: { upsert: [same] } } };
+  r = await commit(noChange);
+  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.commit.replayed, false);
+  const revSame = r.data.commit.revision;
+  // (iv) the same key again (a lost reply resent unchanged) is a replay: 200, same revision
+  r = await commit(noChange);
+  assert.equal(r.status, 200); assert.equal(r.data.commit.replayed, true); assert.equal(r.data.commit.revision, revSame);
+  assert.equal((await snapOf()).workspace.revision, revSame);
+  // (v) a real conflict (older base, new key) is still CONFLICT, and the server's data is untouched
+  r = await commit({ expectedRevision: snap.workspace.revision, idempotencyKey: `h25-stale-${w}`, changes: { materials: { upsert: [{ ...same, name: "Renamed" }] } } });
+  assert.equal(r.status, 409); assert.equal(r.data.code, "CONFLICT");
+  snap = await snapOf();
+  assert.equal(snap.workspace.revision, revSame);
+  assert.equal(snap.materials.find((x) => x.id === alu).name, "Aluminium angle 50 × 50 × 3");
+});
+
+// ── HUB 024: add an aluminium setup to the company products ──────────────────────────────────────────────────
+const H24 = { name: "Aluminium angle 50 × 50 × 3", wA: id(), wB: id(), jmA: id(), jmB: id(), presetId: null };
+const h24Mat = (snap, mid) => snap.materials.find((m) => m.id === mid);
+const h24Snap = async (w) => (await S(`/workspaces/${w}`)).data.snapshot;
+await t("HUB 024 save, find and restore: the setup saved on one job (kerf kept, its confirmation not) is found by name on another job and restores every setting", async () => {
+  const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
+  const base = aluminiumPreset();
+  const spec24 = { ...base, kerfMm: 3, kerfConfirmed: true, finish: "Mill", windowPreset: { ...base.windowPreset, head: true, jambAllowanceTotalMm: 80 } };
+  // the first job: its aluminium material, set up and confirmed for that job
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: H24.wA, name: "HUB024 A" });
+  let r = await SP(`/workspaces/${H24.wA}/commit`, { expectedRevision: 1, changes: { materials: { upsert: [{ id: H24.jmA, name: H24.name, methodKey: "linear_stock", methodVersion: 1, spec: spec24, rules: {} }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const mA = h24Mat(r.data.snapshot, H24.jmA);
+  // Add to company products: the job's own name and settings (open flags / a default link sent along are dropped)
+  const save = await SP("/company-products", { name: mA.name, methodKey: mA.methodKey, methodVersion: mA.methodVersion, spec: mA.spec,
+    rules: { ...mA.rules, carried: { finish: "Anodised" }, defaultsFrom: { presetId: id(), revision: 1, productId: "x" }, companyDefault: true } });
+  assert.equal(save.status, 200, JSON.stringify(save.data)); assert.equal(save.data.preset.revision, 1);
+  H24.presetId = save.data.preset.presetId;
+  const found = (await S("/presets")).data.presets.filter((p) => p.name.toLowerCase().includes("aluminium angle"));
+  assert.equal(found.length, 1);
+  const pr = found[0];
+  assert.equal(pr.id, H24.presetId); assert.equal(pr.name, H24.name); assert.equal(pr.methodKey, "linear_stock");
+  assert.equal(pr.spec.stockLengthMm, 6500); assert.deepEqual([pr.spec.profile.aMm, pr.spec.profile.bMm, pr.spec.profile.tMm], [50, 50, 3]);
+  assert.equal(pr.spec.kerfMm, 3); assert.equal(pr.spec.kerfConfirmed, false, "each job still confirms its kerf");
+  assert.equal(pr.spec.finish, "Mill"); assert.equal(pr.spec.windowPreset.head, true); assert.equal(pr.spec.windowPreset.jambAllowanceTotalMm, 80);
+  for (const k of ["carried", "defaultsFrom", "companyDefault"]) assert.equal(k in pr.rules, false, k);
+  assert.equal(pr.sourceReview.status, "user_entered");
+  const by = await q("SELECT created_by_user_id FROM takeoff_material_preset_revisions WHERE preset_id=$1 AND revision=1", [H24.presetId]);
+  assert.equal(by.rows[0].created_by_user_id, U.admin);
+  // the first job's own material is untouched and unlinked (it keeps its confirmation)
+  const a2 = h24Mat(await h24Snap(H24.wA), H24.jmA);
+  assert.equal(a2.spec.kerfConfirmed, true); assert.equal(a2.fromPresetId, null);
+  // another job: Use on this job copies that exact revision, and a reload restores every saved setting
+  await SP(`/jobs/carpentry/${J.carpB}/workspaces`, { id: H24.wB, name: "HUB024 B" });
+  r = await SP(`/workspaces/${H24.wB}/commit`, { expectedRevision: 1, changes: { materials: { upsert: [{ id: H24.jmB, fromPreset: { presetId: H24.presetId } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const mB = h24Mat(await h24Snap(H24.wB), H24.jmB);
+  assert.equal(mB.name, H24.name); assert.equal(mB.fromPresetId, H24.presetId); assert.equal(mB.fromPresetRevision, 1);
+  assert.deepEqual(mB.spec, pr.spec);
+  assert.equal(mB.spec.kerfConfirmed, false);
+});
+
+await t("HUB 024 isolation: changing the new job's copy never changes the company product or the first job, and the reverse", async () => {
+  const mB = h24Mat(await h24Snap(H24.wB), H24.jmB);
+  let r = await SP(`/workspaces/${H24.wB}/commit`, { expectedRevision: (await h24Snap(H24.wB)).workspace.revision,
+    changes: { materials: { upsert: [{ ...mB, spec: { ...mB.spec, stockLengthMm: 6000, kerfConfirmed: true } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  let pr = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.equal(pr.revision, 1); assert.equal(pr.spec.stockLengthMm, 6500); assert.equal(pr.spec.kerfConfirmed, false);
+  const mA = h24Mat(await h24Snap(H24.wA), H24.jmA);
+  assert.equal(mA.spec.stockLengthMm, 6500);
+  // now the first job changes; the new job's copy and the company product stay as they were
+  r = await SP(`/workspaces/${H24.wA}/commit`, { expectedRevision: (await h24Snap(H24.wA)).workspace.revision,
+    changes: { materials: { upsert: [{ ...mA, spec: { ...mA.spec, stockLengthMm: 5000, finish: "Anodised" } }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const b2 = h24Mat(await h24Snap(H24.wB), H24.jmB);
+  assert.equal(b2.spec.stockLengthMm, 6000); assert.equal(b2.spec.finish, "Mill"); assert.equal(b2.spec.kerfConfirmed, true);
+  pr = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.equal(pr.revision, 1); assert.equal(pr.spec.stockLengthMm, 6500); assert.equal(pr.spec.finish, "Mill");
+});
+
+await t("HUB 024 who may save: office staff on the Hub and linked Worker-app logins; aluminium only, never a flashing standard or a company default; same name = next version on its revision", async () => {
+  const { aluminiumPreset, productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const alu = { name: H24.name, methodKey: "linear_stock", methodVersion: 1, spec: { ...aluminiumPreset(), kerfMm: 3 }, rules: {} };
+  assert.equal((await SP("/company-products", alu, { as: "emp" })).status, 403);
+  // never flashing, timber or cladding content
+  const fl = await SP("/company-products", { name: "F", methodKey: "flashing_runs", methodVersion: 1, spec, rules: {}, profile });
+  assert.equal(fl.status, 400); assert.equal(fl.data.error, "Only an aluminium setup can be added here.");
+  const timber = await SP("/company-products", { name: "Studs", methodKey: "repeated_members", methodVersion: 2, spec: { family: "timber", purpose: "studs", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock: { maxMm: 6000 } }, rules: {} });
+  assert.equal(timber.status, 400, JSON.stringify(timber.data));
+  const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth");
+  assert.equal((await SP("/company-products", { name: "Axon", methodKey: "sheet_layout", methodVersion: 2, spec: { ...specFromGroup(g), assemblyId: "axon-vertical" }, rules: {} })).status, 400);
+  // an incomplete profile is refused (nothing saved)
+  const half = await SP("/company-products", { ...alu, name: "Half angle", spec: { ...alu.spec, profile: { shape: "equal-angle", aMm: 50, bMm: null, tMm: 3 } } });
+  assert.equal(half.status, 400); assert.equal(half.data.error, "Enter the profile size (e.g. 50 × 50 × 3).");
+  assert.equal((await S("/presets")).data.presets.some((p) => p.name === "Half angle"), false);
+  // the narrow route can't revise a flashing standard (A10's) or a company default (HUB 014's)
+  const all = (await S("/presets")).data.presets;
+  assert.equal((await SP("/company-products", { ...alu, presetId, expectedRevision: all.find((p) => p.id === presetId).revision })).status, 400);
+  const cd = all.find((p) => p.rules?.companyDefault === true);
+  assert.ok(cd, "a company default exists (HUB 014)");
+  assert.equal((await SP("/company-products", { ...alu, presetId: cd.id, expectedRevision: cd.revision })).status, 400);
+  assert.equal((await SP("/company-products", { ...alu, presetId: "not-a-uuid", expectedRevision: 1 })).status, 400);
+  // same name: the next version, on the revision it was read at; a stale revision is refused and changes nothing
+  const v2 = await SP("/company-products", { ...alu, spec: { ...alu.spec, stockLengthMm: 6100 }, presetId: H24.presetId, expectedRevision: 1 }, { as: "sup" });
+  assert.equal(v2.status, 200, JSON.stringify(v2.data)); assert.equal(v2.data.preset.revision, 2);
+  const stale = await SP("/company-products", { ...alu, presetId: H24.presetId, expectedRevision: 1 });
+  assert.equal(stale.status, 409); assert.equal(stale.data.code, "CONFLICT");
+  let pr = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.equal(pr.revision, 2); assert.equal(pr.spec.stockLengthMm, 6100);
+  // the job that copied revision 1 keeps its own copy
+  assert.equal(h24Mat(await h24Snap(H24.wB), H24.jmB).fromPresetRevision, 1);
+  // Worker app: a leading hand is refused; the same login linked to an Admin account saves (Sam on his phone)
+  assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.addCompanyProducts, false);
+  assert.equal((await W("/capabilities", { worker: "wt-lh" })).data.capabilities.editStandards, false);
+  assert.equal((await WP("/company-products", alu, { worker: "wt-lh" })).status, 403);
+  await q("UPDATE employees SET user_id=$1 WHERE id=$2", [U.admin, E.lh]);
+  try {
+    const caps = (await W("/capabilities", { worker: "wt-lh" })).data.capabilities;
+    assert.equal(caps.addCompanyProducts, true); assert.equal(caps.editStandards, false);
+    const w = await WP("/company-products", { ...alu, presetId: H24.presetId, expectedRevision: 2 }, { worker: "wt-lh" });
+    assert.equal(w.status, 200, JSON.stringify(w.data)); assert.equal(w.data.preset.revision, 3);
+    const by = await q("SELECT created_by_user_id FROM takeoff_material_preset_revisions WHERE preset_id=$1 AND revision=3", [H24.presetId]);
+    assert.equal(by.rows[0].created_by_user_id, U.admin);
+    assert.equal((await WP("/company-products", alu, { as: "admin", preview: E.lh })).status, 403);   // read-only preview never saves
+    assert.equal((await WP("/presets", { content: { name: "x" } }, { worker: "wt-lh" })).status, 404);   // the full standards route stays Hub-only
+  } finally { await q("UPDATE employees SET user_id=NULL WHERE id=$1", [E.lh]); }
+  pr = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.equal(pr.revision, 3); assert.equal(pr.spec.kerfConfirmed, false);
+});
+
+await t("HUB 024 review: a new version never turns one size's product into another angle (refused, nothing saved); a different size saves under its own name", async () => {
+  const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
+  const before = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.deepEqual([before.spec.profile.aMm, before.spec.profile.bMm, before.spec.profile.tMm], [50, 50, 3]);
+  const small = { name: H24.name, methodKey: "linear_stock", methodVersion: 1, spec: { ...aluminiumPreset(), profile: { shape: "equal-angle", aMm: 40, bMm: 40, tMm: 2 }, kerfMm: 3 }, rules: {} };
+  const r = await SP("/company-products", { ...small, presetId: H24.presetId, expectedRevision: before.revision });
+  assert.equal(r.status, 400, JSON.stringify(r.data));
+  assert.equal(r.data.error, `“${H24.name}” is a 50 × 50 × 3 angle. Give this 40 × 40 × 2 setup its own name.`);
+  const after = (await S("/presets")).data.presets.find((p) => p.id === H24.presetId);
+  assert.equal(after.revision, before.revision);
+  assert.deepEqual(after.spec.profile, before.spec.profile);
+  // the same profile still saves as the next version (stock / kerf / finish may change), and a new name is a new product
+  const same = await SP("/company-products", { ...small, spec: { ...small.spec, profile: { ...before.spec.profile }, stockLengthMm: 6000 }, presetId: H24.presetId, expectedRevision: before.revision });
+  assert.equal(same.status, 200, JSON.stringify(same.data)); assert.equal(same.data.preset.revision, before.revision + 1);
+  const own = await SP("/company-products", { ...small, name: "Aluminium angle 40 × 40 × 2" });
+  assert.equal(own.status, 200, JSON.stringify(own.data)); assert.equal(own.data.preset.revision, 1);
+  assert.notEqual(own.data.preset.presetId, H24.presetId);
+  const list = (await S("/presets")).data.presets;
+  assert.deepEqual(list.find((p) => p.id === own.data.preset.presetId).spec.profile, { shape: "equal-angle", aMm: 40, bMm: 40, tMm: 2 });
+  assert.deepEqual([list.find((p) => p.id === H24.presetId).spec.profile.aMm, list.find((p) => p.id === H24.presetId).spec.stockLengthMm], [50, 6000]);
+});
+
+// ── HUB 026: a side of aluminium measured on a scaled elevation (the Run tool's save, as MeasureScreen sends it) ──
+await t("HUB 026: an aluminium side measured on a scaled elevation keeps its cut length under that profile through a reload; never joined; a page with no scale is refused", async () => {
+  const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
+  const w = id(), cal = id(), alu = id(), op = id(), side = id(), long = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB026-elevation.pdf");
+  await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB026" });
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const sidePts = runPts(1800, 300);
+  const r1 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: alu, name: "Aluminium angle 50 × 50 × 3", methodKey: "linear_stock", methodVersion: 1, spec: { ...aluminiumPreset(), kerfMm: 3, kerfConfirmed: true }, rules: {} }] },
+    measurements: { upsert: [
+      { id: op, kind: "opening", inputs: { xMm: 0, sillMm: 0, widthMm: 600, heightMm: 2400, label: "W01" } },
+      { id: side, kind: "polyline", documentId: doc, pageIndex: 0, calibrationId: cal, points: sidePts, inputs: { splitsMm: [] } }] },
+    contributions: { upsert: [{ id: id(), measurementId: op, jobMaterialId: alu, role: "opening" }, { id: id(), measurementId: side, jobMaterialId: alu, role: "primary" }] } } });
+  assert.equal(r1.status, 200, JSON.stringify(r1.data));
+  // the reload: a fresh read of the takeoff
+  const g1 = (await S(`/workspaces/${w}`)).data;
+  const m = g1.snapshot.measurements.find((x) => x.id === side);
+  assert.deepEqual([m.kind, m.documentId, m.pageIndex, m.calibrationId], ["polyline", doc, 0, cal]);
+  assert.deepEqual(m.points, sidePts, "the same two ends");
+  assert.deepEqual(g1.snapshot.contributions.filter((c) => c.measurementId === side).map((c) => [c.jobMaterialId, c.role]), [[alu, "primary"]], "under that profile");
+  const res1 = g1.computed.materialResults[alu];
+  const runs1 = res1.demands.filter((d) => d.sourceRefs?.[0]?.measurementId === side);
+  assert.equal(runs1.length, 1, "one straight side is one cut");
+  assert.equal(runs1[0].role, "run");
+  assert.ok(Math.abs(runs1[0].lengthMm - 1800) <= 0.5, `cut length ${runs1[0].lengthMm}`);
+  assert.equal(runs1[0].noSplice, true, "never joined");
+  assert.deepEqual([runs1[0].stockPolicy.lengthMm, runs1[0].stockPolicy.kerfMm], [6500, 3]);
+  // pooled with the opening's cuts in ONE allocation group (the same bars)
+  const opDems = res1.demands.filter((d) => d.sourceRefs?.[0]?.measurementId === op);
+  assert.deepEqual(opDems.map((d) => d.role).sort(), ["jamb-left", "jamb-right", "sill"]);
+  const groups1 = res1.allocation.groups;
+  assert.equal(groups1.length, 1, "one group for the profile");
+  const placed1 = groups1[0].bars.flatMap((b) => b.cuts.map((c) => c.demandId));
+  for (const d of [...runs1, ...opDems]) assert.ok(placed1.includes(d.id), `${d.id} on a bar`);
+  const buy1 = groups1[0].purchase.map((p) => `${p.quantity}×${p.stockLengthMm}`);
+  assert.deepEqual(buy1, ["2×6500"]);   // 2,500 + 2,500 + 600 + 1,800 with 3 mm kerf
+  // no-join and stock rules: a 7,000 mm side is longer than the 6,500 bar — listed as unavailable, never split
+  const r2 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    measurements: { upsert: [{ id: long, kind: "polyline", documentId: doc, pageIndex: 0, calibrationId: cal, points: runPts(7000, 340), inputs: { splitsMm: [] } }] },
+    contributions: { upsert: [{ id: id(), measurementId: long, jobMaterialId: alu, role: "primary" }] } } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  const res2 = (await S(`/workspaces/${w}`)).data.computed.materialResults[alu];
+  const longDems = res2.demands.filter((d) => d.sourceRefs?.[0]?.measurementId === long);
+  assert.equal(longDems.length, 1);
+  assert.ok(Math.abs(longDems[0].lengthMm - 7000) <= 0.5, String(longDems[0].lengthMm));
+  assert.ok(longDems.every((d) => d.lengthMm >= 7000 - 0.5 && d.noSplice === true), "never split into shorter pieces");
+  const [g2] = res2.allocation.groups;
+  assert.equal(res2.allocation.groups.length, 1);
+  assert.deepEqual(g2.unavailable.filter((u) => u.demandId === longDems[0].id).map((u) => u.reason), ["exceeds-stock"]);
+  assert.ok(!g2.bars.some((b) => b.cuts.some((c) => c.demandId === longDems[0].id)), "not on any bar");
+  assert.deepEqual(g2.purchase.map((p) => `${p.quantity}×${p.stockLengthMm}`), buy1, "the other pieces still buy the same bars");
+  // only a scaled page gives a length: no scale → refused, nothing saved
+  const before = await rev();
+  const r3 = await SP(`/workspaces/${w}/commit`, { expectedRevision: before, changes: {
+    measurements: { upsert: [{ id: id(), kind: "polyline", documentId: doc, pageIndex: 0, calibrationId: null, points: runPts(1200, 380), inputs: { splitsMm: [] } }] } } });
+  assert.equal(r3.status, 400);
+  assert.equal(r3.data.error, "Scale this plan page before measuring.");
+  assert.equal(await rev(), before, "nothing saved");
 });
 
 server.close();
