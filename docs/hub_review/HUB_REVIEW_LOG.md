@@ -35,6 +35,10 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 016 follow-up: offcuts shared across walls | Implemented, live | c220c90 | Two-wall iPhone check |
 | HUB 022 Height first, trace the whole run (+ windows/doors on the plan, auto battens, end review) | Implemented, awaiting deploy | 9f4818d, 57314d5, 2e37dae, ee7418d | Deploy + iPhone check |
 | HUB 023 Rectangle and Area on elevations | Implemented, awaiting deploy | d9acb34 | Deploy + iPhone check |
+| HUB 024 Aluminium setup as a company product | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
+| HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
+| HUB 026 Aluminium plan measuring first | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
+| HUB 027 Timber presets by purpose | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
 
 **Migrations for Sam to paste (Supabase SQL editor, in order):**
 `supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
@@ -45,6 +49,18 @@ which cut gets to 7). HUB 001 (the ongoing forecast rule). The wall-by-wall plan
 his OK and six questions before anything is built.
 
 ## Log
+
+### 2026-10-21 (night) — HUB 024–027 built; deploy stuck behind Railway's outage
+- Sam said deploy: pushed main d066d1e, then an empty commit 3e3cca8 to retrigger. Neither Vercel nor Railway built it:
+  Railway had a major outage (builds paused, from 07:24 UTC). main = 3e3cca8 waits for Railway; live is still a8e5b22.
+- New doc items HUB 024–027 (Recording reviews 06–07). One workflow: 4 planners, 4 sequential builds, 2 reviewers, 1 fixer.
+  HUB 025 cause reproduced on the real server: one save archived and re-created the same wall-opening assignment (untick and
+  re-tick inside the 500 ms debounce) → unique-key 23505 → 409 "That was already saved." shown as Conflict. Fixed by
+  sending the halves in order; only a real edit clash shows Conflict. HUB 024 Add to company products (office logins;
+  same-name other size refused). HUB 026 Measure runs on the plan first. HUB 027 timber Size and grade presets (Sam
+  confirmed 120 studs MGP10). 7 review findings fixed. 37 node suites, 282 screen tests, journeys (both browsers) pass.
+- Committed 7e6759e on takeoff-r03; NOT pushed to main (deploy needs Sam's word). Verdicts written in the doc.
+- Left alone: the kerf/tolerance feedback (Recording review 06) and the reserved 1750.mp4 for the 5am run.
 
 ### 2026-10-21 (evening) — wall-by-wall takeoff built (steps 1–5), not deployed
 - Migrations 210 and 211 confirmed live (read-only): suppliers.address exists; 10 James Hardie company defaults.
