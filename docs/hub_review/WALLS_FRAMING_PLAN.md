@@ -30,6 +30,72 @@ Here is the decision in short. Walls is one new timber item. It uses the HUB 022
 Every other [Default, needs Sam] rule below stays as written. In the build, re-tag the four answered ones as [Sam], and
 update the worked examples, the screen-test texts ("to confirm" drops) and the SOP lines to match.
 
+## Sam's decisions, round 3 (25 October 2026) — long plates are LVL; overrides rounds 1 and 2 where they differ
+
+Sam: "lvl 90x45 plates come up 10 11m long and we use them when long plates are required". Then, in chat: the longest
+90 × 45 LVL is **11.0 m**, and a wall longer than 6.0 m gets **one LVL length** for its plates.
+
+1. **Pine plates up to the pine longest length (6,000 by default; a saved plate product's own longest length wins).**
+2. **Any plate piece longer than that is ordered as ONE 90 × 45 LVL length** (bottom, top and second top alike, per
+   wall per layer), on its own order line and cut list, e.g. "Plates 90 × 45 LVL". It is not joined.
+3. **Only a plate longer than the LVL's longest length (11,000) is joined over a stud** (the step 1 helper, splitting
+   against 11,000); each resulting piece then follows rules 1-2 (over 6,000 = LVL, otherwise pine). [Default for the
+   pieces after a join, needs Sam; walls over 11 m are rare.]
+4. **LVL stock:** bought in 300 mm steps like all timber, with 11,000 itself allowed as the longest (a stock LIST:
+   6,300, 6,600 … 10,800, 11,000 — the grid alone can't reach 11,000 from 1,200 in 300 steps). [Default, needs Sam.]
+5. **The LVL part** is a fourth Walls part, "Long plates", default 90 × 45, grade "LVL", longest 11,000, with the same
+   product rules as the other parts (a saved company product can fill it; no copying between parts). Its needs (e.g.
+   treatment) only show when at least one plate is long enough to use it. It sits in the closed "Studs, plates,
+   noggins" fold, after Plates, labelled "Long plates (over 6.0 m)".
+6. **Walls line wording is unchanged** (bottom plate / top plate totals include the LVL metres). Each wall page with an
+   LVL plate says "Plates: 90 × 45 LVL (over 6.0 m)". The order and cut lists show LVL separately.
+7. Example: a 9,000 wall at 2,700 → bottom 1 × 9,000 LVL, top 1 × 9,000 LVL (9,000 is on the 300 grid). A 12,000 wall
+   at 600 centres → split over the stud at 10,800: 10,800 LVL + 1,200 pine per plate layer.
+
+**Where it goes in the build:** LVL part, defaults and stock list in step 2; the per-piece pine/LVL choice, the join only
+past 11,000, separate lines and cut lists in step 3; the fold row and wall-page line in steps 4-5; SOP lines in step 6
+("plates over 6.0 m come as one 90 × 45 LVL length, up to 11.0 m").
+
+## Sam's decisions, round 2 (25 October 2026, after checking Bestimator's real Gibson order) — these override round 1 and everything below
+
+Source: Bestimator's V2E supplier cutting list for the Gibson house (eval/fixtures/gibson-v2e-takeoff-oracle.json in the
+Bestimator repo, read-only). Sam's answers in chat:
+
+1. **Bottom plate: buy it full length** (replaces "doors cut the bottom plate" for ORDERING). The bottom plate is ordered
+   the full wall length, like the top plate; the crew cuts the doorway out after the frame is stood. So computePlates gets
+   NO door gaps on Walls; bottom and top plate pieces are identical per wall. A plate over the longest length is still
+   split over a stud (round 1, rule 4). The SOP says "cut the doorway out of the bottom plate after standing the frame".
+2. **2 full-length studs each side of every opening** (windows, doors and "other"), not 1. Each is a full stud from the
+   stud product at the wall's cut length, labelled "Stud beside D1" (never "king" or "jamb"). Placement: the first stud's
+   face on the opening edge (centre at edge ∓ w/2), the second against it (centre at edge ∓ 3w/2), w = stud thickness
+   along the wall. The merge rule (centres closer than one stud thickness are one stud; end > side > centre) still
+   applies. Lintels, jacks, trimmers and short studs under/over openings are still NOT counted (round 1 rule 3).
+3. **All timber is bought in 300 mm steps** (Sam: "Yes, 300 mm steps"; he was told it changes timber buying in
+   general). Timber grid becomes minimum 1,200, increment 300 (1,200, 1,500, 1,800 … ) everywhere the owner timber grid
+   is defined: shared/takeoff/engine/families.js TIMBER_GRID, timber.js TIMBER_STOCK_GRID, the inline timber grid in
+   dispatch.js (check what it serves first), and products/seed.js timberOrderingPolicy (add source OWNER-2026-10-25).
+   Applies to Walls AND the existing Studs/Plates/Noggins/other timber items. Do NOT change flashings, cladding sheets,
+   aluminium, or the cladding followers (battens/tape/H-flashing) unless they deliberately use the owner timber grid —
+   if one does, say so and leave it unchanged pending Sam. Existing timber test expectations that encode 600 mm steps
+   are legitimately updated (list every one). Example: a 2,700 stud now buys 2,700; 4,000 buys 4,200; 6,000 buys 6,000.
+4. **Wet areas:** one Stud centres setting per Walls item stays. SOP 20-08 says: trace wet-area walls as their own
+   Walls item at 450.
+5. Also add to SOP 20-08 Section 7 the two tracing reminders: trace every nib and return (especially wet-area nibs), and
+   don't trace a shared wall twice.
+
+**Expected figures for the 2,700 worked example under round 2** (orchestrator's hand check; the numbers reviewer must
+confirm with the real engine): studs Wall 1 = 9 grid + 4 beside D1 = 13; Wall 2 = 4 grid (1,200 and 3,000 merge into the
+first studs beside W1) + 4 beside W1 = 8; run 21 studs, ordered 21 × 2,700. Plates: bottom = top = 6,000 + 4,000 fitted,
+ordered 2 × 6,000 + 2 × 4,200 (bottom 10.00 m, top 10.00 m). Noggins (1 row): Wall 1 = 9 (7 × 555, 287.5, 467.5 = 4,640
+mm), Wall 2 = 4 (555, 487.5, 487.5, 355 = 1,885 mm); 13 noggins, 6,525 mm, stock from the allocator at 6,000 max on the
+300 grid. Touching studs beside an opening leave no clear bay, so no noggin and no block. Line: "Walls: 21 studs at
+2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)". Recompute the 3,000 + Double top plate example
+the same way.
+
+**Where it goes in the build:** the 300 mm grid in step 2 (constants + tests) or the first step that touches stock;
+no door gaps and 2 studs per side in step 3 (extend the step 1 options as needed: e.g. a studsPerSide count, default 1,
+so Studs is unchanged); SOP lines in step 6. Update the plan's worked examples, tests and SOP figures to round 2.
+
 ## What Sam asked
 
 From the review doc, HUB 028 "Trace a wall once and calculate its framing together":
