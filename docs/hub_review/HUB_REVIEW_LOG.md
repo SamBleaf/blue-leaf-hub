@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 21 October 2026, after deploy)
+## Current state (updated 24 October 2026, after deploy)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -24,31 +24,45 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 011 Takeoffs ▾ show / hide list | Implemented, live | 1f06680, 7bcc090 | iPhone check |
 | HUB 012 Lengths inside a flashing | Implemented, live | 1f06680 | Flashing 5 check |
 | HUB 013 Flashing order matches the takeoff | Implemented, live | 463aab0 | iPhone check |
-| HUB 014 Company cladding defaults | Implemented, live | b56ff14 | Migration 211 |
+| HUB 014 Company cladding defaults | Implemented, live | b56ff14 | iPhone check |
 | HUB 015 Automatic sheet joint | Implemented, live | af660b3 | iPhone check |
 | HUB 016 Shared sheets (8, not 7) | Implemented, live | f802d67 | Sam confirms 8 |
 | HUB 017 Gable values kept | Implemented, live | fbbcfe6 | iPhone check |
 | HUB 018 Drawing recovery cards | Implemented, live | 2cde077 | iPhone check |
-| HUB 019 Supplier address + edit | Implemented, live | 1934643 | Migration 210 |
+| HUB 019 Supplier address + edit | Implemented, live | 1934643 | iPhone check |
 | HUB 020 Reopen / revise a draft | Implemented, live | 463aab0 | iPhone check |
 | HUB 021 Plan kept on the phone | Implemented, live | b361b95 | iPhone check |
 | HUB 016 follow-up: offcuts shared across walls | Implemented, live | c220c90 | Two-wall iPhone check |
-| HUB 022 Height first, trace the whole run (+ windows/doors on the plan, auto battens, end review) | Implemented, awaiting deploy | 9f4818d, 57314d5, 2e37dae, ee7418d | Deploy + iPhone check |
-| HUB 023 Rectangle and Area on elevations | Implemented, awaiting deploy | d9acb34 | Deploy + iPhone check |
-| HUB 024 Aluminium setup as a company product | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
-| HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
-| HUB 026 Aluminium plan measuring first | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
-| HUB 027 Timber presets by purpose | Implemented, awaiting deploy | 7e6759e | Deploy + iPhone check |
+| HUB 022 Height first, trace the whole run (+ windows/doors on the plan, auto battens, end review) | Implemented, live | 9f4818d, 57314d5, 2e37dae, ee7418d | iPhone check |
+| HUB 023 Rectangle and Area on elevations | Implemented, live | d9acb34 | iPhone check |
+| HUB 024 Aluminium setup as a company product | Implemented, live | 7e6759e | iPhone check |
+| HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, live | 7e6759e | iPhone check |
+| HUB 026 Aluminium plan measuring first | Implemented, live | 7e6759e | iPhone check |
+| HUB 027 Timber presets by purpose | Implemented, live | 7e6759e | iPhone check |
+| HUB 028 Walls: trace once, studs + plates + noggins together | Open | — | Sam's answers (studs at ends/corners, openings, stock lengths), then a plan |
 
-**Migrations for Sam to paste (Supabase SQL editor, in order):**
-`supabase/migrations/210_takeoff_supplier_address.sql`, then `supabase/migrations/211_takeoff_company_cladding_defaults.sql`.
-Both are one statement and safe to re-run. Applied already: 206, 207, 208, 209.
+**Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October).
 
-**Decisions waiting on Sam:** HUB 016 (the recorded wall comes to 8 sheets under the factory-edge rule; confirm, or say
-which cut gets to 7). HUB 001 (the ongoing forecast rule). The wall-by-wall plan (`docs/hub_review/WALL_BY_WALL_PLAN.md`):
-his OK and six questions before anything is built.
+**Decisions waiting on Sam:** HUB 028 (three questions before planning: stud count at ends, corners and junctions;
+whether openings cut studs or plates; plate and noggin stock lengths). HUB 016 (8 sheets under the factory-edge rule, or
+which cut gets to 7). HUB 001 (the ongoing forecast rule). The aluminium kerf/tolerance feedback (Recording review 06:
+drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc comment asking for Add supplier is built
+(HUB 008/019) and can be resolved.
 
 ## Log
+
+### 2026-10-24 — HUB 022–027 live; Railway secrets reset checklist
+- Railway's 21–23 October incident is over. An empty commit 8cb24f8 on main started a build straight away (the GitHub
+  link didn't need reconnecting). Live bundle main-0xWSitf3.js = the local build of 90a1a3b; the takeoff chunk with
+  Review walls, Add to company products, Measure runs on the plan, Wall height and Size and grade is served;
+  POST /api/takeoff/company-products and /company-defaults answer 401 unsigned.
+- Doc: HUB 022–027 statuses → Implemented; verdicts → "live 24 October 2026" (6 + 6 replacements, read back).
+- Railway asked customers to treat every stored variable as exposed. Published a tick-through reset checklist for Sam
+  (artifact FzVt2eGBJfXVT9SAy5LQjW, names only, no values). Read-only checks: GitHub clean (no deploy keys, hooks,
+  Actions secrets or other collaborators; all pushes Sam's); no new Hub accounts since 19 October; 3 admins; one saved
+  Xero connection in xero_credentials.
+- New in the doc since the last run: HUB 028 (added by the 22 October 5am run from 1750.mp4). Not built; waits on Sam.
+- The HUB 016 follow-up verdict ("live 21 October") is correct: c220c90 is in a8e5b22.
 
 ### 2026-10-21 (night) — HUB 024–027 built; deploy stuck behind Railway's outage
 - Sam said deploy: pushed main d066d1e, then an empty commit 3e3cca8 to retrigger. Neither Vercel nor Railway built it:

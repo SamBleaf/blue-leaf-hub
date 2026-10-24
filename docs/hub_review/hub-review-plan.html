@@ -59,11 +59,11 @@ a { color: var(--primary); }
 <div class="wrap">
   <header>
     <h1>Hub Review Plan</h1>
-    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 21 October 2026, night. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 24 October 2026. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
     <div class="counts" aria-label="Totals">
-      <div class="count"><b>21</b> live</div>
-      <div class="count"><b>6</b> built, awaiting deploy</div>
-      <div class="count"><b>1</b> not started</div>
+      <div class="count"><b>27</b> live</div>
+      <div class="count"><b>0</b> awaiting deploy</div>
+      <div class="count"><b>2</b> not started</div>
       <div class="count"><b>0</b> verified by you</div>
     </div>
   </header>
@@ -73,14 +73,16 @@ a { color: var(--primary); }
     <ol>
             <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
-      <li>Wait for Railway: its outage has builds paused. The wall-by-wall takeoff deploys when it is back. <span class="sub">Then say <b>deploy</b> again to add HUB 024–027.</span></li>
+      <li>Try the wall-by-wall takeoff on your iPhone. <span class="sub">Set a height, trace a run, add a window and a door, check the battens, tape and H-flashing, then Review walls to the order. Also: save an aluminium company product, untick and re-tick an opening (it should say Saved), and pick a timber preset.</span></li>
+      <li>Answer the three HUB 028 questions. <span class="sub">Studs at ends, corners and junctions; whether doors and windows cut studs or plates; the stock length for plates and noggins.</span></li>
+      <li>Work through the <a href="https://claude.ai/artifact/FzVt2eGBJfXVT9SAy5LQjW" target="_blank" rel="noopener">Railway secrets reset</a>. <span class="sub">Railway's 21 October incident means every key it held should be replaced.</span></li>
     </ol>
   </section>
 
   <section aria-labelledby="board-h">
     <h2 id="board-h">Faults</h2>
     <div class="filters" role="group" aria-label="Show">
-      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 28</button>
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 29</button>
       <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
       <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
       <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
@@ -89,8 +91,8 @@ a { color: var(--primary); }
   </section>
 
   <section class="card" aria-labelledby="walk">
-    <h2 id="walk">Wall-by-wall takeoff with HUB 022 and 023: built, awaiting deploy</h2>
-    <p>All five steps were built on 21 October and are waiting for you to say deploy.</p>
+    <h2 id="walk">Wall-by-wall takeoff with HUB 022 and 023: live 24 October</h2>
+    <p>All five steps were built on 21 October and went live on 24 October, after Railway's outage.</p>
     <ul>
       <li>The Line tool shows the cladding and its Wall height together. Trace the whole run point to point; change the height partway and only the walls after that change.</li>
       <li>Finish keeps you on the plan with one card, e.g. "Run 1 · 4 walls · 2,700". Each wall keeps its own elevation and sheets.</li>
@@ -187,12 +189,13 @@ const FAULTS = [
   ["HUB 020", "Reopen and revise an unplaced draft", "P0", "live", "Live", "Reopen FO-001003 and revise it"],
   ["HUB 021", "Plan reopens without downloading", "P2", "live", "Live", "Reopen a plan in Aeroplane Mode"],
   ["HUB 016 follow-up", "Offcuts shared across walls", "P1", "live", "Live", "Two Axon walls: check the cut list names each wall"],
-  ["HUB 022", "Set the height first, then trace the whole run", "P1", "wait", "Awaiting deploy", "Deploy, then trace a run on your iPhone"],
-  ["HUB 023", "Rectangle and Area on elevations", "P1", "wait", "Awaiting deploy", "Deploy, then measure an elevation"],
-  ["HUB 024", "Save an aluminium setup as a company product", "P1", "wait", "Awaiting deploy", "Save 50 × 50 × 3 and load it on another job"],
-  ["HUB 025", "Aluminium Conflict explained", "P1", "wait", "Awaiting deploy", "Untick and re-tick an opening: it should say Saved"],
-  ["HUB 026", "Aluminium: measure on the plan first", "P1", "wait", "Awaiting deploy", "Measure a window side on a scaled elevation"],
-  ["HUB 027", "Timber presets by purpose", "P1", "wait", "Awaiting deploy", "Pick 90 × 45 MGP10 studs and reload"],
+  ["HUB 022", "Set the height first, then trace the whole run", "P1", "live", "Live", "Trace a run on your iPhone"],
+  ["HUB 023", "Rectangle and Area on elevations", "P1", "live", "Live", "Measure an elevation"],
+  ["HUB 024", "Save an aluminium setup as a company product", "P1", "live", "Live", "Save 50 × 50 × 3 and load it on another job"],
+  ["HUB 025", "Aluminium Conflict explained", "P1", "live", "Live", "Untick and re-tick an opening: it should say Saved"],
+  ["HUB 026", "Aluminium: measure on the plan first", "P1", "live", "Live", "Measure a window side on a scaled elevation"],
+  ["HUB 027", "Timber presets by purpose", "P1", "live", "Live", "Pick 90 × 45 MGP10 studs and reload"],
+  ["HUB 028", "Walls: trace once for studs, plates and noggins", "P1", "none", "Not started", "Your three answers"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");
