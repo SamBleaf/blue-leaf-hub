@@ -42,7 +42,7 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 
 ## 3. What this does
 
-You add a timber material (section, grade, treatment), choose what it is for, and measure it on the plan or on walls. For repeated members you draw **one member line** (how long each rafter or joist is) and **a distribution run** (the line they are spaced along); the app puts a tick at every member position and counts them. For walls it places studs at centres, takes out the studs inside openings, and works out plates and noggins. Every piece is then ordered on the **company stock grid — 1200 mm, then every 600 mm (1800, 2400, 3000 …)** — one stock length per member, never joined. The schedule shows quantity × stock length per section/grade/treatment, with a cut list ("18 × 5,196.2 mm — one cut from each 5,400 mm length"). Sizes are always shown as **"manual selection (not structurally checked)"**.
+You add a timber material (section, grade, treatment), choose what it is for, and measure it on the plan or on walls. For repeated members you draw **one member line** (how long each rafter or joist is) and **a distribution run** (the line they are spaced along); the app puts a tick at every member position and counts them. For walls it places studs at centres, takes out the studs inside openings, and works out plates and noggins. Every piece is then ordered on the **company stock grid — 1200 mm, then every 300 mm (1500, 1800, 2100 …)** — one stock length per member, never joined. (Owner decision, 25 Oct 2026: all timber is bought in 300 mm steps; it was 600 mm steps before.) The schedule shows quantity × stock length per section/grade/treatment, with a cut list ("18 × 5,196.2 mm — one cut from each 5,400 mm length"). Sizes are always shown as **"manual selection (not structurally checked)"**.
 
 ---
 
@@ -78,7 +78,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
    - **Measure projection** (rafters only) — you measure the rafter **in plan**; enter the **Pitch** (°). The true length = plan length ÷ cos(pitch).
    - **Measure true length** (rafters) / **Measure length** (joists, battens) — you measure the real member length (e.g. on a section). Pitch is never applied again.
    - **Enter cut length** — type the **Cut length**; no member line is needed.
-8. **Stock** (fixed): "1200 mm, then every 600 mm (1800, 2400, 3000 …) — same at every supplier." Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
+8. **Stock** (fixed): "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier." Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
 9. **More (offsets, allowance, ends, plies, supplier)** — **Start offset**, **End offset**, **End allowance (true length)** (0 unless you set one — no hidden allowance), **Plies**, **First member** / **Last member** (Included / Excluded), **Supplier**, **Size reference (schedule/drawing)** (records where the size came from, e.g. "S-101 engineer schedule"), **Availability**.
 10. Read the bottom of the card: **Needs…** (what is still missing before it can be ordered — you can keep measuring), **On the order now (this job)** and the three statuses **Quantity / Installation / Procurement**. With nothing measured, Quantity reads **Not measured yet**.
 11. Tap **Measure members**. Rafters / joists / battens / trim / other open the plan; studs / plates / noggins open the **Walls** screen.
@@ -124,7 +124,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 1. **Trim / Other member** on the plan: tools **Run | Count | Select | Pan**.
 2. **Run** — tap the start and each corner, double-tap the last point (or **Finish**). **A plan corner is a joint for timber**: every straight leg becomes its own piece ("2 straight pieces added — each corner is a joint, so every straight leg is its own piece. Undo removes them all."). An extra tap part-way along a straight leg is merged, not a new piece.
 3. **Count** — type **Cut length of each piece** first, then tap each place. Each tap is one piece, ordered on the next stock length.
-4. **Typed-in lengths** — on the overview tap **Add lengths** on the timber row, type the length and **Qty**, tap **Add**. For timber this is a **cut length**: it is put on the stock grid (2,350 → 2,400; 500 → 1,200; 1,200.1 → 1,800). Entered lengths are listed under the form with a **Remove** button each.
+4. **Typed-in lengths** — on the overview tap **Add lengths** on the timber row, type the length and **Qty**, tap **Add**. For timber this is a **cut length**: it is put on the stock grid (2,350 → 2,400; 500 → 1,200; 1,200.1 → 1,500). Entered lengths are listed under the form with a **Remove** button each.
 
 ### F. Check the schedule
 
@@ -173,11 +173,12 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 | "No members counted — see why below." | Offsets longer than the run, or both ends excluded on a tiny run | Fix the offsets in **‹ Whole run …** |
 | "N member change(s) no longer match(es) a station … — review." | The run or spacing changed after you changed single members | Check, then **Clear them** and redo the changes |
 | "… cannot be cut from any compatible stock (… Unavailable — no clamping or splice.) …" | A member is longer than **Longest available length** (or every grid length up to it is marked unavailable) | Change the detail, or set a supplier-confirmed longer length |
-| "Only grid lengths (1200, 1800, 2400 …) can be marked unavailable — off-grid sizes are never added." | Typed an off-grid length (e.g. 6500) | Enter grid lengths only |
+| "Only grid lengths (1200, 1500, 1800 …) can be marked unavailable — off-grid sizes are never added." | Typed an off-grid length (e.g. 6500) | Enter grid lengths only |
 | "W1: base studs only; opening framing incomplete — needs its framing detail." | A wall with studs has an opening | Add the opening framing from the detail as its own timber / entered lengths |
 | "Enter the number of noggin rows …" | Noggins without rows | Enter **Noggin rows** |
 | "Frame A: enter the bottom and top plate thickness to turn the frame height into a stud length." | Frame height chosen without plate thicknesses | Enter both, or switch to **Stud cut** |
-| Rafters suddenly ordered shorter (e.g. 4,800 instead of 5,400) | The plan **Roof pitch** was blanked (saved as 0°) | Re-type the pitch |
+| Rafters suddenly ordered shorter (e.g. 4,500 instead of 5,400) | The plan **Roof pitch** was blanked (saved as 0°) | Re-type the pitch |
+| Timber ordered before 25 Oct 2026 shows under **Placed, but no longer in the takeoff**, and the same pieces show as not ordered on a shorter length (e.g. 2,700 instead of 3,000) | Timber is bought in 300 mm steps since 25 Oct 2026 (it was 600 mm steps), so many stock lengths changed | Don't re-order. The placed lengths still cut the same pieces. On a draft order, tap **Update to what's needed now** if it shows, or **Remove line** and add the line again |
 | Tick label says "(preview)" | Member length not known yet | Draw the member line, enter the pitch or the cut length |
 | "Not saved: One or more values are not valid for this field." on a member/distribution/wall | Migration 207 missing on that database | Apply migration 207 to that (non-production) database; production waits for the Director |
 
@@ -210,12 +211,12 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 
 ## 11. Automation notes
 
-- **Add timber** upserts a `takeoff_job_materials` row at once: `spec` { family "timber", purpose "rafters", section {}, stock { kind "grid", minMm 1200, incrementMm 600 } }, `rules` { centresMm 600, lengthSource "projected" }, method `repeated_members@2` (studs → `wall_frame@1`, plates / noggins / trim / other → `linear_stock@1`). Each setup edit is a further upsert (autosave, SOP 20-07).
+- **Add timber** upserts a `takeoff_job_materials` row at once: `spec` { family "timber", purpose "rafters", section {}, stock { kind "grid", minMm 1200, incrementMm 300 } }, `rules` { centresMm 600, lengthSource "projected" }, method `repeated_members@2` (studs → `wall_frame@1`, plates / noggins / trim / other → `linear_stock@1`). Each setup edit is a further upsert (autosave, SOP 20-07).
 - **Member line:** `takeoff_measurements` `kind` 'member', two plan points, `geometry.inputs.mode` 'projected' | 'true'; contribution `role` 'member'. One per material — a new one archives the previous (`archived_at`).
 - **Distribution run:** `kind` 'distribution', two points, inputs { startOffsetMm, endOffsetMm, includeStart, includeEnd, spacing, overrides[] }; contribution `role` 'distribution'. Tick changes are `overrides` entries { station, removed | lengthMm | duplicate } on that measurement.
 - **Walls / openings:** `kind` 'wall' (`role` 'wall') and 'opening' (`parentId` = wall) — see SOP 20-09.
 - **Runs / counts / typed lengths:** timber Run finishes as one `kind` 'polyline' per straight leg (`role` 'primary'); Count = `kind` 'count'; Add lengths = `kind` 'manual'.
-- **Calculation** (`shared/takeoff/engine/timber.js`, `dispatch.js`, run in the browser for display and again on the server for every save/export): positions T1 (count = ceil(usable ÷ centres) + 1), length T2 (projected ÷ cos pitch), stock T3 = max(1200, ceil(L ÷ 600) × 600) within the longest available / unavailable list; one stock piece per member; studs T4; plates / noggins T5. Sizing provenance is `manual` unless a **Size reference** is entered — never "verified".
+- **Calculation** (`shared/takeoff/engine/timber.js`, `dispatch.js`, run in the browser for display and again on the server for every save/export): positions T1 (count = ceil(usable ÷ centres) + 1), length T2 (projected ÷ cos pitch), stock T3 = max(1200, ceil(L ÷ 300) × 300) within the longest available / unavailable list (300 mm steps since 25 Oct 2026, OWNER-2026-10-25); one stock piece per member; studs T4; plates / noggins T5. Sizing provenance is `manual` unless a **Size reference** is entered — never "verified".
 - **Schedule / order lines:** generic purchase lines `unit` 'piece', `item.description` "90 × 45 MGP10 H2 — 5,400 mm length"; order lines carry `unit` + `item` (migration 207).
 - No email, notification or file is created.
 
@@ -277,7 +278,7 @@ Next review date: 2027-04-14
 2. Type `6500` in **Grid lengths this supplier doesn't stock (optional)** and press Enter; then `6600`.
 3. Type `0` in **Centres** and press Enter.
 4. Close the card. Open the mixed job's **Rafters 90 × 45** → **Setup**, clear **Pitch** (blank, Enter), then **Open schedule**.
-5. Expected result: step 1 — Needs lists "Enter the timber section (e.g. 90 × 45).", "Enter the grade or species.", "Enter the treatment (or "untreated")." and Quantity shows **Not measured yet**; step 2 — "Only grid lengths (1200, 1800, 2400 …) can be marked unavailable — off-grid sizes are never added." for 6500, accepted for 6600; step 3 — "Enter a number greater than 0." and centres stay 600; step 4 — the Rafters group shows "Needs before ordering:" with "Pitch is required." and "Nothing to order yet — see what it needs above."
+5. Expected result: step 1 — Needs lists "Enter the timber section (e.g. 90 × 45).", "Enter the grade or species.", "Enter the treatment (or "untreated")." and Quantity shows **Not measured yet**; step 2 — "Only grid lengths (1200, 1500, 1800 …) can be marked unavailable — off-grid sizes are never added." for 6500, accepted for 6600; step 3 — "Enter a number greater than 0." and centres stay 600; step 4 — the Rafters group shows "Needs before ordering:" with "Pitch is required." and "Nothing to order yet — see what it needs above."
 6. Expected record: step 2 → new timber material `spec.stock.unavailableMm` = [6600] only; step 4 → `mat-raf.rules.pitchDeg` absent/null (not 0).
 - [ ] Pass  [ ] Fail
 
@@ -311,17 +312,17 @@ Next review date: 2027-04-14
 6. Expected record: `m-dist.inputs.overrides` holds { station …1200, lengthMm 6000, duplicate 1 } and { station …3000, removed true }.
 - [ ] Pass  [ ] Fail
 
-**TC-07 — Stock grid 1200 + 600 and unavailable stock**
+**TC-07 — Stock grid 1200 + 300 and unavailable stock**
 1. Overview → **Trimmers** → **Add lengths**: add 500 × 1, 1200 × 1, 1201 × 1 and 4200 × 1 (one at a time). **Open schedule** → Trimmers.
 2. Back → Trimmers → **Setup** → in the **Stock** box set **Longest available length (optional)** = 4800 (Enter) → **Close**. On the overview **Add lengths** 4801 × 1. **Open schedule** → Trimmers.
-3. Expected result: step 1 rows "2 pieces … — 1,200 mm length" (500 and 1,200), "1 piece … — 1,800 mm length" (1,201), "1 piece … — 4,200 mm length" (4,200 stays 4,200) plus the seeded "4 pieces … — 2,400 mm length"; step 2 the group shows **Ordering: Stock unavailable** with "Needs before ordering:" containing "cannot be cut from any compatible stock" and "Unavailable — no clamping or splice."; no 4,800 or 5,400 line is added for the 4,801 piece, and the "longest available stock isn't set" note is gone.
+3. Expected result: step 1 rows "2 pieces … — 1,200 mm length" (500 and 1,200), "1 piece … — 1,500 mm length" (1,201), "1 piece … — 4,200 mm length" (4,200 stays 4,200) plus the seeded "4 pieces … — 2,400 mm length"; step 2 the group shows **Ordering: Stock unavailable** with "Needs before ordering:" containing "cannot be cut from any compatible stock" and "Unavailable — no clamping or splice."; no 4,800 or 5,100 line is added for the 4,801 piece, and the "longest available stock isn't set" note is gone.
 4. Expected record: manual measurements keep the entered lengths (1201 stays 1201 in the record — only the order line is on the grid); `mat-trim.spec.stock.maxMm` = 4800.
 - [ ] Pass  [ ] Fail
 
 **TC-08 — Length source: true length and entered cut length (pitch never applied twice)**
 1. Rafters 90 × 45 → **Setup** → **Member length from: Measure true length**. **Open schedule**.
 2. Back → **Setup** → **Enter cut length**, **Cut length** 4300. **Measure members**.
-3. Expected result: step 1 "18 pieces … — 4,800 mm length" and the explanation "4,500 mm measured true length — already sloped, pitch not applied"; step 2 the plan tools are **Distribution | Select | Pan** (no Member) and the schedule shows "18 pieces … — 4,800 mm length" with "4,300 mm entered cut length — pitch not applied".
+3. Expected result: step 1 "18 pieces … — 4,500 mm length" and the explanation "4,500 mm measured true length — already sloped, pitch not applied"; step 2 the plan tools are **Distribution | Select | Pan** (no Member) and the schedule shows "18 pieces … — 4,500 mm length" with "4,300 mm entered cut length — pitch not applied".
 - [ ] Pass  [ ] Fail
 
 **TC-09 — Studs on a wall with an opening (base studs only)**
@@ -361,7 +362,7 @@ Next review date: 2027-04-14
 5. Tap **Studs**, type **Section depth** 140 and **Section width** 45. Then pick **90 × 35 MGP10** and then **Custom (enter below)**.
 6. As office staff, save a company timber product (SOP 20-12) for **Battens**: 70 × 35, MGP10, treatment H3, supplier "Supplier A". Reopen the takeoff, **Add timber** → **Battens** → pick it from **Company products** in the list. Then change **Treatment** to H4.
 7. Expected result: step 1 — no list on Rafters; step 2 — list "Choose a size…", 90 × 35 MGP10, 90 × 45 MGP10, 120 × 35 MGP10, 120 × 45 MGP10, Custom (enter below); the line "LVL: pick your supplier's LVL from the company products. The app doesn't assume an LVL grade or treatment."; after the pick **Section depth** 90, **Section width** 45, **Grade** MGP10, **Treatment** blank, Needs says "Enter the treatment"; step 3 — one Undo clears all three, Redo puts them back, after coming back the list still shows 90 × 45 MGP10; step 4 — noggins 90 × 35, plates 90 × 45, battens 90 × 35, 70 × 35, 90 × 45, 70 × 45 (each list ends with Custom (enter below); "Choose a size…" only shows while no size or grade is entered), and on Plates picking 90 × 45 keeps the grade MGP10 from before; step 5 — the list reads Custom for 140 × 45 and still after coming back; Custom after 90 × 35 MGP10 changes no value and saves nothing; step 6 — the option reads "<name> — 70 × 35 · MGP10 · H3", picking it fills **Treatment** H3, it is still H3 after coming back; after H4 the list shows 70 × 35 and the company product still says H3.
-8. Expected record: step 2 → the material's `spec.section` { depthMm 90, widthMm 45 }, `spec.grade` "MGP10", no `spec.treatment`, `methodKey` "wall_frame", `spec.stock` still the 1200 + 600 grid; no new field is stored for the choice. Step 6 → `spec.treatment` "H3", `spec.supplierName` "Supplier A"; after H4 the company product (`GET /api/takeoff/presets`) keeps `spec.treatment` "H3" and revision 1. Live DB: `takeoff_job_materials.spec` holds section, grade and treatment as above.
+8. Expected record: step 2 → the material's `spec.section` { depthMm 90, widthMm 45 }, `spec.grade` "MGP10", no `spec.treatment`, `methodKey` "wall_frame", `spec.stock` still the 1200 + 300 grid; no new field is stored for the choice. Step 6 → `spec.treatment` "H3", `spec.supplierName` "Supplier A"; after H4 the company product (`GET /api/takeoff/presets`) keeps `spec.treatment` "H3" and revision 1. Live DB: `takeoff_job_materials.spec` holds section, grade and treatment as above.
 9. Screen tests: e2e/ui-review/tc-catalogue.spec.js "HUB 027: …" (7 tests); node: scripts/tests/takeoff-tc-hub027.test.mjs.
 - [ ] Pass  [ ] Fail
 

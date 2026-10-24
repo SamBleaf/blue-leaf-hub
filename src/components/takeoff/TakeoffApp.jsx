@@ -9,7 +9,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { companyVersionDiffers, findAluminiumProduct, profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
@@ -422,7 +422,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     setOpenRow(m.id);
     setEditing({ material: m, stage: "family" });
   };
-  const addTimber = () => addFamily({ family: "timber", purpose: "rafters", section: {}, stock: { kind: "grid", minMm: 1200, incrementMm: 600 } }, "Timber", { centresMm: 600, lengthSource: "projected" });
+  const addTimber = () => addFamily({ family: "timber", purpose: "rafters", section: {}, stock: { ...TIMBER_GRID } }, "Timber", { centresMm: 600, lengthSource: "projected" });
   const addCladding = () => addFamily({ family: "cladding", layout: "sheet", product: {} }, "Cladding");
   const addAluminium = () => addFamily(aluminiumPreset(), "Aluminium angle 50 × 50 × 3");
   const isPainted = (m) => { try { return normaliseSpec(m?.spec).colourApplicable !== false; } catch { return true; } };
@@ -942,7 +942,7 @@ function ManualLengths({ onAdd, timber = false }) {
   return (
     <div className="grid grid-cols-[1fr_7rem_auto] items-end gap-2 rounded-lg bg-page p-2">
       <NumberField label={timber ? "Cut length" : "Finished length"} value={len} max={30000} onCommit={setLen}
-        help={timber ? "Each cut is bought as the next stock length (1200, 1800, 2400 …) — the cut itself isn't changed." : "Entered lengths are used exactly — no allowance or rounding."} />
+        help={timber ? "Each cut is bought as the next stock length (1200, 1500, 1800 …) — the cut itself isn't changed." : "Entered lengths are used exactly — no allowance or rounding."} />
       <NumberField label="Qty" unit="pcs" integer min={1} max={10000} value={qty} onCommit={setQty} />
       <Btn kind="primary" disabled={!len || !qty} onClick={() => { onAdd(len, qty); setLen(null); setQty(1); }}>Add</Btn>
     </div>

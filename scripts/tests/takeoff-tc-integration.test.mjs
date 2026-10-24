@@ -201,7 +201,7 @@ await t("spares are added on top of the layout quantity and shown separately", (
 await t("a timber trim run with a corner is TWO pieces (one per straight leg), never one bent member", () => {
   const trim = { id: "tr", name: "Trim", methodKey: "linear_stock", methodVersion: 1, spec: { family: "timber", purpose: "trim", section: { depthMm: 42, widthMm: 19 }, grade: "Merbau", treatment: "untreated" }, rules: {} };
   const c = computeWorkspace(ws({ materials: [trim], measurements: [path("p", [3000, 2000])], contributions: [con("c", "p", "tr")] }));
-  assert.deepEqual(summary(linesOf(c, "tr")), ["1 piece @2400", "1 piece @3000"]);
+  assert.deepEqual(summary(linesOf(c, "tr")), ["1 piece @2100", "1 piece @3000"]); // 2,000 → 2,100 on the 300 mm timber grid
 });
 await t("a raked wall may start at 0 mm (triangle) — only an absent height is missing", () => {
   const w = j2(); w.measurements[0].inputs = { kind: "rake", widthMm: 4800, startHeightMm: 0, endHeightMm: 2700, name: "Tri" }; w.measurements.pop();
@@ -235,7 +235,7 @@ await t("QO-02/SEC-03: two materials with the same product never share a bucket"
 await t("QO-03/SEC-02: entered lengths on rafters are ordered; a kind the method can't read is a blocking problem (never dropped)", () => {
   const w = j1(); w.measurements.push({ id: "man", kind: "manual", finishedLengthMm: 2000, quantity: 2 }); w.contributions.push(con("cm2", "man", "tim"));
   const c = computeWorkspace(w);
-  assert.deepEqual(summary(linesOf(c, "tim")), ["18 piece @5400", "2 piece @2400"]);
+  assert.deepEqual(summary(linesOf(c, "tim")), ["18 piece @5400", "2 piece @2100"]); // 2,000 → 2,100 on the 300 mm timber grid
   const w2 = j1(); w2.measurements.push({ id: "wl", kind: "wall", inputs: { kind: "rect", widthMm: 3000, heightMm: 2400 } }); w2.contributions.push(con("cw", "wl", "tim", "wall"));
   const c2 = computeWorkspace(w2);
   assert.ok(c2.materialResults.tim.problems.some((p) => p.code === "measurement_unused" && p.blocking));

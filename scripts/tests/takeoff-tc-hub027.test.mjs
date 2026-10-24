@@ -1,7 +1,7 @@
 // Hub review HUB 027 — timber "Size and grade" choices per purpose (owner, 21 Oct 2026). Pure rules from
 // shared/takeoff/engine/families.js: the stated choices, a pick fills section + grade together (never a treatment,
 // never an LVL grade), a saved company product fills its own identity exactly as saved, the list shows the choice the
-// saved fields match (nothing new stored), and measurements / the 1200 + 600n grid are unchanged. The server keeps
+// saved fields match (nothing new stored), and measurements / the 1200 + 300n grid (Sam, 25 Oct 2026; HUB 028) are unchanged. The server keeps
 // these fields (takeoff-api.test.mjs "TC J1"); the screens are in e2e/ui-review/tc-catalogue.spec.js ("HUB 027").
 //   node scripts/tests/takeoff-tc-hub027.test.mjs
 import assert from "node:assert/strict";
@@ -15,7 +15,7 @@ function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE)
 
 const labels = (purpose) => timberPresetsFor(purpose).map(timberPresetLabel);
 /** The spec Add timber creates (TakeoffApp addTimber), with the purpose tapped. */
-const addTimber = (purpose) => ({ family: "timber", purpose, section: {}, stock: { kind: "grid", minMm: 1200, incrementMm: 600 } });
+const addTimber = (purpose) => ({ family: "timber", purpose, section: {}, stock: { kind: "grid", minMm: 1200, incrementMm: 300 } });
 const preset = (purpose, label) => timberPresetsFor(purpose).find((p) => timberPresetLabel(p) === label);
 
 t("each purpose offers its stated choices (no treatment, no built-in LVL)", () => {
@@ -41,7 +41,7 @@ t("each purpose offers its stated choices (no treatment, no built-in LVL)", () =
 });
 
 t("fills section and grade together; treatment, plies, sizing and stock unchanged (a product's hidden species is cleared)", () => {
-  const before = { ...addTimber("studs"), treatment: "H2", species: "Radiata pine", plies: 2, sizing: { provenance: "manual", reference: null }, stock: { kind: "grid", minMm: 1200, incrementMm: 600, maxMm: 6000 } };
+  const before = { ...addTimber("studs"), treatment: "H2", species: "Radiata pine", plies: 2, sizing: { provenance: "manual", reference: null }, stock: { kind: "grid", minMm: 1200, incrementMm: 300, maxMm: 6000 } };
   const after = applyTimberPreset(before, preset("studs", "90 × 45 MGP10"));
   assert.deepEqual(after.section, { depthMm: 90, widthMm: 45 });
   assert.equal(after.grade, "MGP10");
@@ -50,8 +50,8 @@ t("fills section and grade together; treatment, plies, sizing and stock unchange
   assert.deepEqual(before.section, {}, "the input is not mutated");
   const n = normaliseFamilySpec(after);
   assert.equal(n.sizing.provenance, "manual");
-  assert.deepEqual([n.stock.kind, n.stock.minMm, n.stock.incrementMm], ["grid", 1200, 600]);
-  assert.deepEqual(TIMBER_GRID, { kind: "grid", minMm: 1200, incrementMm: 600 });
+  assert.deepEqual([n.stock.kind, n.stock.minMm, n.stock.incrementMm], ["grid", 1200, 300]);
+  assert.deepEqual(TIMBER_GRID, { kind: "grid", minMm: 1200, incrementMm: 300 });
   // straight from Add timber: the only thing still missing to order is the treatment (never filled by a built-in row)
   const fresh = applyTimberPreset(addTimber("studs"), preset("studs", "90 × 45 MGP10"));
   assert.deepEqual(familyProblems(fresh).map((p) => p.message), ["Enter the treatment (or \"untreated\")."]);
@@ -137,7 +137,7 @@ t("matchTimberChoice: the preset id for 90 × 45 MGP10, 'custom' for 140 × 45, 
   assert.equal(matchTimberChoice({ ...b, treatment: "H4" }, [], products), "custom");
 });
 
-t("existing measurements and the 1200 + 600n grid are unchanged by a pick; only the identity changes", () => {
+t("existing measurements and the 1200 + 300n grid are unchanged by a pick; only the identity changes", () => {
   const mat = (spec) => ({ id: "st", name: "Studs", methodKey: "wall_frame", methodVersion: 1, spec, rules: { centresMm: 600, studHeightMm: 2700 } });
   const typed = { ...addTimber("studs"), section: { depthMm: 90, widthMm: 35 }, grade: "MGP10", treatment: "H2" };
   const snap = (spec) => ({ workspace: { id: "w", name: "t", revision: 1, state: "active", owner: { carpentryJobId: "j" } }, documents: [], calibrations: [],
@@ -151,8 +151,8 @@ t("existing measurements and the 1200 + 600n grid are unchanged by a pick; only 
   const rows = (c) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes("st")).map((l) => [l.quantity, l.unit, l.finishedLengthMm]);
   assert.ok(rows(before).length > 0, "the wall produces studs");
   assert.deepEqual(rows(after), rows(before));
-  for (const [, , len] of rows(after)) assert.ok(len >= 1200 && (len - 1200) % 600 === 0, `${len} on the 1200 + 600n grid`);
-  assert.deepEqual(rows(after), [[9, "piece", 3000]], "4,800 wall @600 → 9 studs of 2,700 cut from 3,000");
+  for (const [, , len] of rows(after)) assert.ok(len >= 1200 && (len - 1200) % 300 === 0, `${len} on the 1200 + 300n grid`);
+  assert.deepEqual(rows(after), [[9, "piece", 2700]], "4,800 wall @600 → 9 studs of 2,700, each bought as a 2,700 length");
   // the identity (what is bought) is the only change
   const key = (c) => c.scheduleLines.find((l) => l.jobMaterialIds.includes("st")).specKey;
   assert.match(key(before), /90x35/);

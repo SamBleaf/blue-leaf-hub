@@ -22,7 +22,7 @@ const ANGLE_BLACK = { ...ANGLE, finish: "black anodised" };
 const ANGLE_40 = { ...ANGLE, profile: { shape: "equal-angle", aMm: 40, bMm: 40, tMm: 3 } };
 const ALU = { kind: "fixed", lengthMm: 6500, kerfMm: 3, kerfConfirmed: true, endTrimMm: 0, finalEndAcceptable: false, sharePieces: true, minRetainedOffcutMm: 300 };
 const TIMBER = { family: "timber", section: { depthMm: 90, widthMm: 45 }, grade: "mgp10", treatment: "h2", species: null };
-const GRID = { kind: "grid", minMm: 1200, incrementMm: 600 }; // owner-confirmed timber grid (12)
+const GRID = { kind: "grid", minMm: 1200, incrementMm: 600 }; // a 1200 + 600 test grid (the owner timber grid until 25 Oct 2026, now TIMBER_GRID 1200 + 300); stock.js takes any grid
 const alu = (id, lengthMm, over = {}) => ({ id, kind: "linear", unit: "piece", lengthMm, quantity: 1, identity: ANGLE, stockPolicy: ALU, label: id, ...over });
 const one = (r) => { assert.equal(r.groups.length, 1, "one group"); return r.groups[0]; };
 const cutIds = (g) => g.bars.flatMap((b) => b.cuts.map((c) => c.cutId));
@@ -46,7 +46,7 @@ t("fixtures STOCK-* (4) via selectStock: grid, availability and maximum", () => 
     }
   }
 });
-t("fixtures TIM-min-grid-* (6) via selectStock on the 1200/600 grid", () => {
+t("fixtures TIM-min-grid-* (6) via selectStock on the 1200/300 timber grid", () => {
   const cases = fixtures("TIM-min-grid-");
   assert.equal(cases.length, 6);
   for (const c of cases) assert.equal(selectStock(c.input.need, { kind: "grid", minMm: c.input.min, incrementMm: c.input.increment }).stockMm, c.expected, c.id);

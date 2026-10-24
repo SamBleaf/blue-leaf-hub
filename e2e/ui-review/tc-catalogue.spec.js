@@ -575,12 +575,12 @@ test("Accessories: sealant volume needs bead size + count; cartridges need the p
 });
 
 // ── timber + aluminium cards (same auto-apply / undo plumbing) ─────────────────────────────────────────────
-test("Timber setup: purpose, section, centres and pitch auto-apply; stock is the 1200 + 600 grid; size stays a manual selection", async ({ page }) => {
+test("Timber setup: purpose, section, centres and pitch auto-apply; stock is the 1200 + 300 grid; size stays a manual selection", async ({ page }) => {
   await openTakeoff(page);
   await page.getByRole("button", { name: "Add timber" }).click();
   const t = page.locator('[data-setup="timber"]');
   await expect(t).toBeVisible();
-  await expect(t).toContainText("1200 mm, then every 600 mm");
+  await expect(t).toContainText("1200 mm, then every 300 mm"); // Sam, 25 Oct 2026: all timber in 300 mm steps
   await expect(t).toContainText("The app does not check structural adequacy.");
   await enter(t.getByLabel("Section depth"), 90);
   await enter(t.getByLabel("Section width"), 45);
@@ -592,7 +592,7 @@ test("Timber setup: purpose, section, centres and pitch auto-apply; stock is the
   // unavailable lengths may only REMOVE grid lengths — an off-grid entry is refused and nothing is saved
   const unavailable = t.getByLabel("Grid lengths this supplier doesn't stock (optional)");
   await enter(unavailable, "6500");
-  await expect(t).toContainText("Only grid lengths (1200, 1800, 2400 …) can be marked unavailable");
+  await expect(t).toContainText("Only grid lengths (1200, 1500, 1800 …) can be marked unavailable");
   await enter(unavailable, "6600");
   await expect.poll(async () => (await genericMaterial(page)).spec.stock.unavailableMm).toEqual([6600]);
   await t.locator('[data-chips="purpose"]').getByRole("button", { name: "Studs" }).click();

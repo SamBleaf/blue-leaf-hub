@@ -196,6 +196,8 @@ const generic = (key, version, label, families, roles, outputs) => Object.freeze
 const GENERIC = [
   generic("repeated_members", 2, "Timber — repeated members (rafters, joists, battens)", ["timber"], ["distribution", "member", "manual", "count"], ["linearDemands"]),
   generic("wall_frame", 1, "Timber — stud wall frame", ["timber"], ["wall", "opening", "distribution", "manual"], ["linearDemands"]),
+  // HUB 028 Walls: one item, traced walls only (openings sit on the walls); studs, plates and noggins worked out together
+  generic("wall_framing", 1, "Timber — walls (studs, plates and noggins together)", ["timber"], ["wall"], ["linearDemands", "allocation"]),
   generic("linear_stock", 1, "Linear stock — plates, noggins, trim, aluminium profiles", ["timber", "aluminium"], ["primary", "path", "opening", "wall", "manual", "count", "offcut"], ["linearDemands", "allocation"]),
   generic("sheet_layout", 2, "Cladding — sheet layout (Axon, Rendex)", ["cladding", "foam"], ["wall", "opening", "surface"], ["sheetDemands", "layout"]),
   generic("course_layout", 1, "Cladding — horizontal/vertical courses (Linea, Stria, timber boards)", ["cladding", "timber-cladding"], ["wall", "opening", "surface"], ["linearDemands", "layout"]),

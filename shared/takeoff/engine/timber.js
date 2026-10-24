@@ -8,7 +8,7 @@
 //                        restarts its own grid; connected parts selected as one run share one grid.
 //  T2 memberLength       projected ÷ cos(pitch) | true / entered (already sloped — never pitched again) |
 //                        clear span + labelled overhangs (exclusive mode). ONE explicit allowance, default 0.
-//  T3 stock              NOT selected here. Linear demands carry the owner grid (1200 + 600n, product max and
+//  T3 stock              NOT selected here. Linear demands carry the owner grid (1200 + 300n, product max and
 //                        unavailable lengths, plus any entered kerf / end trim) for engine/allocator.js;
 //                        structural members are noSplice. Any other stock setting is rejected, never ignored.
 //  T4 computeStudWall    real stations; full studs strictly inside an opening are removed; opening framing
@@ -30,12 +30,16 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
+import { TIMBER_GRID } from "./families.js";
 
 /** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
 const GEOM_TOL_MM = 0.001;
 
-/** Owner-confirmed timber stock grid (12): 1200 mm then 600 mm steps for every supplier. Not configurable. */
-export const TIMBER_STOCK_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 600 });
+/** Owner timber stock grid for every supplier: 1,200 mm then 300 mm steps (Sam, 25 Oct 2026; 600 mm steps before).
+ *  Not configurable. The same object as engine/families.js TIMBER_GRID, its one definition. */
+export const TIMBER_STOCK_GRID = TIMBER_GRID;
+/** "1,200 mm then 300 mm steps" — how the grid reads in a message. */
+const GRID_TEXT = `${formatMm(TIMBER_GRID.minMm, 0)} mm then ${formatMm(TIMBER_GRID.incrementMm, 0)} mm steps`;
 
 /** Proposed safeguard (06): generated members per wall or item. Excess is rejected, never truncated. */
 export const MAX_GENERATED_PER_WALL = 5000;
@@ -238,7 +242,7 @@ const onGrid = (l) => {
 };
 
 /**
- * T3 stock policy for new timber (allocated by engine/allocator.js, not here). The 1200/600 grid is fixed;
+ * T3 stock policy for new timber (allocated by engine/allocator.js, not here). The 1200/300 grid is fixed;
  * a product may only restrict it (maxMm, unavailable grid lengths). maxMm stays null when unknown — no
  * implied 6 m or unlimited maximum. sharePieces false = one stock length per member (structural default).
  * The allocator's cutting-loss fields (kerfMm, endTrimMm, minRetainedOffcutMm ≥ 0; kerfConfirmed,
@@ -251,17 +255,17 @@ const onGrid = (l) => {
 export function timberStockPolicy(opts = {}) {
   if (!opts || typeof opts !== "object" || Array.isArray(opts)) fail("Stock settings are invalid.", "stock");
   const unknown = Object.keys(opts).filter((k) => !STOCK_KEYS.has(k) && opts[k] !== undefined);
-  if (unknown.length) fail(`Timber stock has no “${unknown.join("”, “")}” setting — it is 1,200 mm then 600 mm steps, restricted only by the product maximum and unavailable lengths.`, "stock");
+  if (unknown.length) fail(`Timber stock has no “${unknown.join("”, “")}” setting — it is ${GRID_TEXT}, restricted only by the product maximum and unavailable lengths.`, "stock");
   const { kind, minMm, incrementMm, unavailableMm } = opts;
   if ((kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
     || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm)) {
-    fail("Timber stock is 1,200 mm then 600 mm steps for every supplier — restrict it with the product maximum or unavailable lengths instead.", "stock");
+    fail(`Timber stock is ${GRID_TEXT} for every supplier — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   }
   const maxMm = opts.maxMm ?? null;
   if (maxMm !== null) num(maxMm, "Longest stock", { min: TIMBER_STOCK_GRID.minMm });
   const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").map((l) => {
     num(l, "Unavailable length", { min: TIMBER_STOCK_GRID.minMm });
-    if (!onGrid(l)) fail(`${fmt(l)} mm is not a timber stock length (1,200 mm then 600 mm steps).`, "unavailableMm");
+    if (!onGrid(l)) fail(`${fmt(l)} mm is not a timber stock length (${GRID_TEXT}).`, "unavailableMm");
     return l;
   }))].sort((x, y) => x - y);
   const cutting = {};
@@ -312,7 +316,7 @@ function setup(input, role) {
   if (stockPolicy.maxMm === null) {
     ctx.problems.push(problem("stock_max_unset", "The longest available stock isn't set for this product — confirm it before ordering.", { blocking: false }));
   }
-  ctx.explain.push(`Stock: 1,200 mm then 600 mm steps${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
+  ctx.explain.push(`Stock: ${GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
     + `${stockPolicy.unavailableMm.length ? `, unavailable ${stockPolicy.unavailableMm.map(fmt).join("/")} mm` : ""}`
     + `${stockPolicy.kerfMm !== undefined ? `, kerf ${fmt(stockPolicy.kerfMm)} mm${stockPolicy.kerfConfirmed ? "" : " (unconfirmed)"}` : ""}`
     + `${stockPolicy.endTrimMm !== undefined ? `, end trim ${fmt(stockPolicy.endTrimMm)} mm` : ""}; `

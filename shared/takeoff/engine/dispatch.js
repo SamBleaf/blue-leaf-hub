@@ -4,7 +4,7 @@
 //
 // Flashing keeps schedule.js's own path. Every other family (engine/families.js) comes through here:
 //   timber      repeated_members@2 (rafters/joists/battens), wall_frame@1 (studs), linear_stock@1 (plates,
-//               noggins, trim, other members, manual/count entries)
+//               noggins, trim, other members, manual/count entries), wall_framing@1 (HUB 028 Walls: reads walls only)
 //   aluminium   linear_stock@1 — window three-edge preset per opening + measured runs, pooled into 6500 bars
 //   cladding    sheet_layout@2 / course_layout@1 / panel_grid@1 / aac_panel_layout@1 / area_to_linear@2
 //   batten      support_grid@1;  accessory  accessory_routes@1
@@ -16,7 +16,7 @@
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
-import { FAMILIES, familyIdentity, familyProblems, normaliseFamilySpec, stockIdentityKey } from "./families.js";
+import { FAMILIES, TIMBER_GRID, familyIdentity, familyProblems, normaliseFamilySpec, stockIdentityKey } from "./families.js";
 import { computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
@@ -41,6 +41,9 @@ const fmt = (mm) => formatMm(mm, 1);
 export function methodReads(mat) {
   const fam = mat?.spec?.family;
   if (fam === "timber") {
+    // HUB 028 Walls: traced walls only (a run, count or entered length can't be put on Walls; extra members go on a
+    // separate Timber item)
+    if (mat.methodKey === "wall_framing") return ["wall"];
     if (mat.methodKey === "repeated_members") return ["distribution", "run", "polyline", "member", "manual", "count"];
     if (mat.methodKey === "wall_frame") return ["wall", "manual", "count"];
     const purpose = mat.spec?.purpose;
@@ -591,10 +594,11 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       continue;
     }
     if (d.kind === "linear") {
-      // ordered stock (the user's own supplier cut list) or a linear demand with no policy: buy as entered
+      // ordered stock (the user's own supplier cut list) or a linear demand with no policy: buy as entered. A TIMBER
+      // material's linear demand that carries no policy is bought on the owner timber grid (the one definition)
       const L = d.lengthMm;
       if (d.lengthKind !== "orderedStock" && d.stockPolicy == null && n.family === "timber") {
-        const s = selectStock(L, { kind: "grid", minMm: 1200, incrementMm: 600, maxMm: n.stock?.maxMm ?? null, unavailableMm: n.stock?.unavailableMm || [] });
+        const s = selectStock(L, { ...TIMBER_GRID, maxMm: n.stock?.maxMm ?? null, unavailableMm: n.stock?.unavailableMm || [] });
         if (s.stockMm == null) { sink.problems.push({ code: "unavailable_stock", message: `${d.label || "A piece"}: ${s.message}`, blocking: true }); continue; }
         add(`piece|${s.stockMm}|${identityKey(d.identity)}`, "piece", d.quantity, s.stockMm, { description: `${itemText(d, n, recipeLabels)} — ${fmt(s.stockMm)} mm length`, stockLengthMm: s.stockMm }, [d.id], d.identity);
       } else add(`piece|${L}|${identityKey(d.identity)}`, d.unit === "bar" ? "bar" : "piece", d.quantity, L, { description: `${itemText(d, n, recipeLabels)} — ${fmt(L)} mm length${d.lengthKind === "orderedStock" ? " (as entered)" : ""}`, stockLengthMm: L }, [d.id], d.identity);

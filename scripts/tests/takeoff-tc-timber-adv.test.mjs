@@ -120,7 +120,7 @@ t("12: need 4,801 with product maximum 4,800 → unavailable, never clamped to 4
 });
 t("12: an unavailable grid length is skipped to the next grid length, never an off-grid one", () => {
   const d = rafters({ stock: { maxMm: 7200, unavailableMm: [5400] } }).demands[0];
-  assert.equal(stockFor(d), 6000);
+  assert.equal(stockFor(d), 5700); // the next 300 mm step (was 6,000 on 600 mm steps)
 });
 
 // ── defect: cutting-loss settings were silently dropped (T6 kerf / end trim) ──
@@ -141,12 +141,13 @@ t("defect: cutting-loss settings are validated (negative kerf, non-boolean confi
 
 // ── defect: other stock settings were silently ignored (T3 "not silently") ───
 t("defect: a stock list, fixed length or unknown stock key is rejected, never silently replaced by the grid", () => {
-  invalid(rafters({ stock: { kind: "list", lengthsMm: [3000, 6000] } }), /1,200 mm then 600 mm/);
+  invalid(rafters({ stock: { kind: "list", lengthsMm: [3000, 6000] } }), /1,200 mm then 300 mm/);
   invalid(rafters({ stock: { lengthsMm: [3000, 6000] } }));
   invalid(rafters({ stock: { kind: "fixed", lengthMm: 6000 } }));
   invalid(rafters({ stock: { maxmm: 6000 } }), /maxmm/);
   assert.throws(() => timberStockPolicy(null));
-  assert.equal(timberStockPolicy({ kind: "grid", minMm: 1200, incrementMm: 600 }).kind, "grid", "restating the grid is fine");
+  assert.equal(timberStockPolicy({ kind: "grid", minMm: 1200, incrementMm: 300 }).kind, "grid", "restating the grid is fine");
+  invalid(rafters({ stock: { kind: "grid", minMm: 1200, incrementMm: 600 } }), /1,200 mm then 300 mm/); // the old 600 mm steps are refused
 });
 
 // ── defect: an explicit sharePieces in stock settings was overridden ─────────
@@ -255,7 +256,7 @@ t("defect: a manual member line takes an individual projected length + its own p
   const d = r.demands[0];
   close(d.lengthMm, 3000 / Math.cos((21.4 * Math.PI) / 180) + 50);
   assert.deepEqual([d.quantity, d.role, d.lengthKind, d.noSplice, d.provenance], [2, "hip", LENGTH_KINDS.CUT, true, "manual"]);
-  assert.equal(stockFor(d), 3600);
+  assert.equal(stockFor(d), 3300); // 3,272.6 on the 300 mm grid (was 3,600 on 600 mm steps)
   assert.equal(manual([{ id: "J", kind: "member", quantity: 1, member: { mode: "true", lengthMm: 2000, pitchDeg: 45 } }]).demands[0].lengthMm, 2000, "true length never pitched");
   invalid(manual([{ id: "H", kind: "member", quantity: 1, member: { mode: "projected", lengthMm: 3000, pitchDeg: 20, allowanceMm: 50 } }], { allowanceMm: 50 }), /once/);
   invalid(manual([{ id: "H", kind: "member", quantity: 1, member: { mode: "projected", lengthMm: 3000 } }]), /Pitch/);
@@ -381,7 +382,7 @@ t("T3 every structural demand is noSplice with one stock piece each; no maximum 
   }
 });
 t("T3 the grid cannot be bent: off-grid unavailable, max below 1,200, NaN max", () => {
-  for (const s of [{ unavailableMm: [1500] }, { unavailableMm: [600] }, { maxMm: 1199 }, { maxMm: Number.NaN }, { unavailableMm: "4800" }]) invalid(rafters({ stock: s }));
+  for (const s of [{ unavailableMm: [1400] }, { unavailableMm: [600] }, { maxMm: 1199 }, { maxMm: Number.NaN }, { unavailableMm: "4800" }]) invalid(rafters({ stock: s }));
 });
 
 // ── T4 / TIM02 ───────────────────────────────────────────────────────────────
@@ -458,7 +459,7 @@ t("T5 plates: one piece per layer, never aggregate LM; joints need the detail an
 t("T7 count markers: shared length grouped, per-marker lengths in their own labelled group, all cut-kind", () => {
   const r = shape(manual([{ id: "C", kind: "count", lengthMm: 900, markers: [{ id: "1" }, { id: "2", lengthMm: 1300 }, { id: "3" }] }]));
   assert.deepEqual(r.demands.map((d) => [d.quantity, d.lengthMm, d.lengthKind]), [[2, 900, "cut"], [1, 1300, "cut"]]);
-  assert.deepEqual(r.demands.map(stockFor), [1200, 1800]);
+  assert.deepEqual(r.demands.map(stockFor), [1200, 1500]);
   invalid(manual([{ id: "C", kind: "count", lengthMm: 900, markers: [{ id: "1" }, { id: "1" }] }]), /listed twice/);
 });
 

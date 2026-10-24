@@ -2,7 +2,7 @@
 // shared/takeoff/engine/stock.js — which NEW stock length a linear need buys (TC-R04 03 §T3, 11, 12 §Timber stock).
 //
 // A StockPolicy (engine/contract.js) names the permitted new stock lengths:
-//   grid   timber: max(min, ceil(L / inc) × inc) = min + n·inc — owner-confirmed 1200 + 600n for every supplier
+//   grid   timber: max(min, ceil(L / inc) × inc) = min + n·inc — owner-confirmed 1200 + 300n for every supplier
 //          (12). The minimum must be a whole number of increments (otherwise the two forms disagree).
 //          `unavailableMm` may only REMOVE grid lengths (the next available grid length is taken); an
 //          off-grid entry is ignored, never introduced. `maxMm` is explicit; null = no product maximum

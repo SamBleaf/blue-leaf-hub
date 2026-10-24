@@ -1122,13 +1122,14 @@ export const CATALOGUE_SEED = Object.freeze({
  ],
  "timberOrderingPolicy": {
   "minLengthMm": 1200,
-  "incrementMm": 600,
+  "incrementMm": 300,
   "rounding": "up",
   "scope": "all-suppliers-timber",
   "maxLengthMm": null,
   "availabilityMayRestrictGrid": true,
   "sourceRefs": [
-   "OWNER-2026-10-14"
+   "OWNER-2026-10-14",
+   "OWNER-2026-10-25"
   ]
  },
  "preferredSystems": {

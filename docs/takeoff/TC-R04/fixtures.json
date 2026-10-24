@@ -47,7 +47,7 @@
         "length": 4500,
         "pitch": 30,
         "allowance": 100,
-        "increment": 600
+        "increment": 300
       },
       "expected": 5400
     },
@@ -59,7 +59,7 @@
         "length": 4500,
         "pitch": 30,
         "allowance": 100,
-        "increment": 600
+        "increment": 300
       },
       "expected": 4800
     },
@@ -376,7 +376,7 @@
       "kind": "stock",
       "input": {
         "need": 500,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
       "expected": 1200
@@ -386,7 +386,7 @@
       "kind": "stock",
       "input": {
         "need": 1199,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
       "expected": 1200
@@ -396,7 +396,7 @@
       "kind": "stock",
       "input": {
         "need": 1200,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
       "expected": 1200
@@ -406,17 +406,17 @@
       "kind": "stock",
       "input": {
         "need": 1200.1,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
-      "expected": 1800
+      "expected": 1500
     },
     {
       "id": "TIM-min-grid-1800",
       "kind": "stock",
       "input": {
         "need": 1800,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
       "expected": 1800
@@ -426,10 +426,10 @@
       "kind": "stock",
       "input": {
         "need": 1800.1,
-        "increment": 600,
+        "increment": 300,
         "min": 1200
       },
-      "expected": 2400
+      "expected": 2100
     },
     {
       "id": "TIM-cover90",

@@ -1639,6 +1639,43 @@ await t("HUB 026: an aluminium side measured on a scaled elevation keeps its cut
   assert.equal(await rev(), before, "nothing saved");
 });
 
+await t("HUB 028 step 2: a Walls item (wall_framing@1) keeps its four parts (part stock included) and rules on the REAL server; it reads walls only", async () => {
+  const { normaliseFamilySpec, wallFramingDefaults, TIMBER_GRID } = await import("../../shared/takeoff/index.js");
+  const w = id(), walls = id(), wall = id(), man = id(), cw = id();
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB028" })).status, 200);
+  const spec = wallFramingDefaults([]);
+  // what a pick in the fold could write: a treatment, the noggins' own longest length and "not stocked" lengths (4,850 is
+  // off the 300 mm grid, so the server drops it); junk at the top and an unknown part are dropped too
+  const sent = { ...spec, junk: "x", components: { ...spec.components, extra: { section: { depthMm: 1 } },
+    noggins: { ...spec.components.noggins, treatment: "H2", supplierName: "Yard A", stock: { maxMm: 5400, unavailableMm: [4800, 4850] } } } };
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec: sent, rules: { centresMm: 450, doubleTopPlate: true } }] },
+    measurements: { upsert: [{ id: wall, kind: "wall", inputs: { kind: "rect", widthMm: 6000, heightMm: 2700, name: "Wall 1" } }] },
+    contributions: { upsert: [{ id: cw, measurementId: wall, jobMaterialId: walls, role: "wall" }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const kept = (await S(`/workspaces/${w}`)).data.snapshot.materials.find((m) => m.id === walls); // a reload
+  assert.deepEqual(kept.spec, normaliseFamilySpec(sent), "the server keeps exactly the normalised Walls spec");
+  assert.deepEqual(kept.spec, normaliseFamilySpec(kept.spec), "a fixed point");
+  assert.equal(kept.spec.purpose, "walls", "never turned into 'other'");
+  assert.deepEqual(Object.keys(kept.spec.components).sort(), ["longPlates", "noggins", "plates", "studs"]); // jsonb keeps no key order
+  assert.deepEqual(kept.spec.components.noggins.stock, { maxMm: 5400, unavailableMm: [4800] });
+  assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.longPlates.grade], [6000, 11000, "LVL"]);
+  assert.equal(kept.spec.junk, undefined);
+  assert.deepEqual(kept.spec.stock, { ...TIMBER_GRID, maxMm: null, unavailableMm: [] });
+  assert.deepEqual([kept.methodKey, kept.methodVersion, kept.rules], ["wall_framing", 1, { centresMm: 450, doubleTopPlate: true }]);
+  const row = (await q("SELECT method_key, spec, rules FROM takeoff_job_materials WHERE id=$1", [walls])).rows[0];
+  assert.deepEqual([row.method_key, row.spec.components, row.rules], ["wall_framing", kept.spec.components, kept.rules]);
+  // a Walls item reads traced walls only: an entered length is refused, nothing saved
+  const before = await rev();
+  const bad = await SP(`/workspaces/${w}/commit`, { expectedRevision: before, changes: {
+    measurements: { upsert: [{ id: man, kind: "manual", finishedLengthMm: 2400, quantity: 2 }] },
+    contributions: { upsert: [{ id: id(), measurementId: man, jobMaterialId: walls, role: "primary" }] } } });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.data.error, "Walls can't use a manual measurement — assign it to the right material.");
+  assert.equal(await rev(), before, "nothing saved");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

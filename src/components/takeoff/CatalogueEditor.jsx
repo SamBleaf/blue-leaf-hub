@@ -17,7 +17,7 @@
 //   onChange  every valid edit (draft content)        onSave(content) — the caller saves a company version
 // =============================================================================
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, describeFamilySpec, familyProblems, methodFor, normaliseFamilySpec, productionMethods } from "../../../shared/takeoff/index.js";
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_PURPOSES, describeFamilySpec, familyProblems, methodFor, normaliseFamilySpec, productionMethods } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
 import { AccessoryRecipeEditor, AssemblyName, CarriedFlags, Chips, CommitText, KeyboardSafe, LengthList, NumberField, ProductPicker, ReviewBadge, SourcePicker, SourceRefs, StatusRow,
@@ -50,7 +50,7 @@ const GROUPS = [["product", "Product"], ["ordering", "Ordering"], ["installation
 const REVIEW_STATES = [["candidate", "Candidate"], ["checked", "Transcription checked"], ["reviewed", "Reviewed"]];
 
 function freshSpec(family) {
-  if (family === "timber") return { family, purpose: "rafters", section: {}, stock: { kind: "grid", minMm: 1200, incrementMm: 600 } };
+  if (family === "timber") return { family, purpose: "rafters", section: {}, stock: { ...TIMBER_GRID } };
   if (family === "aluminium") return aluminiumPreset();
   if (family === "foam") return { family, layout: "sheet", orientation: "vertical", assemblyId: "rendex-eps", coating: null, product: { manufacturer: "Rendex", name: null, sourceRefs: ["F01", "F02"] } };
   if (family === "timber-cladding") return { family, layout: "course", orientation: "horizontal", supply: "random", endCondition: "square", product: { name: null, effectiveCoverMm: null, sourceRefs: [] } };
@@ -364,7 +364,7 @@ export default function CatalogueEditor({ value, onChange, onSave, onCancel, can
           {fam === "timber" ? (
             <fieldset className="space-y-2 rounded-lg border border-hairline p-2">
               <legend className="px-1 text-xs font-semibold text-ink">Stock</legend>
-              <p className="text-sm text-ink">1200 mm, then every 600 mm — the same grid at every supplier (owner setting).</p>
+              <p className="text-sm text-ink">1200 mm, then every 300 mm — the same grid at every supplier (owner setting).</p>
               <NumberField label="Longest available length" value={s.stock?.maxMm} onCommit={(n) => setSpec({ stock: { ...s.stock, maxMm: n } })} />
               <LengthList label="Grid lengths this supplier doesn't stock" values={s.stock?.unavailableMm} placeholder="e.g. 6600" onCommit={(v) => setSpec({ stock: { ...s.stock, unavailableMm: v } })}
                 help="Availability can only remove grid lengths — never add off-grid ones." />
@@ -387,7 +387,7 @@ export default function CatalogueEditor({ value, onChange, onSave, onCancel, can
             <>
               <LengthList label={fam === "aac" || fam === "foam" || fam === "cladding" ? "Listed lengths / heights" : "Stock lengths"} values={s.product?.lengthsMm}
                 onCommit={(v) => setProduct({ lengthsMm: v, lengthMm: v.length === 1 ? v[0] : null, skus: (s.product?.skus || []).filter((k) => v.includes(k.lengthMm)) })}
-                help="Manufactured boards keep their product sizes — the timber 1200/600 grid does not apply." />
+                help={`Manufactured boards keep their product sizes. The timber grid (${TIMBER_GRID.minMm} mm, then every ${TIMBER_GRID.incrementMm} mm) does not apply.`} />
               {(s.product?.lengthsMm || []).length > 1 && (
                 <div className="grid grid-cols-2 gap-2" data-sku-per-length="">
                   {(s.product.lengthsMm || []).map((L) => (

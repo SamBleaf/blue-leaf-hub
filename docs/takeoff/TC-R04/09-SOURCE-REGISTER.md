@@ -190,8 +190,12 @@ Official source for technical manual and separate coating-system documents. Full
 
 ## OWNER-2026-10-14 clarification
 
-Walsc AAC; Rendex foam; supplier/product configurable effective covers; timber stock1200 mm minimum then600 mm increments for all suppliers. These are confirmed company settings, not a claim of universal market availability.
+Walsc AAC; Rendex foam; supplier/product configurable effective covers; timber stock1200 mm minimum then600 mm increments for all suppliers. These are confirmed company settings, not a claim of universal market availability. The timber 600 mm increments are superseded by OWNER-2026-10-25 (300 mm steps).
 
 ## OWNER-2026-10-14 continuous flashing interaction
 
 Owner requests single-tap corner points, double-tap finish as one site-cut/folded flashing, and deliberate red-line splitting for overlength runs. Detailed gesture thresholds and legal split-marker behaviour in13 are implementation decisions;9000 mm maximum in examples is illustrative and product-configurable.
+
+## OWNER-2026-10-25 — timber stock in 300 mm steps
+
+Owner decision (Sam, 25 Oct 2026: "Yes, 300 mm steps"). Timber stock is 1200 mm minimum, then 300 mm increments (1200, 1500, 1800 …), for all suppliers and every timber item. It replaces the 600 mm increments of OWNER-2026-10-14. A product's longest length and the lengths it doesn't stock still only restrict the grid. Flashings, cladding sheets, aluminium and the cladding followers keep their own stock rules.

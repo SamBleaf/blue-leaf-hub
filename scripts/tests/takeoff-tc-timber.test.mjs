@@ -52,7 +52,7 @@ function shape(r) {
     assert.ok(["calculated", "manual"].includes(d.provenance));
     assert.ok(Array.isArray(d.sourceRefs) && d.sourceRefs.length);
     if (d.lengthKind === LENGTH_KINDS.ORDERED_STOCK) assert.equal(d.stockPolicy, undefined);
-    else assert.deepEqual([d.stockPolicy.kind, d.stockPolicy.minMm, d.stockPolicy.incrementMm], ["grid", 1200, 600]);
+    else assert.deepEqual([d.stockPolicy.kind, d.stockPolicy.minMm, d.stockPolicy.incrementMm], ["grid", 1200, 300]); // owner grid, Sam 25 Oct 2026
   }
   for (const p of r.problems) assert.ok(p.code && p.message && typeof p.blocking === "boolean");
   return r;
@@ -74,7 +74,7 @@ for (const f of mine) {
         centresMm: a.centres, startOffsetMm: opts.startOffsetMm, endOffsetMm: opts.endOffsetMm, member: { mode: "entered", lengthMm: 3000 } }));
       assert.equal(r.demands.length, f.expected);
     } else {
-      assert.equal(a.increment, TIMBER_STOCK_GRID.incrementMm, "fixture uses the owner 600 grid");
+      assert.equal(a.increment, TIMBER_STOCK_GRID.incrementMm, "fixture uses the owner 300 grid");
       const len = memberLength({ mode: a.mode === "true" ? "true" : "projected", lengthMm: a.length, pitchDeg: a.pitch, allowanceMm: a.allowance });
       assert.equal(gridStock(len.lengthNeededMm), f.expected);
     }
@@ -251,15 +251,15 @@ t("T2 rejects non-positive lengths and negative allowance", () => {
 
 // ── T3 stock policy + TIM03 identity ─────────────────────────────────────────
 t("T3 structural demands carry the owner grid, noSplice and one stock piece each (no allocator here)", () => {
-  for (const d of rafters().demands) assert.deepEqual(d.stockPolicy, { kind: "grid", minMm: 1200, incrementMm: 600, maxMm: 7200, unavailableMm: [], sharePieces: false });
+  for (const d of rafters().demands) assert.deepEqual(d.stockPolicy, { kind: "grid", minMm: 1200, incrementMm: 300, maxMm: 7200, unavailableMm: [], sharePieces: false });
 });
 t("T3 the grid cannot be redefined: another minimum/increment or an off-grid unavailable length is rejected", () => {
-  throwsValidation(() => timberStockPolicy({ incrementMm: 300 }), /600 mm steps/);
+  throwsValidation(() => timberStockPolicy({ incrementMm: 600 }), /1,200 mm then 300 mm steps/); // the old 600 grid is gone too
   throwsValidation(() => timberStockPolicy({ minMm: 900 }));
-  throwsValidation(() => timberStockPolicy({ unavailableMm: [4500] }), /not a timber stock length/);
+  throwsValidation(() => timberStockPolicy({ unavailableMm: [4400] }), /not a timber stock length \(1,200 mm then 300 mm steps\)/);
   throwsValidation(() => timberStockPolicy({ maxMm: 1000 }));
   assert.deepEqual(timberStockPolicy({ unavailableMm: [4800, 4800, 3000] }).unavailableMm, [3000, 4800]);
-  assert.deepEqual(codes(rafters({ stock: { incrementMm: 300 } })), ["invalid_input"]);
+  assert.deepEqual(codes(rafters({ stock: { incrementMm: 600 } })), ["invalid_input"]);
 });
 t("T3 no arbitrary 6 m maximum: an unset product maximum stays null and is flagged (non-blocking)", () => {
   const r = shape(rafters({ stock: undefined }));
@@ -268,7 +268,7 @@ t("T3 no arbitrary 6 m maximum: an unset product maximum stays null and is flagg
   assert.ok(p && p.blocking === false);
   assert.equal(r.status.quantity, "calculated");
 });
-t("T3 same timber settings at two suppliers yield the same 1200/600 grid", () => {
+t("T3 same timber settings at two suppliers yield the same 1200/300 grid", () => {
   const a = rafters({ identity: { ...PINE, supplier: "Supplier A" } }).demands[0].stockPolicy;
   const b = rafters({ identity: { ...PINE, supplier: "Supplier B" } }).demands[0].stockPolicy;
   assert.deepEqual(a, b);

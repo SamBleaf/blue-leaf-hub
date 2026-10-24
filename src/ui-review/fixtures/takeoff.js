@@ -35,6 +35,7 @@ import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
   SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
+  TIMBER_GRID, WALLS_PURPOSE, methodReads, normaliseFamilySpec,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
@@ -137,7 +138,7 @@ function seedMixed() {
   const pt = (x, y) => ({ x: bx + x * k, y: by + y * k });
   const fam = (spec) => { const m = methodFor(spec); return { spec, methodKey: m.key, methodVersion: m.version }; };
   const group = (re) => productGroups({}).find((g) => re.test(g.name));
-  const timber = (purpose) => ({ family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock: { kind: "grid", minMm: 1200, incrementMm: 600 } });
+  const timber = (purpose) => ({ family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock: { ...TIMBER_GRID } });
   state.materials.push(
     { id: "mat-raf", name: "Rafters 90 × 45", ...fam(timber("rafters")), rules: { centresMm: 600, lengthSource: "projected", pitchDeg: 30 }, revision: 1 },
     { id: "mat-axon", name: "Axon cladding", ...fam(specFromGroup(group(/Axon 133 smooth/))), rules: {}, revision: 1 },
@@ -241,6 +242,28 @@ function serverOpeningInputs(i) {
   return out;
 }
 
+/**
+ * Like the server's commit check (every LIVE assignment after the change must be read by its generic material): a
+ * Walls item (wall_framing@1) can't take a run, count or entered length — same message as takeoffService. Only Walls is
+ * checked here, so older review seeds behave as before.
+ */
+function wallsReadProblem(ch) {
+  const merged = (list, ups, archive) => {
+    const out = new Map(list.map((x) => [x.id, x]));
+    for (const r of ups || []) if (r?.id) out.set(r.id, { ...(out.get(r.id) || {}), ...r });
+    for (const id of archive || []) out.delete(id);
+    return out;
+  };
+  const mats = merged(state.materials, ch.materials?.upsert, ch.materials?.archive);
+  const meas = merged(state.measurements, ch.measurements?.upsert, ch.measurements?.archive);
+  for (const c of merged(state.contributions, ch.contributions?.upsert, ch.contributions?.archive).values()) {
+    const cm = mats.get(c.jobMaterialId), mm = meas.get(c.measurementId);
+    if (!cm || !mm || cm.methodKey !== "wall_framing") continue;
+    if (!methodReads(cm).includes(mm.kind)) return `${cm.name} can't use a ${mm.kind} measurement — assign it to the right material.`;
+  }
+  return null;
+}
+
 function applyCommit(body) {
   if (window.__takeoffReviewOffline) throw new TypeError("Failed to fetch"); // simulate a dropped connection
   if (window.__takeoffReviewRefuse) { // simulate a 4xx refusal: a status (expired sign-in), or { status, error, code } (HUB 025)
@@ -267,6 +290,15 @@ function applyCommit(body) {
     livePair.set(rec.id, pair);
     for (const [id, p] of livePair) if (id !== rec.id && p === pair) return fail(409, PROBLEM_TEXT.duplicate_assignment, "DUPLICATE_ASSIGNMENT");
   }
+  // HUB 028, like the server (cleanMaterialContent → normaliseFamilySpec): a Walls spec is kept CLEANED (its four parts,
+  // junk dropped), and a Walls item reads traced walls only (methodReads), checked before anything changes
+  const walls = new Map();
+  for (const m of ch.materials?.upsert || []) {
+    if (m?.spec?.family !== "timber" || m.spec.purpose !== WALLS_PURPOSE) continue;
+    try { walls.set(m.id, normaliseFamilySpec(m.spec)); } catch (e) { return fail(400, e.message, "INVALID"); }
+  }
+  const wallsRead = wallsReadProblem(ch);
+  if (wallsRead) return fail(400, wallsRead, "INVALID");
   try {
     if (ch.workspace) {
       const w = ch.workspace;
@@ -286,6 +318,7 @@ function applyCommit(body) {
       // like the server: the job gets its own COPY of the preset revision (HUB 024: a later job edit never reaches it)
       if (m.fromPreset) { const p = state.presets.find((x) => x.id === m.fromPreset.presetId); return { id: m.id, name: p.name, methodKey: p.methodKey, methodVersion: p.methodVersion, spec: structuredClone(p.spec), rules: structuredClone(p.rules), profile: p.profile ? structuredClone(p.profile) : p.profile, fromPresetId: p.id, fromPresetRevision: p.revision }; }
       // TC-R04 families keep their own rules (centres, pitch, heights …); flashing rules are normalised as before
+      if (walls.has(m.id)) return { ...m, spec: walls.get(m.id), rules: { ...(m.rules || {}) } };
       return m.spec?.family && m.spec.family !== "flashing" ? { ...m, rules: { ...(m.rules || {}) } } : { ...m, rules: normaliseFlashingRules(m.rules) };
     });
     // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft

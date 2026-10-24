@@ -6,15 +6,29 @@
 // (normaliseSpec / fabricationIdentity). Every other family sets spec.family and is normalised here.
 // Product FACTS (dimensions, cover) come from the catalogue snapshot copied into the job material; the
 // installation state stays "source-pending" unless a reviewed rule row / project detail is recorded.
-// Ordering policy is per family: timber 1200 + 600n grid (owner, 12), aluminium fixed 6500 bars with kerf
-// (11), manufactured cladding = listed product sizes (never the timber grid), random timber LM increment.
+// Ordering policy is per family: timber 1200 + 300n grid (owner, 25 Oct 2026; was 1200 + 600n from 14 Oct),
+// aluminium fixed 6500 bars with kerf (11), manufactured cladding = listed product sizes (never the timber grid),
+// random timber LM increment.
+//
+// HUB 028 Walls: one timber item (purpose "walls", method wall_framing@1) holding four parts in spec.components:
+// studs, plates, long plates (90 × 45 LVL, Sam's round 3) and noggins. Each part is a small timber identity with its
+// own longest length; Walls is never a Purpose chip, so "walls" stays out of TIMBER_PURPOSES.
 // =============================================================================
 import { TakeoffValidationError, isFiniteNumber } from "../units.js";
 import { identityKey as identityKeyOf } from "./contract.js";
 
 export const FAMILIES = Object.freeze(["timber", "cladding", "aac", "foam", "timber-cladding", "batten", "aluminium", "accessory"]);
 export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "plates", "noggins", "battens", "trim", "other"]);
-export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 600 });
+/** The owner's timber grid for EVERY supplier and every timber item: 1,200 mm, then 300 mm steps (1,500, 1,800 …).
+ *  Sam, 25 Oct 2026 ("Yes, 300 mm steps"; OWNER-2026-10-25), replacing the 600 mm steps of 14 Oct (OWNER-2026-10-14).
+ *  The ONE definition: engine/timber.js, dispatch.js and the app read it from here. */
+export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300 });
+export const TIMBER_GRID_SOURCE = "OWNER-2026-10-25";
+/** Is this a length on the timber grid (1,200, 1,500, 1,800 …)? Only these can be marked "not stocked". */
+export function onTimberGrid(mm) {
+  const n = Number(mm);
+  return isFiniteNumber(n) && n >= TIMBER_GRID.minMm && (n - TIMBER_GRID.minMm) % TIMBER_GRID.incrementMm === 0;
+}
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
 
 // ── HUB 027: timber size choices per purpose (owner, 21 Oct 2026) ─────────────────────────────────────────────
@@ -99,10 +113,101 @@ export function matchTimberChoice(spec, presets = [], products = []) {
   return "custom";
 }
 
+// ── HUB 028 Walls: one timber item, four parts ────────────────────────────────────────────────────────────────
+/** The Walls purpose. Kept out of TIMBER_PURPOSES: no Purpose chip and no company-product purpose. */
+export const WALLS_PURPOSE = "walls";
+/** Walls parts in the order they read (the fold lists Long plates after Plates). Keys of spec.components. */
+export const WALL_PARTS = Object.freeze(["studs", "plates", "longPlates", "noggins"]);
+export const WALL_PART_LABELS = Object.freeze({ studs: "Studs", plates: "Plates", longPlates: "Long plates", noggins: "Noggins" });
+/** Sam, 25 Oct 2026: the longest length for plates and noggins is 6,000 on every new Walls item (a saved company
+ *  product's own longest length still wins). Round 3: 90 × 45 LVL plates come up to 11,000. Studs: none stated. */
+export const WALL_PART_DEFAULT_MAX_MM = Object.freeze({ studs: null, plates: 6000, longPlates: 11000, noggins: 6000 });
+/** Sam, round 3: "lvl 90x45 plates … we use them when long plates are required" — the Long plates part's default. */
+export const WALL_LONG_PLATE_DEFAULT = Object.freeze({ depthMm: 90, widthMm: 45, grade: "LVL" });
+/** Long plates start at the first 300 mm step over the 6,000 pine plates [Default, needs Sam]. */
+export const WALL_LVL_STOCK_MIN_MM = 6300;
+/** Walls rules (bounded scalars the server already keeps): one Stud centres and one Double top plate per item. */
+export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate: false });
+
+const LVL_RE = /\blvl/i;
+/** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */
+export function isLvlTimber(spec) {
+  return LVL_RE.test(String(spec?.grade ?? "")) || LVL_RE.test(String(spec?.species ?? ""));
+}
+
+/**
+ * The company timber products that can fill one Walls part: active timber products saved for that part's purpose
+ * (the same filter as the Timber card's Size and grade list). Plates are split by LVL: Long plates take the LVL plate
+ * products, Plates the others [Default, needs Sam], so saving one pine and one LVL plate product fills both parts.
+ */
+export function wallPartProducts(presets, part) {
+  const purpose = part === "longPlates" ? "plates" : part;
+  return (presets || []).filter((p) => p?.isActive !== false && p?.spec?.family === "timber" && p.spec.purpose === purpose && p.rules?.companyDefault !== true
+    && (part === "longPlates" ? isLvlTimber(p.spec) : part === "plates" ? !isLvlTimber(p.spec) : true));
+}
+
+/**
+ * A saved company timber product applied to one Walls part: timberProductFill (HUB 027, unchanged) plus the product's
+ * stock, because the noggins can only share lengths and the plates can only be split with a longest length. The
+ * product's own longest length wins; a product with none leaves that part's default (`part` given: 6,000 for plates
+ * and noggins, 11,000 for long plates, none for studs). Its "not stocked" lengths are copied exactly as saved.
+ */
+export function wallPartFill(partSpec, productSpec, part = null) {
+  const p = productSpec || {};
+  const filled = timberProductFill(partSpec, p);
+  const ownMax = p.stock?.maxMm;
+  return { ...filled, stock: {
+    maxMm: ownMax != null && ownMax !== "" ? ownMax : (part ? WALL_PART_DEFAULT_MAX_MM[part] ?? null : null),
+    unavailableMm: Array.isArray(p.stock?.unavailableMm) ? [...p.stock.unavailableMm] : [],
+  } };
+}
+
+const emptyPart = () => ({ section: { depthMm: null, widthMm: null }, grade: null, treatment: null, species: null, supplierName: null, productCode: null,
+  stock: { maxMm: null, unavailableMm: [] } });
+
+/**
+ * A new Walls item's spec (normalised, so it is exactly what the server keeps). Each part takes the one active company
+ * product saved for it when there is exactly one; with none, or two or more (one pick away in the fold), the built-in
+ * choice: studs 90 × 45 MGP10, plates 90 × 45, noggins 90 × 35 (HUB 027 rows) and long plates 90 × 45 LVL (round 3).
+ * Plates and noggins get Sam's 6,000 longest length and long plates 11,000 unless the product states its own.
+ * Nothing is copied between parts; a built-in row never carries a treatment.
+ */
+export function wallFramingDefaults(presets = []) {
+  const builtIn = {
+    studs: TIMBER_PRESETS.studs.find((x) => x.id === "studs-90x45-mgp10"),
+    plates: TIMBER_PRESETS.plates.find((x) => x.id === "plates-90x45"),
+    longPlates: WALL_LONG_PLATE_DEFAULT,
+    noggins: TIMBER_PRESETS.noggins.find((x) => x.id === "noggins-90x35"),
+  };
+  const components = {};
+  for (const part of WALL_PARTS) {
+    const products = wallPartProducts(presets, part);
+    components[part] = products.length === 1 ? wallPartFill(emptyPart(), products[0].spec, part)
+      : { ...applyTimberPreset(emptyPart(), builtIn[part]), stock: { maxMm: WALL_PART_DEFAULT_MAX_MM[part], unavailableMm: [] } };
+  }
+  return normaliseFamilySpec({ family: "timber", purpose: WALLS_PURPOSE, components });
+}
+
+/**
+ * The Long plates (LVL) stock lengths, ascending: 300 mm steps on the timber grid from 6,300 up to the part's longest
+ * length, plus that longest length itself when it is off the grid (Sam: 11,000 → 6,300, 6,600 … 10,800, 11,000; the
+ * grid alone can't reach 11,000 from 1,200 in 300 steps). No longest length → 11,000. "Not stocked" lengths come out.
+ */
+export function longPlateStockLengths(part) {
+  const s = part?.stock || {};
+  const max = s.maxMm != null && s.maxMm !== "" && Number(s.maxMm) > 0 ? Number(s.maxMm) : WALL_PART_DEFAULT_MAX_MM.longPlates;
+  const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
+  const out = [];
+  for (let l = WALL_LVL_STOCK_MIN_MM; l <= max; l += TIMBER_GRID.incrementMm) out.push(l);
+  if (!out.includes(max)) out.push(max);
+  return out.filter((l) => !off.has(l));
+}
+
 /** Method per family/purpose (versioned keys from 06). */
 export function methodFor(spec) {
   switch (spec?.family) {
     case "timber":
+      if (spec.purpose === WALLS_PURPOSE) return { key: "wall_framing", version: 1 };
       if (["rafters", "joists", "battens"].includes(spec.purpose)) return { key: "repeated_members", version: 2 };
       if (spec.purpose === "studs") return { key: "wall_frame", version: 1 };
       return { key: "linear_stock", version: 1 };                 // plates, noggins, trim, other members
@@ -132,6 +237,18 @@ const num = (v, label, { min = 0, allowNull = true, max = 1e6 } = {}) => {
 const txt = (v, max = 80) => (v == null ? null : String(v).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max) || null);
 const lengthsList = (arr, label) => (Array.isArray(arr) ? [...new Set(arr.map((x) => num(x, label, { allowNull: false })))].sort((a, b) => a - b) : []);
 
+/** One Walls part, cleaned with the same field rules as a timber spec; a part's problem names it ("Plates: …"). */
+function normaliseWallPart(p, label) {
+  const x = p && typeof p === "object" ? p : {};
+  return {
+    section: { depthMm: num(x.section?.depthMm, `${label}: section depth`), widthMm: num(x.section?.widthMm, `${label}: section width`) },
+    grade: txt(x.grade, 40), treatment: txt(x.treatment, 40), species: txt(x.species, 40),
+    supplierName: txt(x.supplierName), productCode: txt(x.productCode, 60),
+    stock: { maxMm: num(x.stock?.maxMm, `${label}: longest available length`),
+      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter(onTimberGrid) },
+  };
+}
+
 /** Canonical spec for a non-flashing family. Throws only for values that can never be valid. */
 export function normaliseFamilySpec(spec) {
   const s = spec || {};
@@ -140,6 +257,16 @@ export function normaliseFamilySpec(spec) {
   const base = { v: 1, family, supplierName: txt(s.supplierName), productCode: txt(s.productCode, 60), notes: txt(s.notes, 300),
     availability: s.availability === "supplier_confirmed" ? "supplier_confirmed" : "confirm_with_supplier", spareRate: s.spareRate == null || s.spareRate === "" ? 0 : num(s.spareRate, "Spare %", { min: -1e-9, max: 100 }) };
   if (family === "timber") {
+    const sizing = { provenance: ["manual", "engineer-schedule", "manufacturer-schedule"].includes(s.sizing?.provenance) ? s.sizing.provenance : "manual", reference: txt(s.sizing?.reference, 120) };
+    if (s.purpose === WALLS_PURPOSE) {
+      // HUB 028 Walls: the parts carry the identities; the top-level section, grade, treatment and stock stay empty and
+      // are ignored. No plies, end allowance or spares on Walls.
+      const parts = s.components && typeof s.components === "object" ? s.components : {};
+      return { ...base, spareRate: 0, purpose: WALLS_PURPOSE,
+        section: { depthMm: null, widthMm: null }, grade: null, treatment: null, species: null, plies: 1,
+        stock: { ...TIMBER_GRID, maxMm: null, unavailableMm: [] }, sizing, endAllowanceMm: 0,
+        components: Object.fromEntries(WALL_PARTS.map((k) => [k, normaliseWallPart(parts[k], WALL_PART_LABELS[k])])) };
+    }
     const maxMm = num(s.stock?.maxMm, "Longest available length");
     return { ...base,
       purpose: TIMBER_PURPOSES.includes(s.purpose) ? s.purpose : "other",
@@ -147,8 +274,8 @@ export function normaliseFamilySpec(spec) {
       grade: txt(s.grade, 40), treatment: txt(s.treatment, 40), species: txt(s.species, 40),
       plies: s.plies == null ? 1 : Math.max(1, Math.round(Number(s.plies)) || 1),
       // the owner's grid for ALL timber suppliers; availability may only remove grid lengths, never add off-grid ones
-      stock: { ...TIMBER_GRID, maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter((l) => l >= 1200 && (l - 1200) % 600 === 0) },
-      sizing: { provenance: ["manual", "engineer-schedule", "manufacturer-schedule"].includes(s.sizing?.provenance) ? s.sizing.provenance : "manual", reference: txt(s.sizing?.reference, 120) },
+      stock: { ...TIMBER_GRID, maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter(onTimberGrid) },
+      sizing,
       endAllowanceMm: s.endAllowanceMm == null || s.endAllowanceMm === "" ? 0 : num(s.endAllowanceMm, "End allowance", { min: -1e-9 }),
     };
   }
@@ -195,11 +322,20 @@ export function normaliseFamilySpec(spec) {
 /** What must be bought — changes here make draft order lines stale (06 identity). */
 export function familyIdentity(spec) {
   const n = normaliseFamilySpec(spec);
+  if (n.family === "timber" && n.purpose === WALLS_PURPOSE) {
+    // every part's identity (a part's product change marks the item's draft lines for review; one key per material)
+    return { family: "timber", purpose: WALLS_PURPOSE, components: Object.fromEntries(WALL_PARTS.map((k) => [k, timberPartIdentity(n.components[k])])) };
+  }
   if (n.family === "timber") return { family: "timber", section: n.section, grade: n.grade?.toLowerCase() || null, treatment: n.treatment?.toLowerCase() || null, species: n.species?.toLowerCase() || null, productCode: n.productCode };
   if (n.family === "aluminium") return { family: "aluminium", profile: n.profile, alloyTemper: n.alloyTemper, finish: n.finish?.toLowerCase() || null, colour: n.colour?.toLowerCase() || null, productCode: n.productCode };
   const p = n.product;
   return { family: n.family, manufacturer: p.manufacturer, name: p.name, sku: p.sku, thicknessMm: p.thicknessMm, widthMm: p.widthMm, effectiveCoverMm: p.effectiveCoverMm,
     finish: p.finish?.toLowerCase() || null, orientation: n.orientation, endCondition: n.endCondition, coating: n.coating, productCode: n.productCode };
+}
+
+/** A timber part's procurement identity: the same fields as a timber material's (section, grade, treatment, species, code). */
+function timberPartIdentity(p) {
+  return { section: p.section, grade: p.grade?.toLowerCase() || null, treatment: p.treatment?.toLowerCase() || null, species: p.species?.toLowerCase() || null, productCode: p.productCode };
 }
 
 /** The procurement identity key a recorded OFFCUT is stamped with (a later finish/section change never lets it be
@@ -208,13 +344,27 @@ export function stockIdentityKey(spec) {
   try { return identityKeyOf({ family: normaliseFamilySpec(spec).family, ...familyIdentity(spec) }); } catch { return null; }
 }
 
-/** Completeness problems that block ordering (drafts can hold them). */
-export function familyProblems(spec) {
+/**
+ * Completeness problems that block ordering (drafts can hold them). A Walls item checks each part and names it
+ * ("Plates: enter the treatment …", with `part`). Long plates are checked only when a plate uses them: the Walls
+ * calculation says so with `usesLongPlates: true`; without it the part is skipped (a job with no plate over the pine
+ * longest length never asks for an LVL treatment).
+ */
+export function familyProblems(spec, { usesLongPlates = false } = {}) {
   let n;
   try { n = normaliseFamilySpec(spec); } catch (e) { return [{ code: "material_incomplete", message: e.message }]; }
   const out = [];
   const need = (cond, message) => { if (!cond) out.push({ code: "material_incomplete", message }); };
-  if (n.family === "timber") {
+  if (n.family === "timber" && n.purpose === WALLS_PURPOSE) {
+    for (const k of WALL_PARTS) {
+      if (k === "longPlates" && !usesLongPlates) continue;
+      const p = n.components[k], label = WALL_PART_LABELS[k];
+      const needPart = (cond, message) => { if (!cond) out.push({ code: "material_incomplete", message: `${label}: ${message}`, part: k }); };
+      needPart(p.section.depthMm && p.section.widthMm, "enter the timber section (e.g. 90 × 45).");
+      needPart(p.grade || p.species, "enter the grade or species.");
+      needPart(p.treatment, "enter the treatment (or \"untreated\").");
+    }
+  } else if (n.family === "timber") {
     need(n.section.depthMm && n.section.widthMm, "Enter the timber section (e.g. 90 × 45).");
     need(n.grade || n.species, "Enter the grade or species.");
     need(n.treatment, "Enter the treatment (or \"untreated\").");
@@ -245,6 +395,15 @@ export function describeFamilySpec(spec) {
   let n;
   try { n = normaliseFamilySpec(spec); } catch { return { line: "Material details incomplete", installation: null }; }
   const mm = (v) => (v == null ? "?" : String(v));
+  if (n.family === "timber" && n.purpose === WALLS_PURPOSE) {
+    // "Studs 90 × 45 MGP10 H2 · plates 90 × 45 H2 · long plates 90 × 45 LVL · noggins 90 × 35"
+    const part = (k, i) => {
+      const p = n.components[k], label = WALL_PART_LABELS[k];
+      const sec = p.section.depthMm && p.section.widthMm ? `${mm(p.section.depthMm)} × ${mm(p.section.widthMm)}` : "section?";
+      return [i === 0 ? label : label.toLowerCase(), sec, p.grade, p.species, p.treatment].filter(Boolean).join(" ");
+    };
+    return { line: WALL_PARTS.map(part).join(" · "), installation: "Size: manual selection (not structurally checked)" };
+  }
   if (n.family === "timber") {
     const sec = n.section.depthMm && n.section.widthMm ? `${mm(n.section.depthMm)} × ${mm(n.section.widthMm)}` : "section?";
     return { line: [sec, n.grade, n.species, n.treatment, n.plies > 1 ? `${n.plies} plies` : null].filter(Boolean).join(" · "),

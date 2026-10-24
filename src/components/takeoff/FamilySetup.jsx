@@ -2,7 +2,7 @@
 // FamilySetup — compact setup cards for the TC-R04 families (02 §2–3, 05, 11, 12; 07 UX03 / CL05):
 //   * TimberSetup    — purpose → "Size and grade" list (HUB 027: the owner's sizes for that purpose + company timber
 //                      products saved for it, or Custom) → section/grade/treatment (always shown, editable) →
-//                      centres / length source / pitch → 1200 + 600n stock
+//                      centres / length source / pitch → 1200 + 300n stock
 //   * CladdingSetup  — material → product (searchable catalogue; Walsc first for AAC) → orientation → assembly
 //                      → stock / spares / supplier. Also hosts the support-batten layer and the accessory card.
 //   * BattenSetup    — support layer: product/section, orientation, max spacing (required), offsets, existing
@@ -23,7 +23,7 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_PURPOSES, applyTimberPreset, describeFamilySpec, familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec,
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, applyTimberPreset, describeFamilySpec, familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid,
   timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches } from "../../../shared/takeoff/index.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
@@ -141,6 +141,7 @@ const SOURCES = Object.freeze({
   F01: ["Rendex external wall cladding page", "product", "https://www.rendex.com.au/external-wall-cladding"],
   F02: ["Rendex downloads (system + coating documents)", "guide", "https://www.rendex.com.au/downloads"],
   "OWNER-2026-10-14": ["Blue Leaf owner decision, 14 Oct 2026", "owner", null],
+  "OWNER-2026-10-25": ["Blue Leaf owner decision, 25 Oct 2026 (timber in 300 mm steps)", "owner", null],
 });
 const KIND_TEXT = { product: "product facts", guide: "installation guide — rows not reviewed", gap: "not readable — not used as authority", owner: "company setting", other: "entered reference" };
 
@@ -1123,12 +1124,12 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
       )}
       <fieldset className="rounded-lg border border-hairline p-2">
         <legend className="px-1 text-xs font-semibold text-ink">Stock</legend>
-        <p className="text-sm text-ink">1200 mm, then every 600 mm (1800, 2400, 3000 …) — same at every supplier.</p>
+        <p className="text-sm text-ink">1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier.</p>
         <NumberField label="Longest available length (optional)" value={s.stock?.maxMm} onCommit={(n) => set({ spec: { stock: { ...s.stock, maxMm: n } } })} help="Longer members are flagged unavailable — never clamped or joined." />
         <LengthList label="Grid lengths this supplier doesn't stock (optional)" values={s.stock?.unavailableMm} placeholder="e.g. 6600"
-          validate={(v) => (v.some((l) => l < 1200 || (l - 1200) % 600 !== 0) ? "Only grid lengths (1200, 1800, 2400 …) can be marked unavailable — off-grid sizes are never added." : null)}
+          validate={(v) => (v.some((l) => !onTimberGrid(l)) ? "Only grid lengths (1200, 1500, 1800 …) can be marked unavailable — off-grid sizes are never added." : null)}
           onCommit={(v) => set({ spec: { stock: { ...s.stock, unavailableMm: v } } })} help="A member that needs one of these moves up to the next available grid length." />
-        <SourceRefs refs={["OWNER-2026-10-14"]} label="Stock rule" />
+        <SourceRefs refs={["OWNER-2026-10-14", TIMBER_GRID_SOURCE]} label="Stock rule" />
       </fieldset>
       <details className="rounded-lg border border-hairline px-2 py-1">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">More (offsets, allowance, ends, plies, supplier)</summary>
@@ -1987,7 +1988,7 @@ function BattenFields({ d, result, lines }) {
           <NumberField label="Width" value={s.product?.widthMm} onCommit={(n) => setP({ widthMm: n })} />
           <NumberField label="Thickness" value={s.product?.thicknessMm} onCommit={(n) => setP({ thicknessMm: n })} />
           <div className="col-span-2"><LengthList label="Stock lengths" values={s.product?.lengthsMm} onCommit={(v) => setP({ lengthsMm: v, lengthMm: v.length === 1 ? v[0] : null })}
-            help="Timber stock is 1200 mm then every 600 mm at every supplier — enter the lengths your supplier actually has." /></div>
+            help="Timber stock is 1200 mm then every 300 mm at every supplier — enter the lengths your supplier actually has." /></div>
         </div>
       )}
       {g && <SourceRefs refs={s.product?.sourceRefs} label="Product sources" />}
