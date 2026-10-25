@@ -29,7 +29,7 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
@@ -1170,8 +1170,12 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
 }
 
 // ── Walls (HUB 028) ──────────────────────────────────────────────────────────────────────────────────────────
-/** Long plates' one built-in row: Sam's round 3 "90 × 45 LVL" (the other parts use their HUB 027 purpose rows). */
+/** Long plates' one built-in row: Sam's round 3 LVL, "90 × 45 LVL Smart 10" (decision 6; the other parts use their
+ *  HUB 027 purpose rows). */
 const LONG_PLATE_ROW = Object.freeze({ id: "longPlates-90x45-lvl", depthMm: WALL_LONG_PLATE_DEFAULT.depthMm, widthMm: WALL_LONG_PLATE_DEFAULT.widthMm, grade: WALL_LONG_PLATE_DEFAULT.grade });
+/** Decision 6: a new Walls item's studs are 90 × 35 LVL Smart 10, first in the Studs list so it reads as picked (the
+ *  HUB 027 stud rows follow, unchanged; the Timber card's Studs list doesn't get it). */
+const WALL_STUD_ROW = Object.freeze({ id: "studs-90x35-lvl-smart-10", depthMm: WALL_PART_DEFAULTS.studs.depthMm, widthMm: WALL_PART_DEFAULTS.studs.widthMm, grade: WALL_PART_DEFAULTS.studs.grade });
 /** The HUB 027 purpose a Walls part's built-in rows and company products come from (Long plates are plates). */
 const partPurpose = (part) => (part === "longPlates" ? "plates" : part);
 
@@ -1193,7 +1197,7 @@ function WallPartSizeChoice({ d, part, presets }) {
       return { ...c, spec: { ...c.spec, components: { ...(c.spec?.components || {}), [part]: next } } };
     }),
   };
-  return <TimberSizeChoice d={pd} presets={presets} builtIn={part === "longPlates" ? [LONG_PLATE_ROW] : timberPresetsFor(purpose)}
+  return <TimberSizeChoice d={pd} presets={presets} builtIn={part === "longPlates" ? [LONG_PLATE_ROW] : part === "studs" ? [WALL_STUD_ROW, ...timberPresetsFor(purpose)] : timberPresetsFor(purpose)}
     products={wallPartProducts(presets, part)} fillProduct={(s, ps) => wallPartFill(s, ps, part)} lvlHint={false} />;
 }
 

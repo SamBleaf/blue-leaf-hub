@@ -16,7 +16,10 @@
  * ?takeoffSeed=battens (wall-by-wall step 4) adds Axon 400 smooth set up from the Blue Leaf defaults on the check job —
  * walls of 6, 4, 6 and 4 m at 2,700 with three windows and a door, plus a 6 m gable that needs an H joint — so its
  * automatic battens, foam tape and H-flashing show on the walls, the schedule and the order with nothing set up;
- * ?takeoffSeed=walls (HUB 028) adds one Walls item from the built-in defaults (no company products), nothing traced;
+ * ?takeoffSeed=walls (HUB 028) adds one Walls item from the built-in defaults (no company products), nothing traced:
+ * Sam's default products (decision 6, 25 Oct 2026), so it needs nothing; ?takeoffSeed=walls-needs adds one saved
+ * before those defaults (the HUB 027 rows with no treatment: studs 90 × 45 MGP10, plates 90 × 45, noggins 90 × 35,
+ * long plates 90 × 45 LVL), so its parts still need their details;
  * ?takeoffSeed=walls-after-cladding adds a cladding with one wall traced with Line at 2,745 on page 1, and no Walls item;
  * ?takeoffSeed=walls-products adds one active company timber product for each Walls part (studs, pine plates, LVL plates
  * and noggins), each with its grade, treatment, supplier, code and longest length (noggins 5,400), and no Walls item, so
@@ -105,6 +108,7 @@ function seed() {
   if (qs().get("takeoffSeed") === "mixed") seedMixed();
   if (qs().get("takeoffSeed") === "battens") seedBattens();
   if (qs().get("takeoffSeed") === "walls") seedWalls();
+  if (qs().get("takeoffSeed") === "walls-needs") seedWallsNeeds();
   if (qs().get("takeoffSeed") === "walls-after-cladding") seedWallsAfterCladding();
   if (qs().get("takeoffSeed") === "walls-products") seedWallsProducts();
   if (qs().get("takeoffSeed") === "no-plan") seedNoPlan();
@@ -146,6 +150,16 @@ function seedBattens() {
 /** HUB 028 (SYNTHETIC): one Walls item exactly as Add walls makes it with no company products, nothing traced yet. */
 function seedWalls() {
   const spec = wallFramingDefaults([]);
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-walls", name: "Walls", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: { ...WALL_FRAMING_RULES } });
+}
+
+/** HUB 028 (SYNTHETIC): one Walls item saved before Sam's default products (decision 6), parts as saved then (no
+ *  treatment, plates and noggins with no grade), nothing traced, so its parts still need their details. */
+function seedWallsNeeds() {
+  const part = (depthMm, widthMm, grade, maxMm) => ({ section: { depthMm, widthMm }, grade, stock: { maxMm, unavailableMm: [] } });
+  const spec = normaliseFamilySpec({ family: "timber", purpose: WALLS_PURPOSE, components: { studs: part(90, 45, "MGP10", null), plates: part(90, 45, null, 6000),
+    longPlates: part(90, 45, "LVL", 11000), noggins: part(90, 35, null, 6000) } });
   const m = methodFor(spec);
   state.materials.push({ id: "mat-walls", name: "Walls", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: { ...WALL_FRAMING_RULES } });
 }

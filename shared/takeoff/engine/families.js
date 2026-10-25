@@ -12,7 +12,8 @@
 //
 // HUB 028 Walls: one timber item (purpose "walls", method wall_framing@1) holding four parts in spec.components:
 // studs, plates, long plates (90 × 45 LVL, Sam's round 3) and noggins. Each part is a small timber identity with its
-// own longest length; Walls is never a Purpose chip, so "walls" stays out of TIMBER_PURPOSES.
+// own longest length; Walls is never a Purpose chip, so "walls" stays out of TIMBER_PURPOSES. A new Walls item starts
+// with Sam's products (WALL_PART_DEFAULTS, 25 Oct 2026 decision 6), so it needs nothing before ordering.
 // =============================================================================
 import { TakeoffValidationError, isFiniteNumber } from "../units.js";
 import { identityKey as identityKeyOf } from "./contract.js";
@@ -122,8 +123,24 @@ export const WALL_PART_LABELS = Object.freeze({ studs: "Studs", plates: "Plates"
 /** Sam, 25 Oct 2026: the longest length for plates and noggins is 6,000 on every new Walls item (a saved company
  *  product's own longest length still wins). Round 3: 90 × 45 LVL plates come up to 11,000. Studs: none stated. */
 export const WALL_PART_DEFAULT_MAX_MM = Object.freeze({ studs: null, plates: 6000, longPlates: 11000, noggins: 6000 });
-/** Sam, round 3: "lvl 90x45 plates … we use them when long plates are required" — the Long plates part's default. */
-export const WALL_LONG_PLATE_DEFAULT = Object.freeze({ depthMm: 90, widthMm: 45, grade: "LVL" });
+/**
+ * Sam, 25 Oct 2026 (in chat, decision 6): the products a new Walls item starts with, so it has no product needs.
+ * "studs are 90x35 LVL smart 10 h2, noggings 90x35 mgp10 untreated, top and bottom plate 90x45 mgp10 H2, or 90x45 LVL
+ * 10 smart H2 for long plates". The LVL grade reads "LVL Smart 10", so a line reads "Studs 90 × 35 LVL Smart 10 H2";
+ * "untreated" is a real treatment (the noggins' line reads "… MGP10 untreated"). A saved company product for a part
+ * still wins (wallFramingDefaults). Ordering setup only, never a structural size. HUB 027's Timber rows are unchanged.
+ */
+export const WALL_PART_DEFAULTS = Object.freeze({
+  studs: Object.freeze({ depthMm: 90, widthMm: 35, grade: "LVL Smart 10", treatment: "H2" }),
+  plates: Object.freeze({ depthMm: 90, widthMm: 45, grade: "MGP10", treatment: "H2" }),
+  longPlates: Object.freeze({ depthMm: 90, widthMm: 45, grade: "LVL Smart 10", treatment: "H2" }),
+  noggins: Object.freeze({ depthMm: 90, widthMm: 35, grade: "MGP10", treatment: "untreated" }),
+});
+export const WALL_PART_DEFAULTS_SOURCE = "OWNER-2026-10-25";
+/** Sam, round 3: "lvl 90x45 plates … we use them when long plates are required" — the Long plates part's default row
+ *  (decision 6: 90 × 45 LVL Smart 10). */
+export const WALL_LONG_PLATE_DEFAULT = Object.freeze({ depthMm: WALL_PART_DEFAULTS.longPlates.depthMm, widthMm: WALL_PART_DEFAULTS.longPlates.widthMm,
+  grade: WALL_PART_DEFAULTS.longPlates.grade });
 /** Long plates start at the first 300 mm step over the pine plates' longest length [Default, needs Sam]: 6,300 over
  *  the 6,000 default (longPlateStockLengths takes the actual pine longest, so a 4,800 plate product starts them at 5,100). */
 export const WALL_LVL_STOCK_MIN_MM = 6300;
@@ -170,23 +187,20 @@ const emptyPart = () => ({ section: { depthMm: null, widthMm: null }, grade: nul
 
 /**
  * A new Walls item's spec (normalised, so it is exactly what the server keeps). Each part takes the one active company
- * product saved for it when there is exactly one; with none, or two or more (one pick away in the fold), the built-in
- * choice: studs 90 × 45 MGP10, plates 90 × 45, noggins 90 × 35 (HUB 027 rows) and long plates 90 × 45 LVL (round 3).
- * Plates and noggins get Sam's 6,000 longest length and long plates 11,000 unless the product states its own.
- * Nothing is copied between parts; a built-in row never carries a treatment.
+ * product saved for it when there is exactly one; with none, or two or more (one pick away in the fold), Sam's
+ * default (WALL_PART_DEFAULTS, decision 6): studs 90 × 35 LVL Smart 10 H2, plates 90 × 45 MGP10 H2, long plates
+ * 90 × 45 LVL Smart 10 H2 and noggins 90 × 35 MGP10 untreated, so a new Walls item needs nothing before ordering.
+ * Plates and noggins get Sam's 6,000 longest length and long plates 11,000 unless the product states its own; studs
+ * none (Sam stated none). Nothing is copied between parts.
  */
 export function wallFramingDefaults(presets = []) {
-  const builtIn = {
-    studs: TIMBER_PRESETS.studs.find((x) => x.id === "studs-90x45-mgp10"),
-    plates: TIMBER_PRESETS.plates.find((x) => x.id === "plates-90x45"),
-    longPlates: WALL_LONG_PLATE_DEFAULT,
-    noggins: TIMBER_PRESETS.noggins.find((x) => x.id === "noggins-90x35"),
-  };
   const components = {};
   for (const part of WALL_PARTS) {
     const products = wallPartProducts(presets, part);
+    const own = WALL_PART_DEFAULTS[part];
     components[part] = products.length === 1 ? wallPartFill(emptyPart(), products[0].spec, part)
-      : { ...applyTimberPreset(emptyPart(), builtIn[part]), stock: { maxMm: WALL_PART_DEFAULT_MAX_MM[part], unavailableMm: [] } };
+      : { ...emptyPart(), section: { depthMm: own.depthMm, widthMm: own.widthMm }, grade: own.grade, treatment: own.treatment,
+        stock: { maxMm: WALL_PART_DEFAULT_MAX_MM[part], unavailableMm: [] } };
   }
   return normaliseFamilySpec({ family: "timber", purpose: WALLS_PURPOSE, components });
 }

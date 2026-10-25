@@ -55,7 +55,8 @@ test("HUB 028 step 2: the mock keeps a Walls item like the server (normalised pa
   expect(kept.spec).toEqual(normaliseFamilySpec(sent));
   expect(Object.keys(kept.spec.components)).toEqual(["studs", "plates", "longPlates", "noggins"]);
   expect(kept.spec.components.noggins.stock).toEqual({ maxMm: 5400, unavailableMm: [4800] });
-  expect([kept.spec.components.longPlates.grade, kept.spec.components.longPlates.stock.maxMm, kept.spec.spareRate, kept.spec.junk]).toEqual(["LVL", 11000, 0, undefined]);
+  // Sam's default long plates (decision 6, 25 Oct): 90 × 45 LVL Smart 10 H2
+  expect([kept.spec.components.longPlates.grade, kept.spec.components.longPlates.stock.maxMm, kept.spec.spareRate, kept.spec.junk]).toEqual(["LVL Smart 10", 11000, 0, undefined]);
   expect(kept.rules).toEqual({ centresMm: 600, doubleTopPlate: false });
   // an entered length on Walls: the server's own message, and nothing saved
   const before = (await snapshot(page)).workspace.revision;
@@ -185,15 +186,19 @@ async function inSheetView(page, locator) {
   return { inside: !!b && b.y >= sb.y && b.y + b.height <= sb.y + sb.height + 0.5, scrolled, b, sb };
 }
 
-/** The Walls card (Details › or the row's Setup): its needs name the parts; no Purpose chips, no company-product picker. */
-async function expectWallsCard(page) {
+/** The Walls card (Details › or the row's Setup): its needs name the parts; no Purpose chips, no company-product picker.
+ *  A new Walls item has Sam's default products (decision 6, 25 Oct), so it has no needs (`needs: false`); one saved
+ *  before them (the walls-needs seed) still lists its parts' needs. */
+async function expectWallsCard(page, { needs = true } = {}) {
   const win = page.locator("[data-takeoff-focus]");
   await expect(win.locator('[data-setup="walls"]')).toBeVisible();
   await expect(win.getByRole("heading", { name: "Walls", exact: true })).toBeVisible();
   await expect(win.getByText("Walls · this job only")).toBeVisible();
-  await expect(win.locator("[data-needs]")).toContainText('Studs: enter the treatment (or "untreated").');
-  await expect(win.locator("[data-needs]")).toContainText('Plates: enter the treatment (or "untreated").');
-  await expect(win.locator("[data-needs]")).toContainText('Noggins: enter the treatment (or "untreated").');
+  if (needs) {
+    await expect(win.locator("[data-needs]")).toContainText('Studs: enter the treatment (or "untreated").');
+    await expect(win.locator("[data-needs]")).toContainText('Plates: enter the treatment (or "untreated").');
+    await expect(win.locator("[data-needs]")).toContainText('Noggins: enter the treatment (or "untreated").');
+  } else await expect(win.locator("[data-needs]")).toHaveCount(0);
   await expect(win.locator('[data-setup="timber"], [data-chips="purpose"]')).toHaveCount(0);
   await expect(win.getByLabel("Company products")).toHaveCount(0);
   await expect(win.getByRole("button", { name: "Measure members" })).toHaveCount(0);
@@ -220,8 +225,8 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(centresField(page)).toHaveValue("600");
     await expect(doubleTop(page)).not.toBeChecked();
     for (const l of [heightField(page), centresField(page), doubleTop(page)]) await expect(l).toBeVisible();
-    // the built-in parts have no treatment: the panel says how many need fixing, the needs themselves aren't listed here
-    await expect(page.locator("[data-walls-details]")).toHaveText("Details: 3 to fix ›");
+    // Sam's default products (decision 6, 25 Oct): a new Walls item has nothing to fix
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
     await expect(panel(page)).not.toContainText("enter the treatment");
     await expect(wallsLine(page)).toHaveText("");                                // nothing traced yet
     await shot(page, "add-walls-line-panel-390x844");
@@ -240,7 +245,7 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(wallsLine(page)).toContainText("17 noggins");
     // one "Details" on the panel (it opens the Walls card); the quantity / installation / procurement fold is "Status"
     await expect(panel(page).locator("summary")).toHaveText(["Status"]);
-    await expect(panel(page).getByText(/^Details/)).toHaveText(["Details: 3 to fix ›"]);
+    await expect(panel(page).getByText(/^Details/)).toHaveText(["Details ›"]);   // Sam's default products: nothing to fix
     await shot(page, "walls-line-L-390x844");
     // 3. Stud centres 450 → 25 studs; ONE Undo → 600 and 19 studs
     await setCentres(page, 450);
@@ -281,11 +286,11 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
       const v = await inSheetView(page, page.locator("[data-run-card]").getByRole("button", { name }));
       expect(v.inside && v.scrolled === 0, `${name} in view ${JSON.stringify(v)}`).toBe(true);
     }
-    // Details › opens this Walls item's card: the parts' needs, each naming its part; no Purpose chips and no
+    // Details › opens this Walls item's card: no needs (Sam's default products); no Purpose chips and no
     // company-product picker (one tap there would turn Walls into Studs or replace its parts); Close comes back here
     const MIXED = "Walls: 27 studs (21 at 2,700, 6 at 2,800) · bottom plate 13.00 m · top plate 2 × 13.00 m · 23 noggins (1–2 rows)";
     await page.locator("[data-walls-details]").click();
-    await expectWallsCard(page);
+    await expectWallsCard(page, { needs: false });
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(panel(page).locator("[data-line-material]")).toHaveText("Walls");
     await expect(wallsLine(page)).toHaveText(MIXED);
@@ -298,7 +303,7 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(page.getByRole("heading", { level: 1, name: "Timber and cladding" })).toBeVisible();
     const row = page.locator("[data-material-row]").filter({ hasText: /^Walls/ });
     await row.getByRole("button", { name: "Setup", exact: true }).click();
-    await expectWallsCard(page);
+    await expectWallsCard(page, { needs: false });
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Timber and cladding" })).toBeVisible();
     await expect(page.locator("[data-line-panel]")).toHaveCount(0);
@@ -366,7 +371,7 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(why).toHaveText("Wall 1: Openings W1 and W2 overlap along the wall — frame them as one opening or with explicit members.");
     v = await inSheetView(page, why);
     expect(v.inside && v.scrolled === 0, `the reason in view ${JSON.stringify(v)}`).toBe(true);
-    await expect(page.locator("[data-walls-details]")).toHaveText("Details: 3 to fix ›");   // the parts' needs only
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");   // the parts' needs only (none: Sam's defaults)
     await shot(page, "walls-line-wall-not-counted-390x844");
     await saved(page);
   });
@@ -512,7 +517,8 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
   test("screen 7: reload brings back the same walls, settings and line; each wall page leads with its own Walls line and notes, side studs drawn as full studs; an opening's sheet takes a framing detail", async ({ page }) => {
-    const SEEDED = `${TIMBER}&takeoffSeed=walls`;
+    // a Walls item saved before Sam's default products (decision 6), so its parts' needs still show on the wall pages
+    const SEEDED = `${TIMBER}&takeoffSeed=walls-needs`;
     await openMeasure(page, SEEDED);
     await setHeight(page, 2700);
     await traceL(page);
@@ -590,7 +596,8 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
   });
 
   test("the Walls card: needs and the lintels note at the top; Stud centres, Double top plate and its line; the closed fold edits each part (one Undo each, a pick never shows on another part); a 9,000 wall's page says its plates are LVL", async ({ page }) => {
-    await openMeasure(page, `${TIMBER}&takeoffSeed=walls`);
+    // a Walls item saved before Sam's default products (decision 6): its parts still need their details
+    await openMeasure(page, `${TIMBER}&takeoffSeed=walls-needs`);
     await setHeight(page, 2700);
     await traceL(page);
     await addOpening(page, "door", D1_ENDS, { heightMm: 2040 });
@@ -622,9 +629,11 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
     const sizes = (k) => part(page, k).getByLabel("Size and grade");
     await expect(sizes("studs")).toHaveValue("studs-90x45-mgp10");
     await expect(sizes("plates")).toHaveValue("plates-90x45");
-    await expect(sizes("longPlates")).toHaveValue("longPlates-90x45-lvl");
+    // the long plates were saved as "90 × 45 LVL", and the list's one LVL row is now Sam's 90 × 45 LVL Smart 10 (decision 6):
+    // they read Custom, with their fields as saved
+    await expect(sizes("longPlates")).toHaveValue("custom");
     await expect(sizes("noggins")).toHaveValue("noggins-90x35");
-    await expect(sizes("longPlates").locator("option:checked")).toHaveText("90 × 45 LVL");
+    await expect(sizes("longPlates").locator("option:checked")).toHaveText("Custom (enter below)");
     const longest = (k) => part(page, k).getByLabel("Longest length");
     expect(await Promise.all(["studs", "plates", "longPlates", "noggins"].map((k) => longest(k).inputValue()))).toEqual(["", "6000", "11000", "6000"]);
     // a typed treatment: one change, one Undo step
@@ -697,6 +706,34 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
     await expect(page.locator("[data-wall-problems]").getByRole("alert")).toHaveCount(1);
     await expect(page.locator("[data-wall-problems]").getByRole("alert")).toContainText("Walls: 1 part needs setup (long plates).");
     await expect(wallPage(page).line).toHaveText("16 studs at 2,700 · bottom plate 9.00 m · top plate 2 × 9.00 m · 15 noggins (1 row)");
+  });
+
+  test("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, so there is nothing to fix and the fold reads them (studs 90 × 35 LVL Smart 10 H2 first in its list)", async ({ page }) => {
+    await openMeasure(page, `${TIMBER}&takeoffSeed=walls`);
+    await setHeight(page, 2700);
+    await traceL(page);
+    await addOpening(page, "door", D1_ENDS, { heightMm: 2040 });
+    await addOpening(page, "window", W1_ENDS, { heightMm: 1200, sillMm: 900 });
+    await expect(wallsLine(page)).toHaveText(L_OPENINGS);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
+    await panel(page).locator("summary", { hasText: "Status" }).click();
+    await expect(panel(page).locator("[data-statuses]")).not.toContainText("needs product setup");
+    await saved(page);
+    await page.locator("[data-walls-details]").click();
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).locator("[data-needs]")).toHaveCount(0);
+    await fold(page).locator("summary").click();
+    const sizes = (k) => part(page, k).getByLabel("Size and grade");
+    await expect(sizes("studs")).toHaveValue("studs-90x35-lvl-smart-10");
+    await expect(sizes("studs").locator("option:checked")).toHaveText("90 × 35 LVL Smart 10");
+    // Sam's stud row first, then HUB 027's own stud rows, unchanged
+    await expect(sizes("studs").locator("option")).toHaveText(["90 × 35 LVL Smart 10", "90 × 35 MGP10", "90 × 45 MGP10", "120 × 35 MGP10", "120 × 45 MGP10", "Custom (enter below)"]);
+    await expect(sizes("plates")).toHaveValue("plates-90x45");
+    await expect(sizes("longPlates").locator("option:checked")).toHaveText("90 × 45 LVL Smart 10");
+    await expect(sizes("noggins")).toHaveValue("noggins-90x35");
+    await expect.poll(async () => partsBrief(page)).toEqual({ studs: [90, 35, "LVL Smart 10", "H2", null, null, null], plates: [90, 45, "MGP10", "H2", null, null, 6000],
+      longPlates: [90, 45, "LVL Smart 10", "H2", null, null, 11000], noggins: [90, 35, "MGP10", "untreated", null, null, 6000] });
+    await shot(page, "walls-card-sam-defaults-390x844");
   });
 
   test("screen 8: on walls-products the saved products fill every part (the noggins' longest length too): no needs, no share or longest-length note; Details shows the fold closed with each part's product", async ({ page }) => {

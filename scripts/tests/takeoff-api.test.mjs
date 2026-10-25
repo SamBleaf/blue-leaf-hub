@@ -1660,7 +1660,8 @@ await t("HUB 028 step 2: a Walls item (wall_framing@1) keeps its four parts (par
   assert.equal(kept.spec.purpose, "walls", "never turned into 'other'");
   assert.deepEqual(Object.keys(kept.spec.components).sort(), ["longPlates", "noggins", "plates", "studs"]); // jsonb keeps no key order
   assert.deepEqual(kept.spec.components.noggins.stock, { maxMm: 5400, unavailableMm: [4800] });
-  assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.longPlates.grade], [6000, 11000, "LVL"]);
+  // Sam's default long plates (decision 6, 25 Oct): 90 × 45 LVL Smart 10 H2
+  assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.longPlates.grade], [6000, 11000, "LVL Smart 10"]);
   assert.equal(kept.spec.junk, undefined);
   assert.deepEqual(kept.spec.stock, { ...TIMBER_GRID, maxMm: null, unavailableMm: [] });
   assert.deepEqual([kept.methodKey, kept.methodVersion, kept.rules], ["wall_framing", 1, { centresMm: 450, doubleTopPlate: true }]);
@@ -1743,7 +1744,8 @@ await t("HUB 028 step 5: a company timber product saved for a Walls part keeps i
   const parts = wallFramingDefaults(kept).components;
   assert.deepEqual([parts.noggins.section, parts.noggins.productCode, parts.noggins.stock], [{ depthMm: 90, widthMm: 35 }, "NG-9035", { maxMm: 5400, unavailableMm: [4800] }]);
   assert.deepEqual([parts.longPlates.grade, parts.longPlates.supplierName, parts.longPlates.stock.maxMm], ["LVL", "Yard B", 11000]);
-  assert.deepEqual([parts.plates.grade, parts.plates.treatment, parts.plates.stock.maxMm], [null, null, 6000], "the LVL product never fills the pine plates");
+  // the pine plates keep Sam's default (decision 6: 90 × 45 MGP10 H2)
+  assert.deepEqual([parts.plates.grade, parts.plates.treatment, parts.plates.stock.maxMm], ["MGP10", "H2", 6000], "the LVL product never fills the pine plates");
 });
 
 await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back the same after a reload on the REAL server (parts and their stock, rules, runId/seq, heights, opening types); the lines after the reload are the preview's; a run, manual or count measurement on Walls is refused", async () => {

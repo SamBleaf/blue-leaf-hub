@@ -758,7 +758,8 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await expect(heightBox).toHaveValue("");
     await expect(page.locator("[data-stud-centres]").getByLabel("Stud centres")).toHaveValue("600");
     await expect(page.getByRole("checkbox", { name: "Double top plate" })).not.toBeChecked();
-    await expect(page.locator("[data-walls-details]")).toHaveText("Details: 3 to fix ›");
+    // Sam's default products (decision 6, 25 Oct): a new Walls item has nothing to fix
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
     await num(heightBox, 2700);
     await press(page.getByRole("button", { name: "Fit page" })); await page.waitForTimeout(400);
     await zoomOn(at(6000, 4000), 2);
@@ -795,7 +796,8 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     const ops = w.snapshot.measurements.filter((m) => m.kind === "opening" && ids.includes(m.parentId)).map((m) => [m.inputs.label, m.inputs.type, m.inputs.xMm, m.inputs.widthMm, m.inputs.heightMm, m.inputs.sillMm]);
     expect(ops).toEqual([["D1", "door", 1000, 820, 2040, 0]]);
     const rows = (x) => linesOf(x, wallsId).map((l) => [l.component, l.quantity, l.finishedLengthMm]);
-    expect(rows(w)).toEqual([["studs", 21, 2700], ["plates", 2, 6000], ["plates", 2, 4200], ["noggins", 1, 4800], ["noggins", 1, 3600]]);
+    // decision 6: 90 × 35 studs, so each noggin bay is 600 less one 35 stud (565): the noggins buy 5,400 + 3,300
+    expect(rows(w)).toEqual([["studs", 21, 2700], ["plates", 2, 6000], ["plates", 2, 4200], ["noggins", 1, 5400], ["noggins", 1, 3300]]);
     const before = linesOf(w, wallsId);
     observed.WF = { ...observed.WF, line: WALLS_D1, lines: before.map(lineText) };
     // reload: the same walls, door, settings and line come back from the REAL server

@@ -88,9 +88,20 @@ function tracedLength(m, ctx) {
   return { lengthMm: polylineLengthMm(cal, m.points), legs, problems, cal };
 }
 
-/** The wall page's own field labels, for the "enter the …" wording (HUB 029). */
-const WALL_FIELD_LABELS = { widthMm: "Wall length", heightMm: "Wall height", startHeightMm: "Height at start", endHeightMm: "Height at end",
-  eavesHeightMm: "Eaves height", apexHeightMm: "Apex height", apexXMm: "Apex position", outline: "wall outline" };
+/** The wall page's own field labels, for the "enter the …" wording (HUB 029; the fix rows use them too). */
+export const WALL_FIELD_LABELS = Object.freeze({ widthMm: "Wall length", heightMm: "Wall height", startHeightMm: "Height at start", endHeightMm: "Height at end",
+  eavesHeightMm: "Eaves height", apexHeightMm: "Apex height", apexXMm: "Apex position", outline: "wall outline" });
+
+/**
+ * The readable tag each wall of ONE material is named by (cells, demands, problems): its name, plus the first 4
+ * characters of its id when two of the material's walls share that name ("Wall (wb12)"). `walls` is [{ id, name }],
+ * one per contribution. HUB 029: the fix rows name walls the same way (shared/takeoff/fixes.js).
+ */
+export function wallTagsOf(walls) {
+  const tags = new Map();
+  for (const w of walls) tags.set(w.id, walls.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
+  return tags;
+}
 /** Not a wall page field: a traced wall on a page with no usable scale gets its length from scaling the page. */
 const NON_HEIGHT = new Set(["widthMm", "outline", "scale"]);
 
@@ -328,8 +339,17 @@ function runTimber(mat, n, items, ctx, sink) {
 
 /** A Walls part's procurement identity, tagged with its part so each part buys on its own lines and cut list. */
 const wallPartIdentity = (p, part) => timberIdentity({ section: sectionText(p), grade: p.grade, treatment: p.treatment, species: p.species, supplier: p.supplierName, component: part });
-/** What the supplier reads for a Walls part: "Studs 90 × 45 MGP10 H2", "Plates 90 × 45 LVL" (Long plates are plates too). */
-const wallPartText = (identity) => `${identity.component === "longPlates" ? WALL_PART_LABELS.plates : WALL_PART_LABELS[identity.component]} ${timberText(identity)}`;
+/**
+ * What the supplier reads for a Walls part: "Studs 90 × 45 MGP10 H2", "Plates 90 × 45 LVL" (Long plates are plates too).
+ * The grade and treatment read as the part holds them (Sam's decision 6: "Studs 90 × 35 LVL Smart 10 H2", "Noggins
+ * 90 × 35 MGP10 untreated"); the identity, and so the line it buys on, still ignores case.
+ */
+const wallPartText = (identity, part) => {
+  const p = part || {};
+  const as = (raw, id) => (String(raw ?? "").trim() || id);
+  const text = timberText({ ...identity, grade: as(p.grade, identity.grade), treatment: as(p.treatment, identity.treatment) });
+  return `${identity.component === "longPlates" ? WALL_PART_LABELS.plates : WALL_PART_LABELS[identity.component]} ${text}`;
+};
 const andList = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 /** Is this a Walls part's own identity problem ("Studs: choose the treatment …"), which familyProblems already says? */
 const isPartIdentityProblem = (p) => p.code === "timber_identity_incomplete" && WALL_PARTS.some((k) => String(p.message).startsWith(`${WALL_PART_LABELS[k]}:`));
@@ -458,7 +478,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     const demands = three.flatMap((r) => r.demands);
     for (const d of demands) {
-      if (d.identity?.component) d.itemDescription = wallPartText(d.identity);
+      if (d.identity?.component) d.itemDescription = wallPartText(d.identity, parts[d.identity.component]);
       // the cut lists name each piece's wall ("Wall 2 stud @ 1,177.5 (beside W1)", "Wall 1 second top plate 0–6,000")
       d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Bottom plate|Top plate|Second top plate|Noggin)\b/, (x) => x.toLowerCase())}`;
     }
@@ -1011,7 +1031,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn,
       framedElsewhere: (wallMeasId) => framedElsewhere(wallMeasId, mat.id) };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
-    for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
+    for (const [id, tag] of wallTagsOf(names)) sink.wallTags.set(id, tag);
     let n = null, methodResults = [];
     let matProblems = familyProblems(mat.spec).map((p) => ({ ...p, blocking: true }));
     try {

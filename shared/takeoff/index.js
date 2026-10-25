@@ -10,6 +10,8 @@ export * from "./history.js";
 export * from "./catalogue.js";
 export * from "./sections.js";
 export * from "./orderDraft.js";
+// HUB 029: every order blocker as a one-tap fix row (fixesFor, isInstallationNote, the code-to-target table)
+export * from "./fixes.js";
 export * from "./engine/contract.js";
 export * from "./engine/families.js";
 export { gableInputProblem } from "./engine/wall.js";
