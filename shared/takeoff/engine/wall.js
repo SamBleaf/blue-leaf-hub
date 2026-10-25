@@ -256,42 +256,48 @@ export function buildWall(raw) {
   const input = raw && typeof raw === "object" ? raw : {};
   const kind = input.kind ?? "rect";
   const head = { id: input.id ?? null, measurementId: input.measurementId ?? null, kind };
-  const fail = (code, message) => ({ ...head, polygon: null, bbox: null, grossAreaMm2: null, problems: [qty(code, message)] });
+  // HUB 029: a shape problem names the wall page fields that fix it (refs[0].missing, the same keys as wall_incomplete:
+  // widthMm, heightMm, the rake or gable heights, apexXMm, or "outline" for a traced outline to retrace)
+  const fail = (code, message, missing) => ({ ...head, polygon: null, bbox: null, grossAreaMm2: null,
+    problems: [qty(code, message, missing ? { refs: [{ missing }] } : {})] });
   if (!WALL_KINDS.includes(kind)) return fail("wall_kind_unknown", `Unknown wall shape "${kind}".`);
   let pts;
   if (kind === "polygon") {
     const raw = input.points;
-    if (!Array.isArray(raw) || raw.length < 3) return fail("wall_polygon_invalid", "A traced wall needs at least 3 points.");
-    if (raw.length > MAX_WALL_POINTS) return fail("wall_polygon_invalid", `A traced wall can have at most ${MAX_WALL_POINTS} points — split the wall.`);
-    if (!raw.every((p) => p && isFiniteNumber(p.x) && isFiniteNumber(p.y))) return fail("wall_polygon_invalid", "A wall point is not a number.");
+    if (!Array.isArray(raw) || raw.length < 3) return fail("wall_polygon_invalid", "A traced wall needs at least 3 points.", ["outline"]);
+    if (raw.length > MAX_WALL_POINTS) return fail("wall_polygon_invalid", `A traced wall can have at most ${MAX_WALL_POINTS} points — split the wall.`, ["outline"]);
+    if (!raw.every((p) => p && isFiniteNumber(p.x) && isFiniteNumber(p.y))) return fail("wall_polygon_invalid", "A wall point is not a number.", ["outline"]);
     pts = raw.map((p) => ({ x: p.x, y: p.y }));
   } else {
     const W = input.widthMm;
-    if (!isPos(W)) return fail("wall_dimension_invalid", "Wall length must be a number greater than 0.");
+    if (!isPos(W)) return fail("wall_dimension_invalid", "Wall length must be a number greater than 0.", ["widthMm"]);
     if (kind === "rect") {
-      if (!isPos(input.heightMm)) return fail("wall_dimension_invalid", "Wall height must be a number greater than 0.");
+      if (!isPos(input.heightMm)) return fail("wall_dimension_invalid", "Wall height must be a number greater than 0.", ["heightMm"]);
       const H = input.heightMm;
       pts = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
     } else if (kind === "rake") {
       const a = input.startHeightMm, b = input.endHeightMm;
-      if (!isNonNeg(a) || !isNonNeg(b) || Math.max(a, b) <= 0) return fail("wall_dimension_invalid", "A raked wall needs start and end heights (0 or more, not both 0).");
+      if (!isNonNeg(a) || !isNonNeg(b) || Math.max(a, b) <= 0) {
+        const bad = [!isNonNeg(a) && "startHeightMm", !isNonNeg(b) && "endHeightMm"].filter(Boolean);
+        return fail("wall_dimension_invalid", "A raked wall needs start and end heights (0 or more, not both 0).", bad.length ? bad : ["startHeightMm", "endHeightMm"]);
+      }
       pts = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: b }, { x: 0, y: a }];
     } else {
       const e = input.eavesHeightMm, ax = input.apexXMm, ah = input.apexHeightMm;
-      if (!isNonNeg(e)) return fail("wall_dimension_invalid", "Gable eaves height must be 0 or more.");
-      if (!isFiniteNumber(ax) || ax <= 0 || ax >= W) return fail("wall_dimension_invalid", "Gable apex position must be between the two wall ends.");
-      if (!isFiniteNumber(ah) || ah <= e) return fail("wall_dimension_invalid", "Gable apex must be higher than the eaves.");
+      if (!isNonNeg(e)) return fail("wall_dimension_invalid", "Gable eaves height must be 0 or more.", ["eavesHeightMm"]);
+      if (!isFiniteNumber(ax) || ax <= 0 || ax >= W) return fail("wall_dimension_invalid", "Gable apex position must be between the two wall ends.", ["apexXMm"]);
+      if (!isFiniteNumber(ah) || ah <= e) return fail("wall_dimension_invalid", "Gable apex must be higher than the eaves.", ["apexHeightMm"]);
       pts = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: e }, { x: ax, y: ah }, { x: 0, y: e }];
     }
   }
   const poly = dedupe(pts);
   const far = poly.reduce((f, p) => (Math.hypot(p.x - poly[0].x, p.y - poly[0].y) > Math.hypot(f.x - poly[0].x, f.y - poly[0].y) ? p : f), poly[0]);
   const span = Math.hypot(far.x - poly[0].x, far.y - poly[0].y);
-  if (poly.length < 3 || poly.every((p) => Math.abs(orient(poly[0], far, p)) <= EPS_MM * span)) return fail("wall_polygon_invalid", "The wall outline has no area.");
-  if (selfIntersects(poly)) return fail("wall_self_intersecting", "The wall outline crosses or touches itself — retrace it.");
+  if (poly.length < 3 || poly.every((p) => Math.abs(orient(poly[0], far, p)) <= EPS_MM * span)) return fail("wall_polygon_invalid", "The wall outline has no area.", ["outline"]);
+  if (selfIntersects(poly)) return fail("wall_self_intersecting", "The wall outline crosses or touches itself — retrace it.", ["outline"]);
   const area = signedArea(poly);
   const b = bboxOf(poly);
-  if (Math.abs(area) <= EPS_MM * (b.x1 - b.x0 + b.y1 - b.y0)) return fail("wall_polygon_invalid", "The wall outline has no area.");
+  if (Math.abs(area) <= EPS_MM * (b.x1 - b.x0 + b.y1 - b.y0)) return fail("wall_polygon_invalid", "The wall outline has no area.", ["outline"]);
   const polygon = area > 0 ? poly : poly.slice().reverse();
   return { ...head, polygon, bbox: b, grossAreaMm2: Math.abs(area), problems: [] };
 }

@@ -1820,6 +1820,68 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   assert.deepEqual(mine((await S(`/workspaces/${w}`)).data.computed), mine(again.computed), "the lines are unchanged");
 });
 
+await t("HUB 029 step 1: a traced wall on a re-scaled page is held with its cladding and listed by the rescale review with its length; the REAL server keeps the review's re-stamp and refuses the gable the review holds back", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { computeWorkspace: compute, methodFor, rescaleCandidates } = await import("../../shared/takeoff/index.js");
+  const axonSpec = specFromGroup(productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth"));
+  const mk = methodFor(axonSpec);
+  const w = id(), cal = id(), cal2 = id(), clad = id(), wall = id(), gable = id(), entered = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB029-s1-plan.pdf");
+  assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB029 s1" })).status, 200);
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] },
+    materials: { upsert: [{ id: clad, name: "Axon 400 smooth", methodKey: mk.key, methodVersion: mk.version, spec: axonSpec, rules: {} }] },
+    measurements: { upsert: [{ id: wall, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(0, 0), c(4200, 0)], inputs: { kind: "rect", heightMm: 2700, name: "Wall 1" } },
+      // a gable traced 6,000 long with its apex centred
+      { id: gable, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: [c(0, 1000), c(6000, 1000)], inputs: { kind: "gable", eavesHeightMm: 2400, apexHeightMm: 3600, apexXMm: 3000, name: "Gable" } },
+      { id: entered, kind: "wall", inputs: { kind: "rect", widthMm: 3000, heightMm: 2700, name: "Wall 2" } }] },
+    contributions: { upsert: [wall, gable, entered].map((mid) => ({ id: id(), measurementId: mid, jobMaterialId: clad, role: "wall" })) } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // the page is scaled again with every known distance halved (the first scale was 2x too long): revision 2
+  const half = (d) => ({ ...d, knownMm: d.knownMm / 2 });
+  const rs = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal2, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: half(H), vertical: half(V), verification: { ...CHECK, expectedMm: CHECK.expectedMm / 2 } }] } } });
+  assert.equal(rs.status, 200, JSON.stringify(rs.data));
+  const held = (await S(`/workspaces/${w}`)).data;
+  const lines = (cw) => cw.scheduleLines.filter((l) => l.jobMaterialIds.includes(clad));
+  assert.ok(lines(held.computed).length && lines(held.computed).every((l) => l.problems.includes("calibration_superseded")), "every line of the cladding is held");
+  const rows = rescaleCandidates(held.snapshot);
+  assert.deepEqual(rows.map((x) => [x.measurement.id, x.from.id, x.to.id]).sort(), [[gable, cal, cal2], [wall, cal, cal2]].sort(), "the traced walls only, never the wall by numbers");
+  const rowOf = (mid) => rows.find((x) => x.measurement.id === mid);
+  assert.ok(Math.abs(rowOf(wall).wall.beforeMm - 4200) < 0.5 && Math.abs(rowOf(wall).wall.afterMm - 2100) < 0.5 && rowOf(wall).wall.problem === null, JSON.stringify(rowOf(wall).wall));
+  assert.equal(rowOf(gable).wall.problem?.field, "apexXMm", JSON.stringify(rowOf(gable).wall));
+  const restamp = (row) => ({ ...row.measurement, calibrationId: row.to.id });
+  // the review's prediction is the server's: re-stamping the gable is refused, and the WHOLE change with it
+  const both = await SP(`/workspaces/${w}/commit`, { expectedRevision: held.snapshot.workspace.revision, changes: { measurements: { upsert: rows.map(restamp) } } });
+  assert.equal(both.status, 400, JSON.stringify(both.data));
+  assert.match(both.data.error, /apex must sit between the two wall ends/);
+  assert.equal((await q("SELECT calibration_id FROM takeoff_measurements WHERE id=$1", [wall])).rows[0].calibration_id, cal, "nothing was applied");
+  // Use the new scale: RescaleReview sends only the rows it can (the measurement as loaded, re-stamped)
+  const ap = await SP(`/workspaces/${w}/commit`, { expectedRevision: held.snapshot.workspace.revision, changes: { measurements: { upsert: rows.filter((x) => !x.wall.problem).map(restamp) } } });
+  assert.equal(ap.status, 200, JSON.stringify(ap.data));
+  const mid = (await S(`/workspaces/${w}`)).data;
+  const stored = mid.snapshot.measurements.find((m) => m.id === wall);
+  assert.equal(stored.calibrationId, cal2);
+  assert.ok(Math.abs(stored.inputs.widthMm - 2100) < 0.5, `the server re-derives the length from the new scale: ${stored.inputs.widthMm}`);
+  assert.equal((await q("SELECT calibration_id FROM takeoff_measurements WHERE id=$1", [wall])).rows[0].calibration_id, cal2);
+  assert.deepEqual(rescaleCandidates(mid.snapshot).map((x) => x.measurement.id), [gable], "the gable is still on the old scale");
+  // change the Apex position first (checked against the old scale's 6,000), then the gable takes the new scale too
+  const g0 = mid.snapshot.measurements.find((m) => m.id === gable);
+  const mv = await SP(`/workspaces/${w}/commit`, { expectedRevision: mid.snapshot.workspace.revision, changes: { measurements: { upsert: [{ ...g0, inputs: { ...g0.inputs, apexXMm: 1500 } }] } } });
+  assert.equal(mv.status, 200, JSON.stringify(mv.data));
+  const moved = (await S(`/workspaces/${w}`)).data;
+  const [gr] = rescaleCandidates(moved.snapshot);
+  assert.deepEqual([gr.measurement.id, gr.wall.problem], [gable, null]);
+  const ap2 = await SP(`/workspaces/${w}/commit`, { expectedRevision: moved.snapshot.workspace.revision, changes: { measurements: { upsert: [restamp(gr)] } } });
+  assert.equal(ap2.status, 200, JSON.stringify(ap2.data));
+  const after = (await S(`/workspaces/${w}`)).data;
+  assert.ok(lines(after.computed).every((l) => !l.problems.includes("calibration_superseded")), JSON.stringify(lines(after.computed).map((l) => l.problems)));
+  assert.deepEqual(rescaleCandidates(after.snapshot), []);
+  assert.deepEqual(lines(compute(after.snapshot)), lines(after.computed), "the shared engine on the stored snapshot gives the server's lines");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

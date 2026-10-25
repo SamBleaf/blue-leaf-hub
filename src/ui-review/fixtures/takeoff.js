@@ -38,7 +38,7 @@
 import { route } from "../registry.js";
 import { reviewRole } from "../config.js";
 import {
-  buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
+  buildCalibration, verifyCalibration, segmentLengthMm, polylineLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
   SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
   TIMBER_GRID, WALLS_PURPOSE, WALL_FRAMING_RULES, methodReads, normaliseFamilySpec, wallFramingDefaults,
@@ -379,9 +379,15 @@ function applyCommit(body) {
       if (walls.has(m.id)) return { ...m, spec: walls.get(m.id), rules: { ...(m.rules || {}) } };
       return m.spec?.family && m.spec.family !== "flashing" ? { ...m, rules: { ...(m.rules || {}) } } : { ...m, rules: normaliseFlashingRules(m.rules) };
     });
-    // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft
+    // like the server's cleanInputs (HUB 017): a gable's present values must be coherent — a missing apex position is a draft.
+    // HUB 029: a traced gable is checked against its length under ITS calibration, as the server does (a re-stamp to a new
+    // scale can put the apex off the wall, and the server then refuses the whole change)
     for (const m of ch.measurements?.upsert || []) {
-      if (m.kind === "wall" && m.inputs?.kind === "gable") { const gp = gableInputProblem(m.inputs, m.inputs.widthMm); if (gp) return fail(400, gp.message, "INVALID"); }
+      if (m.kind === "wall" && m.inputs?.kind === "gable") {
+        const cal = Array.isArray(m.points) && m.points.length ? state.calibrations.find((x) => x.id === m.calibrationId) : null;
+        const gp = gableInputProblem(m.inputs, cal ? Math.round(polylineLengthMm(cal, m.points) * 1000) / 1000 : m.inputs.widthMm);
+        if (gp) return fail(400, gp.message, "INVALID");
+      }
       // like the server: a wall traced on a plan is one straight wall; only an elevation OUTLINE (Rectangle / Area, HUB 023)
       // has more corners — at most 200
       if (m.kind === "wall" && Array.isArray(m.points) && m.points.length && !(m.points.length === 2 || (m.inputs?.kind === "polygon" && m.points.length <= 200))) {

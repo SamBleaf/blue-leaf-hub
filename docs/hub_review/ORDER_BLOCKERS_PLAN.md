@@ -30,6 +30,22 @@ HUB 028 step 4 is editing `TakeoffApp.jsx`, `MeasureScreen.jsx` and `src/ui-revi
    Hardie" reconcile row, `formerBatten` and `rules.battensCoveredBy` are NOT built. Draft Hardie lines are handled by
    Update all like any other stale line.
 
+**Decision 6 (25 October 2026, Sam, in chat) — Walls default products, so a new Walls item has NO product needs:**
+Sam: "studs are 90x35 LVL smart 10 h2, noggings 90x35 mgp10 untreated, top and bottom plate 90x45 mgp10 H2, or 90x45 LVL 10
+smart H2 for long plates or all plates but i dont love the way they absorbs moisture on the ground"; plates and noggins
+grade MGP10.
+- Studs: 90 × 35 LVL "Smart 10", H2 (stud thickness along the wall is now 35, so side-stud placement, the merge distance and
+  noggin clear lengths follow from 35; HUB 028 test figures that rely on the default stud product change legitimately;
+  list each one).
+- Plates (bottom, top, second top): 90 × 45 MGP10, H2 (pine; Sam doesn't want LVL on the ground by default).
+- Long plates (over the pine plates' 6.0 m): 90 × 45 LVL "Smart 10", H2, up to 11.0 m (as before).
+- Noggins: 90 × 35 MGP10, "Untreated" (a real treatment value that satisfies the need, printed as "untreated").
+Represent "LVL Smart 10" so order lines read naturally, e.g. "Studs 90 × 35 LVL Smart 10 H2". A saved company product for
+a part still wins over these. Keep HUB 027's Timber presets unchanged. Update SOP 20-08's Walls defaults and the HUB 028
+worked-example notes in step 6.
+**Where it goes:** the first build step that starts after this note is written implements it (families.js
+wallFramingDefaults + tests), unless an earlier step already did.
+
 ## What Sam asked
 
 **Message 1** (25 October, with a screenshot of the live Cladding panel):

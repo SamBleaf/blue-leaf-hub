@@ -12,13 +12,14 @@
 //   bucket        (spec key, finished length) — the unit of required / ordered / remaining.
 // =============================================================================
 import { TakeoffValidationError, stableStringify, totalLinearMetres } from "./units.js";
-import { calibrationOrderReady, latestPageCalibrations, pointsWithinCalibration, polylineLengthMm, segmentLengthMm } from "./calibration.js";
+import { calibrationOrderReady, latestPageCalibrations, pointToMm, pointsWithinCalibration, polylineLengthMm, segmentLengthMm } from "./calibration.js";
 import { evaluateSplit, lengthFlags, manualPieceResult, measuredRunResult, normaliseFlashingRules } from "./flashing.js";
 import { profileGeometryKey, profileProblems } from "./profile.js";
 import { fabricationIdentity, specProblems } from "./catalogue.js";
 import { computeFlashingPath } from "./engine/flashingPath.js";
 import { computeGenericMaterials, genericMaterialKey, isGenericMaterial } from "./engine/dispatch.js";
 import { WALL_PARTS, familyProblems } from "./engine/families.js";
+import { gableInputProblem } from "./engine/wall.js";
 
 export const LIMITS = Object.freeze({
   measurementsPerWorkspace: 500,
@@ -309,6 +310,11 @@ export function computeWorkspace(ws) {
     return { contributionId: c.contributionId, jobMaterialId: c.jobMaterialId, specKey: mat ? materialSpecKey(mat) : null, problems: c.problems, explanation: c.explanation };
   });
   unplaced.push(...gen.unplaced);
+  // HUB 029: a measured generic item that is blocked and has no line at all (e.g. a batten item with no product) is
+  // still something the job needs, so the job is not ready while it is held. An item with nothing measured never counts.
+  const measuredGeneric = new Set(gen.contributions.map((c) => c.jobMaterialId));
+  const heldWithNoLines = [...measuredGeneric].some((id) => (gen.results[id]?.problems || []).some((p) => p.blocking !== false)
+    && !genericLines.some((l) => l.jobMaterialIds.includes(id)));
   return {
     contributions: [...contributions, ...gen.contributions],
     scheduleLines,
@@ -317,7 +323,7 @@ export function computeWorkspace(ws) {
     materialResults: gen.results,
     // LM is a flashing total; other units are never added together (see materialResults / line units)
     totalLm: totalLinearMetres(flashingLines),
-    orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0) && !unplaced.length,
+    orderReady: scheduleLines.length > 0 && scheduleLines.every((l) => l.problems.length === 0) && !unplaced.length && !heldWithNoLines,
   };
 }
 
@@ -434,17 +440,70 @@ export function contributionPiecesForBucket(computed, line) {
   return out.sort((a, b) => (a.contributionId < b.contributionId ? -1 : 1));
 }
 
-/** Runs whose calibration is not the newest for its document/page/region, with before/after. */
+/** A traced wall's size under one scale: its length along the line, or a traced outline's width along the wall and its
+ *  height (as the engine), null when it can't be worked out. */
+function tracedWallSize(m, cal) {
+  try {
+    if (m.inputs?.kind === "polygon" && m.points.length >= 3) {
+      const q = m.points.map((p) => pointToMm(cal, m.points[0], p));
+      const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+      const lengthMm = Math.max(...xs) - Math.min(...xs), heightMm = Math.max(...ys) - Math.min(...ys);
+      return Number.isFinite(lengthMm) && Number.isFinite(heightMm) ? { lengthMm, heightMm } : null;
+    }
+    const lengthMm = polylineLengthMm(cal, m.points);
+    return Number.isFinite(lengthMm) ? { lengthMm } : null;
+  } catch { return null; }
+}
+
+/**
+ * A traced wall under the newest scale (HUB 029): its size before and after, why the server would refuse the re-stamp
+ * (it re-derives the wall from the new scale and refuses the whole change: a gable apex no longer between the wall ends,
+ * points outside the new scale's region), and its openings. Openings are kept in mm as entered or tapped, so they never
+ * move with the scale: `fits` says whether each still sits inside the wall's new size.
+ */
+function tracedWallRescale(m, cur, newest, measurements) {
+  const before = tracedWallSize(m, cur), after = tracedWallSize(m, newest);
+  const outline = m.inputs?.kind === "polygon";
+  let problem = null;
+  if (!pointsWithinCalibration(newest, m.points)) problem = { code: "outside_region", message: "It goes outside the area the new scale covers: retrace it." };
+  else if (!after) problem = { code: "measurement_invalid", message: "Its length can't be worked out with the new scale: retrace it." };
+  else if (m.inputs?.kind === "gable") {
+    // the server's own check (takeoffService cleanInputs → gableInputProblem on the length under the new scale)
+    const gp = gableInputProblem(m.inputs, after.lengthMm);
+    if (gp) problem = { code: "wall_dimension_invalid", field: gp.field, message: gp.field === "apexXMm"
+      ? `At ${Math.round(after.lengthMm).toLocaleString("en-AU")} mm long the apex is off the wall: change the Apex position first.` : gp.message };
+  }
+  const openings = measurements.filter((o) => o.kind === "opening" && o.parentId === m.id && !o.archived).map((o) => {
+    const x = o.inputs || {};
+    const fits = !after || ((Number(x.xMm) || 0) + (Number(x.widthMm) || 0) <= after.lengthMm + 0.5
+      && (!outline || (Number(x.sillMm) || 0) + (Number(x.heightMm) || 0) <= after.heightMm + 0.5));
+    return { id: o.id, label: x.label || null, fits };
+  });
+  return { beforeMm: before?.lengthMm ?? null, afterMm: after?.lengthMm ?? null,
+    ...(outline ? { heightBeforeMm: before?.heightMm ?? null, heightAfterMm: after?.heightMm ?? null } : {}), problem, openings };
+}
+
+/**
+ * Runs whose calibration is not the newest for its document/page/region, with before/after. HUB 029: traced walls too
+ * (a wall with plan points and a scale), as `wall: { beforeMm, afterMm, heightBeforeMm?, heightAfterMm?, problem,
+ * openings }` (see tracedWallRescale). Applying the new scale is the same re-stamp of its calibrationId; a wall with a
+ * `problem` must not be sent (the server refuses the whole change).
+ */
 export function rescaleCandidates(view) {
   const mats = new Map(view.materials.map((m) => [m.id, m]));
   const byMeasurement = new Map(view.contributions.map((c) => [c.measurementId, c]));
   const out = [];
   for (const m of view.measurements) {
-    if ((m.kind !== "run" && m.kind !== "polyline") || m.archived) continue;
+    const wall = m.kind === "wall" && Array.isArray(m.points) && m.points.length >= 2;
+    if ((m.kind !== "run" && m.kind !== "polyline" && !wall) || m.archived) continue;
     const cur = view.calibrations.find((c) => c.id === m.calibrationId);
     if (!cur) continue;
     const newest = latestPageCalibrations(view.calibrations, cur.documentId, cur.pageIndex).find((c) => (c.regionLabel || "") === (cur.regionLabel || ""));
     if (!newest || newest.id === cur.id) continue;
+    if (wall) {
+      out.push({ measurement: m, from: cur, to: newest, before: null, after: null, wall: tracedWallRescale(m, cur, newest, view.measurements) });
+      continue;
+    }
     const mat = mats.get(byMeasurement.get(m.id)?.jobMaterialId);
     if (mat && isGenericMaterial(mat)) { out.push({ measurement: m, from: cur, to: newest, before: null, after: null }); continue; }
     const rules = mat?.rules;

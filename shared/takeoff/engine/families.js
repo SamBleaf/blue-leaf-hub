@@ -381,6 +381,15 @@ export function stockIdentityKey(spec) {
 }
 
 /**
+ * HUB 029: the card fields a familyProblems need can name (its `field`): the timber section, grade or species,
+ * treatment and (a Walls part's) longest length; an aluminium profile and saw kerf; a product, its width × thickness,
+ * effective cover and stock lengths; the foam coating; the random-length LM increment. A Walls part's need also names
+ * its `part`.
+ */
+export const FAMILY_NEED_FIELDS = Object.freeze(["section", "grade", "treatment", "stock.maxMm", "profile", "kerfMm", "product", "product.size", "product.cover",
+  "product.lengths", "coating", "orderIncrementM"]);
+
+/**
  * Completeness problems that block ordering (drafts can hold them). A Walls item checks each part and names it
  * ("Plates: enter the treatment …", with `part`). Long plates are checked only when a plate uses them: the Walls
  * calculation says so with `usesLongPlates: true`; without it the part is skipped (a job with no plate over the pine
@@ -390,40 +399,41 @@ export function familyProblems(spec, { usesLongPlates = false } = {}) {
   let n;
   try { n = normaliseFamilySpec(spec); } catch (e) { return [{ code: "material_incomplete", message: e.message }]; }
   const out = [];
-  const need = (cond, message) => { if (!cond) out.push({ code: "material_incomplete", message }); };
+  // HUB 029: every need names the card field that fixes it (`field`, one of FAMILY_NEED_FIELDS), so its fix opens there
+  const need = (cond, field, message) => { if (!cond) out.push({ code: "material_incomplete", message, field }); };
   if (n.family === "timber" && n.purpose === WALLS_PURPOSE) {
     for (const k of WALL_PARTS) {
       if (k === "longPlates" && !usesLongPlates) continue;
       const p = n.components[k], label = WALL_PART_LABELS[k];
-      const needPart = (cond, message) => { if (!cond) out.push({ code: "material_incomplete", message: `${label}: ${message}`, part: k }); };
-      needPart(p.section.depthMm && p.section.widthMm, "enter the timber section (e.g. 90 × 45).");
-      needPart(p.grade || p.species, "enter the grade or species.");
-      needPart(p.treatment, "enter the treatment (or \"untreated\").");
+      const needPart = (cond, field, message) => { if (!cond) out.push({ code: "material_incomplete", message: `${label}: ${message}`, part: k, field }); };
+      needPart(p.section.depthMm && p.section.widthMm, "section", "enter the timber section (e.g. 90 × 45).");
+      needPart(p.grade || p.species, "grade", "enter the grade or species.");
+      needPart(p.treatment, "treatment", "enter the treatment (or \"untreated\").");
       // a longest length under the grid's 1,200 can't buy any length: named once here, and no wall is worked out
-      needPart(wallPartLongestOk(p), `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);
+      needPart(wallPartLongestOk(p), "stock.maxMm", `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);
     }
   } else if (n.family === "timber") {
-    need(n.section.depthMm && n.section.widthMm, "Enter the timber section (e.g. 90 × 45).");
-    need(n.grade || n.species, "Enter the grade or species.");
-    need(n.treatment, "Enter the treatment (or \"untreated\").");
+    need(n.section.depthMm && n.section.widthMm, "section", "Enter the timber section (e.g. 90 × 45).");
+    need(n.grade || n.species, "grade", "Enter the grade or species.");
+    need(n.treatment, "treatment", "Enter the treatment (or \"untreated\").");
   } else if (n.family === "aluminium") {
-    need(n.profile.aMm && n.profile.bMm && n.profile.tMm, "Enter the profile size (e.g. 50 × 50 × 3).");
-    need(n.kerfMm != null && n.kerfConfirmed, "Confirm the saw kerf for the cutting plan (an estimate can use 0, ordering can't).");
+    need(n.profile.aMm && n.profile.bMm && n.profile.tMm, "profile", "Enter the profile size (e.g. 50 × 50 × 3).");
+    need(n.kerfMm != null && n.kerfConfirmed, "kerfMm", "Confirm the saw kerf for the cutting plan (an estimate can use 0, ordering can't).");
   } else if (n.family === "batten") {
     // a support layer: product/section and stock lengths — never a cladding "effective cover" (05 B1/B3)
-    need(n.product.name, "Choose the batten / rail product.");
-    need(n.product.widthMm && n.product.thicknessMm, "Enter the batten section (width × thickness).");
-    need(n.product.lengthMm || n.product.lengthsMm.length, "Enter the stock length(s).");
+    need(n.product.name, "product", "Choose the batten / rail product.");
+    need(n.product.widthMm && n.product.thicknessMm, "product.size", "Enter the batten section (width × thickness).");
+    need(n.product.lengthMm || n.product.lengthsMm.length, "product.lengths", "Enter the stock length(s).");
   } else if (n.family === "accessory") {
     // an accessory SET (starters, trims, sealant, fixings …): each item carries its own identity in the recipe
-    need(n.product.name, "Name this accessory set.");
+    need(n.product.name, "product", "Name this accessory set.");
   } else {
-    need(n.product.name, "Choose the product.");
-    need(n.product.widthMm && n.product.thicknessMm, "Product width and thickness are needed.");
-    if (n.layout !== "grid" && n.family !== "aac") need(n.product.effectiveCoverMm, "Effective cover is needed (supplier/product value — not the nominal width).");
-    if (n.family === "foam") need(n.coating, "Choose factory-coated or applicator-coated.");
-    if (n.family === "timber-cladding" && n.supply === "random") need(n.orderIncrementM, "Enter the supplier's LM ordering increment.");
-    if (!(n.family === "timber-cladding" && n.supply === "random")) need(n.product.lengthMm || n.product.lengthsMm.length, "Enter the stock length(s) or sheet height(s).");
+    need(n.product.name, "product", "Choose the product.");
+    need(n.product.widthMm && n.product.thicknessMm, "product.size", "Product width and thickness are needed.");
+    if (n.layout !== "grid" && n.family !== "aac") need(n.product.effectiveCoverMm, "product.cover", "Effective cover is needed (supplier/product value — not the nominal width).");
+    if (n.family === "foam") need(n.coating, "coating", "Choose factory-coated or applicator-coated.");
+    if (n.family === "timber-cladding" && n.supply === "random") need(n.orderIncrementM, "orderIncrementM", "Enter the supplier's LM ordering increment.");
+    if (!(n.family === "timber-cladding" && n.supply === "random")) need(n.product.lengthMm || n.product.lengthsMm.length, "product.lengths", "Enter the stock length(s) or sheet height(s).");
   }
   return out;
 }

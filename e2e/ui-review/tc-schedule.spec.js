@@ -611,6 +611,50 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(page.getByText(/Not ready to order yet:/)).toBeVisible();
   });
 
+  test("HUB 029 REV-3b: Review with new scale holds back a traced gable whose apex the new scale puts off the wall (the mock refuses its re-stamp, as the server does), and the runs still switch", async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.goto(MIXED);
+    await ready(page);
+    const snap = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot);
+    const dist = snap.measurements.find((m) => m.id === "m-dist");
+    const cal = snap.calibrations.find((c) => c.id === dist.calibrationId);
+    // a gable traced on the 10,000 mm line with its apex centred; then the page is scaled again with every known distance
+    // doubled in the drawing (the first scale was 2x too long), so the gable is really 5,000 long
+    await serverEdit(page, { measurements: { upsert: [{ id: "m-gab", kind: "wall", documentId: dist.documentId, pageIndex: dist.pageIndex, calibrationId: cal.id, points: dist.points, label: null,
+      inputs: { kind: "gable", eavesHeightMm: 2400, apexHeightMm: 3600, apexXMm: 5000, name: "Gable G" } }] } });
+    const half = (d) => ({ ...d, knownMm: d.knownMm / 2 });
+    await serverEdit(page, { calibrations: { insert: [{ id: "cal-half", documentId: cal.documentId, pageIndex: cal.pageIndex, pageMeta: cal.pageMeta, basisRotation: 0, horizontal: half(cal.horizontal), vertical: half(cal.vertical) }] } });
+    // mock parity: re-stamping the gable is refused with the server's own message (cleanInputs checks the new length)
+    const refused = await page.evaluate(async () => {
+      const s = (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot;
+      const g = s.measurements.find((m) => m.id === "m-gab");
+      const body = { expectedRevision: window.__takeoffReviewState().revision, idempotencyKey: `rev-${Math.random()}`, changes: { measurements: { upsert: [{ ...g, calibrationId: "cal-half" }] } } };
+      return (await fetch("/api/takeoff/workspaces/ws-1/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    });
+    expect([refused.ok, refused.error]).toEqual([false, "The apex must sit between the two wall ends."]);
+    await reopen(page);
+    await page.getByRole("button", { name: "Review with new scale" }).tap();
+    const row = page.locator('[data-rescale-wall="m-gab"]');
+    await expect(row).toContainText("Gable G: 10,000 → 5,000 mm long");
+    await expect(row.locator("[data-rescale-problem]")).toHaveText("At 5,000 mm long the apex is off the wall: change the Apex position first.");
+    const box = page.locator("label", { has: row }).getByRole("checkbox");
+    await expect(box).toBeDisabled();
+    await expect(box).not.toBeChecked();
+    const ticked = await page.getByRole("checkbox", { checked: true }).count();
+    expect(ticked).toBeGreaterThan(0);
+    await page.screenshot({ path: `${SHOTS}/rescale-gable-held-390x844.png` });
+    await page.getByRole("button", { name: `Use the new scale for ${ticked} run(s)` }).tap();
+    await expect(page.getByRole("button", { name: "Open schedule" })).toBeVisible();
+    // autosaved (the mock keeps what the server would): every run on the old scale switched, the gable stayed on it
+    const runs = snap.measurements.filter((m) => (m.kind === "run" || m.kind === "polyline") && m.calibrationId === cal.id).map((m) => m.id);
+    expect(runs.length).toBe(ticked);
+    const calsOf = () => page.evaluate(async () => Object.fromEntries((await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.measurements.map((m) => [m.id, m.calibrationId])));
+    await expect.poll(async () => { const c = await calsOf(); return runs.every((id) => c[id] === "cal-half"); }, { timeout: 10_000 }).toBe(true);
+    expect((await calsOf())["m-gab"]).toBe(cal.id);
+    await expect(page.getByText(/Not saved/)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("REV-4 needed cuts vs selected stock, existing offcuts actually used, saw loss / left-over and the objective; sizing and cutting provenance (02 §6, 06, 11)", async ({ page }) => {
     const errors = watchErrors(page);
     await page.goto(MIXED);

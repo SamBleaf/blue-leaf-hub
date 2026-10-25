@@ -88,14 +88,45 @@ function tracedLength(m, ctx) {
   return { lengthMm: polylineLengthMm(cal, m.points), legs, problems, cal };
 }
 
-/** Wall measurement → { wall (wall.js input), openings, label, problems }. Entered numbers are authoritative. */
+/** The wall page's own field labels, for the "enter the …" wording (HUB 029). */
+const WALL_FIELD_LABELS = { widthMm: "Wall length", heightMm: "Wall height", startHeightMm: "Height at start", endHeightMm: "Height at end",
+  eavesHeightMm: "Eaves height", apexHeightMm: "Apex height", apexXMm: "Apex position", outline: "wall outline" };
+/** Not a wall page field: a traced wall on a page with no usable scale gets its length from scaling the page. */
+const NON_HEIGHT = new Set(["widthMm", "outline", "scale"]);
+
+/**
+ * HUB 029: what an incomplete wall still needs, said with the wall page's own labels and naming only the missing fields
+ * ("Wall 3: enter the Wall height.", "… trace or enter the Wall length.", "… enter the Height at start and end.",
+ * "… enter the Eaves height, Apex height and Apex position.", "… scale this plan page." for a traced wall whose page has
+ * no usable scale: it has no length to type, so it never asks for one).
+ */
+export function wallIncompleteText(tag, missing) {
+  const asks = [];
+  if (missing.includes("scale")) asks.push("scale this plan page");
+  if (missing.includes("widthMm")) asks.push(`trace or enter the ${WALL_FIELD_LABELS.widthMm}`);
+  if (missing.includes("outline")) asks.push(`trace the ${WALL_FIELD_LABELS.outline}`);
+  const heights = missing.filter((f) => !NON_HEIGHT.has(f));
+  if (heights.length === 2 && heights.includes("startHeightMm") && heights.includes("endHeightMm")) asks.push("enter the Height at start and end");
+  else if (heights.length) asks.push(`enter the ${andList(heights.map((f) => WALL_FIELD_LABELS[f] || f))}`);
+  return `${tag}: ${asks.join(" and ")}.`;
+}
+
+/**
+ * Wall measurement → { wall (wall.js input), openings, label, missing, problems }. Entered numbers are authoritative.
+ * `missing` names the fields an incomplete wall still needs, as the wall page's inputs (widthMm, heightMm,
+ * startHeightMm, endHeightMm, eavesHeightMm, apexHeightMm, apexXMm, or "outline" for a traced outline with none) —
+ * exactly what makes it wall_incomplete. A traced wall whose page has no usable scale names "scale" instead of its
+ * length or outline: the plan page needs scaling (its calibration_missing code says so too), never a typed length.
+ */
 function resolveWall(m, ctx) {
   const inp = { ...(m.inputs || {}) };
   const problems = [];
   let widthMm = inp.widthMm;
+  let unscaled = false;
   if (Array.isArray(m.points) && m.points.length >= 2) {
     const t = tracedLength(m, ctx);
     problems.push(...t.problems);
+    unscaled = !t.cal;
     if (inp.kind === "polygon" && t.cal && m.points.length >= 3) {
       // traced elevation outline: local wall mm, x along the wall, y up from the lowest point
       const q = m.points.map((p) => pointToMm(t.cal, m.points[0], p));
@@ -106,10 +137,14 @@ function resolveWall(m, ctx) {
   const kind = inp.kind || "rect";
   // a rake / gable may legitimately start at 0 (triangular) — only an ABSENT height is missing
   const has = (v) => v != null && v !== "";
-  const missing = kind === "rect" ? !inp.heightMm : kind === "rake" ? !(has(inp.startHeightMm) && has(inp.endHeightMm))
-    : kind === "gable" ? !(has(inp.eavesHeightMm) && inp.apexHeightMm && inp.apexXMm != null) : !(Array.isArray(inp.polygon) && inp.polygon.length >= 3);
+  // the same tests as before, field by field (a gable's apex height of 0 is missing, its apex position only when absent)
+  const shapeMissing = kind === "rect" ? (inp.heightMm ? [] : ["heightMm"])
+    : kind === "rake" ? ["startHeightMm", "endHeightMm"].filter((f) => !has(inp[f]))
+    : kind === "gable" ? [!has(inp.eavesHeightMm) && "eavesHeightMm", !inp.apexHeightMm && "apexHeightMm", inp.apexXMm == null && "apexXMm"].filter(Boolean)
+    : Array.isArray(inp.polygon) && inp.polygon.length >= 3 ? [] : [unscaled ? "scale" : "outline"];
+  const missing = [...(!widthMm && kind !== "polygon" ? [unscaled ? "scale" : "widthMm"] : []), ...shapeMissing];
   if (!widthMm && kind !== "polygon") problems.push("wall_incomplete");
-  if (missing) problems.push("wall_incomplete");
+  if (shapeMissing.length) problems.push("wall_incomplete");
   const openings = (ctx.openingsByWall.get(m.id) || []).map((o) => {
     const x = o.inputs || {};
     return { id: o.id, label: x.label || null, type: x.type || "window", xMm: x.xMm, sillMm: x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm,
@@ -117,7 +152,7 @@ function resolveWall(m, ctx) {
   });
   const wall = { id: m.id, kind, widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon };
-  return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", problems };
+  return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", missing, problems };
 }
 
 // ── method adapters: material + its contributions → MethodResult(s) ──────────
@@ -223,9 +258,14 @@ function runTimber(mat, n, items, ctx, sink) {
     for (const { m } of items.filter((x) => x.m.kind === "wall")) {
       const w = resolveWall(m, ctx);
       sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
-      if (!w.wall.widthMm) { sink.problems.push({ code: "wall_incomplete", message: `${w.label}: enter or trace the wall length.`, blocking: true }); continue; }
+      // HUB 029: the same wall facts as every other wall problem (which wall, which field), the wording unchanged
+      const wallRef = (missing) => ({ scope: "wall", refs: [{ measurementId: m.id, missing }] });
+      if (!w.wall.widthMm) {
+        sink.problems.push({ code: "wall_incomplete", message: `${w.label}: enter or trace the wall length.`, blocking: true, ...wallRef(w.missing.includes("scale") ? ["scale"] : ["widthMm"]) });
+        continue;
+      }
       const studLen = rules.studHeightMm || w.wall.heightMm;
-      if (!studLen) { sink.problems.push({ code: "wall_incomplete", message: `${w.label}: enter the stud cut length or frame height.`, blocking: true }); continue; }
+      if (!studLen) { sink.problems.push({ code: "wall_incomplete", message: `${w.label}: enter the stud cut length or frame height.`, blocking: true, ...wallRef(["heightMm"]) }); continue; }
       // frame height needs BOTH plate build-ups entered (T4 explicit) — never assumed 0
       if (rules.heightMode === "frame" && !(rules.bottomPlateMm > 0 && rules.topPlateMm > 0)) {
         sink.problems.push({ code: "plates_missing", message: `${w.label}: enter the bottom and top plate thickness to turn the frame height into a stud length.`, blocking: true });
@@ -254,7 +294,7 @@ function runTimber(mat, n, items, ctx, sink) {
         legs.forEach((runMm, k) => results.push(computePlates({ ...base, wallId: legs.length > 1 ? `${m.id}:${k + 1}` : m.id, measurementId: m.id, runMm, layers, allowanceMm: n.endAllowanceMm || 0 })));
       }
     } else if (n.purpose === "noggins") {
-      if (!n.section?.widthMm) sink.problems.push({ code: "material_incomplete", message: "Enter the stud/noggin section so the clear bays can be worked out.", blocking: true });
+      if (!n.section?.widthMm) sink.problems.push({ code: "material_incomplete", message: "Enter the stud/noggin section so the clear bays can be worked out.", blocking: true, field: "section" });
       for (const { m } of n.section?.widthMm ? walls : []) {
         const w = resolveWall(m, ctx);
         if (!w.wall.widthMm) continue;
@@ -344,12 +384,13 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
     const tag = sink.wallTags.get(m.id) || w.label;
-    const block = (code, message) => sink.problems.push({ code, message, blocking: true, refs: [{ measurementId: m.id }] });
+    const block = (code, message, extra = {}) => sink.problems.push({ code, message, blocking: true, refs: [{ measurementId: m.id, ...extra }], ...(extra.missing ? { scope: "wall" } : {}) });
     const L = w.wall.widthMm;
     const H = Number(w.wall.heightMm);
     if (w.wall.kind !== "rect") { block("wall_not_straight", `${tag} is sloped or traced as an outline. Walls only works out straight walls of one height.`); continue; }
-    if (!(L > 0)) { block("wall_incomplete", `${tag}: trace the wall length.`); continue; }
-    if (!(H > 0)) { block("wall_incomplete", `${tag}: enter the Wall height.`); continue; }
+    // HUB 029: which field, as on every other wall_incomplete (the wording unchanged)
+    if (!(L > 0)) { block("wall_incomplete", `${tag}: trace the wall length.`, { missing: w.missing.includes("scale") ? ["scale"] : ["widthMm"] }); continue; }
+    if (!(H > 0)) { block("wall_incomplete", `${tag}: enter the Wall height.`, { missing: ["heightMm"] }); continue; }
     // openings along the wall (then by id), each named by its plan label (D1, W1 …), unique on the wall, so the names
     // and notes don't depend on the order the openings were added. The id stays the measurement id.
     const names = new Set();
@@ -526,12 +567,22 @@ function runWallMethod(mat, n, items, ctx, sink) {
   for (const { m } of items.filter((x) => x.m.kind === "wall")) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
-    if (w.problems.includes("wall_incomplete")) { sink.problems.push({ code: "wall_incomplete", message: `${w.label}: enter the wall length and heights.`, blocking: true }); continue; }
-    const built = buildWall({ ...w.wall, measurementId: m.id });
-    if (!built.polygon) { sink.problems.push(...built.problems.map((p) => ({ ...p, blocking: true, message: `${w.label}: ${p.message}` }))); continue; }
-    const wallGeom = built;
     // readable AND unique per material: the wall label (+ short id when two walls share a name) names cells/demands
-    const tag = sink.wallTags.get(m.id);
+    const tag = sink.wallTags.get(m.id) || w.label;
+    // HUB 029: a wall's own problem names only what it is missing, and says which wall (refs), so its fix opens that
+    // wall at that field even when two walls share a name. It still holds the whole material (Sam, 25 Oct: the sheets,
+    // battens and H-flashing are cut across walls)
+    if (w.problems.includes("wall_incomplete")) {
+      sink.problems.push({ code: "wall_incomplete", message: wallIncompleteText(tag, w.missing), blocking: true, scope: "wall", refs: [{ measurementId: m.id, missing: w.missing }] });
+      continue;
+    }
+    const built = buildWall({ ...w.wall, measurementId: m.id });
+    if (!built.polygon) {
+      sink.problems.push(...built.problems.map((p) => ({ ...p, blocking: true, message: `${w.label}: ${p.message}`, scope: "wall",
+        refs: [{ measurementId: m.id, ...(p.refs?.[0] || {}) }] })));
+      continue;
+    }
+    const wallGeom = built;
     const variants = productVariants(n);
     // the SELECTED installation assembly (never auto-approved): with no reviewed rows it stays source-pending
     const assembly = n.assemblyId ? CATALOGUE_SEED.assemblyCandidates.find((a) => a.id === n.assemblyId) || { id: n.assemblyId } : null;
@@ -1046,7 +1097,9 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       l.item = { ...(l.item || {}), dependencyKey: key };
       for (const p of blocking) if (!l.problems.includes(p.message)) l.problems.push(p.message);
       for (const p of measCodes) if (!l.problems.includes(p)) l.problems.push(p);
-      for (const p of advisory) l.notes.push(p.message);
+      // HUB 029: a note said once per line (e.g. the same installation note from every wall), as the pooled lines do;
+      // the material's own problems list keeps every copy
+      for (const p of advisory) if (!l.notes.includes(p.message)) l.notes.push(p.message);
     }
     // contribution attribution: each purchase unit belongs to the contribution of the (first) demand it serves
     // wall-level demands (supports, accessories, sheets) name their wall by its readable TAG — map it back to the wall

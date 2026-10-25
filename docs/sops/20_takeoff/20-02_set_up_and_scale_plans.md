@@ -1,6 +1,6 @@
 ---
-sop_version: 1.2
-last_reviewed: 2026-10-21
+sop_version: 1.3
+last_reviewed: 2026-10-25
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -101,8 +101,9 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 
 1. Tap **Scale this page** again (or **Re-scale** on the warning banner in the Measure screen) and repeat Section B.
 2. A re-scale creates a **new** scale revision; the old one is kept, never edited.
-3. Runs already measured keep the scale they were measured with. After a re-scale, every run on that page (or region) measured with the older scale is flagged "This page has been re-scaled since this run was measured — review it with the new scale." and can't be ordered until reviewed. The overview shows "N run(s) were measured before the page was re-scaled. They can't be ordered until you review them."
-4. Tap **Review with new scale**. The **Review with new scale** window lists each affected run as "Order <old> mm → **<new> mm**" with "Measured <old> → <new> mm · page N · <region>". All runs are ticked; untick any you don't want to change.
+3. Runs already measured keep the scale they were measured with. After a re-scale, every run on that page (or region) measured with the older scale is flagged "This page has been re-scaled since this run was measured — review it with the new scale." and can't be ordered until reviewed. The overview shows "N run(s) were measured before the page was re-scaled. They can't be ordered until you review them." Walls traced on that page (with **Line**, **Rectangle** or **Area**) are flagged the same way and are counted in that number. Their cladding or Walls item can't be ordered until they are reviewed.
+4. Tap **Review with new scale**. The **Review with new scale** window lists each affected run as "Order <old> mm → **<new> mm**" with "Measured <old> → <new> mm · page N · <region>". A traced wall is listed by its name and length, for example "Wall 3: 4,200 → **4,410 mm** long" with "Traced wall · page N". An outline (**Rectangle** or **Area**) also shows its height, because the whole outline changes with the scale. A wall with openings says "its opening keeps its size: check it after": openings keep the sizes they were given, so check them on the wall page after. All rows are ticked; untick any you don't want to change.
+   - A traced wall that can't take the new scale is shown unticked and can't be ticked, with the reason. For example, a gable whose apex would sit off the shorter wall says "At 3,000 mm long the apex is off the wall: change the Apex position first." Change the **Apex position from start** on the wall page, then come back.
 5. Tap **Use the new scale for N run(s)** (or **Not now** to leave them flagged). Only the ticked runs switch to the new scale; frozen exports and placed orders don't change. A run shown as "invalid" under the new scale (e.g. it falls outside a re-drawn region) should be removed and re-measured instead.
 
 ### E. When a new plan revision replaces the old one
@@ -227,7 +228,7 @@ You pick the plan and its main floor-plan page, then tell the app how big the dr
 - Rotating the view (**⟳ 90°**) is only possible before the first point is placed.
 - A scale saved without a check, or with a failed check, lets you look and measure but blocks those runs from a supplier PDF.
 - Choosing a replaced plan in **Set up plans** only changes the page you are looking at — it can't become the main page, and it can't be scaled or measured on.
-- Runs keep the scale they were measured with. A re-scale flags them for review and blocks ordering until **Review with new scale** switches the ticked runs over (showing before → after) or they are removed and re-measured.
+- Runs keep the scale they were measured with. A re-scale flags them for review and blocks ordering until **Review with new scale** switches the ticked runs over (showing before → after) or they are removed and re-measured. Traced walls work the same way, shown with their length before and after. Their openings keep their sizes, and a wall the new scale can't take (a gable apex off the wall, or outside the scaled region) can't be ticked until it is fixed.
 - The check must use a different dimension from the two used for scaling (checked on screen and again by the server).
 - New plan revisions are never auto-scaled and measurements are never moved across automatically.
 
@@ -347,6 +348,15 @@ Next review date: 2027-04-13
 2. **Rectangle** → **Page 1 ▾** → **Page 3**. Expected: straight back to measuring on "page 3 · scaled" with Rectangle still chosen; `snapshot.workspace.primaryPageIndex` is still 0 and `__takeoffReviewState().commits` hasn't changed.
 3. **Page 3 ▾** → **Page 4** (not scaled) → **Scale page** (in the Rectangle panel) → scale the whole page with a check → **Save scale**. Expected: back on "page 4 · scaled" with Rectangle chosen.
 4. **Area** on page 3: tap three corners → **Page 3 ▾**. Expected: every page tile is 150 high and doesn't move as the pages draw. Tap **Page 1**: no commit, no wall. **Page 1 ▾** → **Page 3**: the three corners are back with Area chosen. **Page 3 ▾** → **Plan** → Rev B → **Back**. Expected: "Rev C · page 3 · scaled", the three corners still there. Spec: e2e/ui-review/tc-measure.spec.js "HUB 023".
+- [ ] Pass  [ ] Fail
+
+**TC-15 — A traced wall in the re-scale review (HUB 029)**
+1. On a **Ready** page, add an Axon cladding and trace one wall with **Line** (Wall height 2,700, about 4,200 long). Trace a second wall with **Line**, set it to **Gable** (Eaves 2,400, Apex height 3,600) and tap **Centre (…)** under **Apex position from start**. Add a third wall **by numbers** (3,000 × 2,700) on the same cladding.
+2. **Scale this page** again, typing half of each known distance (a passing re-scale, revision 2). Every traced length halves.
+3. On the overview, open **Review with new scale**.
+4. Tap **Use the new scale for 1 run(s)**. Open the gable's wall page, set the **Apex position from start** to a quarter of its old length, go back to the overview and open **Review with new scale** again. Tap **Use the new scale for 1 run(s)**.
+5. Expected result: step 2, the overview banner reads "2 run(s) were measured before the page was re-scaled. They can't be ordered until you review them." and every line of the cladding shows "This page has been re-scaled since this run was measured — review it with the new scale." Step 3: two rows, "Wall 1: <old> → <new> mm long" (ticked) and the gable's row (unticked, can't be ticked) saying "At <new> mm long the apex is off the wall: change the Apex position first."; the wall by numbers is not listed. Step 4: no "Not saved" banner; after the second apply the banner is gone and the cladding's lines are clear.
+6. Expected DB: both traced walls' `calibration_id` is revision 2 and their stored Wall length is the new length; the wall by numbers has no `calibration_id`. Node: `node scripts/tests/takeoff-tc-hub029.test.mjs` ("the rescale review …" tests) and `takeoff-api.test.mjs` ("HUB 029 step 1: a traced wall on a re-scaled page …"). Mocked screen: `e2e/ui-review/tc-schedule.spec.js` "HUB 029 REV-3b".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
