@@ -39,7 +39,7 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, live | 7e6759e | iPhone check |
 | HUB 026 Aluminium plan measuring first | Implemented, live | 7e6759e | iPhone check |
 | HUB 027 Timber presets by purpose | Implemented, live | 7e6759e | iPhone check |
-| HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, awaiting deploy (built on takeoff-r03, not on main) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f + step 6 | Sam's deploy, then iPhone check |
+| HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, awaiting deploy (built on takeoff-r03, not on main) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f, 36ad816 + final review fixes | Sam's deploy, then iPhone check |
 
 **Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October). HUB 028 needs none.
 
@@ -47,7 +47,9 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 are tagged [Default, needs Sam] in docs/hub_review/WALLS_FRAMING_PLAN.md (for example LVL stock in 300 mm steps with
 11,000 allowed, the pieces after a join over 11 m, side studs between close openings, no corner plate deduction).
 One HUB 028 question is still open: should a cladding's Wall height ignore walls that are only on a Walls item? Today
-a cladding traced after Walls starts at the stud cut length (2,700, not the cladded 2,745). HUB 016 (8 sheets under the factory-edge rule, or
+a cladding traced after Walls starts at the stud cut length (2,700, not the cladded 2,745). The mirror case came up in
+the final review: Use here of a cladding wall on Walls takes the cladded 2,745 as the stud length. Walls now says so on
+the Use here banner and the SOP says to trace the framing fresh; should it refuse it instead? HUB 016 (8 sheets under the factory-edge rule, or
 which cut gets to 7). HUB 001 (the ongoing forecast rule). The aluminium kerf/tolerance feedback (Recording review 06:
 drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc comment asking for Add supplier is built
 (HUB 008/019) and can be resolved.
@@ -76,6 +78,12 @@ drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc com
   add a door, reload, the same line and the same lines from the real server).
 - SOPs: 20-08 v1.5 (new Section 5D Walls, Sections 2–4, 7, 8, 11, 12, TC-15 to TC-17), 20-09 v2.1 (one note), 20-01
   v1.2 (Add walls in the Timber part), 20-12 v1.4.1 (the 300 mm grid line), SOP_CHANGELOG and SOP_INDEX.
+- Final review fixes (one local commit "HUB 028: final review fixes"): a Longest length under 1,200 is refused at the
+  field and, if one comes in, named once as the part's need with every wall "not counted" (never 0.00 m of plates); a
+  wall with a plate that can't be joined is "not counted"; LVL stock starts over the plates' own longest (a 4,800 plate
+  product buys 5,100 LVL, not 6,300); a wall on two Walls items is noted on both; Use here on Walls says the height it
+  will use as the stud length; Add walls waits for the company products on a slow signal; cut lists read @ 600 before
+  @ 1,200; step 1's unused plate gaps removed. SOP 20-08 v1.5.1 (TC-18), SOP_CHANGELOG and SOP_INDEX.
 - NOT pushed or deployed. No migration. Waiting on Sam's "deploy", then an iPhone check of Add walls on a real job.
 
 ### 2026-10-24 — HUB 022–027 live; Railway secrets reset checklist

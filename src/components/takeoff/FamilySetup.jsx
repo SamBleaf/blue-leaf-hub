@@ -29,7 +29,7 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
@@ -100,7 +100,8 @@ export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max 
     if (t === "") { if (!o.unmounting) { setErr(null); d.applied(true); } if (isNum(value)) onCommit(null); return; }
     const n = Number(t);
     if (!Number.isFinite(n) || n < min || (min > 0 && !integer && n <= 0) || (integer && !Number.isInteger(n))) {
-      if (!o.unmounting) setErr(integer ? `Enter a whole number of ${min} or more.` : min > 0 ? "Enter a number greater than 0." : "Enter a number of 0 or more.");
+      if (!o.unmounting) setErr(integer ? `Enter a whole number of ${min} or more.` : min > 1 ? `Enter ${min.toLocaleString("en-AU")}${unit ? ` ${unit}` : ""} or more.`
+        : min > 0 ? "Enter a number greater than 0." : "Enter a number of 0 or more.");
       return;
     }
     if (n > max) { if (!o.unmounting) setErr(`That's more than ${max.toLocaleString("en-AU")}${unit ? ` ${unit}` : ""} — check the number.`); return; }
@@ -1198,6 +1199,8 @@ function WallPartSizeChoice({ d, part, presets }) {
 
 /** The normaliser's bounds for a part's lengths (over 0, up to 1,000,000 mm), so a refused value is said at the field. */
 const PART_MM = Object.freeze({ min: 1, max: 1000000 });
+/** A longest length buys timber on the grid, so it is at least the grid's shortest length (1,200): "Enter 1,200 mm or more." */
+const PART_LONGEST_MM = Object.freeze({ min: TIMBER_GRID.minMm, max: PART_MM.max });
 
 /**
  * One part in the fold: its Size and grade list, then section, grade, treatment and longest length (always editable).
@@ -1220,7 +1223,7 @@ function WallPart({ d, part, presets }) {
         <CommitText label="Grade (e.g. MGP10)" value={p.grade} maxLength={40} onCommit={(t) => set({ grade: t })} />
         <CommitText label="Treatment (e.g. H3)" value={p.treatment} maxLength={40} onCommit={(t) => set({ treatment: t })} />
       </div>
-      <NumberField label="Longest length" value={p.stock?.maxMm} {...PART_MM} onCommit={(n) => set({ stock: { ...(p.stock || {}), maxMm: n } })} />
+      <NumberField label="Longest length" value={p.stock?.maxMm} {...PART_LONGEST_MM} onCommit={(n) => set({ stock: { ...(p.stock || {}), maxMm: n } })} />
       {notStocked.length > 0 && <p className="text-[11px] text-muted" data-wall-part-not-stocked="">Not stocked: {notStocked.map((l) => `${Math.round(l).toLocaleString("en-AU")}`).join(", ")} mm</p>}
     </fieldset>
   );

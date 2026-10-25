@@ -25,7 +25,7 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { TIMBER_GRID, WALLS_PURPOSE, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths } from "../../../../shared/takeoff/engine/families.js";
+import { WALLS_PURPOSE, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -500,16 +500,9 @@ export function wallPartsNeedText(result) {
  * plates have no longest length (or no stock length within it), or the Long plates' own longest length isn't past it.
  */
 export function wallLongPlateOverMm(spec) {
-  const s = spec?.components?.plates?.stock || {};
-  const max = Number(s.maxMm);
-  if (s.maxMm == null || s.maxMm === "" || !(max >= TIMBER_GRID.minMm)) return null;
-  const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
-  let pine = null;
-  for (let l = TIMBER_GRID.minMm + Math.floor((max - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) * TIMBER_GRID.incrementMm; l >= TIMBER_GRID.minMm; l -= TIMBER_GRID.incrementMm) {
-    if (!off.has(l)) { pine = l; break; }
-  }
+  const pine = wallPinePlateMaxMm(spec?.components?.plates);
   if (pine == null) return null;
-  const long = longPlateStockLengths(spec?.components?.longPlates);
+  const long = longPlateStockLengths(spec?.components?.longPlates, pine);
   return long.length && long[long.length - 1] > pine ? pine : null;
 }
 

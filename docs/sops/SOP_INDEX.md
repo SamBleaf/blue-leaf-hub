@@ -1,6 +1,6 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-10-25 (Takeoffs HUB 028 Walls: 20-08 v1.5, 20-09 v2.1, 20-01 v1.2 and 20-12 v1.4.1 updated, all test_status untested) · 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
+> Last updated: 2026-10-25 (Takeoffs HUB 028 Walls: 20-08 v1.5 then v1.5.1 after the final review, 20-09 v2.1, 20-01 v1.2 and 20-12 v1.4.1 updated, all test_status untested) · 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
 > Total SOPs: 169 (+ 1 reference: portal stack matrix) — counted from the rows in this index on 2026-10-14. Note: 6 files on disk in `18_marketing_agent/` (18-02 to 18-07) are not yet indexed.  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 

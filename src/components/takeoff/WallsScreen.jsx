@@ -1530,6 +1530,9 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
             {!mine.length && <p className="text-sm text-muted">{walls.length && material
               ? FOLLOWERS.has(material.spec?.family)
                 ? `No walls use ${material.name} yet. Open a wall under Other walls and tap Use here.`
+                // HUB 028: a Walls item reads a wall's height as the stud length, so it doesn't send you to another
+                // material's walls (a cladding height, or a wall another Walls item already frames)
+                : isWallsItem(material) ? `No walls use ${material.name} yet. Trace or add one.`
                 : `No walls use ${material.name} yet. Trace or add one, or open a wall under Other walls.`
               : usesLine(material)
                 ? "No walls yet. Trace on plan: type the wall height, then tap each corner. Or add one by numbers (length and heights)."
@@ -1855,7 +1858,9 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               (Materials on this wall, below, keeps the full Use / ✓ Uses / Remove wall) */}
           {canEdit && material && !attached && (
             <div data-use-here=""><Banner tone="info" action={<Btn kind="primary" onClick={() => act.setAttached(wall, true)} aria-label={`Use ${material.name} on this wall`}>Use here</Btn>}>
-              {material.name} isn&apos;t on this wall yet.</Banner></div>
+              {material.name} isn&apos;t on this wall yet.
+              {/* HUB 028: a Walls item takes the wall's height as the stud length (a cladding's 2,745 buys longer studs) */}
+              {isWallsItem(material) && Number(inputs.heightMm) > 0 && <> Its height, {fmtMm(Number(inputs.heightMm))}, would be the stud length.</>}</Banner></div>
           )}
           {/* wall-by-wall step 5: this wall's cladding quantities from the layout (sheets, battens, tape, H-flashing) in
               one short line, before spares — the same numbers the order adds up */}

@@ -7,7 +7,7 @@
 // Material rules / Flashing profile / Length schedule / Orders. Focused windows (scale, measure,
 // profile) take the full screen and hide module navigation until closed.
 // =============================================================================
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, WALL_FRAMING_RULES, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates, wallFramingDefaults } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
@@ -181,6 +181,10 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   const [catalogue, setCatalogue] = useState(null); // company product editor: { preset|null, value }
   const [reviewUpdate, setReviewUpdate] = useState(null); // job material id whose newer company version is being reviewed
   const [presets, setPresets] = useState([]);
+  // HUB 028: Add walls fills its parts from the company products, so on a slow connection it waits for their first load
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
+  const firstPresets = useRef(null); // that first load: a promise of the list (null if it failed)
+  const addingWalls = useRef(false);
   const [manualFor, setManualFor] = useState(null);
   const [notice, setNotice] = useState(null);
   // unfinished drawings kept on this device (R04 F02) — offered after a reload / PWA restart
@@ -261,7 +265,15 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     if (!placeKey || !placeRestored) return;
     try { sessionStorage.setItem(placeKey, JSON.stringify({ win, activeMaterial, openWall })); } catch { /* private mode: nothing kept */ }
   }, [placeKey, placeRestored, win, activeMaterial, openWall]);
-  useEffect(() => { let stop = false; api.presets().then((r) => { if (!stop && r.ok) setPresets(r.data.presets || []); }); return () => { stop = true; }; }, [api]);
+  useEffect(() => {
+    let stop = false;
+    firstPresets.current = Promise.resolve(api.presets()).then((r) => {
+      const list = r?.ok ? r.data.presets || [] : null;
+      if (!stop && list) { setPresets(list); setPresetsLoaded(true); }
+      return list;
+    }).catch(() => null);
+    return () => { stop = true; };
+  }, [api]);
 
   const needsPdf = ["setup", "pages", "calibrate", "measure"].includes(win);
   // the tool to come back to belongs to one trip out of Measure (scale / page) and back
@@ -427,18 +439,26 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   /**
    * HUB 028: one Walls item from the defaults (each part takes its one saved company product, else the built-in row)
    * and straight onto the plan with Line chosen: no Timber card first. With no plan chosen yet, its walls list (Trace
-   * on plan), as Studs does.
+   * on plan), as Studs does. Tapped before the company products have loaded (a slow phone connection), it waits for
+   * them, so the parts still take the saved products; a failed load leaves the built-in rows.
    */
-  const addWalls = () => {
-    const spec = wallFramingDefaults(presets);
-    const mm = methodFor(spec);
-    const names = new Set(view.materials.map((x) => String(x.name || "").trim().toLowerCase()));
-    let name = "Walls";
-    for (let i = 2; names.has(name.toLowerCase()); i++) name = `Walls ${i}`;
-    const m = { id: newId(), name, methodKey: mm.key, methodVersion: mm.version, spec, rules: { ...WALL_FRAMING_RULES }, profile: null };
-    upsertMaterial(m);
-    setOpenRow(m.id); setEditing(null); setSetupFrom(null); setHighlightIds(null); setOpenWall(null); setMeasureTool(null);
-    setWin(docId ? "measure" : "walls");
+  const addWalls = async () => {
+    if (addingWalls.current) return; // a second tap while the products load makes no second item
+    addingWalls.current = true;
+    try {
+      const list = presetsLoaded ? presets : ((await firstPresets.current) ?? presets);
+      const spec = wallFramingDefaults(list);
+      const mm = methodFor(spec);
+      const names = new Set(view.materials.map((x) => String(x.name || "").trim().toLowerCase()));
+      let name = "Walls";
+      for (let i = 2; names.has(name.toLowerCase()); i++) name = `Walls ${i}`;
+      const m = { id: newId(), name, methodKey: mm.key, methodVersion: mm.version, spec, rules: { ...WALL_FRAMING_RULES }, profile: null };
+      upsertMaterial(m);
+      setOpenRow(m.id); setEditing(null); setSetupFrom(null); setHighlightIds(null); setOpenWall(null); setMeasureTool(null);
+      setWin(docId ? "measure" : "walls");
+    } finally {
+      addingWalls.current = false;
+    }
   };
   const addCladding = () => addFamily({ family: "cladding", layout: "sheet", product: {} }, "Cladding");
   const addAluminium = () => addFamily(aluminiumPreset(), "Aluminium angle 50 × 50 × 3");

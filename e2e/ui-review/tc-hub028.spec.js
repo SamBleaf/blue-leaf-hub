@@ -16,6 +16,8 @@
 // shows the parts' needs as one banner, its live result as the framing line, and "… aren't counted" (never "base studs
 // only") for an opening with no detail; the fold shows a product's not-stocked lengths and refuses a 0 at the field.
 // Step 6: Add walls on a takeoff with no plan opens its Walls list (Wall by numbers, no Trace on plan), as SOP 20-08 says.
+// Final review: a Longest length under 1,200 is refused at the field; Add walls tapped before the company products load
+// waits for them; an empty Walls list doesn't point to Other walls and Use here says the height it uses as the stud length.
 //   UI_REVIEW_PORT=5196 npx playwright test --config=playwright.ui-review.config.js e2e/ui-review/tc-hub028.spec.js
 import { test, expect } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -732,6 +734,42 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
     await shot(page, "walls-products-card-390x844");
   });
 
+  test("final review: Add walls tapped before the company products have loaded (a slow signal) waits for them, so every part still takes its saved product", async ({ page }) => {
+    const late = 12000;
+    await page.addInitScript((ms) => { window.__takeoffReviewPresetsDelayMs = ms; }, late);
+    const t0 = Date.now();
+    await page.goto(`${TIMBER}&takeoffSeed=walls-products`);
+    const add = page.locator('[data-material-group="timber"]').getByRole("button", { name: "Add walls" });
+    await add.click();
+    expect(Date.now() - t0, "tapped before the products answered").toBeLessThan(late);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›", { timeout: 20_000 });
+    await expect.poll(async () => (await wallsState(page)).materials.length, { timeout: 15_000 }).toBe(1);
+    expect(await partsBrief(page)).toEqual({
+      studs: [90, 45, "MGP10", "H2", "Yard A", "ST-9045", 6000], plates: [90, 45, "MGP10", "H2", "Yard A", "PL-9045", 6000],
+      longPlates: [90, 45, "LVL", "H2", "Yard B", "LVL-9045", 11000], noggins: [90, 35, "MGP10", "H2", "Yard A", "NG-9035", 5400],
+    });
+    expect((await wallsState(page)).materials).toHaveLength(1);
+  });
+
+  test("final review: an empty Walls list doesn't send you to Other walls, and Use here on a cladding wall says its height would be the stud length", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1?reviewRole=admin&takeoffSeed=walls-after-cladding");
+    await ready(page);
+    const walls = { id: "mat-walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, profile: null, rules: { centresMm: 600, doubleTopPlate: false }, spec: wallFramingDefaults([]) };
+    expect((await commit(page, { materials: { upsert: [walls] } }, "hub028-final-use-here")).status).toBe(200);
+    await page.evaluate((u) => { history.pushState({}, "", u); dispatchEvent(new PopStateEvent("popstate")); }, TIMBER);
+    await ready(page);
+    const row = page.locator("[data-material-row]").filter({ hasText: /^Walls/ });
+    const t = row.locator("button[aria-expanded]").first();
+    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+    await row.getByRole("button", { name: "Walls", exact: true }).click();
+    await expect(page.getByText("No walls use Walls yet. Trace or add one.", { exact: true })).toBeVisible();
+    const other = page.locator("[data-other-walls]");
+    if ((await other.getAttribute("open")) === null) await other.locator("summary").click();
+    await other.getByRole("button", { name: "Open Wall 1" }).click();
+    await expect(page.locator("[data-use-here]")).toContainText("Walls isn't on this wall yet. Its height, 2,745, would be the stud length.");
+    await expect(page.getByRole("button", { name: "Use Walls on this wall" })).toBeVisible();
+  });
+
   test("the Walls card's Needs are the parts' only (what Details › counts); why a wall isn't counted sits under its Walls line, as on the Line panel", async ({ page }) => {
     await addWalls(page, `${TIMBER}&takeoffSeed=walls-products`);
     // a wall with no Wall height: not counted, and Details › stays plain (nothing to fix on the parts)
@@ -747,7 +785,7 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
     await expect(card(page).locator("[data-walls-card-problems] li")).toHaveText(["Wall 1: enter the Wall height."]);
   });
 
-  test("the fold: a saved product's not-stocked lengths show under its Longest length (so Long plates (over 5.7 m) reads true); Long plates read plain when no plate can be LVL; a 0 is refused at the field", async ({ page }) => {
+  test("the fold: a saved product's not-stocked lengths show under its Longest length (so Long plates (over 5.7 m) reads true); Long plates read plain when no plate can be LVL; a 0, or a longest length under 1,200, is refused at the field", async ({ page }) => {
     await page.goto("/carpentry/cjb-1?reviewRole=admin");
     await ready(page);
     // a Walls item whose plates came from a product with 6,000 marked not stocked (seeded through the fake server's commit)
@@ -777,13 +815,17 @@ test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () 
     // a 0 (or a length the server can't keep) is refused at the field, with its reason there; the item keeps its values
     await enter(part(page, "studs").getByLabel("Section depth"), 0);
     await expect(part(page, "studs").getByRole("alert")).toHaveText("Enter a number greater than 0.");
+    // a longest length buys on the timber grid, so under its shortest 1,200 is refused there too (the final review: a
+    // typed 6, meaning 6 m, used to be kept and showed 0.00 m of plates)
     await enter(part(page, "noggins").getByLabel("Longest length"), 0);
-    await expect(part(page, "noggins").getByRole("alert")).toHaveText("Enter a number greater than 0.");
+    await expect(part(page, "noggins").getByRole("alert")).toHaveText("Enter 1,200 mm or more.");
+    await enter(part(page, "longPlates").getByLabel("Longest length"), 6);
+    await expect(part(page, "longPlates").getByRole("alert")).toHaveText("Enter 1,200 mm or more.");
     await enter(part(page, "plates").getByLabel("Longest length"), 2000000);
     await expect(part(page, "plates").getByRole("alert")).toHaveText("That's more than 1,000,000 mm — check the number.");
     await saved(page);
     const b = await partsBrief(page);
-    expect([b.studs[0], b.noggins[6], b.plates[6]]).toEqual([90, 6000, 6000]);
+    expect([b.studs[0], b.longPlates[6], b.noggins[6], b.plates[6]]).toEqual([90, 11000, 6000, 6000]);
     await expect(card(page).locator('[role="alert"]').filter({ hasText: "must be a positive number" })).toHaveCount(0);
   });
 });

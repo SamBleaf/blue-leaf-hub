@@ -21,8 +21,8 @@
 // by default and 2 on Walls from his round 2, the first one's face on the opening edge and the second against it,
 // studs closer than one stud thickness are one: end, then side, then centre), an opening `label` (its plan name in
 // notes and cut-list labels; ids stay the measurement ids) and clipOpeningLevels (default, needs Sam);
-// computePlates per-layer gapsMm (unused by Walls since Sam's round 2 buys the bottom plate full length),
-// joinOverStuds (Sam's join rule, splitPlateAtStuds) and longPlates (Sam's round 3: a plate over the plates' longest
+// computePlates joinOverStuds (Sam's join rule, splitPlateAtStuds; Sam's round 2 buys the bottom plate full length, so
+// no layer leaves a doorway out) and longPlates (Sam's round 3: a plate over the plates' longest
 // length is one long LVL length, joined over a stud only past the LVL's longest); computeNoggins
 // rowsSource "owner-rule" (Sam: wallNogginRows, 1 row at 2,700 or under, 2 over) and skipClosedBays (default, needs
 // Sam); `label` names the part in its identity problem ("Studs: …").
@@ -969,31 +969,6 @@ export function splitPlateAtStuds({ fromMm, toMm, studCentresMm, maxMm, wallLabe
   return { pieces, joinsMm, problem: null };
 }
 
-function plateGaps(raw, tag, runMm) {
-  return list(raw, `${cap(tag)} plate gaps`).map((g, i) => {
-    if (!g || typeof g !== "object") fail(`${cap(tag)} plate gap ${i + 1} is invalid.`, "layers");
-    const id = text(g.id) || null;
-    const name = id || `${cap(tag)} plate gap ${i + 1}`;
-    const fromMm = num(g.fromMm, `${name} start`);
-    const toMm = num(g.toMm, `${name} end`);
-    if (toMm <= fromMm + EPS_MM || toMm > runMm + EPS_MM) fail(`${name} must lie within the plate run, its end after its start.`, "layers");
-    return { id, fromMm, toMm: Math.min(runMm, toMm) };
-  }).sort((x, y) => x.fromMm - y.fromMm);
-}
-
-/** [from, to] less every gap; pieces of zero length or less are dropped. Gaps are sorted by start. */
-function lessGaps([a, b], gaps) {
-  const out = [];
-  let cur = a;
-  for (const g of gaps) {
-    if (g.toMm <= cur + EPS_MM || g.fromMm >= b - EPS_MM) continue;
-    if (g.fromMm - cur > EPS_MM) out.push([cur, g.fromMm]);
-    cur = Math.max(cur, g.toMm);
-  }
-  if (b - cur > EPS_MM) out.push([cur, b]);
-  return out;
-}
-
 const PLATE_NAMES = { bottom: "bottom plate", top: "top plate", "top-2": "second top plate" };
 
 function joinOption(raw) {
@@ -1018,10 +993,8 @@ function longPlateOption(raw, join) {
 /**
  * T5 plates: wall run × explicit layers. A layer is ONE continuous piece unless joints selected from the
  * framing detail (jointDetailRef) split it; never aggregate LM. Roles keep the layer tag ("<tag>-plate").
- * HUB 028 options (off unless given): a layer's gapsMm (spans to leave out) are cut out of it, dropping pieces of
- * zero length or less (a full-width gap leaves no piece and no error). Walls doesn't use gapsMm: Sam's round 2
- * (25 Oct 2026) buys the bottom plate full length and the crew cuts the doorway out. A piece the gaps leave is kept
- * however short. joinOverStuds applies Sam's join rule (splitPlateAtStuds) to every piece longer than the longest
+ * HUB 028 options (off unless given). No layer leaves a doorway out: Sam's round 2 (25 Oct 2026) buys the bottom plate
+ * full length and the crew cuts the doorway out after standing the frame. joinOverStuds applies Sam's join rule (splitPlateAtStuds) to every piece longer than the longest
  * stock length (product maximum, less unavailable lengths and the allowance). A piece no stud lets it join gives one
  * blocking "plate_too_long" for the wall.
  * longPlates (HUB 028 round 3, Sam: "lvl 90x45 plates come up 10 11m long and we use them when long plates are
@@ -1030,7 +1003,7 @@ function longPlateOption(raw, join) {
  * is joined over a stud, against that longest length, and each resulting piece is then a long plate when it is over
  * the plates' longest length, else a plate. [Default, needs Sam] for the pieces after such a join.
  * @param {{ materialId:string, wallId:string, measurementId?:string, identity:object, runMm:number,
- *   layers:Array<{ tag:string, jointsMm?:number[], gapsMm?:Array<{ id?:string, fromMm:number, toMm:number }> }>,
+ *   layers:Array<{ tag:string, jointsMm?:number[] }>,
  *   jointDetailRef?:string, allowanceMm?:number, joinOverStuds?:{ studCentresMm:number[], wallLabel?:string },
  *   longPlates?:{ identity:object, lengthsMm:number[], label?:string },
  *   label?:string, stock?:object, cutAllocation?:boolean, sizing?:object }} input
@@ -1065,11 +1038,8 @@ export function computePlates(input) {
       const cuts = [0, ...joints, runMm];
       for (let k = 1; k < cuts.length; k++) if (cuts[k] <= cuts[k - 1] + EPS_MM) fail(`${tag} plate joints must be in order and inside the run.`, "layers");
       const role = `${tag}-plate`;
-      const hasGaps = l.gapsMm !== undefined && l.gapsMm !== null;
-      const gaps = hasGaps ? plateGaps(l.gapsMm, tag, runMm) : [];
       let spans = [];
       for (let k = 0; k < cuts.length - 1; k++) spans.push([cuts[k], cuts[k + 1]]);
-      if (gaps.length) spans = spans.flatMap((s) => lessGaps(s, gaps));
       const studJoins = [];
       let dropped = 0;
       const limit = longestMm !== null ? longestMm - allowanceMm : null;
@@ -1111,20 +1081,18 @@ export function computePlates(input) {
       }
       layout.push({
         tag, jointsMm: joints, piecesMm: pieces,
-        ...(hasGaps ? { gapsMm: gaps.map((g) => ({ ...(g.id ? { id: g.id } : {}), fromMm: g.fromMm, toMm: g.toMm })) } : {}),
         ...(join ? { joinsOverStudsMm: studJoins } : {}),
         ...(long ? { longPiecesMm: longPieces } : {}),
       });
       const longText = longPieces.length ? ` (${longPieces.length === pieces.length ? (pieces.length === 1 ? "one long plate" : "all long plates")
         : `${longPieces.map(fmt).join(" + ")} mm as ${longPieces.length === 1 ? "a long plate" : "long plates"}`}, over the ${fmt(longestMm)} mm plates)` : "";
-      if (!gaps.length && !studJoins.length && !dropped) {
+      if (!studJoins.length && !dropped) {
         ctx.explain.push(joints.length
           ? `${cap(tag)} plate: split at ${joints.map(fmt).join(", ")} mm per ${jointRef} → ${pieces.map(fmt).join(" + ")} mm${longText}`
           : `${cap(tag)} plate: one continuous ${fmt(runMm)} mm piece${longText || " (no joints selected from the framing detail)"}`);
       } else {
         const steps = [
           ...(joints.length ? [`split at ${joints.map(fmt).join(", ")} mm per ${jointRef}`] : []),
-          ...(gaps.length ? [`less ${gaps.map((g) => `${g.id ? `${g.id} ` : ""}${fmt(g.fromMm)}–${fmt(g.toMm)}`).join(", ")}`] : []),
           ...(studJoins.length ? [`joined over the stud${studJoins.length > 1 ? "s" : ""} at ${studJoins.map(fmt).join(", ")} mm (longest length ${fmt(splitMm)} mm)`] : []),
           ...(dropped ? [`${dropped} piece${dropped > 1 ? "s" : ""} longer than ${fmt(splitMm)} mm with no stud to join over, not ordered`] : []),
         ];

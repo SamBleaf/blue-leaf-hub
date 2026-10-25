@@ -18,7 +18,7 @@ import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
 import { FAMILIES, TIMBER_GRID, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
-  normaliseFamilySpec, stockIdentityKey } from "./families.js";
+  normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
@@ -321,7 +321,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const scheduled = n.sizing?.provenance && n.sizing.provenance !== "manual" && n.sizing.reference;
   const sizing = scheduled ? { source: "projectSchedule", ref: n.sizing.reference } : { source: "manual" };
   const part = (k) => ({ materialId: mat.id, identity: wallPartIdentity(parts[k], k), stock: timberStock(parts[k]), label: WALL_PART_LABELS[k], sizing });
-  const longPlates = { identity: wallPartIdentity(parts.longPlates, "longPlates"), lengthsMm: longPlateStockLengths(parts.longPlates), label: WALL_PART_LABELS.longPlates };
+  // LVL from the first 300 mm step over the pine plates' own longest (6,300 over the 6,000 default; 5,100 over a 4,800
+  // plate product), the same pine longest computePlates splits pine from LVL at
+  const longPlates = { identity: wallPartIdentity(parts.longPlates, "longPlates"), lengthsMm: longPlateStockLengths(parts.longPlates, wallPinePlateMaxMm(parts.plates)), label: WALL_PART_LABELS.longPlates };
   const studW = parts.studs.section?.widthMm; // the stud's thickness along the wall (45 for a 90 × 45)
   const centresMm = rules.centresMm ?? WALL_FRAMING_RULES.centresMm;
   const results = [];
@@ -334,8 +336,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const tagOf = (x) => sink.wallTags.get(x.m.id) || x.m.inputs?.name || x.m.label || "Wall";
   const walls = items.filter((x) => x.m.kind === "wall")
     .sort((a, b) => tagOf(a).localeCompare(tagOf(b), "en", { numeric: true }) || (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0));
-  // no stud thickness: nothing can be laid out. familyProblems already blocks with "Studs: enter the timber section", once
-  for (const { m } of studW ? walls : []) {
+  // no stud thickness, or a part's longest length under 1,200 (it can buy no length): nothing can be laid out, so every
+  // wall is "not counted" (never 0.00 m of plates). familyProblems already blocks with the part's need, once ("Studs:
+  // enter the timber section", "Plates: the longest length must be at least 1,200 mm.")
+  const stockOk = ["studs", "plates", "noggins"].every((k) => wallPartLongestOk(parts[k]));
+  for (const { m } of studW && stockOk ? walls : []) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
     const tag = sink.wallTags.get(m.id) || w.label;
@@ -375,6 +380,16 @@ function runWallFraming(mat, n, items, ctx, sink) {
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
     const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: centres.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
       openings: studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), skipClosedBays: true });
+    // a wall whose plates or noggins can't be worked out (a plate with no stud to join over, or a part's setting
+    // refused) adds nothing to the totals either: it is named "not counted", with its reason, which holds the item
+    const tooLong = plates.problems.filter((p) => p.code === "plate_too_long");
+    const partRefused = [["plates", plates], ["noggins", noggins]].flatMap(([k, r]) => r.problems.filter((p) => p.code === "invalid_input")
+      .map((p) => onWall(`${WALL_PART_LABELS[k]}: ${p.message}`)));
+    if (tooLong.length || partRefused.length) {
+      for (const p of tooLong) sink.problems.push({ ...p, blocking: true, refs: [{ measurementId: m.id, ...(p.refs?.[0] || {}) }] });
+      for (const msg of partRefused) block("invalid_input", msg);
+      continue;
+    }
     const byPart = { studs, plates, noggins };
     const three = Object.values(byPart);
     const problems = [];
@@ -388,7 +403,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // no longest length on a part: one note for the item naming the parts (below), never "for this product" (a
       // framing-detail member's own note names its member and stays)
       if (p.code === "stock_max_unset" && p.message === STOCK_MAX_UNSET_NOTE) { noMax.add(k); continue; }
-      const q = p.code === "plate_too_long" ? p : { ...p, message: onWall(p.message) };
+      const q = { ...p, message: onWall(p.message) };
       if (once(q)) problems.push(q);
     }
     for (const id of here) notCounted.push({ name: nameOf.get(id) ?? id, tag, measurementId: m.id, openingId: id });
@@ -759,8 +774,10 @@ function purchaseLines(mat, n, demands, matKey, sink) {
           rows.set(`u|${u.demandId}`, { cutMm: d?.lengthMm, stockMm: null, qty: d?.quantity || 1, labels: [d?.label].filter(Boolean) });
         }
       }
-      // labels in natural order ("Rafter @ 600" before "@ 1,200") so a site reader can follow the stations
-      const natural = (a, b) => String(a).localeCompare(String(b), "en", { numeric: true });
+      // labels in natural order ("Rafter @ 600" before "@ 1,200") so a site reader can follow the stations: the
+      // thousands separators come out first, or "1,200" would compare as 1 then 200 and sort before "600"
+      const plain = (x) => String(x).replace(/(\d),(?=\d{3})/g, "$1");
+      const natural = (a, b) => plain(a).localeCompare(plain(b), "en", { numeric: true });
       // the material's own list first, then a Walls item's parts in their order (studs, plates, long plates, noggins), then
       // the followers
       const listRank = (k) => (k === "" ? -1 : WALL_PARTS.includes(k) ? WALL_PARTS.indexOf(k) : WALL_PARTS.length);
@@ -919,16 +936,20 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     handMade.set(c.measurementId, h);
   }
   const handMadeOn = (wallMeasId) => { const h = handMade.get(wallMeasId); return { battens: h ? [...h.battens].sort() : [], tape: h ? [...h.tape].sort() : [], joints: h ? [...h.joints].sort() : [] }; };
-  // HUB 028: the walls a Studs, Plates or Noggins item also frames (older jobs) — a Walls item on the same wall notes
-  // that its framing may be counted twice (both are still counted; Studs, Plates and Noggins don't change)
-  const framedOn = new Map();
+  // HUB 028: the walls a Studs, Plates or Noggins item (older jobs) or ANOTHER Walls item (e.g. a wet-area Walls 2) also
+  // frames — a Walls item on the same wall notes that its framing may be counted twice (both are still counted;
+  // Studs, Plates and Noggins don't change)
+  const framedOn = new Map(); // wall measurement → Map(material id → name)
   for (const c of contributions) {
     const m = matById.get(c.jobMaterialId), meas = ctx.measurementsById.get(c.measurementId);
     if (meas?.kind !== "wall" || m?.spec?.family !== "timber") continue;
-    if (!(m.methodKey === "wall_frame" || (m.methodKey === "linear_stock" && ["plates", "noggins"].includes(m.spec.purpose)))) continue;
-    framedOn.set(c.measurementId, new Set([...(framedOn.get(c.measurementId) || []), m.name || "a timber item"]));
+    if (!(m.methodKey === "wall_frame" || m.methodKey === "wall_framing" || (m.methodKey === "linear_stock" && ["plates", "noggins"].includes(m.spec.purpose)))) continue;
+    const on = framedOn.get(c.measurementId) || new Map();
+    on.set(m.id, m.name || "a timber item");
+    framedOn.set(c.measurementId, on);
   }
-  const framedElsewhere = (wallMeasId) => [...(framedOn.get(wallMeasId) || [])].sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+  const framedElsewhere = (wallMeasId, selfId) => [...new Set([...(framedOn.get(wallMeasId) || new Map())].filter(([id]) => id !== selfId).map(([, nm]) => nm))]
+    .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
   let generated = 0;
   // wall-by-wall step 4 (Sam: "rounded up once per job"): the foam tape and the H-flashing of EVERY Axon cladding on the
   // job are one product each — they are pooled here and bought once, after the loop (buyPooledFollowers)
@@ -936,7 +957,8 @@ export function computeGenericMaterials(materials, contributions, ctx) {
   for (const mat of ordered) {
     const mine = contributions.filter((c) => c.jobMaterialId === mat.id);
     const items = mine.map((c) => ({ c, role: c.role || "primary", m: ctx.measurementsById.get(c.measurementId) })).filter((x) => x.m);
-    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn, framedElsewhere };
+    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn,
+      framedElsewhere: (wallMeasId) => framedElsewhere(wallMeasId, mat.id) };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
     for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
     let n = null, methodResults = [];

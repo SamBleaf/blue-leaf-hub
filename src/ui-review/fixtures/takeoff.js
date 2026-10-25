@@ -20,7 +20,8 @@
  * ?takeoffSeed=walls-after-cladding adds a cladding with one wall traced with Line at 2,745 on page 1, and no Walls item;
  * ?takeoffSeed=walls-products adds one active company timber product for each Walls part (studs, pine plates, LVL plates
  * and noggins), each with its grade, treatment, supplier, code and longest length (noggins 5,400), and no Walls item, so
- * Add walls fills every part from them;
+ * Add walls fills every part from them; window.__takeoffReviewPresetsDelayMs = N answers the company products N ms late
+ * (Add walls tapped before they load still takes them);
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
  * HUB 025 (commits behave like the server's): a repeated idempotencyKey returns the original result with replayed:true
  * before the revision check; a save that would leave two live assignments on one (measurement, material) pair is refused
@@ -619,7 +620,12 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
       state.planDownloads = (state.planDownloads || 0) + 1;
       return new Response(r.body, { status: r.status, headers: { "content-type": "application/pdf", "content-length": r.headers.get("content-length") || "", "cache-control": "private, no-store", "x-content-sha256": DOC.contentSha256 } });
     });
-    route("GET", `${base}/presets`, () => ({ ok: true, presets: state.presets }));
+    route("GET", `${base}/presets`, () => {
+      // HUB 028 final review: window.__takeoffReviewPresetsDelayMs = N answers N ms late (company products on a slow signal)
+      const late = Number(window.__takeoffReviewPresetsDelayMs) || 0;
+      if (!late) return { ok: true, presets: state.presets };
+      return new Promise((res) => { setTimeout(() => res({ ok: true, presets: state.presets }), late); });
+    });
     route("GET", `${base}/suppliers`, () => ({ ok: true, suppliers: mockSuppliers(), defaultSupplierId: "sup-1" }));
     route("GET", `${base}/workspaces/:id/orders`, () => {
       // like the server (otherOrderCover): what open (draft) orders with a supplier export already cover, per bucket

@@ -215,7 +215,7 @@ Tags: **[Sam]** = his 24 October answer. **[doc]** = the review doc or an existi
 - **[doc]** Double top plate is one switch for the item (`rules.doubleTopPlate`, off to start). It shows on the Line panel and the Walls card. When on, it adds a second top plate the full length of every wall. This uses the existing layer `top-2`, already named "Second top plate" (`src/components/takeoff/WallsScreen.jsx:67`).
 - **[Sam, round 2]** The bottom plate is bought the full wall length, like the top plate. No opening cuts it on the order: the crew cuts the doorway out after standing the frame. A full-width door still gives a full bottom plate and no error.
 - **[Sam, as read]** The top plate and second top plate run continuous over every opening, as one piece per wall per layer.
-- **[Sam, round 3]** A plate piece longer than the pine plates' longest length (6,000 by default; a saved plate product's own wins) is ONE 90 × 45 LVL length from the Long plates part, on its own order line and cut list. LVL is bought on the 300 mm grid from 6,300, with 11,000 itself allowed.
+- **[Sam, round 3]** A plate piece longer than the pine plates' longest length (6,000 by default; a saved plate product's own wins) is ONE 90 × 45 LVL length from the Long plates part, on its own order line and cut list. LVL is bought on the 300 mm grid from the first step over the pine plates' longest length (6,300 over the 6,000 default; 5,100 over a saved 4,800 plate product, final review), with 11,000 itself allowed.
 - **[Sam, round 3]** Only a plate longer than the LVL's longest length (11,000) is joined over a stud: at the furthest stud centre that keeps the piece within 11,000. [Default, needs Sam] Each piece after a join is then LVL if over 6,000, else pine. If no stud centre fits, that wall is blocked with a plain note naming it.
 - **[Default, needs Sam]** Plate length = traced wall length. There is no deduction where walls overlap at a corner. That over-orders slightly but never short.
 
@@ -257,7 +257,7 @@ Tags: **[Sam]** = his 24 October answer. **[doc]** = the review doc or an existi
 - **[Default, needs Sam]** Studs, plates, long plates and noggins stay on separate order lines and separate cut lists ("Studs cut list", "Plates cut list", "Long plates cut list", "Noggins cut list"), even when they are the same product. Lines read like "Studs 90 × 45 MGP10 H2" or "Plates 90 × 45 LVL", then the stock length.
 
 ### Walls on two items
-- **[Default, needs Sam]** A wall that is also on a Studs, Plates or Noggins item gets one note on Walls that doesn't block: "Wall 2 is also on Studs 1, so its framing may be counted twice."
+- **[Default, needs Sam]** A wall that is also on a Studs, Plates or Noggins item, or on another Walls item (final review: e.g. a wet-area "Walls 2" at 450), gets one note on each Walls item that doesn't block: "Wall 2 is also on Studs 1, so its framing may be counted twice." / "Wall 2 is also on Walls 2, …".
   - This follows the existing check that leaves automatic battens off a wall that has hand-made ones (`dispatch.js:721-734`).
   - Both are still counted. Studs, Plates and Noggins themselves don't change.
 
@@ -436,7 +436,7 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
      - `openingSideStuds { studWidthMm }` adds side stations, merges any closer than one stud thickness (end, then side, then centre) and marks those ticks `side`.
      - `clipOpeningLevels` clips sill and head instead of throwing.
      - `label` makes identity problems read "Studs: …".
-   - `computePlates` (`:786-821`): per-layer `gapsMm`, dropping pieces of zero length or less.
+   - `computePlates` (`:786-821`): per-layer `gapsMm`, dropping pieces of zero length or less. (Removed in the final review: unused once Sam's round 2 bought the bottom plate full length.)
    - `computeNoggins` (`:833-890`): two new row sources, `"owner-rule"` and `"default"`, each with `rowsRuleRef`, and `skipClosedBays`. The explain text says "owner rule" or "default, to confirm".
    - `setup()` (`:283-302`) takes the label.
    - Test: the per-wall worked-example figures, the merge and wall-end cases, the 2,700 / 2,701 row boundary and its two sources, and `timber.js` suites unchanged.
@@ -518,6 +518,31 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
    - Correction to the flow table, step 1: with no plan on the takeoff, Add walls opens the Walls list with **Wall by
      numbers** only. **Trace on plan** shows once there is a plan (as Studs, `TakeoffApp.jsx` `onTrace` is null with no
      plan). SOP 20-08 Section 5D says so, and the mocked screen test "Add walls with no plan" checks it.
+
+**Final review fixes (25 October 2026, one local commit "HUB 028: final review fixes").** Node tests "final review: …"
+in `takeoff-tc-hub028.test.mjs`, screen tests "final review: …" and "the fold: …" in `tc-hub028.spec.js`, SOP 20-08
+v1.5.1 (TC-18).
+- A part's Longest length is at least 1,200 (the timber grid's shortest): the card's field refuses less ("Enter 1,200
+  mm or more."). One that came in under it (an older entry, a saved product) is a need naming the part ("Plates: the
+  longest length must be at least 1,200 mm."), and no wall is worked out, so the line reads "Walls: Wall 1 and Wall 2
+  not counted" instead of 0.00 m of plates or 0 noggins with an unnamed "Longest stock" message per wall.
+- A wall whose plates or noggins can't be worked out (a plate over 11,000 with no stud to join over, or a refused
+  part setting) adds nothing to the totals and is named "not counted", like a refused wall. Before, its studs and
+  noggins stayed in the line with 0.00 m of plates.
+- LVL stock starts at the first 300 mm step over the plates' actual pine longest (`wallPinePlateMaxMm`, the length
+  computePlates splits at): 6,300 over 6,000, 5,100 over a 4,800 plate product, 6,000 when 6,000 is not stocked.
+- A wall on two Walls items gets the double-count note on both (see Walls on two items). SOP 20-08's wet-area tip
+  says to trace those walls on the 450 item only, or take them off the main one.
+- An empty Walls list says "No walls use Walls yet. Trace or add one." (no "open a wall under Other walls"), and Use
+  here on a Walls item says "Its height, 2,745, would be the stud length." A cladding wall's height is the cladded
+  height, so Use here of it on Walls buys longer studs and can add a noggin row. [Open, needs Sam] whether Walls
+  should refuse Use here of a cladding wall outright; today it warns and the SOP (Section 7) says to trace fresh.
+- Add walls tapped before the company products have loaded (a slow signal) waits for that first load, so each part
+  still takes its saved product (it used to take the built-in rows: "Details: 3 to fix").
+- Cut-list labels sort with the thousands separators taken out, so "@ 600" comes before "@ 1,200" (pre-existing for
+  every timber cut list; every Walls cut list showed it).
+- computePlates' per-layer `gapsMm` (step 1's door gaps, unused since round 2) is removed with its helpers; the step 1
+  tests now check the full-length bottom plate.
 
 ## Tests
 

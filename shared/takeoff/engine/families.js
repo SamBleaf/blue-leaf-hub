@@ -124,7 +124,8 @@ export const WALL_PART_LABELS = Object.freeze({ studs: "Studs", plates: "Plates"
 export const WALL_PART_DEFAULT_MAX_MM = Object.freeze({ studs: null, plates: 6000, longPlates: 11000, noggins: 6000 });
 /** Sam, round 3: "lvl 90x45 plates … we use them when long plates are required" — the Long plates part's default. */
 export const WALL_LONG_PLATE_DEFAULT = Object.freeze({ depthMm: 90, widthMm: 45, grade: "LVL" });
-/** Long plates start at the first 300 mm step over the 6,000 pine plates [Default, needs Sam]. */
+/** Long plates start at the first 300 mm step over the pine plates' longest length [Default, needs Sam]: 6,300 over
+ *  the 6,000 default (longPlateStockLengths takes the actual pine longest, so a 4,800 plate product starts them at 5,100). */
 export const WALL_LVL_STOCK_MIN_MM = 6300;
 /** Walls rules (bounded scalars the server already keeps): one Stud centres and one Double top plate per item. */
 export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate: false });
@@ -191,18 +192,47 @@ export function wallFramingDefaults(presets = []) {
 }
 
 /**
- * The Long plates (LVL) stock lengths, ascending: 300 mm steps on the timber grid from 6,300 up to the part's longest
- * length, plus that longest length itself when it is off the grid (Sam: 11,000 → 6,300, 6,600 … 10,800, 11,000; the
- * grid alone can't reach 11,000 from 1,200 in 300 steps). No longest length → 11,000. "Not stocked" lengths come out.
+ * The longest pine plate a Walls item buys (HUB 028 round 3): the longest timber-grid length (1,200, then 300 mm steps)
+ * within the plates' longest length, less the lengths marked not stocked. This is the length computePlates splits
+ * pine from LVL at (6,000 by default; 6,000 not stocked → 5,700). Null with no longest length, one under 1,200 (the
+ * grid's shortest) or no stock length left within it.
  */
-export function longPlateStockLengths(part) {
+export function wallPinePlateMaxMm(platesPart) {
+  const s = platesPart?.stock || {};
+  const max = Number(s.maxMm);
+  if (s.maxMm == null || s.maxMm === "" || !(max >= TIMBER_GRID.minMm)) return null;
+  const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
+  for (let l = TIMBER_GRID.minMm + Math.floor((max - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) * TIMBER_GRID.incrementMm; l >= TIMBER_GRID.minMm; l -= TIMBER_GRID.incrementMm) {
+    if (!off.has(l)) return l;
+  }
+  return null;
+}
+
+/**
+ * The Long plates (LVL) stock lengths, ascending: 300 mm steps on the timber grid from the first step over the pine
+ * plates' longest length (`overMm`, wallPinePlateMaxMm; 6,000 by default → 6,300) up to the part's longest length, plus
+ * that longest length itself when it is off the grid (Sam: 11,000 → 6,300, 6,600 … 10,800, 11,000; the grid alone
+ * can't reach 11,000 from 1,200 in 300 steps). A plate product with its own 4,800 longest starts them at 5,100, so a
+ * 5,000 plate buys 5,100 of LVL, not 6,300. No longest length → 11,000. "Not stocked" lengths come out.
+ */
+export function longPlateStockLengths(part, overMm = WALL_PART_DEFAULT_MAX_MM.plates) {
   const s = part?.stock || {};
   const max = s.maxMm != null && s.maxMm !== "" && Number(s.maxMm) > 0 ? Number(s.maxMm) : WALL_PART_DEFAULT_MAX_MM.longPlates;
   const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
+  const over = Number(overMm);
+  const first = over >= TIMBER_GRID.minMm
+    ? TIMBER_GRID.minMm + (Math.floor((over - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) + 1) * TIMBER_GRID.incrementMm
+    : WALL_LVL_STOCK_MIN_MM;
   const out = [];
-  for (let l = WALL_LVL_STOCK_MIN_MM; l <= max; l += TIMBER_GRID.incrementMm) out.push(l);
+  for (let l = first; l <= max; l += TIMBER_GRID.incrementMm) out.push(l);
   if (!out.includes(max)) out.push(max);
   return out.filter((l) => !off.has(l));
+}
+
+/** Can a Walls part's longest length buy anything? None set is fine (a note); under 1,200 (the grid's shortest) isn't. */
+export function wallPartLongestOk(part) {
+  const m = part?.stock?.maxMm;
+  return m == null || m === "" || Number(m) >= TIMBER_GRID.minMm;
 }
 
 /** Method per family/purpose (versioned keys from 06). */
@@ -369,6 +399,8 @@ export function familyProblems(spec, { usesLongPlates = false } = {}) {
       needPart(p.section.depthMm && p.section.widthMm, "enter the timber section (e.g. 90 × 45).");
       needPart(p.grade || p.species, "enter the grade or species.");
       needPart(p.treatment, "enter the treatment (or \"untreated\").");
+      // a longest length under the grid's 1,200 can't buy any length: named once here, and no wall is worked out
+      needPart(wallPartLongestOk(p), `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);
     }
   } else if (n.family === "timber") {
     need(n.section.depthMm && n.section.widthMm, "Enter the timber section (e.g. 90 × 45).");
