@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 24 October 2026, after deploy)
+## Current state (updated 25 October 2026, HUB 028 built)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -39,17 +39,44 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, live | 7e6759e | iPhone check |
 | HUB 026 Aluminium plan measuring first | Implemented, live | 7e6759e | iPhone check |
 | HUB 027 Timber presets by purpose | Implemented, live | 7e6759e | iPhone check |
-| HUB 028 Walls: trace once, studs + plates + noggins together | Open | — | Sam's answers (studs at ends/corners, openings, stock lengths), then a plan |
+| HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, awaiting deploy (built on takeoff-r03, not on main) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f + step 6 | Sam's deploy, then iPhone check |
 
-**Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October).
+**Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October). HUB 028 needs none.
 
-**Decisions waiting on Sam:** HUB 028 (three questions before planning: stud count at ends, corners and junctions;
-whether openings cut studs or plates; plate and noggin stock lengths). HUB 016 (8 sheets under the factory-edge rule, or
+**Decisions waiting on Sam:** HUB 028's main questions are answered (25 October, rounds 1–3). Its smaller build defaults
+are tagged [Default, needs Sam] in docs/hub_review/WALLS_FRAMING_PLAN.md (for example LVL stock in 300 mm steps with
+11,000 allowed, the pieces after a join over 11 m, side studs between close openings, no corner plate deduction).
+One HUB 028 question is still open: should a cladding's Wall height ignore walls that are only on a Walls item? Today
+a cladding traced after Walls starts at the stud cut length (2,700, not the cladded 2,745). HUB 016 (8 sheets under the factory-edge rule, or
 which cut gets to 7). HUB 001 (the ongoing forecast rule). The aluminium kerf/tolerance feedback (Recording review 06:
 drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc comment asking for Add supplier is built
 (HUB 008/019) and can be resolved.
 
 ## Log
+
+### 2026-10-25 — HUB 028 Walls built (steps 1–6), not deployed
+- Plan: docs/hub_review/WALLS_FRAMING_PLAN.md with Sam's decisions of 25 October (round 1: Wall height = stud cut, 2
+  studs per corner, nothing under or over windows, 6.0 m longest for plates and noggins, 1 noggin row at 2,700 or under
+  and 2 over; round 2 from the Gibson order: bottom plate bought full length, 2 full studs beside every opening, all
+  timber in 300 mm steps, wet-area walls as their own Walls item at 450; round 3: plates over 6.0 m are one 90 × 45 LVL
+  length up to 11.0 m, joined over a stud only past that).
+- Built in six local commits on takeoff-r03: 7fcc43a engine options, 4d241a2 material and registry (and the 300 mm grid
+  for all timber), eb2edf5 the Walls calculation, f11bc21 Add walls and the Line panel, ed2387f the Walls card and wall
+  pages, then step 6 (real-server reload test, the Walls journey, SOPs and this log).
+- What Sam gets: **Add walls** (first in the Timber part and in Measure with…) opens the plan with Line, Wall height,
+  Stud centres and Double top plate. Trace the run, add the door and window, and one line reads, for the worked
+  example, "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)". Studs, plates
+  and noggins have their own order lines and cut lists. Lintels, jacks and trimmers are never counted (one plain line
+  says so). Studs, Plates and Noggins stay for exceptions.
+- Tests (step 6 run): 38 node suites pass, 1,119 tests (takeoff-tc-hub028 83; takeoff-api 76 and takeoff-db 26 on the
+  isolated Postgres, with the new reload case: parts and their stock, rules, runId/seq, heights and opening types come
+  back, the lines after the reload are the preview's, and a run, manual or count measurement on Walls is refused).
+  Lint clean, build OK, mocked screens 295 passed and 1 skipped (the real-stack spec, which needs the sandbox). The
+  real-stack journeys pass on desktop Chromium and iPhone 13 WebKit, including the new WF journey (Add walls, trace,
+  add a door, reload, the same line and the same lines from the real server).
+- SOPs: 20-08 v1.5 (new Section 5D Walls, Sections 2–4, 7, 8, 11, 12, TC-15 to TC-17), 20-09 v2.1 (one note), 20-01
+  v1.2 (Add walls in the Timber part), 20-12 v1.4.1 (the 300 mm grid line), SOP_CHANGELOG and SOP_INDEX.
+- NOT pushed or deployed. No migration. Waiting on Sam's "deploy", then an iPhone check of Add walls on a real job.
 
 ### 2026-10-24 — HUB 022–027 live; Railway secrets reset checklist
 - Railway's 21–23 October incident is over. An empty commit 8cb24f8 on main started a build straight away (the GitHub

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.4
-last_reviewed: 2026-10-21
+sop_version: 1.4.1
+last_reviewed: 2026-10-25
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director

@@ -1746,6 +1746,80 @@ await t("HUB 028 step 5: a company timber product saved for a Walls part keeps i
   assert.deepEqual([parts.plates.grade, parts.plates.treatment, parts.plates.stock.maxMm], [null, null, 6000], "the LVL product never fills the pine plates");
 });
 
+await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back the same after a reload on the REAL server (parts and their stock, rules, runId/seq, heights, opening types); the lines after the reload are the preview's; a run, manual or count measurement on Walls is refused", async () => {
+  const { computeWorkspace: compute, normaliseFamilySpec, wallFramingDefaults } = await import("../../shared/takeoff/index.js");
+  const { openingRecord, wallFramingText, wallFramingTotals } = await import("../../src/components/takeoff/measure/tools.js");
+  const w = id(), cal = id(), walls = id(), run = id(), w1 = id(), w2 = id(), d1 = id(), o1 = id();
+  const doc = await storePlan({ carpentryJobId: J.carpA }, "HUB028-s6-plan.pdf");
+  assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB028 s6" })).status, 200);
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  // the plan is scaled first (Save scale), as on site
+  const sc = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    calibrations: { insert: [{ id: cal, documentId: doc, pageIndex: 0, pageMeta, basisRotation: 0, horizontal: H, vertical: V, verification: CHECK }] } } });
+  assert.equal(sc.status, 200, JSON.stringify(sc.data));
+  const scaled = (await S(`/workspaces/${w}`)).data.snapshot;
+  // Add walls, then a pick in the fold: the noggins' own longest length and a "not stocked" length, a plates treatment
+  const base = wallFramingDefaults([]);
+  const spec = { ...base, components: { ...base.components,
+    plates: { ...base.components.plates, treatment: "H2" },
+    noggins: { ...base.components.noggins, treatment: "H2", stock: { maxMm: 5400, unavailableMm: [4800] } } } };
+  const mat = { id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: true }, profile: null };
+  // one Line run A → B → C (Wall 1 6,000 at 2,700, Wall 2 4,000 at 3,000), saved in ONE commit with its run and order
+  const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
+  const wall = (mid, pts, heightMm, seq) => ({ id: mid, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: pts,
+    inputs: { kind: "rect", heightMm, name: `Wall ${seq}`, runId: run, seq } });
+  const meas = [wall(w1, [c(0, 0), c(6000, 0)], 2700, 1), wall(w2, [c(6000, 0), c(6000, 4000)], 3000, 2),
+    openingRecord(d1, w1, { xMm: 1000, sillMm: 0, widthMm: 820, heightMm: 2040, label: "D1", type: "door" }),
+    openingRecord(o1, w2, { xMm: 1200, sillMm: 900, widthMm: 1800, heightMm: 1200, label: "W1", type: "window" })];
+  const cons = [w1, w2].map((mid) => ({ id: id(), measurementId: mid, jobMaterialId: walls, role: "wall" }));
+  // the preview: what the app works out on the device before the save reaches the server
+  const preview = compute({ ...scaled, materials: [...scaled.materials, mat], measurements: [...scaled.measurements, ...meas], contributions: [...scaled.contributions, ...cons] });
+  const LINE = "Walls: 21 studs (13 at 2,700, 8 at 3,000) · bottom plate 10.00 m · top plate 2 × 10.00 m · 17 noggins (1–2 rows)";
+  assert.equal(wallFramingText(wallFramingTotals(preview.materialResults[walls]), "Walls"), LINE);
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    materials: { upsert: [mat] }, measurements: { upsert: meas }, contributions: { upsert: cons } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // a reload: everything comes back as sent (the spec as the shared normaliser keeps it, a fixed point)
+  const again = (await S(`/workspaces/${w}`)).data;
+  const kept = again.snapshot.materials.find((m) => m.id === walls);
+  assert.deepEqual(kept.spec, normaliseFamilySpec(spec));
+  assert.deepEqual(kept.spec.components, spec.components, "every part as sent, its stock too");
+  assert.deepEqual(kept.spec.components.noggins.stock, { maxMm: 5400, unavailableMm: [4800] });
+  assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.studs.stock.maxMm], [6000, 11000, null]);
+  assert.deepEqual([kept.name, kept.methodKey, kept.methodVersion, kept.rules], ["Walls", "wall_framing", 1, { centresMm: 600, doubleTopPlate: true }]);
+  const back = again.snapshot.measurements.filter((m) => m.inputs?.runId === run).sort((a, b) => a.inputs.seq - b.inputs.seq);
+  assert.deepEqual(back.map((m) => [m.id, m.kind, m.inputs.seq, m.inputs.heightMm, m.inputs.name, m.calibrationId]), [[w1, "wall", 1, 2700, "Wall 1", cal], [w2, "wall", 2, 3000, "Wall 2", cal]]);
+  assert.deepEqual(back.map((m) => m.points), [meas[0].points, meas[1].points], "the traced points, the corner shared exactly");
+  const ops = again.snapshot.measurements.filter((m) => m.kind === "opening" && [w1, w2].includes(m.parentId))
+    .map((m) => [m.parentId, m.inputs.label, m.inputs.type, m.inputs.xMm, m.inputs.widthMm, m.inputs.heightMm, m.inputs.sillMm]).sort((a, b) => a[1].localeCompare(b[1]));
+  assert.deepEqual(ops, [[w1, "D1", "door", 1000, 820, 2040, 0], [w2, "W1", "window", 1200, 1800, 1200, 900]]);
+  assert.deepEqual(again.snapshot.contributions.filter((x) => x.jobMaterialId === walls).map((x) => [x.measurementId, x.role]).sort(), [[w1, "wall"], [w2, "wall"]].sort());
+  // the lines after the reload are the preview's (and the commit's), with the same Walls line. Only the order-line
+  // dependency key moves, as for any wall: the server's cleaner fills each wall's inputs (its traced length, heightSource
+  // and the empty slope fields); the shared engine on the stored snapshot gives the server's lines exactly, key included
+  const mine = (cw) => cw.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls));
+  const noKey = (ls) => ls.map(({ dependencyKey, item, ...l }) => ({ ...l, item: { ...item, dependencyKey: undefined }, keyed: !!dependencyKey }));
+  assert.deepEqual(noKey(mine(again.computed)), noKey(mine(preview)));
+  assert.deepEqual(mine(r.data.computed), mine(again.computed));
+  assert.deepEqual(mine(compute(again.snapshot)), mine(again.computed));
+  assert.deepEqual(back.map((m) => [m.inputs.heightSource, Math.abs(m.inputs.widthMm - [6000, 4000][m.inputs.seq - 1]) < 0.01]), [["plan+entered", true], ["plan+entered", true]], "the traced lengths, 6,000 and 4,000");
+  assert.equal(wallFramingText(wallFramingTotals(again.computed.materialResults[walls]), "Walls"), LINE);
+  assert.deepEqual(mine(again.computed).filter((l) => l.component === "studs").map((l) => [l.quantity, l.finishedLengthMm]), [[8, 3000], [13, 2700]]);
+  assert.deepEqual(mine(again.computed).filter((l) => l.component === "plates").map((l) => [l.quantity, l.finishedLengthMm]), [[3, 6000], [3, 4200]]);
+  // a Walls item reads traced walls only: a Run, an entered length or a count is refused with the server's message, nothing saved
+  const before = await rev();
+  for (const [kind, m] of [["polyline", { kind: "polyline", documentId: doc, pageIndex: 0, calibrationId: cal, points: runPts(3000, 380), inputs: { splitsMm: [] } }],
+    ["manual", { kind: "manual", finishedLengthMm: 2400, quantity: 2 }], ["count", { kind: "count", documentId: doc, pageIndex: 0, calibrationId: null, points: [c(100, 100)], finishedLengthMm: 2400 }]]) {
+    const mid = id();
+    const bad = await SP(`/workspaces/${w}/commit`, { expectedRevision: before, changes: {
+      measurements: { upsert: [{ id: mid, ...m }] }, contributions: { upsert: [{ id: id(), measurementId: mid, jobMaterialId: walls, role: "primary" }] } } });
+    assert.equal(bad.status, 400, `${kind}: ${JSON.stringify(bad.data)}`);
+    assert.equal(bad.data.error, `Walls can't use a ${kind} measurement — assign it to the right material.`);
+  }
+  assert.equal(await rev(), before, "nothing saved");
+  assert.deepEqual(mine((await S(`/workspaces/${w}`)).data.computed), mine(again.computed), "the lines are unchanged");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

@@ -14,6 +14,8 @@
 //       path → red overflow → split at the limit → 9,000 + 1,500 → Split to handling length → 5,400 + 5,400
 //   J5  order with timber pieces + Axon sheets + aluminium bars + flashing pieces; delivery / pickup details; a
 //       NON-draft export; BOTH the supplier PDF and the site appendix downloaded, saved and read back as text
+//   WF  Walls (HUB 028): Add walls → Wall height 2,700 → trace a 6,000 + 4,000 L → + Door → reload → the same line
+//       (after J5, so the orders are unchanged)
 //
 // Run via playwright.tc-evidence.config.js (desktop Chromium = director on the Hub route; WebKit "iPhone 13" with
 // touch = leading hand on the Worker PWA route). Evidence → docs/takeoff/evidence/tc-journeys/<project>/.
@@ -28,6 +30,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { computeWorkspace } from "../../shared/takeoff/index.js";
 import { anchorsFor } from "../../src/components/takeoff/measure/geometry.js";
+import { nextWallInputs } from "../../src/components/takeoff/measure/tools.js";
 
 const BASE = process.env.TAKEOFF_SANDBOX_URL;
 const JOB = "5a4db0c5-0000-4000-8000-00000000a001";   // the sandbox's fixed (local-only) job id
@@ -726,6 +729,98 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     const failed = [...checks, ...fchecks].filter((c) => !c.ok);
     expect(failed, `PDF text checks failed:\n${failed.map((c) => `${c.doc}: ${c.expect}`).join("\n")}`).toEqual([]);
   });
+
+  // ═══ WF — Walls (HUB 028): trace once, studs + plates + noggins together ═══════════════════════════════════════
+  // After J5, so the orders above are exactly as before. The built-in parts have no treatment yet (no company products
+  // in the sandbox), so the Walls item can't be ordered: this journey checks the tracing, the line and the reload.
+  // The run A → B → C (6,000 then 4,000, at 2,700) sits clear of every other drawing on page 1; D1 is the worked
+  // example's door (820 wide at 1,000 on the first wall). Figures from the real engine (scripts/tests/takeoff-tc-hub028).
+  const WA = at(3000, 6000), WB = at(9000, 6000), WC = at(9000, 2000), D1_ENDS = [at(4000, 6000), at(4820, 6000)];
+  const WALLS_L = "Walls: 19 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1 row)";
+  const WALLS_D1 = "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 16 noggins (1 row)";
+  await journey("WF", "Walls (HUB 028): Add walls → Wall height 2,700 → trace a 6,000 + 4,000 L (19 studs, 17 noggins) → + Door D1 → 21 studs · 16 noggins; reload → the same line and lines", async () => {
+    await toOverview();
+    await toSection("timber_cladding");
+    // HUB 022 names a new wall after the takeoff's walls so far: work the run's two names out from the server's walls
+    // now (as the app does), so WF doesn't depend on which earlier journeys added walls
+    const known = (await server()).snapshot.measurements;
+    const name1 = nextWallInputs(known).name;
+    const names = [name1, nextWallInputs([...known, { kind: "wall", inputs: { name: name1 } }]).name];
+    const panel = page.locator("[data-line-panel]");
+    const wallsLine = page.locator("[data-walls-line]");
+    const heightBox = page.locator("[data-line-height]").getByLabel("Wall height");
+    await press(page.locator('[data-material-group="timber"]').getByRole("button", { name: "Add walls" }));
+    await viewer();
+    // straight onto the plan with Line (no Timber card first): Wall height empty the first time, Stud centres 600, Double top plate off
+    await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator('[data-setup="timber"]')).toHaveCount(0);
+    await expect(panel.locator("[data-line-material]")).toHaveText("Walls");
+    await expect(heightBox).toHaveValue("");
+    await expect(page.locator("[data-stud-centres]").getByLabel("Stud centres")).toHaveValue("600");
+    await expect(page.getByRole("checkbox", { name: "Double top plate" })).not.toBeChecked();
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details: 3 to fix ›");
+    await num(heightBox, 2700);
+    await press(page.getByRole("button", { name: "Fit page" })); await page.waitForTimeout(400);
+    await zoomOn(at(6000, 4000), 2);
+    for (const p of [WA, WB, WC]) { await exactTap(p); await page.waitForTimeout(450); }
+    await press(panel.getByRole("button", { name: "Finish", exact: true }));
+    await expect(page.locator("[data-run-card]")).toBeVisible();
+    await expect(wallsLine).toHaveText(WALLS_L);
+    await saved();
+    let w = await server();
+    const mats = w.snapshot.materials.filter((m) => m.methodKey === "wall_framing");
+    expect(mats.map((m) => [m.name, m.spec.purpose, m.rules])).toEqual([["Walls", "walls", { centresMm: 600, doubleTopPlate: false }]]);
+    const wallsId = mats[0].id;
+    const ids = w.snapshot.contributions.filter((c) => c.jobMaterialId === wallsId).map((c) => c.measurementId);
+    const ours = () => w.snapshot.measurements.filter((m) => ids.includes(m.id)).sort((a, b) => a.inputs.seq - b.inputs.seq);
+    // named after the takeoff's walls so far (HUB 022): today J2's North wall is the first, so this run is Wall 2 and Wall 3
+    expect(ours().map((m) => [m.kind, m.inputs.heightMm, m.inputs.seq, m.inputs.name])).toEqual([["wall", 2700, 1, names[0]], ["wall", 2700, 2, names[1]]]);
+    observed.WF = { wallNames: names };
+    expect(new Set(ours().map((m) => m.inputs.runId)).size, "one run").toBe(1);
+    expect(ours().map((m) => Math.round(m.inputs.widthMm))).toEqual([6000, 4000]);
+    await shot("walls-L-line", `Add walls → Wall height 2,700 → A → B → C → Finish: "${WALLS_L}"`);
+    // + Door on Wall 1: Height 2,040 (the first door in this takeoff), then both door edges on the plan
+    await press(panel.getByRole("button", { name: "+ Door" }));
+    await expect(page.locator("[data-opening-panel]")).toHaveAttribute("data-opening-panel", "door");
+    await num(page.locator("[data-opening-height]").getByLabel("Height"), 2040);
+    await zoomOn(at(4410, 6000), 3);
+    for (const p of D1_ENDS) { await exactTap(p); await page.waitForTimeout(450); }
+    await expect(page.locator("[data-opening-panel] [data-last-opening-label]")).toBeVisible();
+    await press(page.locator("[data-opening-panel]").getByRole("button", { name: "Trace more walls" }));
+    await expect(wallsLine).toHaveText(WALLS_D1);
+    await saved();
+    await press(page.getByRole("button", { name: "Fit page" })); await page.waitForTimeout(400);
+    await shot("walls-door-line", `+ Door D1 (820 × 2,040 at 1,000 on the run's first wall): "${WALLS_D1}"`);
+    w = await server();
+    const ops = w.snapshot.measurements.filter((m) => m.kind === "opening" && ids.includes(m.parentId)).map((m) => [m.inputs.label, m.inputs.type, m.inputs.xMm, m.inputs.widthMm, m.inputs.heightMm, m.inputs.sillMm]);
+    expect(ops).toEqual([["D1", "door", 1000, 820, 2040, 0]]);
+    const rows = (x) => linesOf(x, wallsId).map((l) => [l.component, l.quantity, l.finishedLengthMm]);
+    expect(rows(w)).toEqual([["studs", 21, 2700], ["plates", 2, 6000], ["plates", 2, 4200], ["noggins", 1, 4800], ["noggins", 1, 3600]]);
+    const before = linesOf(w, wallsId);
+    observed.WF = { ...observed.WF, line: WALLS_D1, lines: before.map(lineText) };
+    // reload: the same walls, door, settings and line come back from the REAL server
+    await page.goto(`${url}${url.includes("?") ? "&" : "?"}section=timber_cladding`);
+    await expect(sectionHeading()).toBeVisible({ timeout: 30_000 });
+    const row = await openRow(page.locator("[data-material-row]").filter({ hasText: /^Walls/ }));
+    await expect(row.getByRole("button", { name: "Add lengths" })).toHaveCount(0);
+    await press(row.getByRole("button", { name: "Setup", exact: true }));
+    await expect(page.locator('[data-setup="walls"]')).toBeVisible();
+    await expect(page.locator("[data-walls-card-line]")).toHaveText(WALLS_D1);
+    await expect(page.locator("[data-walls-notes]")).toContainText("Lintels, jacks and trimmers at D1 aren't counted.");
+    await shot("walls-card-after-reload", `After a reload, the Walls card (Setup): "${WALLS_D1}"`);
+    await press(page.getByRole("button", { name: "Trace walls" }));
+    await viewer();
+    await expect(wallsLine).toHaveText(WALLS_D1);
+    await expect(heightBox).toHaveValue("2700");   // this Walls item's own last height
+    await expect(page.locator("[data-stud-centres]").getByLabel("Stud centres")).toHaveValue("600");
+    await expect(page.getByRole("checkbox", { name: "Double top plate" })).not.toBeChecked();
+    await shot("walls-plan-after-reload", `After a reload, Trace walls: the plan's Walls line is the same, Wall height starts at 2,700`);
+    const again = await server();
+    expect(linesOf(again, wallsId)).toEqual(before);
+    expect(linesOf({ computed: computeWorkspace(again.snapshot) }, wallsId), "the shared engine on the server's own snapshot").toEqual(before);
+    observed.WF.afterReload = linesOf(again, wallsId).map(lineText);
+    await toOverview();
+  }, ["S0"]);
 
   // ── write the evidence (always) ───────────────────────────────────────────────────────────────────────────
   const engine = page.context().browser();

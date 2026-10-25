@@ -106,6 +106,7 @@ function seed() {
   if (qs().get("takeoffSeed") === "walls") seedWalls();
   if (qs().get("takeoffSeed") === "walls-after-cladding") seedWallsAfterCladding();
   if (qs().get("takeoffSeed") === "walls-products") seedWallsProducts();
+  if (qs().get("takeoffSeed") === "no-plan") seedNoPlan();
   // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
   // scale as page 1, checked), for drawing walls with Rectangle and Area
   if (qs().get("takeoffElevation") === "1") {
@@ -146,6 +147,15 @@ function seedWalls() {
   const spec = wallFramingDefaults([]);
   const m = methodFor(spec);
   state.materials.push({ id: "mat-walls", name: "Walls", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: { ...WALL_FRAMING_RULES } });
+}
+
+/** HUB 028 (SYNTHETIC): a takeoff with no plan at all (no plan document, no scale, nothing measured on a page). */
+function seedNoPlan() {
+  state.documents = [];
+  state.calibrations = [];
+  state.workspace.primaryDocumentId = null;
+  state.measurements = state.measurements.filter((m) => !m.documentId);
+  state.contributions = state.contributions.filter((c) => state.measurements.some((m) => m.id === c.measurementId));
 }
 
 /**

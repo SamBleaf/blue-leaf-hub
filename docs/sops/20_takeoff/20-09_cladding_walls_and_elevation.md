@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-10-21
+sop_version: 2.1
+last_reviewed: 2026-10-25
 app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -95,6 +95,8 @@ You choose the cladding product and how it is installed, then enter each wall �
 8. To change one wall's height later, tap **Select**, tap the wall and change **Wall height**. Only that wall changes. Tap **Done** on the keypad when you have typed it. If you tap the next wall (or anywhere on the plan) straight away, the height you typed is still kept. The same goes for the Line height and a Count length. To move a corner, drag its point. A corner shared by two walls moves both walls, and one **Undo** puts it back.
 9. In the list, a traced run is one line ("Run 1 · 4 walls · 2,700"). Tap it to see its walls in the order you traced them. Each wall shows its shape, length, heights and openings. **Heights needed** and **Needs attention** chips show what is missing (on the run's line too). They always show, because they hold up the order. **More** (beside **Walls**) shows the rest on every row: **Entered**, **From plan** or **Traced elevation**, the materials using the wall and its quantities. Tap **More** again to fold them away. Walls on other materials are folded under **Other walls** (tap it to open: ▸ / ▾). If this material has no walls yet (battens, for example), **Other walls** is already open. **Review walls** (beside **Walls**) starts the review at the first wall (Section C4).
 10. To put this material on a wall, open the wall and tap **Use here** at the top ("Cavity batten 70 × 19 isn't on this wall yet."). Back in the list, **Other walls** and the run stay open, so the next wall is one tap away. **Materials on this wall** (further down) also has **Use … here** / **✓ Uses …** to take it off again. **Remove wall** is there too. It deletes the wall and its openings **for every material using it** ("Removed North and its 1 opening. Also gone from …"). **Undo** brings it back.
+
+> 💡 **Walls (timber framing, HUB 028):** a Walls item traces with this same **Line** tool, and uses the same **+ Window** / **+ Door**, run card and **Review walls**. **Rectangle** and **Area** aren't offered for Walls (SOP 20-08 Section 5D).
 
 ### C2. Add windows and doors on the plan
 

@@ -1,6 +1,6 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
+> Last updated: 2026-10-25 (Takeoffs HUB 028 Walls: 20-08 v1.5, 20-09 v2.1, 20-01 v1.2 and 20-12 v1.4.1 updated, all test_status untested) · 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
 > Total SOPs: 169 (+ 1 reference: portal stack matrix) — counted from the rows in this index on 2026-10-14. Note: 6 files on disk in `18_marketing_agent/` (18-02 to 18-07) are not yet indexed.  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
@@ -201,7 +201,7 @@
 | 20-05 | Length schedule and splitting long pieces | [20-05_length_schedule_and_split.md](20_takeoff/20-05_length_schedule_and_split.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
 | 20-06 | Export a supplier order and record it as placed | [20-06_export_and_record_orders.md](20_takeoff/20-06_export_and_record_orders.md) | Takeoffs | Admin, Supervisor, Leading hand (record placed: Admin/Director only) | Draft | untested | Yes | High |
 | 20-07 | Takeoff saving, recovery and conflicts | [20-07_saving_recovery_conflicts.md](20_takeoff/20-07_saving_recovery_conflicts.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
-| 20-08 | Timber takeoff — rafters, joists, studs, plates, noggins and trim | [20-08_timber_takeoff.md](20_takeoff/20-08_timber_takeoff.md) | Takeoffs | Admin, Supervisor, Leading hand (company products: Admin, Supervisor) | Draft | untested | Yes | High |
+| 20-08 | Timber takeoff — walls, rafters, joists, studs, plates, noggins and trim | [20-08_timber_takeoff.md](20_takeoff/20-08_timber_takeoff.md) | Takeoffs | Admin, Supervisor, Leading hand (company products: Admin, Supervisor) | Draft | untested | Yes | High |
 | 20-09 | Cladding — walls, openings and the generated elevation | [20-09_cladding_walls_and_elevation.md](20_takeoff/20-09_cladding_walls_and_elevation.md) | Takeoffs | Admin, Supervisor, Leading hand (company products: Admin, Supervisor) | Draft | untested | Yes | High |
 | 20-10 | Aluminium profiles and the cutting sheet | [20-10_aluminium_cutting_sheet.md](20_takeoff/20-10_aluminium_cutting_sheet.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
 | 20-11 | Continuous flashing runs and splitting at the limit | [20-11_continuous_flashing_runs.md](20_takeoff/20-11_continuous_flashing_runs.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |

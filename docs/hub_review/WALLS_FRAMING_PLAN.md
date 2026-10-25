@@ -1,6 +1,6 @@
 # HUB 028 Walls: plan
 
-Planning only, 24 October 2026, branch `takeoff-r03`. Nothing has been built yet. This plan merges three separate plans: the "simplest onsite" plan is the base, with parts taken from the "reuse" and "correct data" plans. The appendix scores all three.
+Planned 24 October 2026, branch `takeoff-r03`. Built 25 October 2026 in six steps on `takeoff-r03` (commits 7fcc43a, 4d241a2, eb2edf5, f11bc21 and ed2387f, then step 6; the notes on what was built are under Build steps and the worked examples). Not deployed: it waits for Sam's "deploy" and an iPhone check. This plan merges three separate plans: the "simplest onsite" plan is the base, with parts taken from the "reuse" and "correct data" plans. The appendix scores all three.
 
 Here is the decision in short. Walls is one new timber item. It uses the HUB 022 Line tool and gives one result made of three tagged parts: studs, plates and noggins. It reuses the existing stud, plate and noggin engine functions, each with new options that are off unless Walls turns them on. It needs no migration and no change to the server cleaners. Studs, Plates and Noggins stay exactly as they are, for exceptions.
 
@@ -500,6 +500,24 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
    - Run one real-stack journey once, in a local sandbox, before asking Sam to deploy.
    - Update SOP 20-08 to v1.5, add the 20-09 note, update 20-01 (Add walls in the Timber group), `SOP_CHANGELOG` and `SOP_INDEX`, and a HUB 028 row in `docs/hub_review/HUB_REVIEW_LOG.md`.
    - Finish with a short "done + next steps" summary.
+   - Built in step 6. The real-server reload case ("HUB 028 step 6" in `takeoff-api.test.mjs`) scales the plan first,
+     works out the preview on the device's snapshot, saves a Walls item (a pick's noggin stock and treatments, Double top
+     plate on), a 2-wall Line run at 2,700 and 3,000 and D1 + W1 in one commit, then reloads. Parts (stock included),
+     rules, runId/seq, heights, points and opening types come back as sent, and the lines are the preview's: "Walls: 21
+     studs (13 at 2,700, 8 at 3,000) · bottom plate 10.00 m · top plate 2 × 10.00 m · 17 noggins (1–2 rows)". Only the
+     order-line dependency key moves, as for any wall: the server's cleaner fills each wall's inputs (its traced length,
+     heightSource and the empty slope fields), and the shared engine on the stored snapshot gives the server's lines
+     exactly. A Run, an entered length or a Count on Walls is refused with the server's message, nothing saved.
+   - The real-stack journey WF (`tc-journeys-sandbox.spec.js`) runs after J5, so the orders are unchanged: Add walls,
+     Wall height 2,700, a 6,000 + 4,000 L ("19 studs … 17 noggins"), + Door D1 ("Walls: 21 studs at 2,700 · bottom plate
+     10.00 m · top plate 10.00 m · 16 noggins (1 row)"; studs 21 × 2,700, plates 2 × 6,000 + 2 × 4,200, noggins 4,800 +
+     3,600), then a reload: the Walls card and the plan show the same line, Wall height starts at 2,700 and the real
+     server's lines are the same. Passes on desktop Chromium and iPhone 13 WebKit. HUB 022 names walls after the
+     takeoff's walls so far, so WF works its expected names out from the server's walls before tracing (today Wall 2
+     and Wall 3, after J2's North wall). It doesn't depend on which other journeys added walls.
+   - Correction to the flow table, step 1: with no plan on the takeoff, Add walls opens the Walls list with **Wall by
+     numbers** only. **Trace on plan** shows once there is a plan (as Studs, `TakeoffApp.jsx` `onTrace` is null with no
+     plan). SOP 20-08 Section 5D says so, and the mocked screen test "Add walls with no plan" checks it.
 
 ## Tests
 

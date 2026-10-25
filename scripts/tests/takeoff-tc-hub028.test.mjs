@@ -18,6 +18,8 @@
 // Step 5, the Walls card and wall pages (tools.js wallFramingNotes / wallLongPlateOverMm / wallPartText): each wall
 // page's own notes (its LVL long plates, its openings' lintels note), the "over 6.0 m" the calculation splits against,
 // and the Walls card's part writes (a built-in row, a company product, a typed field) as normaliser fixed points.
+// Step 6: SOP 20-08's Walls words (the short-noggin example's studs, the refusal message, the long-plate exception to
+// "never joined") checked against the engine and the server's own words.
 //   node scripts/tests/takeoff-tc-hub028.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -1481,6 +1483,44 @@ t("the Walls card's part writes are normaliser fixed points: a built-in row, a c
   // the Long plates part lists only LVL plate products, Plates only the others
   const lvl = product("p-lvl", "plates", { grade: "LVL", treatment: "H2" });
   assert.deepEqual([wallPartProducts([plate, lvl], "plates").map((x) => x.id), wallPartProducts([plate, lvl], "longPlates").map((x) => x.id)], [["p-plate"], ["p-lvl"]]);
+});
+
+// ══ Step 6: SOP 20-08's Walls words say what the engine and the server do ═══════════════════════════════════════
+const SOP_2008 = () => readRepo("docs/sops/20_takeoff/20-08_timber_takeoff.md");
+
+t("SOP 20-08's short-noggin example names the studs the engine places: 977.5 is the first stud beside D1 (face on its edge), 932.5 the outer (second)", () => {
+  const sop = SOP_2008();
+  const m = sop.match(/\*\*Short noggins\*\* beside openings are counted as worked out, for example ([\d.,]+) mm between the stud at ([\d,]+) and the outer \(second\) stud beside D1 at ([\d.,]+)\./);
+  assert.ok(m, "the example names the outer (second) stud beside D1");
+  assert.doesNotMatch(sop, /first stud beside D1 at 932\.5/, "932.5 is the second stud, not the first");
+  const [noggin, from, outer] = m.slice(1).map(mmNum);
+  const c = ex(2700);
+  const left = wl(c, "Wall 1").ticks.filter((x) => x.state === "side" && x.positionMm < 1000).map((x) => x.positionMm);
+  nearAll(left, [1000 - 1.5 * W, 1000 - W / 2], "D1's left studs: the second (932.5), then the first (977.5, its face on the edge)");
+  near(outer, left[0], "the SOP's outer stud");
+  near(noggin, outer - from - W, "gap less half of each 45 mm stud");
+  assert.ok(nogLengths(c, "w1").some((x) => Math.abs(x - noggin) < 1e-6), "the engine counts that noggin");
+});
+
+t("SOP 20-08 quotes the Walls refusal as the server words it, the same in Sections 8 and 11, for each kind it names", () => {
+  const quotes = [...SOP_2008().matchAll(/"Walls can't use an? ([^"]+?) measurement — assign it to the right material\."/g)].map((m) => m[1]);
+  assert.ok(quotes.length >= 2, `found ${JSON.stringify(quotes)}`);
+  assert.deepEqual([...new Set(quotes)], ["manual / polyline / count"], "every quote names the same three kinds (an entered length, a Run, a Count)");
+  const reads = methodReads(walls(wallFramingDefaults([])));
+  for (const k of quotes[0].split(" / ")) assert.ok(!reads.includes(k), `Walls refuses a ${k} measurement`);
+  const words = "`${cm.name} can't use a ${mm.kind} measurement — assign it to the right material.`";
+  assert.ok(readRepo("server/lib/takeoff/takeoffService.mjs").includes(words), "the server's words");
+  assert.ok(readRepo("src/ui-review/fixtures/takeoff.js").includes(words), "the review mock's words (mock parity)");
+});
+
+t("SOP 20-08: every 'never joined' / 'never clamped' stock line (outside the Timber card's own field) names the Walls long-plate rule the engine keeps", () => {
+  const lines = SOP_2008().split("\n").filter((l) => /never (?:clamped or )?joined|never clamped/.test(l) && !/^\d+\. \*\*Stock\*\* \(fixed\)/.test(l));
+  assert.ok(lines.length >= 3, `found ${lines.length}`);
+  for (const l of lines) assert.match(l, /Walls/, `no Walls exception: ${l.slice(0, 100)}`);
+  // what those lines say: a 9,000 Walls plate is one LVL length, and only a plate over 11,000 is joined over a stud
+  assert.deepEqual(partRows(wf([wm("w", 9000, 2700, "Wall 1")], { spec: LVL_READY() }), "longPlates"), [[2, 9000]]);
+  const twelve = wf([wm("w", 12000, 2700, "Wall 1")], { spec: LVL_READY() });
+  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[2, 1200]]]);
 });
 
 console.log(`takeoff-tc-hub028: ${pass} passed, ${fail} failed`);

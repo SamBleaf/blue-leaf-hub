@@ -15,6 +15,7 @@
 // The step 5 review: the card's Needs are the parts' only (a blocked wall's reason sits under its line); a wall page
 // shows the parts' needs as one banner, its live result as the framing line, and "… aren't counted" (never "base studs
 // only") for an opening with no detail; the fold shows a product's not-stocked lengths and refuses a 0 at the field.
+// Step 6: Add walls on a takeoff with no plan opens its Walls list (Wall by numbers, no Trace on plan), as SOP 20-08 says.
 //   UI_REVIEW_PORT=5196 npx playwright test --config=playwright.ui-review.config.js e2e/ui-review/tc-hub028.spec.js
 import { test, expect } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -404,6 +405,23 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(panel(page).locator("[data-line-material]")).toHaveText("Walls");
     await expect(heightField(page)).toHaveValue("");
     await expect(panel(page)).toContainText("No height yet. Type it first, or each wall will need one.");
+  });
+
+  test("Add walls with no plan on the takeoff: one Walls item and its Walls list, with Wall by numbers and no Trace on plan (SOP 20-08 Section 5D step 1)", async ({ page }) => {
+    await page.goto(`${TIMBER}&takeoffSeed=no-plan`);
+    await ready(page);
+    await page.locator('[data-material-group="timber"]').getByRole("button", { name: "Add walls" }).click();
+    const list = page.locator('section[aria-label="Walls"]');
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("button", { name: "Wall by numbers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Trace on plan" })).toHaveCount(0);   // onTrace is null with no plan
+    await expect(page.locator("[data-line-panel]")).toHaveCount(0);
+    await expect.poll(async () => (await wallsState(page)).materials.map((m) => m.name)).toEqual(["Walls"]);
+    // the SOP says what the screen does (it used to say the list opens "with Trace on plan")
+    const sop = readFileSync(new URL("../../docs/sops/20_takeoff/20-08_timber_takeoff.md", import.meta.url), "utf8");
+    const step1 = sop.split("\n").find((l) => l.startsWith("1. On the takeoff overview, in the **Timber** part, tap **Add walls**"));
+    expect(step1).toContain("If the takeoff has no plan yet, the Walls list opens instead. Add the walls there with **Wall by numbers**");
+    expect(step1).not.toMatch(/Walls list opens with \*\*Trace on plan\*\*/);
   });
 
   test("screen 12-13 and Measure with…: Add walls is first in the Timber group and in Measure with…; a Walls row has no Add lengths and no Save as standard; Done goes back to the overview; Studs still opens the Wall tool", async ({ page }) => {

@@ -1,13 +1,13 @@
 ---
-sop_version: 1.4
-last_reviewed: 2026-10-21
-app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
+sop_version: 1.5
+last_reviewed: 2026-10-25
+app_version: takeoff-r03 (HUB 028 Walls build, commits 7fcc43a to ed2387f + step 6)
 screenshot_status: placeholders_only
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
 ---
 
-# SOP: Timber Takeoff — Rafters, Joists, Studs, Plates, Noggins and Trim
+# SOP: Timber Takeoff: Walls, Rafters, Joists, Studs, Plates, Noggins and Trim
 
 **Module:** Takeoffs (timber, cladding, aluminium and flashing from plans)  
 **SOP ID:** 20-08  
@@ -15,6 +15,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 **Priority:** High
 
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
+
+> **Walls (HUB 028, 25 October 2026):** built on branch `takeoff-r03` and NOT deployed yet. It waits for the Director's "deploy" and an iPhone check. It needs no migration. Sections 5D, 7, 8, 11, 12 and TC-15 to TC-17 describe it.
 
 > **Read this first:** the timber takeoff counts and lengths timber **for ordering only**. Every section size is a **manual selection** — the app never checks spans, loads, bracing, lintels or any other structural question, and nothing it shows is a structural or engineering approval.
 
@@ -25,7 +27,7 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 | Action | Admin (Director) — Hub | Supervisor — Hub | Leading hand — Worker app | View-only / Admin preview |
 |---|---|---|---|---|
 | Open the timber setup card, the plan and the walls | Yes | Yes | Yes | Read only |
-| **Add timber**, change the setup, draw member / distribution lines, tick changes, walls, counts, **Add lengths** | Yes | Yes | Yes | No |
+| **Add walls**, **Add timber**, change the setup, draw member / distribution lines, tick changes, walls, counts, **Add lengths** | Yes | Yes | Yes | No |
 | **Save as standard** / company timber products (SOP 20-12) | Yes | Yes | No | No |
 | Order the timber (SOP 20-06) | Yes (record placed: Director only) | Yes (export only) | Yes (export only) | No |
 
@@ -33,8 +35,9 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 
 ## 2. When to use it
 
+- You need the **wall framing** for a job. Use **Add walls**: you trace the walls once and get the studs, plates and noggins together (Section 5D). This is the normal way.
 - You need to order **rafters, joists or battens** spaced at centres along a roof or floor (repeated members).
-- You need **studs, plates or noggins** for a wall frame.
+- You need **studs, plates or noggins** on their own for an exception (Section 5E). Walls covers normal wall framing.
 - You need **trim or other members** measured along a line, counted, or typed in from a cut list.
 - A schedule line for timber says "needs attention", "Pitch is required." or "cannot be cut from any compatible stock".
 
@@ -42,7 +45,9 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 
 ## 3. What this does
 
-You add a timber material (section, grade, treatment), choose what it is for, and measure it on the plan or on walls. For repeated members you draw **one member line** (how long each rafter or joist is) and **a distribution run** (the line they are spaced along); the app puts a tick at every member position and counts them. For walls it places studs at centres, takes out the studs inside openings, and works out plates and noggins. Every piece is then ordered on the **company stock grid — 1200 mm, then every 300 mm (1500, 1800, 2100 …)** — one stock length per member, never joined. (Owner decision, 25 Oct 2026: all timber is bought in 300 mm steps; it was 600 mm steps before.) The schedule shows quantity × stock length per section/grade/treatment, with a cut list ("18 × 5,196.2 mm — one cut from each 5,400 mm length"). Sizes are always shown as **"manual selection (not structurally checked)"**.
+You add a timber material (section, grade, treatment), choose what it is for, and measure it on the plan or on walls. For repeated members you draw **one member line** (how long each rafter or joist is) and **a distribution run** (the line they are spaced along); the app puts a tick at every member position and counts them. For walls it places studs at centres, takes out the studs inside openings, and works out plates and noggins. Every piece is then ordered on the **company stock grid — 1200 mm, then every 300 mm (1500, 1800, 2100 …)** — one stock length per member, never joined. On Walls, a plate over 6.0 m is one 90 × 45 LVL length, and only a plate over 11.0 m is joined over a stud (Section 11). (Owner decision, 25 Oct 2026: all timber is bought in 300 mm steps; it was 600 mm steps before.) The schedule shows quantity × stock length per section/grade/treatment, with a cut list ("18 × 5,196.2 mm — one cut from each 5,400 mm length"). Sizes are always shown as **"manual selection (not structurally checked)"**.
+
+**Walls** is one timber item for wall framing. You set the Wall height and trace the walls on the plan with **Line**. When you finish, it works out each wall's studs, bottom and top plates and noggins together, as one result. It puts studs at the stud centres, a stud at each wall end and two studs beside every window and door. It adds one noggin row up to 2,700 high and two rows above that. It is an ordering count only. It never counts kings, jacks, trimmers, lintels, bracing or tie-downs, and it never says a frame is structurally adequate.
 
 ---
 
@@ -51,7 +56,8 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 - The takeoff is open (SOP 20-01) and, for anything traced on the plan, the page is scaled and shows **Ready** (SOP 20-02).
 - Know the **section** (e.g. 90 × 45), **grade** (e.g. MGP10) or species, and **treatment** (e.g. H2, H3 or "untreated") — take them from the drawings or engineer's schedule. The app does not choose them. For studs, noggins, plates and battens you pick the usual size from a list, but you still check it against the drawings.
 - For rafters measured on the floor/roof plan: know the **roof pitch** from the drawings. A pitch is never read off the plan.
-- For walls: know the **stud cut length** (or frame height and the plate thicknesses), and for noggins the **number of noggin rows** from the framing detail.
+- For **Walls**: you need a scaled plan (page **Ready**). Know the **Wall height**, which is the stud cut length, and the **stud centres** (usually 600). Ideally the office has saved company timber products for studs, plates and noggins first (SOP 20-12), each with its grade, treatment and longest length. Then Walls is ready to order with no typing.
+- For Studs, Plates or Noggins on their own: know the **stud cut length** (or frame height and the plate thicknesses), and for noggins the **number of noggin rows** from the framing detail.
 - You have edit access (Section 1).
 - The database has migration 207 (Section 0 feature status). Without it, saving a member line, distribution run or wall is refused (SOP 20-07 "Not saved").
 
@@ -61,9 +67,9 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 
 ### A. Add a timber material and set it up
 
-1. On the takeoff overview, in **Materials**, tap **Add timber**. The **Timber** setup card opens ("Timber · this job only"). A material called **Timber** is created straight away — there is no Save button; every valid change saves automatically ("Changes save automatically to this job only."). **Undo** / **Redo** at the top undo changes made in this card.
+1. On the takeoff overview, in the **Timber** part, tap **Add timber** (the second button, after **Add walls**). The **Timber** setup card opens ("Timber · this job only"). A material called **Timber** is created straight away — there is no Save button; every valid change saves automatically ("Changes save automatically to this job only."). **Undo** / **Redo** at the top undo changes made in this card.
 2. **Name** — e.g. "Rafters 90 × 45".
-3. **Purpose** — tap one: **Rafters**, **Joists**, **Studs**, **Plates**, **Noggins**, **Battens**, **Trim** or **Other member**. The purpose decides the measuring tools (Section 5B–5E).
+3. **Purpose** — tap one: **Rafters**, **Joists**, **Studs**, **Plates**, **Noggins**, **Battens**, **Trim** or **Other member**. The purpose decides the measuring tools (Sections 5B, 5C, 5E and 5F). Walls is not one of them: for wall framing tap **Add walls** instead (Section 5D).
 4. **Size and grade** (shown for Studs, Noggins, Plates and Battens, and for any purpose that has a company timber product saved for it). Tap the list and pick the size. It fills **Section depth**, **Section width** and, for studs, **Grade** in one go. You don't type them.
    - **Studs:** 90 × 35 MGP10, 90 × 45 MGP10, then the less common 120 × 35 MGP10 and 120 × 45 MGP10.
    - **Noggins:** 90 × 35. **Plates:** 90 × 45. **Battens:** 90 × 35, 70 × 35, 90 × 45, 70 × 45. These fill the size only. Type the grade yourself.
@@ -109,24 +115,51 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 5. **‹ Whole run — N rafters: spacing, ends, offsets** opens the run's own settings: **Start offset**, **End offset**, **Member at the start**, **Member at the end**, and **Equal bays on every run of this material** (a material rule — it re-spaces every distribution run of this timber).
 6. If an offset is longer than the run you will see "No members counted — see why below." with the reason.
 
-### D. Studs, plates and noggins (walls)
+### D. Walls: trace once, studs, plates and noggins together
+
+This is the normal way to take off wall framing (HUB 028). One **Walls** item gives one result with the studs, plates and noggins of every wall you trace on it.
+
+1. On the takeoff overview, in the **Timber** part, tap **Add walls** (the first button). It is also first in **Measure with…** on the plan. A Walls item called **Walls** is made straight away ("Walls 2" for the next one), and the plan opens with **Line** chosen. No setup card comes first. If the takeoff has no plan yet, the Walls list opens instead. Add the walls there with **Wall by numbers**, or add a plan first (SOP 20-02): **Trace on plan** only shows once there is one.
+2. The Line panel shows **Walls ›**, **Wall height**, **Stud centres** (600) and **Double top plate** (off). The tools are **Line | Select | Pan**: there is no Rectangle or Area for Walls.
+3. **Wall height**: type the height and tap **Done** on the keypad. The Wall height is the **stud cut length** (for example 2700). The first time it is empty and says "No height yet. Type it first, or each wall will need one." On a later run it starts at this Walls item's own last height, so skip it if that is right. A cladding's height is never carried over.
+4. **Stud centres** and **Double top plate** cover every wall of this Walls item. Leave them at 600 and off unless the job needs otherwise. Each change is one **Undo**. Changing the centres re-lays every wall already traced. Double top plate adds a second top plate the full length of every wall. It changes nothing else.
+5. Tap the start of the run, then each corner. Double-tap the last point, or tap it and press **Finish**. To go right round a building, double-tap the start. While you trace, the Walls line and the settings hide, so **Finish** stays in view. All the walls save together with one Undo. The card says, for example, "Run 1 · 2 walls · 2,700".
+6. **+ Door**: type **Height** (only the first door needs it), then tap both door edges on the wall. **+ Window**: type **Height** and **Sill height**, then tap both window edges. They are labelled D1, W1 and so on (SOP 20-09 Section C2). Tap **Trace more walls** when the openings are in.
+7. Read the **Walls line** under the settings, for example "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)".
+   - With Double top plate on, the top plate reads "top plate 2 × 10.00 m".
+   - Walls of different heights read "21 studs (13 at 2,700, 8 at 3,000)" and "(1–2 rows)".
+   - A wall that can't be worked out adds nothing to the totals and is named: "… · Wall 1 not counted". The reason shows straight under the line, for example "Wall 1: enter the Wall height.".
+8. **Details: 3 to fix ›** (plain **Details ›** when nothing is missing) opens the **Walls** card. At the top it lists what each part still needs, naming the part, for example "Plates: enter the treatment (or "untreated").". Then its notes, for example "Lintels, jacks and trimmers at D1, W1 aren't counted.". Then **Name**, **Stud centres**, **Double top plate** and the Walls line.
+9. The card's closed fold **Studs, plates, noggins** holds each part: **Studs**, **Plates**, **Long plates (over 6.0 m)** and **Noggins**. Each has the **Size and grade** list (Section 5A step 4), **Section**, **Grade**, **Treatment** and **Longest length**. Open it only for an exception, for example 90 × 35 studs. A saved company product picked there fills that part only, its longest length too. Nothing is copied from one part to another. **Trace walls** at the top goes back to the plan.
+10. **Review walls** (on the run card and the panel) opens the first wall. Each wall page leads with its own line, for example "Walls: 13 studs at 2,700 · bottom plate 6.00 m · top plate 6.00 m · 9 noggins (1 row)", then its own notes. The studs beside openings are drawn as full studs, and the studs inside an opening are greyed. **Next wall ›** goes wall to wall (SOP 20-09 Section C4).
+11. **Done** on the plan goes back to the overview. The Walls row has **Setup** (the Walls card), **Walls** (the wall list) and **More** › **Remove**. It has no **Add lengths** and no **Save as standard**.
+12. Extra members such as trimmers, lintels or jacks go on a **separate Timber item** (**Add timber**, purpose **Other member**, with **Add lengths**), because a Walls item takes traced walls only.
+
+> 💡 **Tip:** trace wet-area walls as their own Walls item at 450 centres. Tap **Add walls** again and set **Stud centres** to 450. One Stud centres value covers every wall of a Walls item, so don't change the main one.
+
+[insert screenshot: Line panel on a Walls item: Wall height, Stud centres, Double top plate, the Walls line and Details: 3 to fix ›]
+[insert screenshot: Walls card: needs, the lintels note, the Walls line and the closed Studs, plates, noggins fold]
+
+### E. Studs, plates or noggins on their own (exceptions)
+
+Use these only for an exception. Normal wall framing is **Add walls** (Section 5D). Don't put Studs, Plates or Noggins on walls that already have Walls: both are counted, and Walls shows "Wall 2 is also on Studs 1, so its framing may be counted twice.".
 
 1. **Measure members** on a studs / plates / noggins material opens the **Walls** screen (same screen as cladding — SOP 20-09). Add a wall with **Wall by numbers** (name, shape, length, then height) or **Trace on plan** (Wall tool: tap each corner, double-tap the last point or **Finish**; each straight leg becomes its own wall).
 2. Make sure the wall uses this timber: open it and check **Materials on this wall** shows **✓ Uses …** (tap **Use … here** if not). The wall rows no longer carry these buttons (HUB 022), and walls on other materials are folded under **Other walls**.
    - Timber keeps the **Wall** tool. Cladding traces with **Line** instead, which sets the height before you trace and keeps you on the plan (SOP 20-09 Section 5C).
 3. **Studs** — in the setup card: **Stud cut length (or frame height)** and **That is: Stud cut / Frame height**. Frame height needs **Bottom plate(s) thickness** and **Top plate(s) thickness** (never assumed). Blank uses the wall height as the stud cut length. On the wall, the **Supports** view shows a line per stud (e.g. a 3,600 mm wall at 600 centres → 7 studs).
-4. Openings (add them on the wall — SOP 20-09 Section 5C): studs strictly inside an opening are **removed** (greyed "Removed stud"). The **Supports** view counts the studs ("Studs 90 × 45: 5 studs at 2,400 mm."). **More**, at the bottom of the wall, says what they cover ("Studs 90 × 45: base studs only; opening framing incomplete.") and holds the wall's note "W1: base studs only; opening framing incomplete — needs its framing detail." (notes, statuses and the drawing's explanations are folded there, as on cladding walls: SOP 20-09 Section C4). Tapping a stud shows its cut length; there is no stepping through the studs, and **‹ Previous wall** / **Next wall ›** at the bottom go wall to wall. **Kings, jacks, trimmers, sills and lintels are never guessed** — add them as their own timber material or entered lengths (Section 5E) from the framing detail.
+4. Openings (add them on the wall — SOP 20-09 Section 5C): studs strictly inside an opening are **removed** (greyed "Removed stud"). The **Supports** view counts the studs ("Studs 90 × 45: 5 studs at 2,400 mm."). **More**, at the bottom of the wall, says what they cover ("Studs 90 × 45: base studs only; opening framing incomplete.") and holds the wall's note "W1: base studs only; opening framing incomplete — needs its framing detail." (notes, statuses and the drawing's explanations are folded there, as on cladding walls: SOP 20-09 Section C4). Tapping a stud shows its cut length; there is no stepping through the studs, and **‹ Previous wall** / **Next wall ›** at the bottom go wall to wall. **Kings, jacks, trimmers, sills and lintels are never guessed** — add them as their own timber material or entered lengths (Section 5F) from the framing detail.
 5. **Plates** — **Plates per wall: Bottom + top** or **Bottom + double top**; each wall gives one piece per layer at the wall length (e.g. 3,600 wall → 2 × 3,600). Plates can also be measured with **Run** or counted with **Count** on the plan.
 6. **Noggins** — **Stud centres** and **Noggin rows** (from the framing detail — "never inferred"). Each clear bay (centres − stud width) is one noggin per row, ordered on the stock grid (600 centres, 45 wide → 555 mm cuts from 1,200 mm stock). Without rows you will see "Enter the number of noggin rows or select it from a reviewed framing detail…".
 
-### E. Trim, other members, counts and typed-in lengths
+### F. Trim, other members, counts and typed-in lengths
 
 1. **Trim / Other member** on the plan: tools **Run | Count | Select | Pan**.
 2. **Run** — tap the start and each corner, double-tap the last point (or **Finish**). **A plan corner is a joint for timber**: every straight leg becomes its own piece ("2 straight pieces added — each corner is a joint, so every straight leg is its own piece. Undo removes them all."). An extra tap part-way along a straight leg is merged, not a new piece.
 3. **Count** — type **Cut length of each piece** first, then tap each place. Each tap is one piece, ordered on the next stock length.
 4. **Typed-in lengths** — on the overview tap **Add lengths** on the timber row, type the length and **Qty**, tap **Add**. For timber this is a **cut length**: it is put on the stock grid (2,350 → 2,400; 500 → 1,200; 1,200.1 → 1,500). Entered lengths are listed under the form with a **Remove** button each.
 
-### F. Check the schedule
+### G. Check the schedule
 
 1. Overview → **Open schedule**. Each timber material is its own group: name, "Timber · 90 × 45 · MGP10 · H2", "Size: manual selection (not structurally checked)", the three statuses (**Quantity / Installation / Ordering**), notes and problems.
 2. Rows read **quantity × what is bought**, e.g. "18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length". Tap a row for the cut list ("Cuts: 18 × 5,196.2 mm — one cut from each 5,400 mm length"), where it came from ("Distribution run …", "Member line … · projected") and **Show on plan** / **Show on wall**.
@@ -156,6 +189,17 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 | Picking a size from **Size and grade** and leaving the treatment blank | The list fills the size and grade only | Type the treatment, or pick a company product that has one |
 | Typing an LVL grade on a stud | There is no LVL row in the list | Pick the supplier's LVL from the company products (ask the office to save it once) |
 | Leaving **Noggin rows** blank | Assuming it follows cladding support spacing | Enter the rows from the framing detail |
+| Typing the overall frame height as the **Wall height** on Walls | It looks like the height of the wall | On Walls the Wall height is the **stud cut length**. Double top plate adds a plate. It never changes the stud length |
+| Tapping the first wall before typing the Wall height | The first Walls run starts with an empty Wall height | Type the Wall height first, then tap. A wall with no height is "not counted" until it has one |
+| Expecting every noggin to be bought on its own length | Noggins items buy each noggin its own length | On Walls, noggins share lengths at 6,000 unless a saved noggin product says otherwise. Clear the noggins' longest length under Details and every noggin buys its own 1,200 |
+| Looking for a noggin rows box on Walls | Studs and Noggins items ask for rows | Walls sets the rows itself: walls at 2,700 or under get one noggin row, walls over 2,700 get two |
+| Tracing a wall from the other end and expecting the same studs | Set-out starts at the first point of each wall | Studs set out from where each wall was traced from: the start of the run, then each corner |
+| Missing a nib or return | Short walls are easy to skip | Trace every nib and return, especially wet-area nibs |
+| Tracing a shared wall twice | Two rooms share it | Don't trace a shared wall twice. Every wall you trace is counted |
+| Changing the whole Walls item to 450 centres for the wet areas | One Stud centres covers every wall of a Walls item | Trace wet-area walls as their own Walls item at 450 centres |
+| Expecting the bottom plate to stop at each doorway | The plan shows the doorway | The bottom plate is ordered full length. Cut the doorway out of the bottom plate after standing the frame |
+| Putting Studs, Plates or Noggins on walls that already have Walls | Older jobs used three items | Don't. Both are counted, and Walls shows a note if you do |
+| Expecting Walls to count lintels, jacks and trimmers | They are on the framing detail | Walls says "Lintels, jacks and trimmers at D1 aren't counted." Add them on a separate Timber item |
 
 ---
 
@@ -181,6 +225,20 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 | Timber ordered before 25 Oct 2026 shows under **Placed, but no longer in the takeoff**, and the same pieces show as not ordered on a shorter length (e.g. 2,700 instead of 3,000) | Timber is bought in 300 mm steps since 25 Oct 2026 (it was 600 mm steps), so many stock lengths changed | Don't re-order. The placed lengths still cut the same pieces. On a draft order, tap **Update to what's needed now** if it shows, or **Remove line** and add the line again |
 | Tick label says "(preview)" | Member length not known yet | Draw the member line, enter the pitch or the cut length |
 | "Not saved: One or more values are not valid for this field." on a member/distribution/wall | Migration 207 missing on that database | Apply migration 207 to that (non-production) database; production waits for the Director |
+| **Details: 3 to fix ›** on the Line panel, or "Walls: 3 parts need setup (studs, plates and noggins)." on a wall page | Those Walls parts have no grade or treatment yet (the built-in rows carry none) | Tap **Details**, open **Studs, plates, noggins** and pick or type the product for those parts. Or ask the office to save company products once (SOP 20-12) |
+| "Lintels, jacks and trimmers at D1, W1 aren't counted." | Expected, not a fault. Walls never counts them | Add them on a separate Timber item from the framing detail |
+| The Walls line ends "· Wall 1 not counted" | That wall can't be worked out. The reason is straight under the line | Fix what it says (the rows below). The other walls still show their quantities |
+| "Wall 1: enter the Wall height." | The wall was traced with no height | **Select** the wall and type its **Wall height** |
+| "Wall 1 is sloped or traced as an outline. Walls only works out straight walls of one height." | A sloping, gable or outline wall is on Walls | Trace it with **Line** as straight walls of one height |
+| "Wall 1: Openings W1 and W2 overlap along the wall — frame them as one opening or with explicit members." | Two openings overlap on one wall | Fix the openings on the wall's elevation |
+| An order line "Plates 90 × 45 LVL", and the wall page says "Plates: 90 × 45 LVL (over 6.0 m)" | Plates over 6.0 m come as one 90 × 45 LVL length, up to 11.0 m | Expected. Longer plates are joined over a stud |
+| "Wall 1: the bottom plate has no stud to join over from … to … mm." | A plate over 11.0 m with no stud centre to join it over | Re-trace the wall, or trace it as two walls |
+| Nothing on the Walls item can be ordered, although only one wall has a problem | Any block on one wall holds the whole Walls order, studs and noggins included | Fix that wall. The other walls still show their quantities |
+| "Studs: the longest length isn't set. Confirm it before ordering." | The studs part has no longest length (none was given) | Set the studs' **Longest length** under Details once the supplier confirms it. It doesn't hold up the order |
+| "Noggins: each is cut from its own 1,200 length. Set the noggins' longest length under Details to share lengths across walls." | The noggins' longest length was cleared | Set it again under Details (6,000 by default) |
+| "Wall 2 is also on Studs 1, so its framing may be counted twice." | That wall is on Walls and on an older Studs, Plates or Noggins item | Take the wall off the older item (**Materials on this wall**) |
+| "Walls can't use a manual / polyline / count measurement — assign it to the right material." (the app shows one of the three words, and the item's own name, e.g. "Walls 2") | An entered length (manual), a Run (polyline) or a Count was put on a Walls item | Put extra members on a separate Timber item |
+| "That calculation method is not available." on Walls | The phone still runs the app from before the update | Reload the app. The work is kept on the device (SOP 20-07) |
 
 ---
 
@@ -188,7 +246,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 
 - [20-01 Takeoffs overview, access & switching it on → who can use timber takeoff](20-01_takeoff_overview.md)
 - [20-02 Set up plans and scale a page → a Ready scale before tracing members](20-02_set_up_and_scale_plans.md)
-- [20-09 Cladding walls, openings and the generated elevation → the Walls screen used for studs, plates, noggins](20-09_cladding_walls_and_elevation.md)
+- [20-09 Cladding walls, openings and the generated elevation → the Line tool, + Window / + Door, the run card and Review walls that Walls uses; the Walls screen used for studs, plates, noggins](20-09_cladding_walls_and_elevation.md)
 - [20-05 Length schedule and splitting → the schedule window](20-05_length_schedule_and_split.md)
 - [20-06 Export a supplier order and record it as placed → ordering timber, site appendix cut list](20-06_export_and_record_orders.md)
 - [20-07 Saving, recovery and conflicts → the save chip](20-07_saving_recovery_conflicts.md)
@@ -198,7 +256,10 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 
 ## 10. Screenshot placeholders
 
-[insert screenshot: overview Materials section with Add timber / Add cladding / Add aluminium]
+[insert screenshot: overview Timber part with Add walls / Add timber, Cladding part with Add cladding / Add aluminium]
+[insert screenshot: Line panel on a Walls item: Wall height, Stud centres, Double top plate, the Walls line]
+[insert screenshot: Walls card: needs, notes, Walls line, Studs, plates, noggins fold opened]
+[insert screenshot: a Walls wall page: its Walls line, notes and studs beside D1 drawn as full studs]
 [insert screenshot: Timber setup card — Needs…, On the order now, three statuses]
 [insert screenshot: plan — Member tool panel "Member line 4,500 mm measured in plan (projected) → 5,196.2 mm true at 30°"]
 [insert screenshot: plan — distribution run with ticks "18 rafters"]
@@ -220,6 +281,30 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 - **Schedule / order lines:** generic purchase lines `unit` 'piece', `item.description` "90 × 45 MGP10 H2 — 5,400 mm length"; order lines carry `unit` + `item` (migration 207).
 - No email, notification or file is created.
 
+**Walls (HUB 028).** Plan: `docs/hub_review/WALLS_FRAMING_PLAN.md` (Sam's decisions of 25 October 2026, rounds 1 to 3). No migration.
+
+- **Add walls** upserts one `takeoff_job_materials` row: name "Walls" ("Walls 2" …), method `wall_framing@1`, `spec` { v 1, family "timber", purpose "walls", plies 1, endAllowanceMm 0, spareRate 0, components { studs, plates, longPlates, noggins } }. Each part is { section { depthMm, widthMm }, grade, treatment, species, supplierName, productCode, stock { maxMm, unavailableMm } }. `rules` { centresMm 600, doubleTopPlate false }. "walls" is not one of the Purpose chips.
+- Walls and openings are the HUB 022 records, unchanged: `kind` 'wall' with 2 points and `inputs` { kind "rect", heightMm, name, runId, seq } (the server adds widthMm, the traced length), and `kind` 'opening' with `parentId` and `inputs` { xMm, sillMm, widthMm, heightMm, label, type }. One `role` 'wall' contribution per wall.
+- `wall_framing` reads walls only (`methodReads` = ["wall"]). The server refuses a Run, Count or entered length on a Walls item ("Walls can't use a manual / polyline / count measurement — assign it to the right material.", with the kind and the item's own name).
+- Never stored: stud stations, studs beside openings, plate pieces, noggin rows and bays, stock lengths and the Walls line. `computeWorkspace` works them out again in the browser and on the server every time. Order lines carry `item.component` (studs, plates, longPlates, noggins).
+- The rules, each with its source. [Sam] = Sam's answer (24 and 25 October 2026). [doc] = the review doc or an existing engine rule. [Default, needs Sam] = what the build does until Sam says otherwise.
+  - **Studs.** [Sam] Studs at the Stud centres along each wall (0, c, 2c … plus the wall end: ceil(L ÷ c) + 1 before openings), and a stud at each wall end. Walls never uses offsets. [Default, needs Sam] Set-out starts at each wall's first traced point (the start of the run, then each corner); openings are measured from the same point. [Default, needs Sam] One Stud centres value per Walls item; Wall height is per wall.
+  - **Corners.** [Sam] 2 studs at a corner, one from each wall (a closed run too). No third corner stud, and nothing at a T-junction (separate runs aren't linked).
+  - **Openings.** [Sam, round 2] 2 full-length studs each side of every opening (window, door, other), labelled "Wall 1 stud @ 932.5 (beside D1)", never "king". The first stud's face sits on the opening edge (centre at the edge ∓ w/2), the second against it (∓ 3w/2), w = the stud thickness along the wall (45). A side stud never sits outside the wall. [Default, needs Sam] Between two openings g apart there are floor(g ÷ 45) side studs, 1 to 4; openings closer than half a stud share one. [doc] Centre studs strictly inside an opening come out, and nothing is added under sills or above heads. [Default, needs Sam] A sill or head above the studs is clipped into the stud height with a note, never a block. [doc] Overlapping openings block that wall.
+  - **Merge.** [Sam, round 2] Studs whose centres are closer than one stud thickness are one stud: an end stud beats a side stud, a side stud beats a centre stud, a first side stud beats a second. Touching studs are both kept.
+  - **Stud length.** [Sam] Stud cut length = that wall's own Wall height. The item-wide stud height is never read, and Double top plate never changes the cut.
+  - **Framing details.** [doc] An explicit framing detail on an opening still adds its own members, with the note "Check the studs beside D1 aren't counted twice.". Without one, one plain line that doesn't block: "Lintels, jacks and trimmers at D1, W1 aren't counted." (quantity status stays "incomplete").
+  - **Shapes.** [Default, needs Sam] Straight walls of one height only. A sloped, gable or outline wall, or one with no height, gets one blocking line naming it. Rectangle and Area aren't offered for Walls.
+  - **Plates.** [doc] One bottom and one top plate per wall. Double top plate adds a second top plate (layer `top-2`) the full length of every wall. [Sam, round 2] The bottom plate is bought the full wall length (no door gaps): the crew cuts the doorway out after standing the frame. [Sam, as read] Top plates run continuous over openings, one piece per wall per layer. [Default, needs Sam] Plate length = traced wall length, with no corner deduction.
+  - **Long plates.** [Sam, round 3] A plate piece longer than the pine plates' longest length (6,000 by default; a saved plate product's own wins) is one 90 × 45 LVL length from the Long plates part, on its own "Plates 90 × 45 LVL" line and "Long plates cut list". [Default, needs Sam] LVL is bought in 300 mm steps from 6,300, with 11,000 allowed. [Sam, round 3] Only a plate over 11,000 is joined over a stud, at the furthest stud centre that keeps the piece within 11,000. [Default, needs Sam] Each piece after a join is LVL if over 6,000, else pine. If no stud centre fits, that wall is blocked, naming it.
+  - **Noggins.** [doc + Sam] A wall over 2,700 has 2 rows (owner rule "HUB 028: over 2,700 mm = 2 rows"); exactly 2,700 is not over. [Sam] 2,700 or under has 1 row ("HUB 028: 2,700 mm or under = 1 row"). [doc] One noggin per row in each clear bay between the counted studs; clear = gap − half of each bordering stud, using the stud's thickness (555 at 600 centres with 90 × 45 studs). [Sam] No noggins in a bay that overlaps any opening. [Default, needs Sam] Touching studs leave no bay: no noggin and no block. A short bay is counted, however short.
+  - **Height changes.** [doc, HUB 022] Each wall uses its own Wall height. [Default, needs Sam] A straight wall split by a height change is two walls, so the join has 2 studs.
+  - **Stock.** [Sam, round 2] All timber is bought on the 1,200 then 300 mm grid (LVL also allows 11,000, off the grid), the smallest length that fits. A piece is never clamped or made from two lengths: a Walls plate over 11,000 is first split over a stud (see Long plates). [doc] One length per stud. [Sam] One length per plate piece, no offcut sharing. [Sam] Noggins share lengths across every wall of the Walls item at 6,000 (a saved noggin product's own longest length wins); there is no sharing between two Walls items. [Default, needs Sam] A part with no longest length gets one note naming it ("Studs: the longest length isn't set. Confirm it before ordering."). [Default, needs Sam] Kerf 0, no spares.
+  - **Products.** [Default, needs Sam] Studs default to 90 × 45 MGP10. [doc, HUB 027] Plates 90 × 45, noggins 90 × 35. [Sam, round 3] Long plates 90 × 45 LVL, longest 11,000. [Default, needs Sam] Exactly one active company timber product for a part's purpose fills that part (`wallPartFill`: size, grade, treatment, species, supplier, code, longest length and "not stocked" lengths); with two or more, the built-in row stays and the products are one pick away. [doc, HUB 027] Nothing is copied between parts. [Default, needs Sam] Each part keeps its own order lines and cut list ("Studs cut list", "Plates cut list", "Long plates cut list", "Noggins cut list"), even for the same product.
+  - **Two items on one wall.** [Default, needs Sam] A wall also on a Studs, Plates or Noggins item gets one note on Walls that doesn't block. Both are still counted.
+  - **Blocks.** [doc] Any blocking problem goes on every line of the Walls item, studs and noggins included. The other walls still show their quantities.
+  - **Never counted.** [doc] Kings, jacks, trimmers, lintels, cripples, sill trimmers, tie-downs, bracing and blocking. Walls never says a frame is structurally adequate.
+
 ---
 
 ## 12. Edge cases and limits
@@ -236,10 +321,21 @@ You add a timber material (section, grade, treatment), choose what it is for, an
 - **Known wording issue — Add lengths for timber:** the form's help says "Entered lengths are used exactly — no allowance or rounding." For timber the entered length is a **cut length** that is ordered on the next stock length (2,350 → 2,400). The schedule shows the stock length and the cut list shows the cut.
 - Only one member line per repeated-member material; for rafters of different lengths use another material, change single ticks (**Length for this rafter only**), or enter hip/valley/jack lengths individually.
 - Disconnected distribution runs each restart their own spacing; there is no automatic phase matching between runs.
-- Studs: base studs only. Corners, T-junctions, brace panels and opening framing are explicit additions.
-- Stock is one piece per member — members are never joined to reach a length, and a member longer than the longest available length is **unavailable**, never clamped.
+- Studs items (not Walls): base studs only. Corners, T-junctions, brace panels and opening framing are explicit additions.
+- Timber items other than Walls: stock is one piece per member — members are never joined to reach a length, and a member longer than the longest available length is **unavailable**, never clamped. On Walls a plate over 6.0 m is one 90 × 45 LVL length, and only a plate over 11.0 m is joined over a stud (Section 11, Long plates).
 - The overview's "Length schedule … pcs" total adds every unit together (pieces, sheets, bars, LM). Read quantities in the schedule window, not that total.
 - Plan lines need a Ready scale on the current plan revision; a re-scale or replaced plan flags them (SOP 20-02).
+- **Walls (HUB 028):**
+  - **Corners** get 2 studs, one from each wall. A closed run is the same where the last wall meets the first. **T-junctions** get no extra stud, because separate runs aren't linked.
+  - **Openings** get 2 full studs each side. Where an opening edge falls on the stud grid, the grid stud and the first stud beside it are one stud (closer than 45 mm). Example: W1 from 1,200 to 3,000 on a 4,000 wall at 600 centres gives 8 studs: 0, 600, 1,132.5, 1,177.5, 3,022.5, 3,067.5, 3,600 and 4,000.
+  - A **door at a wall end** keeps the wall's end stud at the door edge. The studs beside it go on the wall side only, never outside the wall.
+  - A **height change** partway along a straight wall makes two walls, so the join has 2 studs (a 6,000 wall split at 3,000 has 12 studs, against 11).
+  - **Short noggins** beside openings are counted as worked out, for example 287.5 mm between the stud at 600 and the outer (second) stud beside D1 at 932.5. Two touching studs beside an opening leave no bay, so no noggin goes there.
+  - **No corner deduction:** each plate is the traced wall length, so the two plates at a corner overlap by a stud width. It over-orders slightly but never short.
+  - **Mixed heights** on one Walls item read on one line, lowest first: "Walls: 21 studs (13 at 2,700, 8 at 3,000) · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1–2 rows)".
+  - Stud centres and Double top plate cover the whole Walls item. A per-wall centres, a noggin row override, plies, kerf and spares are not on Walls.
+  - Stud centres and Double top plate are stored on the item. A change marks every draft order line of that Walls item for review (one dependency key per item). The quantities are still right.
+  - Walls counts every wall it is given. A shared wall traced twice is counted twice, and so is a wall on Walls and on an older Studs item (that one with a note).
 - Undo/redo on the plan covers the current visit to that screen (up to 100 steps); the setup card has its own Undo/Redo.
 
 ---
@@ -262,6 +358,8 @@ Next review date: 2027-04-14
 - [ ] "Expected record" in UI Review Mode = the fake server's copy. In the page console: `await (await fetch("/api/takeoff/workspaces/ws-1")).json()` → `snapshot.materials / measurements / contributions`; `window.__takeoffReviewState()` → `{ revision, commits, measurements }`. A full page reload re-seeds the fake data.
 - [ ] Plan positions: PDF point for (x mm, y mm) on page 1 = `{ x: 120 + x × 0.0283464567, y: 150 + y × 0.0283464567 }`; screen position = `document.querySelector("[data-takeoff-viewport]").takeoffViewport.toScreen(pt)` + the viewport's bounding rect; zoom with `.takeoffViewport.zoomOn(pt, factor)`. Taps land on whole pixels — zoom in before drawing and allow ±40 mm on drawn lengths.
 - [ ] Optional live-stack run (local only, isolated test DB with migrations **206 and 207**, `TAKEOFF_ENABLED=true`, `BLH TEST` job) for the DB checks marked "Live DB".
+- [ ] **Walls (TC-15 to TC-17):** open `http://localhost:<PORT>/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding` (page 1 is scaled). `&takeoffSeed=walls` adds one Walls item with nothing traced (overview → **Measure** opens it); `&takeoffSeed=walls-products` saves one company product per Walls part. The worked example's run on page 1: A (2000, 3000) → B (8000, 3000) → C (8000, 7000), so Wall 1 is 6,000 and Wall 2 is 4,000. D1's edges are (3000, 3000) and (3820, 3000). W1's edges are (8000, 4200) and (8000, 6000). Zoom right in on each point before tapping it (`zoomOn(pt, 40)`), and wait about half a second between taps on the same spot of the screen, or two taps read as a double-tap.
+- [ ] **Reload in UI Review Mode** = leave the takeoff and come back inside the app, because a browser reload re-seeds the fake data: in the console `history.pushState({}, "", "/carpentry/cjb-1?reviewRole=admin"); dispatchEvent(new PopStateEvent("popstate"))`, then the same with the takeoff URL. The real server's reload is covered by `scripts/tests/takeoff-api.test.mjs` ("HUB 028 step 6") and the real-stack journey WF (`e2e/ui-review/tc-journeys-sandbox.spec.js`).
 
 ### Test cases
 
@@ -373,6 +471,39 @@ Next review date: 2027-04-14
 4. Expected result: step 2 — the list shows **Yard B …** after the pick and after coming back; then **Yard A …**; then **70 × 35**, still after coming back, with the fields 70 / 35 / MGP10 / H3. Step 3 — the list shows **90 × 35 MGP10** after the pick and after coming back; the row reads "90 × 35 · MGP10 · H2-S", never "LVL".
 5. Expected record: step 2 → after Yard B `spec.supplierName` "Yard B", `spec.productCode` "B-7035"; after the plain 70 × 35 `spec.productCode` null. Step 3 → `spec.grade` "MGP10", `spec.treatment` "H2-S", `spec.species` null, `spec.productCode` null.
 6. Screen tests: e2e/ui-review/tc-catalogue.spec.js "HUB 027: two suppliers' battens …" and "HUB 027: LVL comes only from a selected company product …"; node: scripts/tests/takeoff-tc-hub027.test.mjs ("review: …").
+- [ ] Pass  [ ] Fail
+
+**TC-15 — Walls (HUB 028): the 2,700 worked example, then a reload**
+1. Open the Walls URL (pre-test setup, no seed). In the **Timber** part tap **Add walls**.
+2. Expected: the plan opens with **Line** checked and the tools **Line | Select | Pan** (no Rectangle, Area or Wall). No Timber card shows first. The panel shows **Walls ›**, **Wall height** empty with "No height yet. Type it first, or each wall will need one.", **Stud centres** 600, **Double top plate** off and **Details: 3 to fix ›**.
+3. Type `2700` in **Wall height** (Enter). Tap A and B, then double-tap C.
+4. Expected: the card "Run 1 · 2 walls · 2,700" and the line "Walls: 19 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1 row)". The Status fold under the panel reads **Status**.
+5. Tap **+ Door**, type Height `2040` (Enter), tap D1's two edges, then **Trace more walls**. Tap **+ Window**, type Height `1200` and Sill height `900`, tap W1's two edges, then **Trace more walls**.
+6. Expected: the line "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)". It never says "to confirm".
+7. Tap **Review walls**. Expected: Wall 1's page leads with "Walls: 13 studs at 2,700 · bottom plate 6.00 m · top plate 6.00 m · 9 noggins (1 row)" and "Lintels, jacks and trimmers at D1 aren't counted.". Its drawing has 13 full studs (the 4 beside D1 drawn like the rest) and 2 greyed inside D1. **Next wall ›**: "Walls: 8 studs at 2,700 · bottom plate 4.00 m · top plate 4.00 m · 4 noggins (1 row)".
+8. Reload (pre-test setup), overview → Walls row → **Setup**. Expected: the Walls card shows the needs naming each part ("Studs: enter the treatment (or "untreated")." …), the notes "Lintels, jacks and trimmers at D1, W1 aren't counted." and "Studs: the longest length isn't set. Confirm it before ordering.", the same Walls line, and the closed **Studs, plates, noggins** fold. **Trace walls** goes back to the plan with the same line and Wall height 2700.
+9. Expected record: ONE material `methodKey` "wall_framing", `spec.purpose` "walls", `spec.components` with studs, plates, longPlates and noggins (plates and noggins `stock.maxMm` 6000, long plates 11000 grade "LVL"), `rules` { centresMm 600, doubleTopPlate false }; 2 walls (`role` "wall"), one `runId`, `seq` 1 and 2, `heightMm` 2700; openings D1 (type "door", xMm 1000, widthMm 820, heightMm 2040) and W1 (type "window", xMm 1200, widthMm 1800, sillMm 900). `computed.scheduleLines` for the item, as [part, quantity, length]: studs 21 × 2,700; plates 2 × 6,000 and 2 × 4,200; noggins 1 × 4,800 and 1 × 1,800 (the 13 noggins are 6,525 mm, shared at 6,000). Each part has its own cut list ("Studs cut list", "Plates cut list", "Noggins cut list"). No king, jack, trimmer or lintel line. Live DB: `takeoff_job_materials.method_key` 'wall_framing', `spec.components` as above.
+10. Screen tests: e2e/ui-review/tc-hub028.spec.js "screen 1-6 …" and "screen 7 …"; node: scripts/tests/takeoff-tc-hub028.test.mjs; real server: scripts/tests/takeoff-api.test.mjs "HUB 028 step 6"; real stack: tc-journeys-sandbox.spec.js journey WF.
+- [ ] Pass  [ ] Fail
+
+**TC-16 — Walls at 3,000 with Double top plate (HUB 028)**
+1. Open the Walls URL with `&takeoffSeed=walls` → **Measure**. Type `3000` in **Wall height**. Trace A → B → C and add D1 and W1 as in TC-15.
+2. Expected: "Walls: 21 studs at 3,000 · bottom plate 10.00 m · top plate 10.00 m · 26 noggins (2 rows)".
+3. Tick **Double top plate**.
+4. Expected: "Walls: 21 studs at 3,000 · bottom plate 10.00 m · top plate 2 × 10.00 m · 26 noggins (2 rows)". Only the top plate changes. Wall 1's page: "Walls: 13 studs at 3,000 · bottom plate 6.00 m · top plate 2 × 6.00 m · 18 noggins (2 rows)".
+5. Expected record: `rules.doubleTopPlate` true. Lines: studs 21 × 3,000; plates 3 × 6,000 and 3 × 4,200 (was 2 × 6,000 and 2 × 4,200 before step 3); noggins 4,800 + 4,500 + 3,900 (26 noggins, 13,050 mm), the same before and after step 3.
+6. Untick **Double top plate**. Expected: back to step 2's line and 2 × 6,000 + 2 × 4,200 plates. The stud and noggin lines never changed.
+7. Screen tests: e2e/ui-review/tc-hub028.spec.js "screen 1-6 …" (step 5); node: scripts/tests/takeoff-tc-hub028.test.mjs (the 3,000 example and the switch).
+- [ ] Pass  [ ] Fail
+
+**TC-17 — Walls: Stud centres 450, one Undo, and a reload (HUB 028)**
+1. Open the Walls URL with `&takeoffSeed=walls` → **Measure**. Type `2700` in **Wall height** and trace A → B → C.
+2. Expected: "Walls: 19 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1 row)".
+3. Type `450` in **Stud centres** (Enter). Expected: "Walls: 25 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 23 noggins (1 row)". Record: `rules.centresMm` 450.
+4. Tap **Undo** once. Expected: Stud centres 600, the step 2 line again, and `rules.centresMm` 600.
+5. Type `450` again (Enter), wait for **Saved**, then reload (pre-test setup) and tap **Measure**.
+6. Expected: Stud centres 450, "25 studs" on the line, and Wall height starts at 2700 (this Walls item's own last height). The fake server still holds one Walls item with 2 walls.
+7. Screen tests: e2e/ui-review/tc-hub028.spec.js "screen 1-6 …" (step 3) and "screen 10 …".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

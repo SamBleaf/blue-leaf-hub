@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-10-19
+sop_version: 1.2
+last_reviewed: 2026-10-25
 app_version: takeoff-r03
 screenshot_status: placeholders_only
 owner: Admin / Director
@@ -125,7 +125,7 @@ A job has **one takeoff** with **two sections**. They are measured and ordered s
 3. The heading shows the section you are in. To change section, use the **Flashings | Timber and cladding** switch under the heading. Nothing is lost when you switch: saved quantities and unfinished drawings stay.
 4. Each section only offers its own **Add** buttons:
    - Flashings: **Add flashing**.
-   - Timber and cladding: **Timber** (**Add timber**) and **Cladding** (**Add cladding**, **Add aluminium**). Aluminium used with cladding sits under Cladding.
+   - Timber and cladding: **Timber** (**Add walls**, **Add timber**) and **Cladding** (**Add cladding**, **Add aluminium**). Aluminium used with cladding sits under Cladding. **Add walls** is the normal way to take off wall framing: it opens the plan to trace the walls once and works out the studs, plates and noggins together (SOP 20-08 Section 5D).
 5. Each material is one compact row: name and a one-line summary. **Tap the row** to show its buttons (Profile / Details / Setup / Walls / Cutting / Add lengths). **Remove** and **Save as standard** are under **More**.
 6. **‹ Back** returns to the section choice. A link ending in `?section=flashings` or `?section=timber_cladding` opens that section directly.
 
@@ -337,9 +337,9 @@ Next review date: 2027-04-13
 **TC-12 — Section choice and compact rows (HUB 002, UI Review, mixed job)**
 1. Open `/carpentry/cjb-1/takeoff?reviewRole=admin&takeoffSeed=mixed`.
 2. Expected: "What are you measuring?" with **Flashings** and **Timber and cladding**.
-3. Tap **Flashings**. Expected: **Add flashing** only (no **Add timber**, **Add cladding**, **Add aluminium**); rows "Apron flashing" and "Barge flashing" only.
+3. Tap **Flashings**. Expected: **Add flashing** only (no **Add walls**, **Add timber**, **Add cladding**, **Add aluminium**); rows "Apron flashing" and "Barge flashing" only.
 4. Tap the "Apron flashing" row. Expected: its buttons show; **Remove** appears only after **More**.
-5. Switch to **Timber and cladding**. Expected: a **Timber** part with **Add timber** and a **Cladding** part with **Add cladding** + **Add aluminium**; "Window angle 50 × 50 × 3" is listed under Cladding; no **Add flashing**.
+5. Switch to **Timber and cladding**. Expected: a **Timber** part with **Add walls** first, then **Add timber**, and a **Cladding** part with **Add cladding** + **Add aluminium**; "Window angle 50 × 50 × 3" is listed under Cladding; no **Add flashing**. Back on **Flashings** there is no **Add walls**.
 6. Switch back. Expected: the flashings are unchanged.
 - [ ] Pass  [ ] Fail
 
