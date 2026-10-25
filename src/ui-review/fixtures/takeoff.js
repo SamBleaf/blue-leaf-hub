@@ -112,6 +112,9 @@ function seed() {
   if (qs().get("takeoffSeed") === "walls-after-cladding") seedWallsAfterCladding();
   if (qs().get("takeoffSeed") === "walls-products") seedWallsProducts();
   if (qs().get("takeoffSeed") === "no-plan") seedNoPlan();
+  if (qs().get("takeoffSeed") === "cladding-wall3") seedCladdingWall3();
+  if (qs().get("takeoffSeed") === "support-battens-empty") seedSupportBattensEmpty();
+  if (qs().get("takeoffSeed") === "converted-axon") seedConvertedAxon();
   // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
   // scale as page 1, checked), for drawing walls with Rectangle and Area
   if (qs().get("takeoffElevation") === "1") {
@@ -145,6 +148,48 @@ function seedBattens() {
     opening("bo-3", "bw-2", "D1", "door", 1500, 0, 900, 2100), opening("bo-4", "bw-3", "W1", "window", 2400, 900, 1200, 1200),
   );
   for (const id of ["bw-1", "bw-2", "bw-3", "bw-4", "bw-5"]) state.contributions.push({ id: `bc-${id}`, measurementId: id, jobMaterialId: "mat-axon400", role: "wall" });
+}
+
+/** HUB 029 (SYNTHETIC, shaped like the recorded job — no real job data): Axon 400 smooth from the Blue Leaf defaults on
+ *  nine 3,600 walls and Wall 3, a 420 mm wall with no Wall height; a second Axon 400 smooth on two more walls (the job's
+ *  tape, H-flashing and battens are bought once for both). Wall 3 holds the first Axon's lines and the pooled ones. */
+function seedCladdingWall3() {
+  const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth"), D = BLUE_LEAF_JH_DEFAULTS;
+  const spec = { ...specFromGroup(g), assemblyId: "axon-vertical", spareRate: D.spareRate };
+  const m = methodFor(spec);
+  const rules = { route: D.route, installConditions: { ...D.installConditions, "direct-or-cavity": D.route }, jointRows: { atMm: [], ...D.jointRule } };
+  state.materials.push({ id: "mat-axon-a", name: "Axon 400 smooth", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules },
+    { id: "mat-axon-b", name: "Axon 400 smooth", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules });
+  const wall = (id, name, inputs) => ({ id, kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, revision: 1, inputs: { name, ...inputs } });
+  const a = [["cw-1", "Wall 1", 3600], ["cw-3", "Wall 3", 420, null], ["cw-4", "Wall 4", 3600], ["cw-5", "Wall 5", 3600], ["cw-6", "Wall 6", 3600]];
+  for (const [id, name, w, h = 3600] of a) state.measurements.push(wall(id, name, { kind: "rect", widthMm: w, heightMm: h }));
+  state.measurements.push(wall("cw-12", "Wall 12", { kind: "rect", widthMm: 3000, heightMm: 2700 }), wall("cw-13", "Wall 13", { kind: "rect", widthMm: 2400, heightMm: 2700 }));
+  for (const [id] of a) state.contributions.push({ id: `cc-${id}`, measurementId: id, jobMaterialId: "mat-axon-a", role: "wall" });
+  for (const id of ["cw-12", "cw-13"]) state.contributions.push({ id: `cc-${id}`, measurementId: id, jobMaterialId: "mat-axon-b", role: "wall" });
+}
+
+/** HUB 030 (SYNTHETIC): a Support battens item with nothing entered on one 3,600 × 2,700 wall — the Blue Leaf default
+ *  pine batten, 600 centres and fixings not counted, so it shows a quantity straight away. */
+function seedSupportBattensEmpty() {
+  const spec = { family: "batten", orientation: "vertical", product: {} };
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-sb", name: "Support battens", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: {} });
+  state.measurements.push({ id: "sw-1", kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, revision: 1,
+    inputs: { name: "Wall 1", kind: "rect", widthMm: 3600, heightMm: 2700 } });
+  state.contributions.push({ id: "sc-1", measurementId: "sw-1", jobMaterialId: "mat-sb", role: "wall" });
+}
+
+/** HUB 029 (SYNTHETIC, the recorded job's mis-tap): an Axon 400 smooth turned into an empty Support battens item by the
+ *  Material chip — its job-only joint rows kept as a "Check these" flag from Axon 400 smooth (label only, as older flags
+ *  are). Re-picking Fibre cement → Axon 400 smooth must bring those rows back. */
+function seedConvertedAxon() {
+  const spec = { family: "batten", orientation: "vertical", product: {} };
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-conv", name: "Support battens", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null,
+    rules: { carried: { jointRows: { value: { atMm: [2990], gapMm: 5, detailRef: "02" }, from: "Axon 400 smooth" } } } });
+  state.measurements.push({ id: "vw-1", kind: "wall", documentId: null, pageIndex: null, calibrationId: null, points: null, parentId: null, label: null, revision: 1,
+    inputs: { name: "Wall 1", kind: "rect", widthMm: 3600, heightMm: 3600 } });
+  state.contributions.push({ id: "vc-1", measurementId: "vw-1", jobMaterialId: "mat-conv", role: "wall" });
 }
 
 /** HUB 028 (SYNTHETIC): one Walls item exactly as Add walls makes it with no company products, nothing traced yet. */

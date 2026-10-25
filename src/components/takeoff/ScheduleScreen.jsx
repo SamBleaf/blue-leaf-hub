@@ -18,7 +18,7 @@
 // screen reads them fresh (GET …/orders) on open, so a placement recorded a moment ago shows without a reload.
 // =============================================================================
 import { useEffect, useMemo, useState } from "react";
-import { describeFamilySpec, describeSpec, evaluateSplit, polylineLengthMm, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
+import { describeFamilySpec, describeSpec, evaluateSplit, fixesFor, isInstallationNote, polylineLengthMm, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, NumberField, Sheet } from "./ui.jsx";
 import { fmtLm, fmtMm, fmtRaw } from "./format.js";
@@ -48,7 +48,7 @@ function byUnitText(lines, qty = (l) => l.quantity) {
 
 // Three independent statuses (06). Wording never claims an installation check the engine didn't make.
 const QUANTITY = { incomplete: ["Incomplete", "bad"], estimate: ["Estimate", "warn"], calculated: ["Calculated", "ok"], reviewed: ["Reviewed", "ok"] };
-const INSTALLATION = { unspecified: ["Not specified", "muted"], "source-pending": ["Source pending — not verified", "warn"], "supported-by-selected-rule": ["Supported by the selected rule", "ok"],
+const INSTALLATION = { unspecified: ["Not specified", "muted"], "source-pending": ["Not checked by the app", "muted"], "supported-by-selected-rule": ["Supported by the selected rule", "ok"],
   "project-detail-supplied": ["Project detail supplied", "ok"], "out-of-scope": ["By others / out of scope", "muted"] };
 const PROCUREMENT = { draft: ["Draft", "muted"], "missing-product": ["Product details missing", "bad"], "unavailable-stock": ["Stock unavailable", "bad"], stale: ["Stale — review", "bad"], ready: ["Ready to order", "ok"],
   "line-problem": ["Not ready — a line needs attention", "bad"], "needs-detail": ["Not ready — see what it needs", "bad"] };
@@ -268,7 +268,8 @@ function describeMeasurement(m, measById, calById) {
   return { name: m.label || (m.kind === "polyline" || m.kind === "run" ? `${kind} ${runRef(m.id)}` : kind), kind, detail: `${traced()}${extra}`, onPlan: true };
 }
 
-export default function ScheduleScreen({ ws, api, onBack, onShowSource, section = null }) {
+// onFix (HUB 029): a blocker row opens its fix (TakeoffApp openFix); without it the needs read as text, as before
+export default function ScheduleScreen({ ws, api, onBack, onShowSource, section = null, onFix = null }) {
   const view = ws.view, computed = ws.computed;
   const [open, setOpen] = useState(null);
   const [splitFor, setSplitFor] = useState(null);
@@ -439,7 +440,8 @@ export default function ScheduleScreen({ ws, api, onBack, onShowSource, section 
         </section>
       ))}
       {generic.map((g) => (
-        <GenericGroup key={g.mat.id} {...g} status={status} open={open} setOpen={setOpen} sourcesOf={sourcesOf} showButton={showButton} measById={measById} />
+        <GenericGroup key={g.mat.id} {...g} status={status} open={open} setOpen={setOpen} sourcesOf={sourcesOf} showButton={showButton} measById={measById}
+          fixRows={onFix && ws.computed ? fixesFor(ws.computed, ws.view, { materialId: g.mat.id }) : null} onFix={onFix} />
       ))}
       {splitFor && (() => {
         const c = contribs.get(splitFor);
@@ -501,13 +503,15 @@ function allocationProblems(alloc, known) {
   return out;
 }
 
-function GenericGroup({ mat, result, lines, status, open, setOpen, sourcesOf, showButton, measById }) {
+function GenericGroup({ mat, result, lines, status, open, setOpen, sourcesOf, showButton, measById, fixRows = null, onFix = null }) {
   const spec = describeFamilySpec(mat.spec);
   const fam = FAMILY_LABEL[mat.spec?.family] || "Material";
   const alloc = result?.allocation;
   const problems = [...(result?.problems || []), ...allocationProblems(alloc, result?.problems || [])];
   const blocking = problems.filter((p) => p.blocking !== false);
-  const advisory = problems.filter((p) => p.blocking === false);
+  // HUB 029: installation notes are one plain line, never listed as notes to act on
+  const installNotes = problems.filter((p) => isInstallationNote(p));
+  const advisory = problems.filter((p) => p.blocking === false && !isInstallationNote(p));
   const st = result?.status || null;
   const verified = st && ["supported-by-selected-rule", "project-detail-supplied"].includes(st.installation);
   const plans = [...new Set((alloc?.groups || []).filter((g) => g.planLabel).map((g) => (groupFollower(g) ? `${FOLLOWER_NAME[groupFollower(g)]}: ${lowerFirst(g.planLabel)}` : g.planLabel)))];
@@ -535,15 +539,27 @@ function GenericGroup({ mat, result, lines, status, open, setOpen, sourcesOf, sh
         </h3>
         <StatusChips status={st} lines={lines} blocked={blocking.length > 0} />
         {st && !verified && <p className="text-[11px] text-muted">Quantities only — installation details are not verified by the app.</p>}
-        {blocking.length > 0 && (
+        {blocking.length > 0 && (fixRows?.length ? (
+          // HUB 029: each thing it needs is one tap to its fix
+          <div className="space-y-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700" role="alert">
+            <p className="font-semibold">Needs before ordering:</p>
+            {fixRows.map((r) => (
+              <button key={r.key} type="button" data-fix-key={r.key} onClick={() => onFix(r)}
+                className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border border-red-200 bg-white px-2 text-left text-[13px] text-ink focus-ring">
+                <span><b>{r.subject}</b>: {r.action}</span><span aria-hidden="true" className="text-primary">›</span>
+              </button>
+            ))}
+          </div>
+        ) : (
           <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700" role="alert">
             <p className="font-semibold">Needs before ordering:</p>
             <ul className="ml-4 list-disc">{blocking.map((p, i) => <li key={`${p.code}-${i}`}>{p.message || PROBLEM_TEXT[p.code] || p.code}</li>)}</ul>
           </div>
-        )}
+        ))}
         {advisory.length > 0 && (
           <ul className="space-y-0.5 text-xs text-amber-900">{advisory.map((p, i) => <li key={`${p.code}-${i}`}>Note: {p.message}</li>)}</ul>
         )}
+        {installNotes.length > 0 && <p className="text-[11px] text-muted" data-install-note="">Installation isn&apos;t checked by the app.</p>}
         {scopes && (
           <div className="rounded-lg bg-page px-2 py-1">
             <p className="text-[11px] font-semibold text-muted">Accessory scope</p>

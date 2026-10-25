@@ -9,7 +9,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, WALL_FRAMING_RULES, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates, wallFramingDefaults } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, WALL_FRAMING_RULES, describeFamilySpec, fixesFor, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates, wallFramingDefaults } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { companyVersionDiffers, findAluminiumProduct, profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
@@ -26,6 +26,7 @@ import CatalogueEditor from "./CatalogueEditor.jsx";
 import MaterialSheet from "./MaterialSheet.jsx";
 import ProfileEditor from "./ProfileEditor.jsx";
 import { AluminiumSetup, CladdingSetup, TimberSetup, WallsSetup } from "./FamilySetup.jsx";
+import { FixContext } from "./fixContext.js";
 import ScheduleScreen from "./ScheduleScreen.jsx";
 import WallsScreen from "./WallsScreen.jsx";
 import { isWallsItem, reviewWalls, usesWalls, wallsNotCounted } from "./measure/tools.js";
@@ -242,7 +243,22 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   }, [view, activeMaterial, section]);
   const [openRow, setOpenRow] = useState(null); // material row whose actions are showing ("" = all closed)
   const [orderFocus, setOrderFocus] = useState(null); // HUB 010: { orderId, bucketKey } to come back to after a fix
+  const [wallFocus, setWallFocus] = useState(null);   // HUB 029: { id, field } the wall a fix row opened, and its field
+  const [fixReturn, setFixReturn] = useState(null);   // HUB 029: { editing, win } a fix row was tapped from (Done comes back)
   useEffect(() => { if (win === "overview") setOrderFocus(null); }, [win]);
+  // HUB 029: a fix row that opened a card scrolls to the field it named (opening a fold or Edit when it is hidden)
+  useEffect(() => {
+    if (editing?.stage !== "family" || !editing.focusField) return undefined;
+    const t = setTimeout(() => {
+      const sel = `[data-fix-field="${editing.focusField}"]`;
+      const el = (editing.focusPart && document.querySelector(`[data-wall-part="${editing.focusPart}"] ${sel}`)) || document.querySelector(sel) || document.querySelector("[data-needs]");
+      if (!el) return;
+      for (let d = el.closest("details"); d; d = d.parentElement?.closest("details")) d.setAttribute("open", "");
+      try { el.scrollIntoView({ block: "center" }); } catch { /* old browser */ }
+      el.querySelector?.("input, select, textarea, button")?.focus?.({ preventScroll: true });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [editing?.stage, editing?.focusField, editing?.focusPart, editing?.focusToken]);
   const [moreFor, setMoreFor] = useState(null);
   // a reload (or a PWA restart) returns to the wall / cutting sheet / schedule the user had open, if it still exists
   const placeKey = wsId ? `takeoff-place:${wsId}` : null;
@@ -584,6 +600,46 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     }
     setEditing({ material: m, stage: "details", focusField, fromOrder: reason });
   }
+  /**
+   * HUB 029: a blocker row (shared/takeoff/fixes.js) opens exactly its fix — the wall at its missing field, the card at the
+   * field, one tap here (with Undo), the plan with the measurements, or the page's scale. `from` is where it was tapped
+   * (the open card), so Done on the wall page comes straight back.
+   */
+  function openFix(row, from = null) {
+    const t = row?.target;
+    if (!t) return;
+    const m = view.materials.find((x) => x.id === (t.materialId || row.materialId));
+    setFixReturn(from && t.kind !== "card" && t.kind !== "apply" ? from : null);
+    if (t.kind === "wall") {
+      setEditing(null); setActiveMaterial(t.materialId); setOpenWallTab(null);
+      setWallFocus({ id: t.measurementId, field: t.field || null });
+      setOpenWall(t.measurementId); setWin("walls");
+      return;
+    }
+    if (t.kind === "card") { if (m) setEditing({ material: currentMat(m), stage: "family", focusField: t.field || null, focusPart: t.part || null, focusToken: Date.now() }); return; }
+    if (t.kind === "apply") {
+      if (t.action === "removeContribution" && t.contributionId) { ws.edit(partial({ archive: { contributions: [t.contributionId] } })); return; }
+      if (!m) return;
+      const cur = currentMat(m);
+      if (t.action === "useSheetJoint" && t.jointRows) upsertMaterial({ ...cur, rules: { ...(cur.rules || {}), jointRows: t.jointRows } });
+      else if (t.action === "clearAssembly") upsertMaterial({ ...cur, spec: { ...cur.spec, assemblyId: null } });
+      return;
+    }
+    setEditing(null);
+    if (t.kind === "measure") {
+      if (m) setActiveMaterial(m.id);
+      if (t.documentId) { setDocId(t.documentId); setPageIndex(t.pageIndex ?? 0); }
+      setHighlightIds(t.measurementIds || null); setMeasureTool(t.tool || null); setWin("measure");
+      return;
+    }
+    if (t.kind === "scale") {
+      if (t.documentId) { setDocId(t.documentId); setPageIndex(t.pageIndex ?? 0); }
+      setScaleFrom(null); setWin("calibrate");
+      return;
+    }
+    if (t.kind === "rescale") { setWin("rescale"); return; }
+    if (t.kind === "flashing") fixFromOrder({ orderId: orderFocus?.orderId || null, bucketKey: t.bucketKey, materialId: t.materialId, problems: t.problems || [] });
+  }
   const toLengths = (m) => {
     // the card is left by its own header button: where it was opened from no longer applies (a later Close on another
     // card goes back to the overview, not here)
@@ -686,12 +742,17 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
                 onAdd={fam === "aluminium" && caps.addCompanyProducts && api.saveCompanyProduct ? () => addToCompanyProducts(m) : undefined} />
             </div>
           )}
+          <FixContext.Provider value={{ materialId: m.id, rows: ws.computed ? fixesFor(ws.computed, view, { materialId: m.id }) : [],
+            open: (row) => openFix(row, { editing: { material: m, stage: "family" }, win: setupFrom || "overview" }),
+            reviewOrder: () => { setEditing(null); setSetupFrom(null); setWin("orders"); } }}>
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
-            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : Setup === TimberSetup ? { presets }
+            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null,
+              hasWalls: view.contributions.some((c) => c.jobMaterialId === m.id && !c.archived && view.measurements.some((x) => x.id === c.measurementId && x.kind === "wall" && !x.archived)) } : Setup === TimberSetup ? { presets }
               // HUB 028: the Walls card's parts list the company timber products saved for each part; its Walls line names
               // any wall the calculation leaves out, as the Line panel's does
               : walls ? { presets, notCounted: wallsNotCounted(ws.computed?.materialResults?.[m.id], view.measurements, view.contributions, m.id) } : {})}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
+          </FixContext.Provider>
         </div>
       </FocusedWindow>
     );
@@ -781,7 +842,14 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   if (win === "walls") {
     // the last wall's Review order › follows the overview's Review & export order: only once this section has lines
     const orderReady = (ws.computed?.scheduleLines || []).some((l) => (section === SECTIONS.FLASHINGS ? !l.generic : !!l.generic));
-    return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} wallTab={openWallTab} onOpenWall={(id) => { setOpenWallTab(null); setOpenWall(id); }}
+    return <WallsScreen ws={ws} materialId={activeMaterial} wallId={openWall} wallTab={openWallTab}
+      focusField={wallFocus?.id === openWall ? wallFocus.field : null} backLabel={fixReturn && openWall ? "Done" : null}
+      onOpenWall={(id) => {
+        setWallFocus(null);
+        // HUB 029: Done after a fix row's wall goes straight back to where it was tapped
+        if (id == null && fixReturn) { const r = fixReturn; setFixReturn(null); setOpenWall(null); setOpenWallTab(null); if (r.editing) setEditing({ ...r.editing, material: currentMat(r.editing.material) }); setWin(r.win || "overview"); return; }
+        setOpenWallTab(null); setOpenWall(id);
+      }}
       onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }}
       onReviewOrder={() => { setOpenWall(null); setOpenWallTab(null); setWin("orders"); }} orderReady={orderReady} />;
   }
@@ -840,7 +908,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     );
   }
   if (win === "schedule") {
-    return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api} section={section}
+    return <FocusedWindow title="Length schedule" onClose={() => setWin("overview")} closeLabel="Back" actions={<SaveChip status={ws.status} />}><div className="min-h-0 flex-1 overflow-y-auto p-3"><ScheduleScreen ws={ws} api={api} section={section} onFix={(row) => openFix(row, { win: "schedule" })}
       onShowSource={({ materialId, measurementIds, tab = null }) => {
         // a wall (or its openings) opens the elevation; plan-traced lines open the plan with them selected
         setActiveMaterial(materialId);

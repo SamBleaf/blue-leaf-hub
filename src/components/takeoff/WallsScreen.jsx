@@ -1165,7 +1165,7 @@ function NewWallSheet({ defaultName, onCreate, onClose }) {
 }
 
 /** Numeric wall fields — authoritative; incoherent combinations stay in the field as a draft with a message. */
-function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst }) {
+function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst, focusField = null }) {
   const inp = wall.inputs || {};
   const kind = inp.kind || "rect";
   const traced = isTraced(wall);
@@ -1197,7 +1197,8 @@ function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst 
     onPatch(patch);
   };
   const missing = missingHeights(inp);
-  const af = (f) => autoFocusFirst && missing[0] === f;
+  // HUB 029: the field a fix row asked for wins; otherwise the first missing height
+  const af = (f) => (focusField ? focusField === f : autoFocusFirst && missing[0] === f);
   const nf = (field, label, help) => (
     <div data-field={field}>
       <NumberField label={label} value={inp[field] ?? null} min={field === "apexXMm" ? 0 : 1} max={MAX_MM} autoFocus={af(field)} onCommit={(n) => commit(field, n)} error={errs[field]} help={help} />
@@ -1217,7 +1218,7 @@ function WallFields({ wall, canEdit, lengthMm, onPatch, onTrace, autoFocusFirst 
           <span className="block text-[11px] text-muted">Measured on the plan — retrace the wall to change it.{onTrace ? "" : " (No plan on this takeoff.)"}</span>
         </div>
       ) : (
-        <div data-field="widthMm"><NumberField label="Wall length" value={inp.widthMm ?? null} min={1} max={MAX_MM} onCommit={(n) => commit("widthMm", n)} error={errs.widthMm} /></div>
+        <div data-field="widthMm"><NumberField label="Wall length" value={inp.widthMm ?? null} min={1} max={MAX_MM} autoFocus={focusField === "widthMm"} onCommit={(n) => commit("widthMm", n)} error={errs.widthMm} /></div>
       )}
       {kind === "rect" && nf("heightMm", "Wall height", "Cladding boundary height — not automatically slab-to-ceiling")}
       {kind === "rake" && <div className="grid grid-cols-2 gap-2">{nf("startHeightMm", "Height at start")}{nf("endHeightMm", "Height at end")}</div>}
@@ -1244,7 +1245,9 @@ function heightsText(inp = {}) {
 
 // ── the screen ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export default function WallsScreen({ ws, materialId, wallId, wallTab = null, onOpenWall, onTrace, onSetup, onClose, onReviewOrder = null, orderReady = true }) {
+export default function WallsScreen({ ws, materialId, wallId, wallTab = null, onOpenWall, onTrace, onSetup, onClose, onReviewOrder = null, orderReady = true,
+  // HUB 029: a fix row opens this wall at the field it needs (`focusField`); `backLabel` names the way back ("Done")
+  focusField = null, backLabel = null }) {
   const view = ws.view;
   const canEdit = !!ws.capabilities?.edit;
   const material = view.materials.find((m) => m.id === materialId) || null;
@@ -1424,11 +1427,11 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
       </nav>
     ) : null;
     return (
-      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => { setStepTab(null); onOpenWall?.(null); }} closeLabel="‹ Walls" actions={headerActions} footer={nav}>
+      <FocusedWindow title={wallName(wall)} subtitle={`${material?.name || "Walls"} · ${provenanceText(wall)}`} onClose={() => { setStepTab(null); onOpenWall?.(null); }} closeLabel={backLabel || "‹ Walls"} actions={headerActions} footer={nav}>
         <div ref={rootRef} className="contents">
           <WallEditor key={wall.id} ws={ws} view={view} wall={wall} material={material} results={results} canEdit={canEdit} act={act} onTrace={onTrace} onSetup={onSetup} saveBanner={saveBanner}
             initialTab={wallTab || (stepTab?.id === wall.id ? stepTab.tab : null)} footerBelow={at >= 0} onEditingSheet={setEditingSheet}
-            tabRef={tabRef} draftReset={draftReset} clearDraftRef={clearDraftRef} />
+            tabRef={tabRef} draftReset={draftReset} clearDraftRef={clearDraftRef} focusField={focusField} />
         </div>
       </FocusedWindow>
     );
@@ -1579,7 +1582,7 @@ function setoutFor(material) {
 }
 
 function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, onSetup = null, saveBanner, draftReset, clearDraftRef, initialTab = null, tabRef = null,
-  footerBelow = false, onEditingSheet = null }) {
+  footerBelow = false, onEditingSheet = null, focusField = null }) {
   const fam = material?.spec?.family;
   const [tab, setTab] = useState(initialTab || (fam === "batten" || fam === "timber" ? "supports" : fam === "accessory" ? "accessories" : "cladding"));
   useEffect(() => { if (tabRef) tabRef.current = tab; }, [tab, tabRef]);
@@ -1845,7 +1848,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     // one DOM position (no remount → focus/keyboard kept); shown first until the elevation can be generated
     <section aria-label="Wall dimensions" data-keyboard-group="" className={`space-y-2 rounded-card border border-hairline bg-white p-3 ${polygon ? "" : "order-first"}`}>
       <h3 className="text-sm font-semibold text-ink">Wall</h3>
-      <WallFields key={draftReset} wall={wall} canEdit={canEdit} lengthMm={lengthMm} onPatch={(p) => act.updateWall(wall, p)} onTrace={onTrace} autoFocusFirst={autoFocusFirst} />
+      <WallFields key={draftReset} wall={wall} canEdit={canEdit} lengthMm={lengthMm} onPatch={(p) => act.updateWall(wall, p)} onTrace={onTrace} autoFocusFirst={autoFocusFirst} focusField={canEdit ? focusField : null} />
       {resultLine && <p className="rounded-lg bg-page px-3 py-2 text-xs font-medium text-ink" data-wall-result="" data-keyboard-result="" aria-live="polite">{resultLine}</p>}
     </section>
   );

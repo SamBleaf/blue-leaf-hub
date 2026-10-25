@@ -29,10 +29,11 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
+import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
-  wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
+  isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
+import { FixContext } from "./fixContext.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
 import { FOAM_TAPE, FOLLOWER_TEXT, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
@@ -214,13 +215,15 @@ export function ReviewBadge({ state, prefix }) {
 
 const STATUS_TEXT = {
   quantity: { incomplete: "Incomplete", estimate: "Estimate", calculated: "Calculated", reviewed: "Reviewed", pending: "Not measured yet", schedule: "See the schedule" },
-  installation: { unspecified: "Unspecified", "source-pending": "Source-pending", "supported-by-selected-rule": "Supported by selected rule", "project-detail-supplied": "Project detail supplied", "out-of-scope": "Out of scope" },
+  installation: { unspecified: "Unspecified", "source-pending": "Not checked by the app", "supported-by-selected-rule": "Supported by selected rule", "project-detail-supplied": "Project detail supplied", "out-of-scope": "Out of scope" },
   procurement: { draft: "Draft", "missing-product": "Missing product", "unavailable-stock": "Unavailable stock", stale: "Stale", ready: "Ready", "kerf-unconfirmed": "Kerf not confirmed" },
 };
-const STATUS_TONE = { calculated: "ok", reviewed: "ok", ready: "ok", "supported-by-selected-rule": "ok", "project-detail-supplied": "ok", incomplete: "bad", "missing-product": "bad", "unavailable-stock": "bad", stale: "bad" };
+// HUB 029: installation that isn't checked reads neutral (slate), never a fault and never green
+const STATUS_TONE = { calculated: "ok", reviewed: "ok", ready: "ok", "supported-by-selected-rule": "ok", "project-detail-supplied": "ok", incomplete: "bad", "missing-product": "bad", "unavailable-stock": "bad", stale: "bad",
+  "source-pending": "neutral", unspecified: "neutral" };
 /** The three independent statuses (06) — never collapsed into one. */
 export function StatusRow({ status, note }) {
-  const tone = { ok: "border-emerald-200 bg-emerald-50 text-emerald-800", bad: "border-red-200 bg-red-50 text-red-700", mid: "border-amber-200 bg-amber-50 text-amber-900" };
+  const tone = { ok: "border-emerald-200 bg-emerald-50 text-emerald-800", bad: "border-red-200 bg-red-50 text-red-700", mid: "border-amber-200 bg-amber-50 text-amber-900", neutral: "border-slate-200 bg-slate-50 text-slate-700" };
   return (
     <div className="space-y-1" data-status-row="">
       <div className="grid grid-cols-3 gap-1.5">
@@ -698,7 +701,7 @@ export function carry(prev, next, reason) {
       if (sameProduct) product[def.target] = null; // take the stale value out of the calculation
       else if (now != null && JSON.stringify(now) === JSON.stringify(old)) continue; // the new product has the same sourced value
     } else delete rules[key];
-    carried[key] = { value: clone(old), from };
+    carried[key] = { value: clone(old), from, ...(prev.spec?.product?.id ? { fromProductId: prev.spec.product.id } : {}) };
     if (key === "scope" && rules.scopeReasons) { carried.scope.reasons = clone(rules.scopeReasons); delete rules.scopeReasons; } // reasons travel with their decisions
   }
   // a company assembly version based on an assembly that is no longer selected is flagged, never kept silently
@@ -709,6 +712,31 @@ export function carry(prev, next, reason) {
   if (["product", "family", "supplier"].includes(reason)) delete rules.review; // review states belonged to the old product's facts
   if (Object.keys(carried).length) rules.carried = carried; else delete rules.carried;
   return { ...next, spec: { ...next.spec, product }, rules };
+}
+/**
+ * HUB 029: picking a product again brings back THIS job's own values that were set for it ("Check these" flags whose
+ * source is the product just picked — by its id, or by its name on flags kept before ids were recorded). Runs before
+ * the company default, so a restored value (e.g. this job's joint rows) is kept and the default fills only the rest.
+ * A different product never gets them. Returns the material unchanged when nothing matches.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- shared with the pickers in this file
+export function restoreOwnCarried(c) {
+  const carried = c.rules?.carried || {};
+  const id = c.spec?.product?.id || null, label = productLabel(c.spec);
+  let out = c;
+  for (const [k, flag] of Object.entries(carried)) {
+    const def = PARAMS[k];
+    if (!def || def.special) continue;
+    // the same product exactly: its name (which names the size for a panel) always, and its id when the flag has one
+    const mine = !!label && flag.from === label && (!flag.fromProductId || (!!id && flag.fromProductId === id));
+    if (!mine || !paramApplies(k, methodFor(out.spec)?.key)) continue;
+    const v = clone(flag.value);
+    const rules = withoutCarried(out.rules, k);
+    if (def.target) out = { ...out, rules, spec: { ...out.spec, product: { ...out.spec.product, [def.target]: v } } };
+    else if (k === "installConditions") out = { ...out, rules: { ...rules, installConditions: { ...(rules.installConditions || {}), ...v } } };
+    else out = { ...out, rules: { ...rules, [k]: v, ...(k === "scope" && flag.reasons ? { scopeReasons: clone(flag.reasons) } : {}) } };
+  }
+  return out;
 }
 /** Only the product / method parameters carry() manages, plus any open "check these" flags (e.g. before starting a different kind of product). */
 // eslint-disable-next-line react-refresh/only-export-components -- shared with CatalogueEditor (same rules for the company catalogue)
@@ -767,7 +795,7 @@ function NeedsRow({ needs }) {
     <div role="status" data-needs="" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
       <p className="text-xs font-semibold">Needs…</p>
       <ul className="ml-4 list-disc space-y-0.5">{needs.map((n) => <li key={n}>{n}</li>)}</ul>
-      <p className="mt-1 text-[11px]">You can keep measuring — it just can&apos;t go on an order yet.</p>
+      <p className="mt-1 text-[11px]">Enter these below to put it on an order. You can keep measuring meanwhile.</p>
     </div>
   );
 }
@@ -832,8 +860,7 @@ function setupNeeds(cur, result) {
     const open = groups.filter((g) => accessoryGroupNeeds(g, groups).length);
     if (open.length) out.push(`Finish ${open.length === 1 ? "this item" : `these ${open.length} items`}: ${open.map(groupName).join(", ")}.`);
   }
-  const pending = Object.keys(r.carried || {}).filter((k) => paramApplies(k, mk));
-  if (pending.length) out.push(`Confirm or re-enter: ${pending.map((k) => PARAMS[k].label.toLowerCase()).join(", ")}.`);
+  // HUB 029: "Check these" values are never used by the calculation, so they don't hold the order (no need here)
   return [...new Set(out)];
 }
 
@@ -842,7 +869,8 @@ function componentRows(s, r = {}) {
   const sys = productLabel(s);
   const a = assemblyById(s.assemblyId);
   const rows = (a?.activeInstallationRows || []).length;
-  const fixings = rows ? ["Fixings", `${rows} reviewed rule row(s) selected`, "ok"] : ["Fixings", `No reviewed fixing row is active for ${sys} — fixings are unresolved (not zero).`, "open"];
+  // HUB 029: with no reviewed fixing row the sheet fixings simply aren't on the order — said plainly, never as a fault
+  const fixings = rows ? ["Fixings", `${rows} reviewed rule row(s) selected`, "ok"] : ["Fixings", `Not counted: the ${sys} fixings aren't on the order (installation isn't checked by the app).`, "na"];
   if (s.family === "aac") return [
     ["Panels", "From your walls: whole panels, shortest listed length per run, no offcut reuse, no inferred lintels.", "ok"],
     ["Rails", `${sys} rail spacing isn't seeded — enter a reviewed rail layout or quantity.`, "open"],
@@ -941,12 +969,68 @@ const qtyText = (l) => {
   const [one, many] = UNIT_WORD[l.unit] || [l.unit || "", l.unit || ""];
   return `${q.toLocaleString("en-AU")} ${q === 1 ? one : many}`;
 };
+// ── HUB 029: every blocker is one tap to its fix ────────────────────────────────────────────────────────────────
+const useFixes = () => useContext(FixContext);
+/** A fix row on THIS card's own field: the Needs list beside the fields already says it, so the list leaves it out. */
+const ownCardRow = (r, materialId) => r.target?.kind === "card" && r.target.materialId === materialId;
+
+/** One button per blocker: the subject in bold, what to do, and a ›. Up to 4 show, then "Show N more". */
+export function FixList({ rows, onOpen, heading = true }) {
+  const [all, setAll] = useState(false);
+  if (!rows?.length) return null;
+  const shown = all ? rows : rows.slice(0, 4);
+  return (
+    <section className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-fix-list="" aria-label="Things to fix before ordering">
+      {heading && <p className="text-xs font-semibold text-amber-950">{rows.length === 1 ? "1 thing to fix before ordering" : `${rows.length} things to fix before ordering`}</p>}
+      <ul className="space-y-1.5">
+        {shown.map((r) => (
+          <li key={r.key}>
+            <button type="button" data-fix-key={r.key} data-fix-kind={r.target?.kind} onClick={() => onOpen(r)}
+              className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-left text-[13px] text-ink focus-ring">
+              <span><b>{r.subject}</b>: {r.action}</span><span aria-hidden="true" className="text-primary">›</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {rows.length > shown.length && <button type="button" className="min-h-[44px] text-[12px] text-primary" onClick={() => setAll(true)}>Show {rows.length - shown.length} more</button>}
+    </section>
+  );
+}
+
+/**
+ * The card's order state (HUB 029): what still holds the order, as buttons; or one line saying it is ready, with
+ * Review order ›. The three status tiles and the calculation notes fold under Details. Without a FixContext (the
+ * company catalogue editor) it shows the tiles and notes as before.
+ */
+function CardStatus({ status, note, result }) {
+  const fx = useFixes();
+  if (!fx) return <><StatusRow status={status} note={note} />{result?.status && <EngineProblems result={result} />}</>;
+  const rows = (fx.rows || []).filter((r) => !ownCardRow(r, fx.materialId));
+  const ready = !(fx.rows || []).length && status?.procurement === "ready";
+  return (
+    <div className="space-y-2" data-card-status="">
+      <FixList rows={rows} onOpen={fx.open} />
+      {ready && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" data-order-ready="">
+          <p className="text-sm font-semibold text-emerald-800">Ready to order</p>
+          {fx.reviewOrder && <button type="button" className="min-h-[44px] text-sm font-semibold text-primary" onClick={fx.reviewOrder}>Review order ›</button>}
+        </div>
+      )}
+      <details data-status-details="">
+        <summary className="flex min-h-[44px] cursor-pointer items-center text-[12px] text-primary">Details</summary>
+        <div className="space-y-2"><StatusRow status={status} note={note} />{result?.status && <EngineProblems result={result} />}</div>
+      </details>
+    </div>
+  );
+}
+
 /**
  * What this material puts on the order right now — the schedule lines for it (pass `lines` = the generic schedule
  * lines of this material) plus the engine's own working for an LM estimate. After an edit (e.g. cover 120 → 90) the
  * previous quantity stays visible, so the effect of the change is seen before leaving the card.
  */
 function QuantityPreview({ lines, result }) {
+  const fx = useFixes();
   const mine = (lines || []).filter((l) => l.generic);
   const text = mine.map((l) => `${qtyText(l)} · ${l.item?.description || ""}`).join("\n");
   const last = useRef(text);
@@ -959,14 +1043,24 @@ function QuantityPreview({ lines, result }) {
   // measured, but a missing value stops the calculation (e.g. no pitch): say so — it isn't "add it to walls"
   const probs = result?.problems || [];
   const blocked = !probs.some((p) => p.code === "nothing_measured") && probs.some((p) => p.blocking !== false);
+  // HUB 029: when every blocked line is held by the same fix, it is said once, above the lines, as one button
+  const rowOf = (l) => (fx?.rows || []).find((r) => (r.bucketKeys || []).includes(l.bucketKey)) || null;
+  const blockedLines = mine.filter((l) => l.problems?.length);
+  const shared = blockedLines.length > 1 && blockedLines.every((l) => rowOf(l)?.key && rowOf(l).key === rowOf(blockedLines[0]).key) ? rowOf(blockedLines[0]) : null;
   return (
     <section className="rounded-lg border border-hairline bg-white px-3 py-2" data-quantity-preview="" aria-live="polite">
       <p className="text-xs font-semibold text-ink">On the order now (this job)</p>
+      {shared && (
+        <button type="button" data-line-fix={shared.key} data-line-fix-all="" onClick={() => fx.open(shared)}
+          className="mt-1 flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-left text-[13px] text-amber-950 focus-ring">
+          <span>Not orderable yet: <b>{shared.reason}</b></span><span aria-hidden="true">›</span>
+        </button>
+      )}
       {mine.length ? (
         <ul className="mt-0.5 space-y-0.5 text-[12px] text-ink">
           {mine.map((l) => (
             <li key={l.bucketKey} data-preview-line={l.unit}><b>{qtyText(l)}</b>{l.spareQuantity ? <span data-preview-spare=""> (incl. {l.spareQuantity} spare)</span> : null} · {l.item?.description}
-              {l.problems?.length ? <span className="text-amber-800"> · not orderable yet</span> : null}</li>
+              {l.problems?.length && !shared ? <LineReason line={l} /> : null}</li>
           ))}
         </ul>
       ) : blocked ? <p className="text-[12px] text-amber-900" data-preview-blocked="">No quantity yet — see why below.</p>
@@ -977,6 +1071,14 @@ function QuantityPreview({ lines, result }) {
   );
 }
 
+/** HUB 029: a blocked line says why, as a button that opens the fix ("not orderable yet: Wall 3 has no Wall height ›"). */
+function LineReason({ line }) {
+  const fx = useFixes();
+  const row = (fx?.rows || []).find((r) => (r.bucketKeys || []).includes(line.bucketKey));
+  if (!row) return <span className="text-amber-800"> · not orderable yet</span>;
+  return <> · <button type="button" data-line-fix={row.key} onClick={() => fx.open(row)} className="text-amber-800 underline decoration-amber-400 underline-offset-2 focus-ring">not orderable yet: {row.reason} ›</button></>;
+}
+
 /** An engine problem in plain words (the installation selectors are internal keys — say what they mean). */
 function problemText(p) {
   const missing = p.code === "installation_selectors_missing" ? p.refs?.find((r) => Array.isArray(r?.missing))?.missing : null;
@@ -985,9 +1087,12 @@ function problemText(p) {
 }
 /** Problems the engine reported for this material (when the caller passes its materialResults entry). Blocking first. */
 function EngineProblems({ result }) {
-  const all = [...new Map((result?.problems || []).map((p) => [problemText(p), { text: problemText(p), blocking: p.blocking !== false }])).values()];
+  const probs = result?.problems || [];
+  // HUB 029: notes about installation sources are never faults: one plain line instead (the statuses are unchanged)
+  const installNotes = probs.filter((p) => p.axis === "installation" && p.blocking === false);
+  const all = [...new Map(probs.filter((p) => !installNotes.includes(p)).map((p) => [problemText(p), { text: problemText(p), blocking: p.blocking !== false }])).values()];
   const list = [...all.filter((p) => p.blocking), ...all.filter((p) => !p.blocking)];
-  if (!list.length) return null;
+  if (!list.length) return installNotes.length ? <p className="text-[11px] text-muted" data-install-note="">Installation isn&apos;t checked by the app.</p> : null;
   const shown = list.slice(0, 6), rest = list.slice(6);
   const item = (p) => <li key={p.text} className={p.blocking ? "" : "text-muted"}>{p.text}</li>;
   return (
@@ -1000,6 +1105,7 @@ function EngineProblems({ result }) {
           <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-ink">{rest.map(item)}</ul>
         </details>
       )}
+      {installNotes.length > 0 && <p className="mt-1 text-[11px] text-muted" data-install-note="">Installation isn&apos;t checked by the app.</p>}
     </div>
   );
 }
@@ -1012,7 +1118,7 @@ function withKerfState(status, spec) {
 }
 
 function SetupStatus({ cur, result, needs }) {
-  if (result?.status) return <><StatusRow status={shownStatus(result)} note="From the calculation for this job's walls." /><EngineProblems result={result} /></>;
+  if (result?.status) return <CardStatus status={shownStatus(result)} note="From the calculation for this job's walls." result={result} />;
   const a = assemblyById(cur.spec?.assemblyId);
   const installation = a && (a.activeInstallationRows || []).length ? "supported-by-selected-rule" : "source-pending";
   const productGaps = familyProblems(cur.spec || {}).filter((p) => !(cur.spec?.family === "batten" && /Effective cover/.test(p.message)));
@@ -1167,9 +1273,8 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
       <ReviewSummary rules={r} />
-      <StatusRow status={shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }}
-        note={result?.status ? "From the calculation for this job. Timber size is a manual selection." : `Timber size is a manual selection. ${NO_RESULT_NOTE}`} />
-      {result?.status && <EngineProblems result={result} />}
+      <CardStatus status={shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }}
+        note={result?.status ? "From the calculation for this job. Timber size is a manual selection." : `Timber size is a manual selection. ${NO_RESULT_NOTE}`} result={result} />
     </div>
     </PendingContext.Provider>
   );
@@ -2100,8 +2205,7 @@ function AccessoryFields({ d, result, lines }) {
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
-      <StatusRow status={status} note={result?.status ? "From the calculation for this job's walls." : "Quantities are worked out from the walls this set is linked to, and shown on the schedule."} />
-      {result?.status && <EngineProblems result={result} />}
+      <CardStatus status={status} note={result?.status ? "From the calculation for this job's walls." : "Quantities are worked out from the walls this set is linked to, and shown on the schedule."} result={result} />
     </div>
   );
 }
@@ -2115,7 +2219,12 @@ export function BattenSetup({ value, onChange, result, lines }) {
 function BattenFields({ d, result, lines }) {
   const cur = d.cur, s = cur.spec || {}, r = cur.rules || {};
   const g = groupOf(s);
-  const custom = !g && (s.product?.name || s.product?.widthMm || s.product?.id === "custom-batten");
+  // HUB 030: an empty product, or the owner's own, is the Blue Leaf default batten (the engine's OWNER_BATTEN)
+  const p0 = s.product || {};
+  const isDefault = isOwnerBatten(p0) || (!p0.id && !p0.name && p0.widthMm == null && p0.thicknessMm == null && !(p0.lengthsMm || []).length);
+  const [changing, setChanging] = useState(false);
+  const custom = !isDefault && !g && (s.product?.name || s.product?.widthMm || s.product?.id === "custom-batten");
+  const useDefault = () => { setChanging(false); d.update((c) => carry(c, { ...c, name: DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec) ? FAMILY_LABEL.batten : c.name, spec: { ...freshSpec("batten", c.spec), orientation: c.spec.orientation || "vertical", product: {} } }, "product")); };
   const setRule = (k, v) => d.update((c) => ({ ...c, rules: { ...withoutCarried(c.rules, k), [k]: v } }));
   const pick = (o) => d.update((c) => carry(c, { ...c, name: DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec) ? o.title : c.name, spec: { ...freshSpec("batten", c.spec), ...specFromGroup(o.group), family: "batten", orientation: c.spec.orientation || "vertical" } }, "product"));
   const goCustom = () => d.update((c) => carry(c, { ...c, spec: { ...freshSpec("batten", c.spec), orientation: c.spec.orientation || "vertical", product: { id: "custom-batten", name: null, sourceRefs: [] } } }, "product"));
@@ -2123,8 +2232,18 @@ function BattenFields({ d, result, lines }) {
   const needs = setupNeeds(cur, result);
   return (
     <div className="space-y-3" data-setup="batten">
-      <ProductPicker family="batten" spec={s} onPick={pick} />
-      <Btn kind={custom ? "primary" : "secondary"} className="w-full" onClick={goCustom} aria-pressed={!!custom}>Timber or other batten (enter its size)</Btn>
+      {isDefault && !changing ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline bg-white px-3 py-2" data-batten-default="">
+          <p className="text-sm text-ink"><b>Blue Leaf default:</b> {OWNER_BATTEN.name}, {fmt(OWNER_BATTEN.lengthsMm[0])}–{fmt(OWNER_BATTEN.lengthsMm[OWNER_BATTEN.lengthsMm.length - 1])} mm in 300 mm steps</p>
+          <Btn kind="ghost" onClick={() => setChanging(true)}>Change</Btn>
+        </div>
+      ) : (
+        <>
+          {!isDefault && <Btn className="w-full" onClick={useDefault} data-use-default="">Use Blue Leaf default ({OWNER_BATTEN.name})</Btn>}
+          <ProductPicker family="batten" spec={s} onPick={(o) => { setChanging(false); pick(o); }} />
+          <Btn kind={custom ? "primary" : "secondary"} className="w-full" onClick={() => { setChanging(false); goCustom(); }} aria-pressed={!!custom}>Timber or other batten (enter its size)</Btn>
+        </>
+      )}
       <CarriedFlags cur={cur} update={d.update} />
       {custom && (
         <div className="grid grid-cols-2 gap-2">
@@ -2164,7 +2283,7 @@ function BattenFields({ d, result, lines }) {
   );
 }
 
-export function CladdingSetup({ value, onChange, result, lines, presets = null, onSaveCompanyDefault = null }) {
+export function CladdingSetup({ value, onChange, result, lines, presets = null, onSaveCompanyDefault = null, hasWalls = false }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
   const pf = usePendingFields();
@@ -2182,7 +2301,10 @@ export function CladdingSetup({ value, onChange, result, lines, presets = null, 
     <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="cladding" data-family={fam}>
       <UndoBar d={d} pending={pf.pending} />
       <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => d.patch({ name: t })} />
-      <Chips label="Material" name="family" value={fam} options={CLADDING_FAMILIES} onChange={chooseFamily} />
+      {/* HUB 029: a cladding with walls offers cladding types only — one tap must never turn its walls into empty Support
+          battens or Accessories (a batten or accessory item still shows every chip, so it can be turned back) */}
+      <Chips label="Material" name="family" value={fam} onChange={chooseFamily}
+        options={hasWalls && !["batten", "accessory"].includes(fam) ? CLADDING_FAMILIES.filter(([k]) => !["batten", "accessory"].includes(k)) : CLADDING_FAMILIES} />
       {fam === "batten" ? <BattenFields d={d} result={result} lines={lines} /> : fam === "accessory" ? <AccessoryFields d={d} result={result} lines={lines} /> : <CladdingFields d={d} result={result} lines={lines} presets={presets} onSaveCompanyDefault={onSaveCompanyDefault} />}
     </div>
     </PendingContext.Provider>
@@ -2208,7 +2330,7 @@ function CladdingFields({ d, result, lines, presets = null, onSaveCompanyDefault
     const spec = { ...keep, ...base };
     spec.assemblyId = reselectAssembly(spec);
     const autoName = DEFAULT_NAMES.has(c.name) || c.name === productLabel(c.spec);
-    const moved = carry(c, { ...c, name: autoName ? o.title : c.name, spec }, "product");
+    const moved = restoreOwnCarried(carry(c, { ...c, name: autoName ? o.title : c.name, spec }, "product"));
     const def = findCompanyDefault(presets, moved.spec);
     return def ? applyCompanyDefault(moved, def) : withoutDefaultsFrom(moved);
   }); };
@@ -2448,9 +2570,9 @@ export function AluminiumSetup({ value, onChange, result, lines }) {
       {d.error && <Banner tone="error">{d.error}</Banner>}
       <NeedsRow needs={needs} />
       <QuantityPreview lines={lines} result={result} />
-      <StatusRow status={withKerfState(shownStatus(result) || { quantity: "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }, s)}
+      <CardStatus result={result} status={withKerfState(shownStatus(result) || { quantity: "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }, s)}
         note={result?.status ? "From the cutting plan for this job." : "The cutting plan is worked out from this job's openings and runs."} />
-      {result?.status && <EngineProblems result={result} />}
+      
     </div>
     </PendingContext.Provider>
   );

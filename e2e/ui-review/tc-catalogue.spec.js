@@ -303,7 +303,8 @@ test("CL05: AAC lists Walsc first, stays one system, needs the adhesive joint en
   const adhesive = page.getByLabel("Approved adhesive joint (system value)");
   await expect(adhesive).toHaveValue(""); // never defaulted
   await expect(page.locator("[data-needs]")).toContainText("approved adhesive joint");
-  await expect(page.locator('[data-component="Fixings"]')).toContainText("No reviewed fixing row is active for Walsc External Wall System 50 — fixings are unresolved (not zero).");
+  // HUB 029: said plainly, never as a fault
+  await expect(page.locator('[data-component="Fixings"]')).toContainText("Not counted: the Walsc External Wall System 50 fixings aren't on the order (installation isn't checked by the app).");
   await expect(page.locator('[data-component="Rails"]')).toContainText("isn't seeded");
   await expect(page.locator('[data-assembly="walsc50"]')).toContainText("0 reviewed rule rows · automatic fixings off");
   await expect(page.locator('[data-status="installation"]')).toHaveAttribute("data-value", "source-pending");
@@ -341,7 +342,9 @@ test("CL05 + statuses: on a real wall the card shows the engine's three statuses
   await expect(h.locator("[data-engine-problems]")).toContainText("Enter the system's approved adhesive/joint width");
   await enter(h.getByLabel("Approved adhesive joint (system value)"), 3);
   await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
-  await expect(h.locator("[data-engine-problems]")).toContainText("no reviewed fixing row is active for Walsc External Wall System 50 — fixings are unresolved (not zero)");
+  // HUB 029: notes about installation sources are one plain line, never listed as faults (the statuses are unchanged)
+  await expect(h.locator("[data-engine-problems]")).toContainText("Installation isn't checked by the app.");
+  await expect(h.locator("[data-engine-problems]")).not.toContainText("no reviewed fixing row is active");
   // the installation status is whatever the engine says — the card never upgrades it
   const engine = await page.evaluate(() => window.__tc.result.status);
   await expect(h.locator('[data-status="installation"]')).toHaveAttribute("data-value", engine.installation);
@@ -407,6 +410,9 @@ test("Support battens: Sam's defaults (HUB 030 decision 2) — 600 centres and f
   await noText(page, "[data-needs]", "maximum support spacing");
   await noText(page, "[data-needs]", "Effective cover");
   await expect(page.locator('[data-component="Supports"]')).toContainText("600 centres (Blue Leaf default)");
+  // HUB 030: the batten starts as the Blue Leaf default (90 × 35 H3 pine); Change opens the picker for another
+  await expect(page.locator("[data-batten-default]")).toContainText("Blue Leaf default: 90 × 35 H3 pine batten");
+  await page.locator("[data-batten-default]").getByRole("button", { name: "Change" }).click();
   await pick(page, P.cavityBatten);
   await expect(page.locator('[data-component="Fixings"]')).toContainText("Not counted (Blue Leaf default)");
   await enter(spacing, 600);
@@ -1676,8 +1682,9 @@ test("PH-11: the fixing route is an installation condition; the assembly's other
   const h = page.locator("#tc-harness");
   const missing = () => page.evaluate(() => window.__tc.result.problems.find((p) => p.code === "installation_selectors_missing")?.refs?.[0]?.missing || []);
   expect(await missing()).toContain("direct-or-cavity");
-  // the calculation's list is shown in plain words, never as internal keys
-  await expect(h.locator("[data-engine-problems]")).toContainText("Installation conditions still needed: wind class");
+  // HUB 029: installation notes never read as faults — one plain line; the conditions themselves are entered below
+  await expect(h.locator("[data-engine-problems], [data-install-note]").first()).toContainText("Installation isn't checked by the app.");
+  await expect(h).not.toContainText("Installation conditions still needed");
   await expect(h).not.toContainText("direct-or-cavity");
   await expect(h).not.toContainText("on-or-off-stud");
   await h.locator('[data-chips="route"]').getByRole("button", { name: "Direct fix" }).click();
