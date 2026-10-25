@@ -12,6 +12,9 @@
 // recomputed under Sam's round 2 (2 studs each side, full-length bottom plate, 300 mm steps) through the real
 // computeWorkspace, the switch, separate lines and cut lists per part, item-wide blocks, the double-count note, round 3
 // LVL long plates, touching studs and order independence.
+// Step 4, entry and plan (src/components/takeoff/measure/tools.js): Walls traces with Line only, usesWalls, the Walls
+// line (wallFramingTotals / wallFramingText) for both worked examples and the mixed run, "Details: n to fix" and the
+// Walls-only starting Wall height. The screens are in e2e/ui-review/tc-hub028.spec.js.
 //   node scripts/tests/takeoff-tc-hub028.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -34,6 +37,7 @@ import { JOB_GENERATED_LIMIT } from "../../shared/takeoff/engine/dispatch.js";
 import { TIMBER_ORDERING_POLICY } from "../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../shared/takeoff/products/seed.js";
 import { cleanMaterialContent } from "../../server/lib/takeoff/takeoffService.mjs";
+import { isWallsItem, lastWallHeight, lineStartHeight, toolsFor, usesWalls, wallFramingText, wallFramingTotals, wallPartsToFix, wallsNotCounted } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); } }
@@ -1232,6 +1236,127 @@ t("order independence: the walls in any order (and the same input twice) give th
   assert.equal(JOB_GENERATED_LIMIT, 20000);
   const many = Array.from({ length: 25 }, (_, i) => wm(`m${i}`, 30000, 3000, `Wall ${i + 1}`));
   assert.throws(() => wf(many, { rules: { centresMm: 100, doubleTopPlate: false } }), (e) => e instanceof TakeoffValidationError && /more than 20,000 pieces \(stopped at Walls\)/.test(e.message));
+});
+
+// ══ Step 4: entry and plan (src/components/takeoff/measure/tools.js) ═══════════════════════════════════════════════
+const line = (c, wallId = null) => wallFramingText(wallFramingTotals(WR(c), wallId), wallId ? null : "Walls");
+
+t("tools: a Walls item traces with Line only (no Rectangle or Area, no Wall); Studs, Plates and Noggins keep Wall; usesWalls includes Walls", () => {
+  const keys = (m) => toolsFor(m).map((x) => x.k);
+  const w = walls(wallFramingDefaults([]));
+  assert.deepEqual(keys(w), ["line", "select", "pan"]);
+  assert.equal(toolsFor(w)[0].label, "Line");
+  assert.deepEqual(keys({ spec: { family: "timber", purpose: "walls" } }), ["line", "select", "pan"], "by its purpose too (before the method is known)");
+  assert.deepEqual(keys({ spec: { family: "timber", purpose: "studs" }, methodKey: "wall_frame" }), ["wall", "select", "pan"]);
+  assert.deepEqual(keys({ spec: { family: "timber", purpose: "plates" }, methodKey: "linear_stock" }), ["wall", "run", "count", "select", "pan"]);
+  assert.deepEqual(keys({ spec: { family: "timber", purpose: "noggins" }, methodKey: "linear_stock" }), ["wall", "count", "select", "pan"]);
+  assert.deepEqual(keys({ spec: { family: "cladding" }, methodKey: "sheet_layout" }), ["line", "rect", "area", "select", "pan"], "cladding unchanged");
+  assert.ok(usesWalls(w) && isWallsItem(w));
+  for (const purpose of ["studs", "plates", "noggins"]) assert.ok(usesWalls({ spec: { family: "timber", purpose } }) && !isWallsItem({ spec: { family: "timber", purpose } }), purpose);
+  assert.ok(!usesWalls({ spec: { family: "timber", purpose: "rafters" } }) && !isWallsItem({ spec: { family: "timber", purpose: "rafters" } }));
+});
+
+t("Walls line, the 2,700 example: 'Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)', and each wall's own", () => {
+  const c = ex(2700);
+  assert.equal(line(c), "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)");
+  assert.equal(line(c, "w1"), "13 studs at 2,700 · bottom plate 6.00 m · top plate 6.00 m · 9 noggins (1 row)");
+  assert.equal(line(c, "w2"), "8 studs at 2,700 · bottom plate 4.00 m · top plate 4.00 m · 4 noggins (1 row)");
+  assert.equal(wallFramingText(wallFramingTotals(WR(c), "w2"), "Wall 2"), "Wall 2: 8 studs at 2,700 · bottom plate 4.00 m · top plate 4.00 m · 4 noggins (1 row)");
+  assert.deepEqual(wallFramingTotals(WR(c)), { walls: 2, studs: 21, studsByHeight: [[2700, 21]], bottomPlateMm: 10000, topPlateMm: 10000, secondTopPlateMm: null, noggins: 13, rows: [1] });
+  // the line's studs and noggins are exactly what the order buys
+  assert.deepEqual([pieceSum(c, "studs"), pieceSum(c, "noggins")], [21, 13]);
+  assert.ok(!/confirm|default/i.test(line(c)), "no 'to confirm' wording: both row rules are Sam's");
+  // without the openings (the first screen step): 19 studs, 17 noggins; at 450 centres 25 studs
+  const plain = EXAMPLE(2700).filter((m) => m.kind === "wall");
+  assert.equal(line(wf(plain)), "Walls: 19 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1 row)");
+  assert.equal(line(wf(plain, { rules: { centresMm: 450, doubleTopPlate: false } })), "Walls: 25 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 23 noggins (1 row)");
+});
+
+t("Walls line, the 3,000 example with Double top plate: only the top plate changes to '2 × 10.00 m'; 26 noggins (2 rows)", () => {
+  assert.equal(line(ex(2700, { doubleTopPlate: true })), "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 2 × 10.00 m · 13 noggins (1 row)");
+  const c = ex(3000, { doubleTopPlate: true });
+  assert.equal(line(c), "Walls: 21 studs at 3,000 · bottom plate 10.00 m · top plate 2 × 10.00 m · 26 noggins (2 rows)");
+  assert.equal(line(c, "w1"), "13 studs at 3,000 · bottom plate 6.00 m · top plate 2 × 6.00 m · 18 noggins (2 rows)");
+  assert.equal(line(c, "w2"), "8 studs at 3,000 · bottom plate 4.00 m · top plate 2 × 4.00 m · 8 noggins (2 rows)");
+});
+
+t("Walls line, a mixed run: 'Walls: 21 studs (13 at 2,700, 8 at 3,000) · … · 17 noggins (1–2 rows)', lowest height first; all at 3,000 reads '(2 rows)'", () => {
+  const c = wf(EXAMPLE(2700, 3000), { rules: { centresMm: 600, doubleTopPlate: false, studHeightMm: 2400 } });
+  assert.equal(line(c), "Walls: 21 studs (13 at 2,700, 8 at 3,000) · bottom plate 10.00 m · top plate 10.00 m · 17 noggins (1–2 rows)");
+  const rev = wf(EXAMPLE(3000, 2700));
+  assert.equal(line(rev), "Walls: 21 studs (8 at 2,700, 13 at 3,000) · bottom plate 10.00 m · top plate 10.00 m · 22 noggins (1–2 rows)", "lowest height first, whichever wall has it");
+  assert.equal(line(ex(3000)), "Walls: 21 studs at 3,000 · bottom plate 10.00 m · top plate 10.00 m · 26 noggins (2 rows)");
+  // a long LVL plate counts in the plate totals (the wording doesn't change)
+  assert.equal(line(wf([wm("w", 9000, 2700, "Wall 1")], { spec: LVL_READY() })), "Walls: 16 studs at 2,700 · bottom plate 9.00 m · top plate 9.00 m · 15 noggins (1 row)");
+  assert.equal(wallFramingText({ walls: 1, studs: 1, studsByHeight: [[2400, 1]], bottomPlateMm: 40, topPlateMm: 40, secondTopPlateMm: null, noggins: 1, rows: [1] }),
+    "1 stud at 2,400 · bottom plate 0.04 m · top plate 0.04 m · 1 noggin (1 row)");
+});
+
+t("Walls line: a blocked wall adds nothing (the other walls still read); nothing worked out → no line; other materials never read as Walls", () => {
+  const blocked = wf([...EXAMPLE(2700), wm("g", 5000, 2700, "Wall 3", { kind: "gable" })]);
+  assert.equal(line(blocked), "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)");
+  assert.ok(WR(blocked).problems.some((p) => p.blocking && /Wall 3 is sloped/.test(p.message)), "the block is on the item's lines, not hidden");
+  const none = wf([]);
+  assert.equal(wallFramingTotals(WR(none)), null);
+  assert.equal(wallFramingText(null, "Walls"), "");
+  assert.equal(wallFramingTotals({ layouts: [{ method: "wall_frame@1", totals: { studs: 9 } }] }), null);
+});
+
+t("Walls line: a blocked wall is named on the line ('· Wall 1 not counted'), never a quiet gap in the totals", () => {
+  const cons = (ms) => ms.filter((m) => m.kind === "wall").map((m) => onW(m.id));
+  const named = (ms, extra = {}) => { const c = wf(ms, extra); return wallFramingText(wallFramingTotals(WR(c)), "Walls", wallsNotCounted(WR(c), ms, extra.contributions || cons(ms), "walls")); };
+  // overlapping windows on Wall 1 (the reviewer's case): Wall 2 still reads, Wall 1 is named, its reason is a block
+  const overlap = [wm("w1", 6000, 2700, "Wall 1"), wm("w2", 4000, 2700, "Wall 2"),
+    om("o1", "w1", "W1", "window", 1000, 1200, 1200, 900), om("o2", "w1", "W2", "window", 1600, 1200, 1200, 900)];
+  assert.equal(named(overlap), "Walls: 8 studs at 2,700 · bottom plate 4.00 m · top plate 4.00 m · 7 noggins (1 row) · Wall 1 not counted");
+  assert.ok(hasMsg(wf(overlap), "invalid_input", true, "Wall 1: Openings W1 and W2 overlap along the wall — frame them as one opening or with explicit members."));
+  // no Wall height on Wall 2; a gable Wall 3 as well: both named, in name order
+  const two = [wm("w1", 6000, 2700, "Wall 1"), wm("w2", 4000, null, "Wall 2"), wm("g", 5000, 2700, "Wall 3", { kind: "gable" })];
+  assert.equal(named(two), "Walls: 11 studs at 2,700 · bottom plate 6.00 m · top plate 6.00 m · 10 noggins (1 row) · Wall 2 and Wall 3 not counted");
+  assert.deepEqual(wallsNotCounted(WR(wf(two)), [...two].reverse(), cons(two).reverse(), "walls"), ["Wall 2", "Wall 3"], "whatever order they were traced");
+  // nothing worked out: the line says so on its own
+  assert.equal(named([wm("w2", 4000, null, "Wall 1")]), "Walls: Wall 1 not counted");
+  assert.equal(wallFramingText(null, "Walls", ["Wall 1", "Wall 2", "Wall 3"]), "Walls: Wall 1, Wall 2 and Wall 3 not counted");
+  assert.equal(wallFramingText(null, null, ["Wall 1"]), "Wall 1 not counted");
+  // every wall worked out, an archived assignment, or a wall on another material: nothing named
+  assert.deepEqual(wallsNotCounted(WR(ex(2700)), EXAMPLE(2700), cons(EXAMPLE(2700)), "walls"), []);
+  assert.equal(named(EXAMPLE(2700)), "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)");
+  const gone = [...cons(two).filter((c) => c.measurementId !== "g"), { ...onW("g"), archived: true }];
+  assert.deepEqual(wallsNotCounted(WR(wf(two, { contributions: gone })), two, gone, "walls"), ["Wall 2"]);
+  assert.deepEqual(wallsNotCounted(WR(wf(two)), two, cons(two).map((c) => (c.measurementId === "w2" ? { ...c, jobMaterialId: "axon" } : c)), "walls"), ["Wall 3"]);
+  assert.deepEqual(wallsNotCounted(null, two, cons(two), "walls"), []);
+  // two walls of one name are told apart as the engine tells them (with a short id)
+  const twins = [wm("aaaa1", 4000, null, "Wall 1"), wm("bbbb2", 4000, 2700, "Wall 1")];
+  assert.deepEqual(wallsNotCounted(WR(wf(twins)), twins, cons(twins), "walls"), ["Wall 1 (aaaa)"]);
+});
+
+t("Details: n to fix: the built-in parts have no treatment (studs, plates, noggins = 3); saved products = 0; Long plates only once a plate uses them", () => {
+  const raw = ex(2700, { spec: wallFramingDefaults([]) });
+  assert.equal(wallPartsToFix(WR(raw)), 3);
+  assert.equal(wallPartsToFix(WR(wf([]))), 0, "nothing traced: a Walls item with saved products for every part");
+  assert.equal(wallPartsToFix(WR(wf([], { spec: wallFramingDefaults([]) }))), 3, "needs show before anything is traced");
+  assert.equal(wallPartsToFix(WR(ex(2700))), 0);
+  const noLvlTreatment = withPart(LVL_READY(), "longPlates", { treatment: null });
+  assert.equal(wallPartsToFix(WR(wf([wm("w", 6000, 2700, "Wall 1")], { spec: noLvlTreatment }))), 0, "no plate over 6,000: the LVL's treatment isn't asked for");
+  assert.equal(wallPartsToFix(WR(wf([wm("w", 9000, 2700, "Wall 1")], { spec: noLvlTreatment }))), 1);
+});
+
+t("starting Wall height: a Walls item starts at the last height of ITS OWN walls (empty the first time); cladding keeps the takeoff's last height", () => {
+  const ms = [
+    { id: "cl-1", kind: "wall", inputs: { kind: "rect", heightMm: 2745, name: "Wall 1", runId: "r1", seq: 1 } },
+    { id: "wf-1", kind: "wall", inputs: { kind: "rect", heightMm: 2700, name: "Wall 2", runId: "r2", seq: 1 } },
+    { id: "wf-2", kind: "wall", inputs: { kind: "rect", heightMm: 2800, name: "Wall 3", runId: "r2", seq: 2 } },
+    { id: "cl-2", kind: "wall", inputs: { kind: "rect", heightMm: 3000, name: "Wall 4", runId: "r3", seq: 1 } },
+  ];
+  const cs = [{ measurementId: "cl-1", jobMaterialId: "axon" }, { measurementId: "cl-2", jobMaterialId: "axon" }, { measurementId: "wf-1", jobMaterialId: "walls" }, { measurementId: "wf-2", jobMaterialId: "walls" }];
+  const w = walls(wallFramingDefaults([]));
+  const axon = { id: "axon", methodKey: "sheet_layout", spec: { family: "cladding" } };
+  assert.equal(lineStartHeight(ms, cs, w), 2800, "its own last wall (highest seq in its run), never the cladding's 3,000");
+  assert.equal(lineStartHeight(ms, cs, axon), 3000, "cladding: HUB 022's start, the takeoff's last wall height");
+  assert.equal(lineStartHeight(ms, cs, axon), lastWallHeight(ms));
+  assert.equal(lineStartHeight(ms.slice(0, 1), cs.slice(0, 1), w), null, "a cladding wall at 2,745 never carries over: empty the first time");
+  assert.equal(lineStartHeight(ms, cs.map((c) => (c.measurementId === "wf-2" ? { ...c, archived: true } : c)), w), 2700, "an archived assignment doesn't count");
+  assert.equal(lineStartHeight([], [], null), null);
 });
 
 console.log(`takeoff-tc-hub028: ${pass} passed, ${fail} failed`);

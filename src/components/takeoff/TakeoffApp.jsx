@@ -9,7 +9,7 @@
 // =============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates } from "../../../shared/takeoff/index.js";
+import { FLASHING_SPEC_DEFAULTS, GROUP_LABEL, NEW_FLASHING_RULES, SECTIONS, SECTION_LABEL, TIMBER_GRID, WALL_FRAMING_RULES, describeFamilySpec, indicativeGirthMm, latestPageCalibrations, materialGroup, materialSection, methodFor, normaliseSpec, rescaleCandidates, wallFramingDefaults } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset } from "../../../shared/takeoff/products/index.js";
 import { companyDefaultContent, findCompanyDefault } from "../../../shared/takeoff/companyDefaults.js";
 import { companyVersionDiffers, findAluminiumProduct, profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
@@ -25,10 +25,10 @@ import MaterialPicker, { FamilyPresetPicker, PresetUpdateReview } from "./Materi
 import CatalogueEditor from "./CatalogueEditor.jsx";
 import MaterialSheet from "./MaterialSheet.jsx";
 import ProfileEditor from "./ProfileEditor.jsx";
-import { AluminiumSetup, CladdingSetup, TimberSetup } from "./FamilySetup.jsx";
+import { AluminiumSetup, CladdingSetup, TimberSetup, WallsSetup } from "./FamilySetup.jsx";
 import ScheduleScreen from "./ScheduleScreen.jsx";
 import WallsScreen from "./WallsScreen.jsx";
-import { reviewWalls } from "./measure/tools.js";
+import { isWallsItem, reviewWalls, usesWalls } from "./measure/tools.js";
 import AluminiumScreen from "./AluminiumScreen.jsx";
 import OrdersScreen from "./OrdersScreen.jsx";
 import PlanSetup from "./PlanSetup.jsx";
@@ -41,9 +41,7 @@ let placeRestoreSpent = false;
 let entryRestoreSpent = false;
 const isReload = () => { try { return performance.getEntriesByType("navigation")[0]?.type === "reload"; } catch { return false; } };
 
-// materials measured as walls (+ openings) rather than plan lines
-const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
-const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.family === "timber" && ["studs", "plates", "noggins"].includes(m?.spec?.purpose));
+// materials measured as walls (+ openings) rather than plan lines: usesWalls (measure/tools.js, Walls included — HUB 028)
 const CLADDING_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding"]);
 
 const SECTION_HELP = {
@@ -314,8 +312,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     const open = (openRow ?? (secMats.length === 1 ? m.id : null)) === m.id;
     const summary = fam ? `${describeFamilySpec(m.spec).line} · ${contribCount(m.id)} item(s)${m.pending ? " · unsaved" : ""}`
       : `${[m.spec?.finish, m.spec?.colour, m.spec?.bmt != null ? `${m.spec.bmt} BMT` : null].filter(Boolean).join(" · ")}${m.profile ? ` · girth ${fmtMm(indicativeGirthMm(m.profile))} mm` : ""} · ${contribCount(m.id)} item(s) · ${ls.reduce((a, l) => a + l.quantity, 0)} pcs${m.pending ? " · unsaved" : ""}`;
+    // HUB 028: a Walls row has no Save as standard (no company-product purpose for Walls) and no Add lengths (Walls
+    // reads traced walls only; extra members such as trimmers go on a separate Timber item)
+    const wallsItem = isWallsItem(m);
     const more = [
-      ...(caps.editStandards && api.savePreset ? [["Save as standard", () => { setMoreFor(null); saveAsStandard(m); }]] : []),
+      ...(caps.editStandards && api.savePreset && !wallsItem ? [["Save as standard", () => { setMoreFor(null); saveAsStandard(m); }]] : []),
       ...(caps.edit ? [["Remove", () => { setMoreFor(null); removeMaterial(m); }]] : []),
     ];
     return (
@@ -334,7 +335,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
             {caps.edit && <Btn kind="ghost" onClick={() => setEditing({ material: m, stage: fam ? "family" : "details" })}>{fam ? "Setup" : "Details"}</Btn>}
             {usesWalls(m) && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setOpenWall(null); setWin("walls"); }}>Walls</Btn>}
             {fam === "aluminium" && <Btn kind="ghost" onClick={() => { setActiveMaterial(m.id); setWin("aluminium"); }}>Cutting</Btn>}
-            {caps.edit && (!fam || fam === "timber") && <Btn kind="ghost" onClick={() => setManualFor(manualFor === m.id ? null : m.id)}>Add lengths</Btn>}
+            {caps.edit && (!fam || fam === "timber") && !wallsItem && <Btn kind="ghost" onClick={() => setManualFor(manualFor === m.id ? null : m.id)}>Add lengths</Btn>}
             {more.length > 0 && <Btn kind="ghost" aria-expanded={moreFor === m.id} onClick={() => setMoreFor(moreFor === m.id ? null : m.id)}>More</Btn>}
             {moreFor === m.id && (
               <div className="flex w-full flex-wrap gap-1 rounded-lg bg-page p-1" data-material-more="">
@@ -423,6 +424,22 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     setEditing({ material: m, stage: "family" });
   };
   const addTimber = () => addFamily({ family: "timber", purpose: "rafters", section: {}, stock: { ...TIMBER_GRID } }, "Timber", { centresMm: 600, lengthSource: "projected" });
+  /**
+   * HUB 028: one Walls item from the defaults (each part takes its one saved company product, else the built-in row)
+   * and straight onto the plan with Line chosen: no Timber card first. With no plan chosen yet, its walls list (Trace
+   * on plan), as Studs does.
+   */
+  const addWalls = () => {
+    const spec = wallFramingDefaults(presets);
+    const mm = methodFor(spec);
+    const names = new Set(view.materials.map((x) => String(x.name || "").trim().toLowerCase()));
+    let name = "Walls";
+    for (let i = 2; names.has(name.toLowerCase()); i++) name = `Walls ${i}`;
+    const m = { id: newId(), name, methodKey: mm.key, methodVersion: mm.version, spec, rules: { ...WALL_FRAMING_RULES }, profile: null };
+    upsertMaterial(m);
+    setOpenRow(m.id); setEditing(null); setSetupFrom(null); setHighlightIds(null); setOpenWall(null); setMeasureTool(null);
+    setWin(docId ? "measure" : "walls");
+  };
   const addCladding = () => addFamily({ family: "cladding", layout: "sheet", product: {} }, "Cladding");
   const addAluminium = () => addFamily(aluminiumPreset(), "Aluminium angle 50 × 50 × 3");
   const isPainted = (m) => { try { return normaliseSpec(m?.spec).colourApplicable !== false; } catch { return true; } };
@@ -548,8 +565,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     setEditing({ material: m, stage: "details", focusField, fromOrder: reason });
   }
   const toLengths = (m) => {
-    setActiveMaterial(m.id); setEditing(null);
-    setWin(m.spec?.family === "aluminium" ? "aluminium" : usesWalls(m) ? "walls" : docId ? "measure" : "overview");
+    // the card is left by its own header button: where it was opened from no longer applies (a later Close on another
+    // card goes back to the overview, not here)
+    setActiveMaterial(m.id); setEditing(null); setSetupFrom(null);
+    // HUB 028: a Walls item goes to the plan (its walls list when there is no plan yet)
+    setWin(m.spec?.family === "aluminium" ? "aluminium" : isWallsItem(m) ? (docId ? "measure" : "walls") : usesWalls(m) ? "walls" : docId ? "measure" : "overview");
     setEditorDrafts((ds) => ds.filter((d) => d.materialId !== m.id)); refreshDrafts();
   };
   /** The editor's status for THIS flashing: Saved only when the server holds exactly this shape (R04b R20). */
@@ -623,17 +643,20 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   if (editing?.stage === "family") {
     const m = currentMat(editing.material);
     const fam = m.spec?.family;
-    const Setup = fam === "timber" ? TimberSetup : fam === "aluminium" ? AluminiumSetup : CladdingSetup;
-    const title = fam === "timber" ? "Timber" : fam === "aluminium" ? "Aluminium" : fam === "batten" ? "Support battens" : fam === "accessory" ? "Accessories" : "Cladding";
+    // HUB 028: a Walls item has its own card: no Purpose chips and no company-product picker (either would turn it into
+    // another timber purpose or replace its parts), and its header button goes back to tracing
+    const walls = isWallsItem(m);
+    const Setup = walls ? WallsSetup : fam === "timber" ? TimberSetup : fam === "aluminium" ? AluminiumSetup : CladdingSetup;
+    const title = walls ? "Walls" : fam === "timber" ? "Timber" : fam === "aluminium" ? "Aluminium" : fam === "batten" ? "Support battens" : fam === "accessory" ? "Accessories" : "Cladding";
     const families = fam === "timber" ? ["timber"] : fam === "aluminium" ? ["aluminium"] : ["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"];
     return (
       // the next step sits in the header: a field saving on blur can reflow the card, never move this button
       <FocusedWindow title={title} subtitle={`${m.name} · this job only`} onClose={leaveEditor} closeLabel="Close"
-        actions={<><SaveChip status={ws.status} /><Btn kind="primary" onClick={() => toLengths(m)}>{fam === "timber" ? "Measure members" : fam === "aluminium" ? "Openings & cutting" : "Walls"}</Btn></>}>
+        actions={<><SaveChip status={ws.status} /><Btn kind="primary" onClick={() => toLengths(m)}>{walls ? "Trace walls" : fam === "timber" ? "Measure members" : fam === "aluminium" ? "Openings & cutting" : "Walls"}</Btn></>}>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {/* HUB 025: the aluminium setup explains its save chip (a Conflict names the edit and offers both choices here) */}
           {fam === "aluminium" && <SaveProblem ws={ws} className="mb-3" />}
-          {caps.edit && (
+          {caps.edit && !walls && (
             <div className="mb-3">
               <FamilyPresetPicker api={api} families={families} canEditStandards={caps.editStandards} reloadToken={presets}
                 // a company product is COPIED onto this job material (same id: its measurements stay attached)
@@ -765,7 +788,10 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
         setHighlightIds(null); setOpenWallTab(null); setOpenWall(first.id); setWin("walls");
       }}
       highlightIds={highlightIds}
-      onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(orderFocus ? "orders" : usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
+      // HUB 028: the Line panel's Details › opens the Walls item's card; its Close comes back to the plan
+      onDetails={caps.edit ? (m) => { setHighlightIds(null); setSetupFrom("measure"); setEditing({ material: m, stage: "family" }); } : null}
+      // HUB 028: Done on a Walls item goes back to the overview (the Walls line is on the plan; Review walls opens its walls)
+      onClose={() => { setHighlightIds(null); const m = view.materials.find((x) => x.id === activeMaterial); setWin(orderFocus ? "orders" : isWallsItem(m) ? "overview" : usesWalls(m) ? "walls" : m?.spec?.family === "aluminium" ? "aluminium" : "overview"); }} />;
   }
   if (win === "materials") {
     return (
@@ -778,7 +804,9 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
           {caps.edit && (section === SECTIONS.FLASHINGS
             ? <Btn kind="primary" className="w-full" onClick={() => setWin("pick")}>Add flashing</Btn>
             : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                {/* HUB 028: Add walls first — the new Walls item is the one measured next, on this plan */}
+                <Btn onClick={addWalls}>Add walls</Btn>
                 <Btn onClick={addTimber}>Add timber</Btn>
                 <Btn onClick={addCladding}>Add cladding</Btn>
                 <Btn onClick={addAluminium}>Add aluminium</Btn>
@@ -896,7 +924,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
 
       {(section === SECTIONS.FLASHINGS ? ["flashings"] : ["timber", "cladding"]).map((grp) => {
         const list = secMats.filter((m) => materialGroup(m) === grp);
-        const adds = grp === "flashings" ? [["Add flashing", () => setWin("pick")]] : grp === "timber" ? [["Add timber", addTimber]] : [["Add cladding", addCladding], ["Add aluminium", addAluminium]];
+        const adds = grp === "flashings" ? [["Add flashing", () => setWin("pick")]] : grp === "timber" ? [["Add walls", addWalls], ["Add timber", addTimber]] : [["Add cladding", addCladding], ["Add aluminium", addAluminium]];
         return (
           <section key={grp} className="space-y-1 rounded-card border border-hairline bg-white p-3" data-material-group={grp}>
             <div className="flex flex-wrap items-center gap-2">

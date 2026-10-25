@@ -140,7 +140,7 @@ export function Btn({ kind = "secondary", className = "", ...p }) {
  *   optional  → commits null ("not entered"; the calculation then asks for it, or uses its own default);
  *   otherwise → stays a draft with "Enter a value." and the saved value is untouched (Undo / typing recovers it).
  */
-export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max = Infinity, step = "any", integer = false, optional = false, autoFocus = false, help, error: extError }) {
+export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max = Infinity, step = "any", integer = false, optional = false, autoFocus = false, help, error: extError, inline = false }) {
   const id = useId();
   const [text, setText] = useState(value == null ? "" : String(value));
   const [err, setErr] = useState(null);
@@ -164,19 +164,23 @@ export function NumberField({ label, value, unit = "mm", onCommit, min = 0, max 
     setErr(null);
     if (n !== value) onCommit(n);
   }
+  const labelEl = <label htmlFor={id} className={inline ? "shrink-0 text-xs font-medium text-muted" : "mb-1 block text-xs font-medium text-muted"}>{label}</label>;
+  const box = (
+    <div className={`flex items-stretch rounded-lg border border-hairline bg-white focus-within:ring-2 focus-within:ring-primary${inline ? " min-w-0 flex-1" : ""}`}>
+      <input
+        id={id} autoFocus={autoFocus} inputMode={integer ? "numeric" : "decimal"} step={step} value={text}
+        onChange={(e) => setText(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+        aria-invalid={!!(err || extError)} aria-describedby={err || extError ? `${id}-err` : undefined}
+        className="min-h-[44px] w-full min-w-0 rounded-l-lg border-0 px-3 text-base text-ink focus:ring-0"
+      />
+      <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span>
+    </div>
+  );
+  // inline: the label sits beside the box on one 44 px row (a tight panel such as the Line panel's Walls row, HUB 028)
   return (
     <div>
-      <label htmlFor={id} className="mb-1 block text-xs font-medium text-muted">{label}</label>
-      <div className="flex items-stretch rounded-lg border border-hairline bg-white focus-within:ring-2 focus-within:ring-primary">
-        <input
-          id={id} autoFocus={autoFocus} inputMode={integer ? "numeric" : "decimal"} step={step} value={text}
-          onChange={(e) => setText(e.target.value)} onBlur={commit}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
-          aria-invalid={!!(err || extError)} aria-describedby={err || extError ? `${id}-err` : undefined}
-          className="min-h-[44px] w-full min-w-0 rounded-l-lg border-0 px-3 text-base text-ink focus:ring-0"
-        />
-        <span className="flex items-center rounded-r-lg bg-page px-3 text-sm text-muted">{unit}</span>
-      </div>
+      {inline ? <div className="flex items-center gap-2">{labelEl}{box}</div> : <>{labelEl}{box}</>}
       {help && <p className="mt-1 text-[11px] text-muted">{help}</p>}
       {(err || extError) && <p id={`${id}-err`} role="alert" className="mt-1 text-xs text-red-700">{err || extError}</p>}
     </div>

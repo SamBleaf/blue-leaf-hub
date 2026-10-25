@@ -159,9 +159,9 @@ test("HUB 002: the takeoff starts with Flashings or Timber and cladding; each se
   await ready(page);
   await expect(page.locator("[data-takeoff-sections] [data-section]")).toHaveCount(2);
   await page.locator('[data-section="flashings"]').click();
-  // Flashings: Add flashing only — no timber / cladding / aluminium, and no timber or cladding rows
+  // Flashings: Add flashing only — no walls / timber / cladding / aluminium, and no timber or cladding rows
   await expect(page.getByRole("button", { name: "Add flashing" })).toBeVisible();
-  for (const n of ["Add timber", "Add cladding", "Add aluminium"]) await expect(page.getByRole("button", { name: n })).toHaveCount(0);
+  for (const n of ["Add walls", "Add timber", "Add cladding", "Add aluminium"]) await expect(page.getByRole("button", { name: n })).toHaveCount(0);
   await expect(page.locator("[data-material-row]").filter({ hasText: "Axon cladding" })).toHaveCount(0);
   // a compact row shows its actions only once tapped; Remove sits inside More
   const apron = page.locator("[data-material-row]").filter({ hasText: "Apron flashing" });
@@ -176,15 +176,29 @@ test("HUB 002: the takeoff starts with Flashings or Timber and cladding; each se
   await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Timber and cladding" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Timber and cladding" })).toBeVisible();
   await expect(page.locator('[data-material-group="timber"]').getByRole("button", { name: "Add timber" })).toBeVisible();
+  // HUB 028: Add walls is the Timber group's first add (the normal way to take off wall framing)
+  await expect(page.locator('[data-material-group="timber"] > div').getByRole("button")).toHaveText(["Add walls", "Add timber"]);
+  await expect(page.locator('[data-material-group="cladding"]').getByRole("button", { name: "Add walls" })).toHaveCount(0);
   await expect(page.locator('[data-material-group="cladding"]').getByRole("button", { name: "Add cladding" })).toBeVisible();
   await expect(page.locator('[data-material-group="cladding"]').getByRole("button", { name: "Add aluminium" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add flashing" })).toHaveCount(0);
   await expect(page.locator('[data-material-group="timber"] [data-material-row]').filter({ hasText: "Rafters 90 × 45" })).toHaveCount(1);
   await expect(page.locator('[data-material-group="cladding"] [data-material-row]').filter({ hasText: "Window angle 50 × 50 × 3" })).toHaveCount(1); // aluminium under Cladding
   await expect(page.locator("[data-material-row]").filter({ hasText: "Apron flashing" })).toHaveCount(0);
-  // and back: the flashings are all still there
+  // … and first in the Measure with… window (no flashing there)
+  await page.getByRole("button", { name: /^Measure$/ }).click();
+  await page.getByRole("button", { name: /^Material:/ }).click();
+  await expect(page.locator("[data-takeoff-focus] .grid").getByRole("button")).toHaveText(["Add walls", "Add timber", "Add cladding", "Add aluminium"]);
+  await expect(page.getByRole("button", { name: "Add flashing" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  // and back: the flashings are all still there; their Measure with… has no Add walls
   await page.getByRole("group", { name: "Takeoff section" }).getByRole("button", { name: "Flashings" }).click();
   await expect(page.locator("[data-material-row]").filter({ hasText: "Apron flashing" })).toHaveCount(1);
+  await page.getByRole("button", { name: /^Measure$/ }).click();
+  await page.getByRole("button", { name: /^Material:/ }).click();
+  await expect(page.getByRole("button", { name: "Add flashing" })).toBeVisible();
+  for (const n of ["Add walls", "Add timber"]) await expect(page.getByRole("button", { name: n })).toHaveCount(0);
 });
 
 test("HUB 007: Flashings and Timber and cladding are separate orders — no line crosses between them", async ({ page }) => {

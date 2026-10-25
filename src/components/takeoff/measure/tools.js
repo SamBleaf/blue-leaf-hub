@@ -5,6 +5,8 @@
 //   flashing           Run (continuous path, 13) · Count · Select · Pan
 //   timber repeated    Member · Distribution · Select · Pan            (rafters / joists / battens; no Member when
 //                      the cut length is entered)
+//   timber Walls       Line · Select · Pan                             (HUB 028 wall_framing: one trace → studs, plates and
+//                      noggins together; no Rectangle or Area, an outline has no single wall length)
 //   timber studs       Wall · Select · Pan                             (wall_frame)
 //   timber plates      Wall · Run · Count · Select · Pan               (linear_stock)
 //   timber noggins     Wall · Count · Select · Pan
@@ -17,8 +19,11 @@
 //                      onto a scaled elevation, saved as a traced outline wall (inputs.kind "polygon")
 //                      Wall-by-wall step 5: reviewWalls (the order Review walls steps through) + each wall's cladding
 //                      quantities in one short line (wallCladdingTotals / wallCladdingText)
+//                      HUB 028: a Walls item's framing in one short line (wallFramingTotals / wallFramingText), naming
+//                      any wall the calculation blocked (wallsNotCounted)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
+import { WALLS_PURPOSE } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -32,8 +37,10 @@ const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "ba
 /** TC-R04 family of a job material (null = flashing). */
 export const familyOf = (m) => (m?.spec?.family && m.spec.family !== "flashing" ? m.spec.family : null);
 export const isFlashingMaterial = (m) => !!m && !familyOf(m);
+/** HUB 028: a Walls item (one timber item framing its traced walls: studs, plates and noggins together). */
+export const isWallsItem = (m) => m?.methodKey === "wall_framing" || (m?.spec?.family === "timber" && m?.spec?.purpose === WALLS_PURPOSE);
 /** Materials measured as walls (+ openings) rather than plan lines — same rule as TakeoffApp. */
-export const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.family === "timber" && ["studs", "plates", "noggins"].includes(m?.spec?.purpose));
+export const usesWalls = (m) => WALL_FAMILIES.has(m?.spec?.family) || (m?.spec?.family === "timber" && ["studs", "plates", "noggins", WALLS_PURPOSE].includes(m?.spec?.purpose));
 
 const T = {
   run: { k: "run", label: "Run" }, count: { k: "count", label: "Count" }, select: { k: "select", label: "Select" }, pan: { k: "pan", label: "Pan" },
@@ -50,6 +57,8 @@ export function toolsFor(material) {
     const p = material.spec?.purpose;
     // an entered cut length needs no member line (03 T2) — only the distribution run is measured
     if (material.methodKey === "repeated_members") return material.rules?.lengthSource === "entered" ? [T.distribution, T.select, T.pan] : [T.member, T.distribution, T.select, T.pan];
+    // HUB 028 Walls: trace the run with Line (the Wall height in force at each tap); straight walls only
+    if (isWallsItem(material)) return [T.line, T.select, T.pan];
     if (p === "studs" || material.methodKey === "wall_frame") return [T.wall, T.select, T.pan];
     if (p === "plates") return [T.wall, T.run, T.count, T.select, T.pan];
     if (p === "noggins") return [T.wall, T.count, T.select, T.pan];
@@ -163,6 +172,17 @@ export function lastWallHeight(measurements) {
     last = w;
   }
   return last ? last.inputs.heightMm : null;
+}
+
+/**
+ * Where the Line panel's Wall height starts for a material. A Walls item (HUB 028): the last height of ITS OWN walls,
+ * empty the first time, because the height there is the stud cut length and a cladding height must never carry over.
+ * Every other material keeps the HUB 022 start: the last wall height anywhere in this takeoff.
+ */
+export function lineStartHeight(measurements, contributions, material) {
+  if (!isWallsItem(material)) return lastWallHeight(measurements);
+  const mine = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === material.id).map((c) => c.measurementId));
+  return lastWallHeight((measurements || []).filter((m) => mine.has(m.id)));
 }
 
 // ── traced runs (HUB 022) ─────────────────────────────────────────────────────────────────────────────────────
@@ -384,6 +404,78 @@ export function wallCladdingText(t) {
   if (t.tapeMm) parts.push(`${m(t.tapeMm)} foam tape`);
   if (t.hFlashingMm) parts.push(`${m(t.hFlashingMm, 2)} H-flashing`);
   return parts.join(" · ");
+}
+
+// ── Walls (HUB 028): a Walls item's framing in one short line ─────────────────────────────────────────────────
+
+/**
+ * A Walls item's framing as the engine laid it out (each wall's layout.totals, wall_framing@1), for one wall
+ * (`wallId`) or for every wall of the item. A blocked wall has no layout, so it adds nothing; the item's lines carry
+ * the block. Null when no wall is worked out. Plates are the fitted lengths (long LVL plates included).
+ * @returns {{ walls:number, studs:number, studsByHeight:Array<[number, number]>, bottomPlateMm:number, topPlateMm:number,
+ *   secondTopPlateMm:number|null, noggins:number, rows:number[] } | null}
+ */
+export function wallFramingTotals(result, wallId = null) {
+  const lays = (result?.layouts || []).filter((l) => l?.method === "wall_framing@1" && l.totals && (wallId == null || l.wallMeasurementId === wallId));
+  if (!lays.length) return null;
+  const t = { walls: lays.length, studs: 0, studsByHeight: [], bottomPlateMm: 0, topPlateMm: 0, secondTopPlateMm: null, noggins: 0, rows: [] };
+  const byH = new Map();
+  for (const { totals: x } of lays) {
+    t.studs += x.studs || 0;
+    if (x.studs) byH.set(x.studLengthMm, (byH.get(x.studLengthMm) || 0) + x.studs);
+    t.bottomPlateMm += x.bottomPlateMm || 0;
+    t.topPlateMm += x.topPlateMm || 0;
+    if (x.secondTopPlateMm != null) t.secondTopPlateMm = (t.secondTopPlateMm || 0) + x.secondTopPlateMm;
+    t.noggins += x.noggins || 0;
+    if (Number.isFinite(x.nogginRows) && !t.rows.includes(x.nogginRows)) t.rows.push(x.nogginRows);
+  }
+  t.studsByHeight = [...byH].sort((a, b) => a[0] - b[0]);
+  t.rows.sort((a, b) => a - b);
+  return t;
+}
+
+/**
+ * The walls of a Walls item that its Walls line leaves out (HUB 028): the calculation blocked them (sloped or outline,
+ * no Wall height, overlapping openings …), so they have no layout. Named as the engine names them ("Wall 1"), in name
+ * order; the reason is on the item's blocking problems. Empty when every wall is worked out.
+ */
+export function wallsNotCounted(result, measurements, contributions, materialId) {
+  if (!result || !materialId) return [];
+  const done = new Set((result.layouts || []).filter((l) => l?.method === "wall_framing@1" && l.totals).map((l) => l.wallMeasurementId));
+  const live = new Set((measurements || []).filter((m) => !m.archived && m.kind === "wall").map((m) => m.id));
+  const ids = [...new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId && live.has(c.measurementId)).map((c) => c.measurementId))];
+  return ids.filter((id) => !done.has(id)).map((id) => wallTagOn(measurements, contributions, materialId, id))
+    .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+}
+
+/**
+ * "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)" (HUB 028). Mixed heights
+ * read "21 studs (13 at 2,700, 8 at 3,000)", lowest first; Double top plate reads "top plate 2 × 10.00 m"; rows read
+ * "(1 row)", "(2 rows)" or "(1–2 rows)". `label` (the item's or the wall's name) leads it; without one it starts at
+ * the studs. `notCounted` (wallsNotCounted) ends it with "· Wall 1 not counted", so a blocked wall is never a quiet
+ * gap in the totals ("Walls: Wall 1 not counted" when no wall is worked out). Empty for no totals and nothing left out.
+ */
+export function wallFramingText(t, label = null, notCounted = []) {
+  const out = (notCounted || []).length ? `${notCounted.length < 2 ? notCounted[0] : `${notCounted.slice(0, -1).join(", ")} and ${notCounted[notCounted.length - 1]}`} not counted` : "";
+  if (!t) return out ? (label ? `${label}: ${out}` : out) : "";
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const m = (mm) => `${(mm / 1000).toFixed(2)} m`;
+  const hs = t.studsByHeight || [];
+  const studs = `${n(t.studs)} stud${t.studs === 1 ? "" : "s"}${hs.length === 1 ? ` at ${n(hs[0][0])}` : hs.length > 1 ? ` (${hs.map(([h, q]) => `${n(q)} at ${n(h)}`).join(", ")})` : ""}`;
+  const two = t.secondTopPlateMm;
+  const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
+  const rows = t.rows || [];
+  const rowText = !rows.length ? "" : rows.length === 1 ? ` (${rows[0]} row${rows[0] === 1 ? "" : "s"})` : ` (${rows[0]}–${rows[rows.length - 1]} rows)`;
+  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...(out ? [out] : [])].join(" · ");
+  return label ? `${label}: ${body}` : body;
+}
+
+/**
+ * How many of a Walls item's parts still need something before ordering (a section, grade or treatment), from the
+ * engine's needs (each names its part: "Plates: enter the treatment …"). The Line panel says "Details: n to fix ›".
+ */
+export function wallPartsToFix(result) {
+  return new Set((result?.problems || []).filter((p) => p.code === "material_incomplete" && p.part).map((p) => p.part)).size;
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────

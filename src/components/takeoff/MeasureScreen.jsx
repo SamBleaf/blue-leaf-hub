@@ -62,7 +62,7 @@
 // (existing measurements stay visible for review). Every valid edit applies at once; Undo/Redo cover all of them.
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT } from "../../../shared/takeoff/index.js";
+import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES } from "../../../shared/takeoff/index.js";
 import { addSplit, appendVertex, computeFlashingPath, finishPath, moveSplit, moveSplitToCorner, resolvePathTap, splitAtLimit } from "../../../shared/takeoff/engine/flashingPath.js";
 import { repeatedPositions } from "../../../shared/takeoff/engine/timber.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
@@ -72,7 +72,7 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
-import { COLORS, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, lastOpeningSizes, lastWallHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallRuns, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
+import { COLORS, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
@@ -103,7 +103,7 @@ const BURST_MS = DOUBLE_TAP_MS + 150;
 /** "W1", "W1 and D1", "W1, W2 and D1". */
 const listNames = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
-export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, displayRotation, materialId, onChangeMaterial, onScale, onPage, onClose, onOpenWall, onReviewWalls = null, highlightIds = null, initialTool = null }) {
+export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, displayRotation, materialId, onChangeMaterial, onScale, onPage, onClose, onOpenWall, onReviewWalls = null, onDetails = null, highlightIds = null, initialTool = null }) {
   const vpRef = useRef(null);
   const view = ws.view;
   const material = view.materials.find((m) => m.id === materialId) || null;
@@ -135,9 +135,17 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // Line (HUB 022): the Wall height in force — starts at the unfinished run's height, else the last wall's. Handlers
   // read it through a ref so a tap straight after typing (the field commits on blur) uses the new height.
   // (undefined = the drawing says nothing; null = the box was cleared on purpose, and stays empty after a reload)
+  // HUB 028: a Walls item starts at the last height of its OWN walls (the stud cut length), empty the first time
   const draftHeight = (d) => (d?.tool !== "line" ? undefined : d.heightMm !== undefined ? d.heightMm : d.heights?.length ? d.heights[d.heights.length - 1] : undefined);
-  const [lineH, setLineHState] = useState(() => { const h = draftHeight(draft); return h !== undefined ? h : lastWallHeight(view.measurements); });
+  const startHeight = (d) => { const h = draftHeight(d); return h !== undefined ? h : lineStartHeight(view.measurements, view.contributions, material); };
+  const [lineH, setLineHState] = useState(() => startHeight(draft));
   const lineHRef = useRef(lineH);
+  // … and switching to (or from) a Walls item here starts the box again that way, once its own drawing is read
+  const [lineFor, setLineFor] = useState(() => ({ id: material?.id ?? null, walls: isWallsItem(material) }));
+  if (lineFor.id !== (material?.id ?? null) && draftState.key === dKey) {
+    setLineFor({ id: material?.id ?? null, walls: isWallsItem(material) });
+    if (lineFor.walls || isWallsItem(material)) { const h = startHeight(draft); lineHRef.current = h; setLineHState(h); }
+  }
   function setLineH(n) {
     lineHRef.current = n;
     setLineHState(n);
@@ -1126,7 +1134,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const runCount = pageMeasurements.filter((m) => (m.kind === "run" || m.kind === "polyline") && (contribsOf.get(m.id) || []).length).length;
   const noun = memberNoun(material);
   const results = material && familyOf(material) ? ws.computed?.materialResults?.[material.id] || null : null;
-  const blocking = (results?.problems || []).filter((p) => p.blocking !== false);
+  // HUB 028 Walls: the parts' needs are counted on the Line panel ("Details: n to fix ›") and listed on the Walls card
+  const wallsItem = isWallsItem(material);
+  const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
+  // a wall the calculation blocked is named on the line ("· Wall 1 not counted"), its reason straight under it
+  const wallsText = wallsItem ? wallFramingText(wallFramingTotals(results), material.name, wallsNotCounted(results, view.measurements, view.contributions, material.id)) : "";
+  const wallsToFix = wallsItem ? wallPartsToFix(results) : 0;
   const draftLen = draft && cal && draft.points.length >= 2 ? pathLengthMm(draft.points, cal) : null;
   const draftLegs = draft && !draftIsFlash ? (draft.tool === "line" ? runLegs(draft.points, draft.heights) : straightLegs(draft.points)).length : 0; // walls / timber / aluminium pieces
   const runs = useMemo(() => wallRuns(view.measurements), [view.measurements]);
@@ -1205,6 +1218,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const reviewable = !!onReviewWalls && !!material && view.measurements.some((m) => m.kind === "wall" && !m.archived && (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === material.id));
   const reviewNow = () => { settleDraft({ navigate: false }); setOpenMode(null); setOpenStart(null); onReviewWalls?.(); };
   const reviewButton = reviewable ? <Btn kind="primary" onClick={reviewNow} data-review-walls="">Review walls</Btn> : null;
+  // HUB 028: Details › opens the Walls item's card (its parts); Close comes back here
+  const openDetails = () => { settleDraft({ navigate: false }); setOpenMode(null); setOpenStart(null); onDetails?.(material); };
   // HUB 023: another page to measure on (the takeoff's main plan page stays); this tool carries on there
   // An unfinished drawing waits on its own page (it is kept on this device) and comes back with it; only a device
   // that can't keep it finishes it first, as leaving does, so nothing tapped is lost.
@@ -1332,7 +1347,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     return <PolylineShape kind={draft.tool === "wall" || draft.tool === "line" ? "wall" : "polyline"} points={draft.points} toScreen={toScr} color={color} dashed draft label={len ? fmtMm(Math.round(len)) : ""} />;
   };
 
-  const statusLine = results && <StatusRow status={results.status} />;
+  // HUB 028: on a Walls item "Details ›" opens its card, so the status fold is "Status" there
+  const statusLine = results && <StatusRow status={results.status} label={wallsItem ? "Status" : undefined} />;
   // repeated members: what the engine made of the member + distribution lines — count → stock → each needs (02 §2)
   const timberResult = <TimberResult result={results} nounOf={(n) => memberNoun(material, n)} />;
   const problemList = (list) => list.length > 0 && (
@@ -1614,6 +1630,31 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                     <NumberField label="Wall height" value={lineH} min={1} max={MAX_WALL_MM} optional onCommit={setLineH} />
                   </div>
                 </div>
+                {/* HUB 028 Walls: Stud centres and Double top plate apply to every wall of the item (one change, one Undo).
+                    They only change the line after Finish, so they hide while tracing, like the line (Finish stays in view) */}
+                {wallsItem && canEdit && !drawing && (
+                  <div className="flex items-center gap-3" data-walls-rules="">
+                    <div className="min-w-0 flex-1" data-stud-centres="">
+                      <NumberField inline label="Stud centres" value={material.rules?.centresMm ?? WALL_FRAMING_RULES.centresMm} min={1} max={MAX_WALL_MM} onCommit={(n) => setRule(material, { centresMm: n })} />
+                    </div>
+                    <label className="flex min-h-[44px] w-40 shrink-0 items-center gap-2 text-sm font-medium text-ink" data-double-top-plate="">
+                      <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={material.rules?.doubleTopPlate === true}
+                        onChange={(e) => setRule(material, { doubleTopPlate: e.target.checked })} />
+                      Double top plate
+                    </label>
+                  </div>
+                )}
+                {/* the Walls line only changes after Finish, so it hides while tracing (Finish stays in view); the parts'
+                    needs show on the Walls card, here only how many */}
+                {wallsItem && !drawing && (wallsText || onDetails) && (
+                  <div className="flex items-center gap-2" data-walls-summary="">
+                    <p className="min-w-0 flex-1 text-[12px] leading-snug text-ink" data-walls-line="">{wallsText}</p>
+                    {onDetails && <button type="button" onClick={openDetails} data-walls-details=""
+                      className="flex min-h-[44px] shrink-0 items-center rounded-full px-2 text-sm font-semibold text-primary">{wallsToFix ? `Details: ${wallsToFix} to fix ›` : "Details ›"}</button>}
+                  </div>
+                )}
+                {/* why a wall isn't counted ("Wall 1: Openings W1 and W2 overlap …"), in view under the line */}
+                {wallsItem && !drawing && problemLines}
                 {!drawing && !run && <p className="text-muted">Tap the start of the wall, then each corner. Double-tap the last point, or press Finish. To go right round, double-tap the start.</p>}
                 {draft?.points.length === 1 && <p className="text-muted">Tap the next corner.</p>}
                 {draft?.points.length >= 2 && <p className="text-muted" data-line-progress="">{draftLegs} wall{draftLegs === 1 ? "" : "s"} · {draftLen != null ? `${fmtRaw(draftLen)} mm` : "—"}. Tap the next corner, or double-tap the last point to finish.</p>}
@@ -1631,7 +1672,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 ) : openingButtons}
                 {draft && !draftStored && <p className="text-[11px] text-amber-800">This device can&apos;t keep an unfinished run if the app reloads. Finish it before leaving.</p>}
                 <p className="text-[11px] text-muted">{pageMeasurements.filter((m) => m.kind === "wall").length} wall(s) on this page.</p>
-                {statusLine}{problemLines}
+                {/* a Walls item's problems sit under its line (above), except while tracing */}
+                {statusLine}{!(wallsItem && !drawing) && problemLines}
               </div>
             );
           })()}

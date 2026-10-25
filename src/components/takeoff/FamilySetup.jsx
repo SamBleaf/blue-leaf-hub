@@ -3,6 +3,9 @@
 //   * TimberSetup    — purpose → "Size and grade" list (HUB 027: the owner's sizes for that purpose + company timber
 //                      products saved for it, or Custom) → section/grade/treatment (always shown, editable) →
 //                      centres / length source / pitch → 1200 + 300n stock
+//   * WallsSetup     — HUB 028 Walls item (studs, plates and noggins from one trace): the parts' needs, then Name. No
+//                      Purpose chips and no company-product picker (one tap there would turn the item into another
+//                      timber purpose or replace its parts). The plan's build step 5 adds the rest of the Walls card.
 //   * CladdingSetup  — material → product (searchable catalogue; Walsc first for AAC) → orientation → assembly
 //                      → stock / spares / supplier. Also hosts the support-batten layer and the accessory card.
 //   * BattenSetup    — support layer: product/section, orientation, max spacing (required), offsets, existing
@@ -1152,6 +1155,30 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
       <StatusRow status={shownStatus(result) || { quantity: needs.length ? "incomplete" : "schedule", installation: "unspecified", procurement: familyProblems(s).length ? "missing-product" : "draft" }}
         note={result?.status ? "From the calculation for this job. Timber size is a manual selection." : `Timber size is a manual selection. ${NO_RESULT_NOTE}`} />
       {result?.status && <EngineProblems result={result} />}
+    </div>
+    </PendingContext.Provider>
+  );
+}
+
+// ── Walls (HUB 028) ──────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * The Walls card (the Line panel's "Details ›" and the overview row's Setup). At the top, what the parts still need,
+ * each naming its part ("Plates: enter the treatment …"), as the engine says (Long plates only once a plate uses them);
+ * then the Name. It has no Purpose chips and no company-product picker, so a Walls item stays a Walls item.
+ */
+export function WallsSetup({ value, onChange, result }) {
+  const d = useAutoApply(value, onChange);
+  const kb = useKeepFieldVisible();
+  const pf = usePendingFields();
+  const cur = d.cur;
+  const needs = [...new Set((result ? (result.problems || []).filter((p) => p.code === "material_incomplete" && p.part) : familyProblems(cur.spec || {})).map((p) => p.message))];
+  return (
+    <PendingContext.Provider value={pf.report}>
+    <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="walls">
+      <UndoBar d={d} pending={pf.pending} />
+      <NeedsRow needs={needs} />
+      <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => d.patch({ name: t })} placeholder="e.g. Walls" />
+      {d.error && <Banner tone="error">{d.error}</Banner>}
     </div>
     </PendingContext.Provider>
   );

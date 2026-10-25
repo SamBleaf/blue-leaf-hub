@@ -16,6 +16,8 @@
  * ?takeoffSeed=battens (wall-by-wall step 4) adds Axon 400 smooth set up from the Blue Leaf defaults on the check job —
  * walls of 6, 4, 6 and 4 m at 2,700 with three windows and a door, plus a 6 m gable that needs an H joint — so its
  * automatic battens, foam tape and H-flashing show on the walls, the schedule and the order with nothing set up;
+ * ?takeoffSeed=walls (HUB 028) adds one Walls item from the built-in defaults (no company products), nothing traced;
+ * ?takeoffSeed=walls-after-cladding adds a cladding with one wall traced with Line at 2,745 on page 1, and no Walls item;
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
  * HUB 025 (commits behave like the server's): a repeated idempotencyKey returns the original result with replayed:true
  * before the revision check; a save that would leave two live assignments on one (measurement, material) pair is refused
@@ -35,7 +37,7 @@ import {
   buildCalibration, verifyCalibration, segmentLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
   SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
-  TIMBER_GRID, WALLS_PURPOSE, methodReads, normaliseFamilySpec,
+  TIMBER_GRID, WALLS_PURPOSE, WALL_FRAMING_RULES, methodReads, normaliseFamilySpec, wallFramingDefaults,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
@@ -98,6 +100,8 @@ function seed() {
   };
   if (qs().get("takeoffSeed") === "mixed") seedMixed();
   if (qs().get("takeoffSeed") === "battens") seedBattens();
+  if (qs().get("takeoffSeed") === "walls") seedWalls();
+  if (qs().get("takeoffSeed") === "walls-after-cladding") seedWallsAfterCladding();
   // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
   // scale as page 1, checked), for drawing walls with Rectangle and Area
   if (qs().get("takeoffElevation") === "1") {
@@ -131,6 +135,26 @@ function seedBattens() {
     opening("bo-3", "bw-2", "D1", "door", 1500, 0, 900, 2100), opening("bo-4", "bw-3", "W1", "window", 2400, 900, 1200, 1200),
   );
   for (const id of ["bw-1", "bw-2", "bw-3", "bw-4", "bw-5"]) state.contributions.push({ id: `bc-${id}`, measurementId: id, jobMaterialId: "mat-axon400", role: "wall" });
+}
+
+/** HUB 028 (SYNTHETIC): one Walls item exactly as Add walls makes it with no company products, nothing traced yet. */
+function seedWalls() {
+  const spec = wallFramingDefaults([]);
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-walls", name: "Walls", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: { ...WALL_FRAMING_RULES } });
+}
+
+/** HUB 028 (SYNTHETIC): a cladding wall traced with Line at 2,745 (a cladding height), no Walls item yet. */
+function seedWallsAfterCladding() {
+  const g = productGroups({ family: "cladding" }).find((x) => x.name === "Axon 400 smooth");
+  const spec = { ...specFromGroup(g), assemblyId: "axon-vertical", spareRate: BLUE_LEAF_JH_DEFAULTS.spareRate };
+  const m = methodFor(spec);
+  state.materials.push({ id: "mat-axon400", name: "Axon 400 smooth", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null,
+    rules: { route: BLUE_LEAF_JH_DEFAULTS.route, installConditions: { ...BLUE_LEAF_JH_DEFAULTS.installConditions, "direct-or-cavity": BLUE_LEAF_JH_DEFAULTS.route }, jointRows: { atMm: [], ...BLUE_LEAF_JH_DEFAULTS.jointRule } } });
+  const pt = (x, y) => ({ x: bx + x * k, y: by + y * k });
+  state.measurements.push({ id: "cw-1", kind: "wall", documentId: DOC.id, pageIndex: 0, calibrationId: "cal-1", points: [pt(1000, 7000), pt(5000, 7000)], parentId: null, label: null, revision: 1,
+    inputs: { kind: "rect", heightMm: 2745, name: "Wall 1", runId: "11111111-1111-4111-8111-111111111111", seq: 1 } });
+  state.contributions.push({ id: "cc-1", measurementId: "cw-1", jobMaterialId: "mat-axon400", role: "wall" });
 }
 
 /** TC-R04 J5 mixed procurement (SYNTHETIC): every unit on one job, plus continuous flashing runs. */

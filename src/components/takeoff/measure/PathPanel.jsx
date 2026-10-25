@@ -17,13 +17,14 @@ const PROC = { ready: "ready to order", draft: "draft — not ready to order", "
 
 /**
  * Quantity · Installation · Procurement — exactly what the engine reported, never upgraded. HUB 006: kept out of the
- * way while measuring (collapsed "Details"); real problems are shown separately in plain English.
+ * way while measuring (collapsed "Details"); real problems are shown separately in plain English. `label` renames the
+ * fold where "Details" already means something else (HUB 028: a Walls item's "Details ›" opens its card, so "Status").
  */
-export function StatusRow({ status }) {
+export function StatusRow({ status, label = "Details" }) {
   if (!status) return null;
   return (
     <details className="text-[11px] text-muted">
-      <summary className="flex min-h-[44px] cursor-pointer items-center text-xs text-primary">Details</summary>
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-xs text-primary">{label}</summary>
       <p data-statuses="">
         Quantity: <b className="font-semibold text-ink">{QTY[status.quantity] || status.quantity}</b> · Installation: <b className="font-semibold text-ink">{INST[status.installation] || status.installation}</b> · Procurement: <b className="font-semibold text-ink">{PROC[status.procurement] || status.procurement}</b>
       </p>

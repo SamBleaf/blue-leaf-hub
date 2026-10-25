@@ -1970,11 +1970,23 @@ test.describe("phone quality (02)", () => {
 
   test("375 px: no horizontal scroll, 44 px tool targets, for flashing, timber and wall tools", async ({ page }) => {
     await openMeasure(page, MIXED);
-    for (const name of [null, "Rafters 90 × 45", "Axon cladding"]) {
-      if (name) await chooseMaterial(page, name);
+    for (const name of [null, "Rafters 90 × 45", "Axon cladding", "Add walls"]) {
+      if (name === "Add walls") {
+        // HUB 028: a new Walls item from Measure with… — Line with Wall height, Stud centres and Double top plate
+        const renders = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+        await page.getByRole("button", { name: /^Material:/ }).click();
+        await page.getByRole("button", { name: "Add walls", exact: true }).click();
+        await page.waitForFunction((n) => (window.__takeoffViewerStats?.renders || 0) > n, renders, { timeout: 30_000 });
+        await expect(page.locator("[data-walls-rules]")).toBeVisible();
+      } else if (name) await chooseMaterial(page, name);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       for (const r of await page.getByRole("radio").all()) expect((await r.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
+    // the Walls panel's own controls are 44 px targets too (the tick box by its label)
+    const small = await page.evaluate(() => [...document.querySelectorAll("[data-line-panel] button, [data-line-panel] input")]
+      .filter((e) => e.offsetParent).map((e) => { const t = e.type === "checkbox" ? e.closest("label") : e; const r = t.getBoundingClientRect(); return { t: (e.innerText || e.getAttribute("aria-label") || e.type).slice(0, 30), w: Math.round(r.width), h: Math.round(r.height) }; })
+      .filter((x) => x.w < 44 || x.h < 44));
+    expect(small).toEqual([]);
   });
 
   test("the on-screen keyboard never covers the active number field", async ({ page }) => {
@@ -2275,6 +2287,7 @@ test("pure helpers: wall naming + last height, member overrides, tools per mater
   expect(straightLegs([P(0, 0), P(100, 0), P(100, 0), P(40, 0)])).toEqual([[P(0, 0), P(100, 0)], [P(100, 0), P(40, 0)]]);
   expect(straightLegs([P(0, 0)])).toEqual([]);
   expect(keys({ family: "timber", purpose: "studs" }, "wall_frame")).toEqual(["wall", "select", "pan"]);
+  expect(keys({ family: "timber", purpose: "walls" }, "wall_framing")).toEqual(["line", "select", "pan"]);   // HUB 028: Walls traces with Line only
   expect(keys({ family: "timber", purpose: "plates" }, "linear_stock")).toEqual(["wall", "run", "count", "select", "pan"]);
   expect(keys({ family: "timber", purpose: "trim" }, "linear_stock")).toEqual(["run", "count", "select", "pan"]);
   expect(keys({ family: "cladding" }, "sheet_layout")).toEqual(["line", "rect", "area", "select", "pan"]);   // HUB 022: cladding traces with Line; HUB 023: Rectangle + Area

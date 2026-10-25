@@ -102,8 +102,9 @@ noggins at the 6,000 default, studs with no longest length):
 - Round 3: a 9,000 wall buys 1 × 9,000 LVL for its bottom plate and 1 × 9,000 LVL for its top plate, on their own
   "Plates 90 × 45 LVL" line. A 12,000 wall at 600 centres joins over the stud at 10,800: 10,800 LVL + 1,200 pine per layer.
 
-The Walls lines quoted in the worked examples ("Walls: 21 studs at 2,700 · …") are written by hand from the line
-rules. Step 4 builds wallFramingText and confirms them.
+The Walls lines quoted in the worked examples ("Walls: 21 studs at 2,700 · …") were written by hand from the line
+rules. Build step 4 built wallFramingText and confirmed every one with the real engine (node tests "Walls line …" in
+`takeoff-tc-hub028.test.mjs`; the plan screens in `e2e/ui-review/tc-hub028.spec.js`).
 
 **Where it goes in the build:** the 300 mm grid in step 2 (constants + tests) or the first step that touches stock;
 no door gaps and 2 studs per side in step 3 (extend the step 1 options as needed: e.g. a studsPerSide count, default 1,
@@ -166,9 +167,11 @@ Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 nogg
 ```
 
 - Stud centres and Double top plate share one row and apply to every wall in the item. Each is one change with one Undo, through the existing `setRule` (`MeasureScreen.jsx:1005-1009`).
-- The Walls line is hidden while a run is being traced, because it only changes after Finish. That keeps Finish in view in the 42vh phone sheet (`MeasureScreen.jsx:1473`).
+- The Walls line is hidden while a run is being traced, because it only changes after Finish. That keeps Finish in view in the 42vh phone sheet (`MeasureScreen.jsx:1473`). Build step 4 also hides the Stud centres / Double top plate row and Details › while tracing (they only change the line), so Finish stays in view even with the "That's the last point" note and an empty Wall height.
+- A wall the calculation blocks (sloped or outline, no Wall height, overlapping openings) adds nothing to the totals, so the line names it: "Walls: 8 studs at 2,700 · … · 7 noggins (1 row) · Wall 1 not counted" ("Walls: Wall 1 not counted" when no wall is worked out). The reason ("Wall 1: Openings W1 and W2 overlap …") sits straight under the line, in view (build step 4).
+- The Quantity / Installation / Procurement fold under the panel reads "Status" for a Walls item, so "Details" means only the Walls card (build step 4).
 - **Details ›** shows how many parts still need something, for example "Details: 3 to fix ›", and plain "Details ›" when nothing is missing. The needs themselves and the "Lintels, jacks and trimmers … aren't counted" note show on the Walls card and the wall pages, not on the panel.
-- **Wall height** for a Walls item starts at the last height of that item's own walls, and is empty the first time. Switching to a Walls item on the plan resets the box the same way. Cladding keeps today's HUB 022 start (`tools.js:158-166`).
+- **Wall height** for a Walls item starts at the last height of that item's own walls, and is empty the first time. Switching to a Walls item on the plan resets the box the same way. Cladding keeps today's HUB 022 start (`tools.js:158-166`). [Open, needs Sam] That start still counts a Walls item's walls, so a cladding traced after Walls starts at the stud cut length (e.g. 2,700, not the cladded 2,745). The plan keeps HUB 022 as written until Sam says otherwise; the mirror rule would be a cladding ignoring walls that are only on Walls items.
 - The run card, Undo, + Window / + Door and Review walls are the HUB 022 ones, unchanged.
 - **Details ›** opens the short Walls card:
   - At the top: the needs, naming the part (for example "Plates: enter the treatment"), and the lintels note.
@@ -264,8 +267,8 @@ Tags: **[Sam]** = his 24 October answer. **[doc]** = the review doc or an existi
 ## Worked examples
 
 Updated to Sam's rounds 2 and 3 and confirmed with the real engine in build step 3
-(`scripts/tests/takeoff-tc-hub028.test.mjs`). The Walls lines under "What Sam sees" are written by hand from the line
-rules; step 4 confirms them with wallFramingText.
+(`scripts/tests/takeoff-tc-hub028.test.mjs`). The Walls lines under "What Sam sees" were confirmed with wallFramingText
+in build step 4.
 
 **Setup.**
 - A Walls item with the built-in defaults: studs 90 × 45 MGP10 (w = 45 along the wall), plates 90 × 45, noggins 90 × 35, long plates 90 × 45 LVL.
@@ -339,7 +342,7 @@ Run total: **13 noggins** (8 × 555, 2 × 487.5, 467.5, 355, 287.5), **6,525 mm*
 - Wall 2 page: "8 studs at 2,700 · bottom plate 4.00 m · top plate 4.00 m · 4 noggins (1 row)".
 - On the Walls card: "Lintels, jacks and trimmers at D1, W1 aren't counted." and "Studs: the longest length isn't set. Confirm it before ordering." Each wall page shows the lintels note for its own openings.
 
-**Without the openings** (the first screen-test step), the same run gives 11 + 8 = 19 studs, bottom plate 10.00 m, top plate 10.00 m, and 10 + 7 = 17 noggins. At 450 centres it gives 15 + 10 = 25 studs.
+**Without the openings** (the first screen-test step), the same run gives 11 + 8 = 19 studs, bottom plate 10.00 m, top plate 10.00 m, and 10 + 7 = 17 noggins. At 450 centres it gives 15 + 10 = 25 studs and 14 + 9 = 23 noggins.
 
 ### At 3,000, Double top plate on
 
@@ -472,8 +475,9 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
    - The Line panel's starting height (`MeasureScreen.jsx:139`) uses only the Walls item's own walls when a Walls item is active, and resets that way when the active material changes to one.
    - The mock refuses measurements a Walls item can't read.
    - Test: `tc-hub028.spec.js` steps 1 to 6, and lint.
+   - Built in step 4 because Details › and the overview row's Setup both reach the card: the Walls card's shell. A Walls item opens `WallsSetup` (title "Walls", header button "Trace walls", the parts' needs at the top, then Name), never the generic Timber card. It has no Purpose chips and no `FamilyPresetPicker`, either of which would turn the item into Studs or another purpose, or replace its parts. Its header button clears where the card was opened from, so a later Close on another card goes back to the overview. Step 5 adds the rest to this same card.
 5. **Walls card and wall pages** (`FamilySetup.jsx`, `WallsScreen.jsx`, `TakeoffApp.jsx:623-652`, `fixtures/takeoff.js`).
-   - `WallsSetup` with the needs and the lintels note at the top, then the closed "Studs, plates, noggins" fold. It reuses `TimberSizeChoice` three times through a small adaptor that fills with `wallPartFill`, with one key per part so a pick can't show against the wrong part.
+   - `WallsSetup` (its shell, routing and needs list are from step 4) with the needs and the lintels note at the top, then the closed "Studs, plates, noggins" fold. It reuses `TimberSizeChoice` three times through a small adaptor that fills with `wallPartFill`, with one key per part so a pick can't show against the wrong part.
    - The card has no `FamilyPresetPicker` and no Save as company product. Its title is "Walls" and its header button is "Trace walls".
    - `studEntry` (`WallsScreen.jsx:1617`) also matches `wall_framing`, so the framing-detail sheet keeps working.
    - Side ticks are drawn like full studs (`:583-608`).
@@ -483,13 +487,14 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
 6. **Real server, journey, SOPs and log.**
    - Add the `takeoff-api.test.mjs` reload case (needs the test database).
    - Run one real-stack journey once, in a local sandbox, before asking Sam to deploy.
-   - Update SOP 20-08 to v1.5, add the 20-09 note, `SOP_CHANGELOG` and `SOP_INDEX`, and a HUB 028 row in `docs/hub_review/HUB_REVIEW_LOG.md`.
+   - Update SOP 20-08 to v1.5, add the 20-09 note, update 20-01 (Add walls in the Timber group), `SOP_CHANGELOG` and `SOP_INDEX`, and a HUB 028 row in `docs/hub_review/HUB_REVIEW_LOG.md`.
    - Finish with a short "done + next steps" summary.
 
 ## Tests
 
 **Node: `scripts/tests/takeoff-tc-hub028.test.mjs`** (real `computeWorkspace`, picked up by `takeoff-run-all.mjs`)
-Figures updated to Sam's rounds 2 and 3 (build step 3 built tests 1-4 and 6-16 this way; 5's wallFramingText is step 4).
+Figures updated to Sam's rounds 2 and 3 (build step 3 built tests 1-4 and 6-16 this way; build step 4 added 5's
+wallFramingText and the toolsFor part of 15).
 1. The 2,700 example:
    - Stations: Wall 1 [0, 600, 932.5, 977.5, 1,842.5, 1,887.5, 2,400 … 6,000] and Wall 2 [0, 600, 1,132.5, 1,177.5, 3,022.5, 3,067.5, 3,600, 4,000].
    - Studs: 21 × 2,700, cut 2,700.
@@ -552,7 +557,7 @@ Figures updated to Sam's rounds 2 and 3 (build step 3 built tests 1-4 and 6-16 t
 3. Change Stud centres to 450. The line reads "25 studs". One Undo brings back 600 and "19 studs".
 4. Add + Door and + Window. The line reads "21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)".
 5. Turn on Double top plate. Only the top plate text changes, to "2 × 10.00 m".
-6. Trace a 2,800 wall. Its wall page shows "(2 rows)". The plan line shows the mixed form, "studs (… at 2,700, … at 2,800)" and "(1–2 rows)".
+6. Trace a 2,800 wall. Its wall page shows "(2 rows)". The plan line shows the mixed form, "studs (… at 2,700, … at 2,800)" and "(1–2 rows)". (Build step 4 checks the plan line, "Walls: 27 studs (21 at 2,700, 6 at 2,800) · bottom plate 13.00 m · top plate 2 × 13.00 m · 23 noggins (1–2 rows)", for a 3,000 mm long wall at 2,800, traced as its own run with Double top plate still on from step 5. The wall page's own line comes with the wall pages in step 5.)
 7. Reload. The same walls, settings and line come back.
 8. On `walls-products`, the saved products fill every part, including the noggins' longest length, and no "missing product" or share note shows. Details shows the fold closed.
 9. At 390 × 844 there is no sideways scroll. Finish (while tracing) and + Window / + Door (after Finish) sit inside the visible sheet without scrolling it. The Worker route `/worker/takeoff/carpentry/cjb-1` shows the same flow.
@@ -623,7 +628,8 @@ Also update:
   - TC-17 is the 450 centres change, its Undo and a reload.
   - TC-12 stays, because Studs, Plates and Noggins still keep the Wall tool.
 - **20-09:** one line saying Walls (timber framing) uses the same Line tool, openings, run card and Review walls as cladding, and that Rectangle and Area aren't offered for Walls.
-- **SOP_CHANGELOG:** one HUB 028 row (20-08 v1.5 + 20-09 note, no migration, Done, untested). **SOP_INDEX:** 20-08 v1.5, test_status untested.
+- **20-01 (takeoff overview):** Section 5 step 4 reads "Timber (**Add walls**, **Add timber**)", and its TC step 5 expects Add walls first in the Timber part, and no Add walls under Flashings. (Added after the build step 4 review: step 4 puts Add walls in the Timber group and first in Measure with…, a 2 × 2 grid.)
+- **SOP_CHANGELOG:** one HUB 028 row (20-08 v1.5 + 20-09 note + 20-01 update, no migration, Done, untested). **SOP_INDEX:** 20-08 v1.5 and 20-01's new version, test_status untested.
 
 ## Questions for Sam (answered 25 October 2026, see Sam's decisions at the top)
 
