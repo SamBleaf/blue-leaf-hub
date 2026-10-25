@@ -1,7 +1,7 @@
 ---
-sop_version: 2.6
-last_reviewed: 2026-10-21
-app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
+sop_version: 2.7
+last_reviewed: 2026-10-26
+app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
 screenshot_status: needs_replacement
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -52,7 +52,7 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 ## 4. Before you start
 
 - The schedule has lines (SOP 20-05). Lines marked **over ceiling** or **needs attention**, and materials that "Need before ordering", block the supplier PDF (a draft PDF is still possible).
-- The supplier exists and is active in **Operations › Procurement › Suppliers** (SOP 16-07). If an active supplier's name starts with "Fielders" it is picked by default.
+- The supplier exists and is active in **Operations › Procurement › Suppliers** (SOP 16-07). On a **Flashings** order, an active supplier whose name starts with "Fielders" is picked by default. A **Timber and cladding** order takes the supplier of this job's last Timber and cladding order. On a job's first one the supplier is left empty, and the order offers the last one you used on any job (Section B5).
 - Know: delivery vs pickup, the delivery address or pickup branch, the **required-by date** (or "as soon as possible"), the **site contact phone**. Blue Leaf's phone or email must be set in **Settings › Company**. These are required for the supplier PDF.
 - The save chip on the takeoff says **Saved** — orders always use the last saved version.
 - A data connection (exports and order records are server actions).
@@ -65,14 +65,15 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 ### A. Open Orders and start a draft
 
 1. On the overview, in **Length schedule**, tap **Review & export order** (view-only users see **Orders**). After checking a cladding's walls with **Review walls** (SOP 20-09 Section C4), **Review order ›** on the last wall opens the same **Timber and cladding** order. Like **Review & export order**, it is greyed out ("Nothing to order yet") until the takeoff has something to order.
+   - **Review order ›** (on the last wall, or on a material's card when it says "Ready to order") opens a **Timber and cladding** draft straight away when there is none, already filled with everything that can be ordered. There is no need to tap **New order**.
 2. The **Orders** window shows: "Exporting makes a PDF for you to send — it doesn't send or place anything. Send it to the supplier yourself, then record it as placed."
 3. If you see "Saving your latest takeoff changes… orders use the saved version.", wait for it to clear.
 4. Tap **New order**. A draft called **Draft FO-00xxxx** appears with:
-   - **Supplier** — Fielders (if on file) or "Choose a supplier…".
+   - **Supplier** — Flashings: Fielders (if on file). Timber and cladding: this job's last Timber and cladding supplier, else "Choose a supplier…" (with a one-tap offer, Section B5).
    - **Delivery or pickup** — **Deliver**, with **Delivery address (from the job)** filled from the job.
    - **Lengths on this order** (flashing): each finished length with its material, "need N · ordered N · left N" and a **Qty** field.
    - **Materials on this order** (everything else): one block per material with its status chips; each line shows what is bought ("90 × 45 MGP10 H2 — 5,400 mm length"), "need … · ordered … · left …" and an **Order quantity (unit)** stepper with **−** / **+**. LM lines say **estimate — not a piece count**.
-   - Quantities start at what is still needed.
+   - Quantities start at what is still needed. A line that can't be ordered yet (for example its wall has no height) is left off, and the order names it with its fix (Section B5).
 5. If you have more than one draft, choose it in the draft dropdown next to the title.
 
 [insert screenshot: Orders — New order, Draft FO-001001 with supplier, delivery, flashing lengths and materials with steppers]
@@ -109,20 +110,40 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
    - Once a draft's **supplier PDF** has been exported, it is never changed behind you. Changes show as "needs updating" (section C), and a second order is only started when you tap **New order**.
 2. **The order is grouped like the PDF:** P1, P2 … one group per flashing, with its pieces and LM, and only lengths with a quantity. Tap **Remove** to take a whole flashing off.
 3. **What isn't on the order is named with its reason:** left off (**Add** puts it back), can't be ordered yet (e.g. missing colour; **Fix ›** opens it), already ordered on a placed order, or on another order whose supplier PDF was exported. The line "Takeoff N · on this order N · already ordered · on other orders · not on this order" lets you check it at a glance.
-4. **Two or more out-of-date lines** can be cleared at once with **Remove all N out-of-date lines**.
+4. **Two or more out-of-date lines** can be cleared at once. **Update all N lines** brings each one to what the takeoff needs now (and removes any that are no longer in it), then saves, e.g. "Updated 8 lines to what the takeoff needs now — saved." **Remove all N out-of-date lines** takes them all off instead.
 5. **Order history** lists every other draft. **Open draft** opens that same draft (same number, never a copy) to change quantities or add and remove flashings. **Discard draft** (with a confirm) removes a draft you don't need. A discarded draft with exported PDFs keeps them in the history, marked Discarded. **Placed orders are locked:** for more pieces, start a new order.
 
 ### B4. Battens, foam tape and H-flashing on the Timber and cladding order (wall-by-wall step 4, 21 Oct 2026)
 
 1. Axon, Linea, Stria and timber cladding work out their own battens, and Axon its foam tape and H-flashing (SOP 20-09, Section F2). Nothing is set up for them.
 2. On the **Timber and cladding** order they sit in the cladding's own block, after its sheets or boards, each with its product code:
-   - "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length" (pieces),
+   - "90 × 35 H3 pine batten — 3,000 mm length" (pieces; Blue Leaf's batten, Hub review HUB 030, bought in 1,200 to 6,000 mm lengths in 300 mm steps; never the Hardie Cavity Batten),
    - "Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces),
    - "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" (**Order quantity (rolls)**).
 3. They work like any other line: the stepper never goes above what the takeoff needs, and **On this order** totals each unit on its own (e.g. "29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll").
 4. The supplier PDF prints them the same way, with the codes. The battens' note says how many metres are fitted ("… m of battens on N walls, cut with offcuts shared across the walls · fixings to the studs not counted"). The tape's note shows the metres and the rolls.
 5. If a wall, an opening or the batten rule changes after a draft is saved, only those lines show **needs updating**. The cladding's own sheet lines are not affected.
-6. Two Axon claddings on one job: the foam tape and the H-flashing are one line each for the whole job (rounded up once), in the block of the first cladding that has them. The line's note names both claddings ("… · for Axon 133 smooth and Axon 400 smooth, worked out once for the job").
+6. Two claddings on one job: the battens, the foam tape and the H-flashing are bought once for the whole job (offcuts shared, rounded up once), in the block of the first cladding that has them. The line's note names both claddings ("… · for Axon 133 smooth and Axon 400 smooth, worked out once for the job").
+
+### B5. Before you can order: one card, one tap each (Hub review HUB 029, 26 Oct 2026)
+
+Everything that still stops the supplier PDF is in one box above **Export supplier PDF**, headed "Not ready to order yet:". Each item is a button or a chip. The aim is that a takeoff done on the plans ends in an order you can place, with as few taps as possible.
+
+1. **Fix buttons.** Each takeoff problem is one button that names the item, e.g. "Wall 3 on Axon 400 smooth (Walls 1, 3–6): enter the Wall height ›". Tap it:
+   - a wall problem opens that wall with the missing field ready to type in. Type it, then **Done** brings you back to this order.
+   - a setup problem opens the material's card at the missing field. **Close** brings you back to this order.
+   - a one-tap fix (for example "Use a 10 mm joint with an H-flashing") is done there and then.
+   A material's own problems are not listed again as text next to its button.
+2. **Chips that save straight away** (no **Save order details** needed). The order says "Saved on this order." after each one.
+   - **Use <supplier> (your last timber and cladding order)**, or **(this job's last order)**. **Choose ›** goes to the supplier list instead.
+   - **As soon as possible**, when no required-by date is set.
+   - **Use delivery from FO-…**, when another order on this takeoff has a phone. It copies Deliver / Pick up, the address or branch, As soon as possible (or a future required-by date, never a past one), the site contact and the phone.
+   - **Use my phone (04…)**, when no order on this takeoff has a phone: the phone from the newest order you created, on any job.
+   None of these is ever filled in without your tap.
+3. **Order without … (one tick).** An item that is measured but can't be ordered yet, and isn't on this order, is named, e.g. "Order without **Axon 400 smooth** (Walls 1, 3–6): Wall 3 has no Wall height". Either fix it (its button is above) or tick the box to order the rest without it. With the tick, **Export supplier PDF** works. The order PDF leaves it off, and the site appendix starts with "Not on this order: Axon 400 smooth (Walls 1, 3–6). Wall 3 has no Wall height. Order it separately once that's fixed." Leaving off lines that are ready is never asked about.
+4. **Add all N lines to this order** (under "Still needed but not on this order:") puts every line that can be ordered back on, at what is still needed, and saves. It never adds a line that is held, or an accessory from another supplier.
+5. **Installation** isn't checked by the app, so there is no Installation chip on the order. It never stops an order.
+6. When nothing is left: "Ready: … to <supplier>." (with ", without <item>" when you ticked **Order without**).
 
 
 
@@ -150,7 +171,8 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 
 1. Tap **Site appendix (cutting & setout)** (after export, or next to any export in **Order history**). It opens in a new tab.
 2. "SITE APPENDIX — CUTTING & SETOUT", the order reference, export number and job, then "For site use. Not part of the supplier order. Quantities are calculated from the plan and entered values; installation details marked source-pending are not verified."
-3. Sections only for what is on that order: aluminium cutting sheet per material (kerf, bars, each bar's cuts and remainder — "keep (reusable offcut)" or "waste"), timber cut list ("18 × cut 5,196 mm from 5,400 mm stock"), wall setouts (gross / openings / net and the sheets per wall), and each continuous flashing run (tight length, corners, splits, pieces).
+3. If the order went **without** a measured item (Section B5, step 3), the first line says so: "Not on this order: <item> (<walls>). <reason>. Order it separately once that's fixed."
+4. Sections only for what is on that order: aluminium cutting sheet per material (kerf, bars, each bar's cuts and remainder — "keep (reusable offcut)" or "waste"), timber cut list ("18 × cut 5,196 mm from 5,400 mm stock"), wall setouts (gross / openings / net and the sheets per wall), and each continuous flashing run (tight length, corners, splits, pieces).
 
 ### F. Record the order as placed (Director, Hub only)
 
@@ -216,7 +238,9 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 | "Not ready to order yet:" list | Missing supplier/delivery/date/phone/lines, or line problems | Fix each listed item |
 | "Choose a supplier." / "Choose delivery or pickup." / "Enter the delivery address." / "Enter the pickup branch." / "Add at least one length to the order." | Draft incomplete | Fill in and **Save order details** |
 | "Enter the date it's required by (or choose As soon as possible)." | No date and ASAP not ticked | Set **Required by** or tick **As soon as possible** |
-| "Enter a site contact phone number." | **Contact phone** blank | Type it |
+| "Enter a site contact phone number." | **Contact phone** blank | Tap **Use delivery from FO-…** or **Use my phone**, or type it |
+| "Order without <item> (<walls>): <reason>." with a tick box | A measured item can't be ordered yet and isn't on this order | Tap its fix button above it, or tick the box to order the rest without it (Section B5) |
+| A **Timber and cladding** order starts with no supplier | The job has no Timber and cladding order with a supplier yet (the flashing supplier is never used for it) | Tap **Use <supplier> (your last timber and cladding order)** or choose one |
 | "Add Blue Leaf's phone or email in Settings › Company so the supplier can reply." | Company details missing | Settings › Company |
 | "… — needs updating" + "This line is no longer in the takeoff …" / "What this line buys has changed …" / "This line's material changed …" / "Fewer … are needed now than this line orders …" / "What this line was worked out from has changed …" | The takeoff changed after the draft was saved | **Update to current material** / **Update to what's needed now** / **Set to N** / **Remove line**, then save |
 | "The takeoff needs N sheets — an order line can't be more than that." | Quantity above the need | Lower it (or record spares on a separate order if really needed) |
@@ -301,7 +325,9 @@ From the schedule you make a draft order for **one supplier**, with delivery or 
 - If requirements drop below what was placed, the extra shows as surplus / "Placed, but no longer in the takeoff"; placed orders are never changed automatically.
 - Exports and placements need a connection; the buttons are not disabled when offline — they fail with a network message.
 - The default delivery address is the job label (for carpentry jobs it includes the client name in brackets) — always check it.
-- The site appendix shows only what is on that order (e.g. battens left off the order are not in its appendix).
+- The site appendix shows only what is on that order (e.g. battens left off the order are not in its appendix). An item ordered **without** (the "Order without …" tick) is named at the top of the appendix.
+- "Order without …" is asked only for an item that is measured, can't be ordered yet, has nothing on this order and nothing placed or exported. An item with nothing measured, or ready lines you set to 0, are never asked about. A held line can't be put on the order: the export refuses it until it is fixed.
+- The one-tap offers (last supplier, delivery from another order, my phone) are read from earlier orders only. They are offered, never applied without a tap.
 - Joint-strip lines can carry the cladding's product name until a joint product is chosen (SOP 20-09 Section 12) — check before ordering.
 
 ---
@@ -468,14 +494,33 @@ Next review date: 2027-04-14
 
 **TC-23 — Battens, foam tape and H-flashing on the Timber and cladding order (wall-by-wall step 4, UI Review + API)**
 1. `?reviewRole=admin&takeoffDefaults=1` → **Timber and cladding** → **Add cladding** → **Axon 400 smooth** → **Walls** → **Wall by numbers** 4,000 × 3,600 → **‹ Walls** → **Back** → **Review & export order** → **New order**.
-2. Expected: the Axon block lists the sheets, then "… · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length" (pieces), "… · Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces) and "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" with **Order quantity (rolls)** 1. Each starts at what the schedule shows.
-3. API (scripts/tests/takeoff-api.test.mjs "wall-by-wall step 4"): an order with every Axon line stores the codes 405307, 305613 and 304560 (the tape as unit "roll"); the exported snapshot has ONE material block holding them (units piece, piece, roll); the supplier PDF is served. Engine (scripts/tests/takeoff-tc-autobattens.test.mjs): the snapshot rows and the supplier PDF text read "N × piece Hardie Cavity Batten 70 × 19 …", "2 × roll Hardie™ 50mm Foam Back Sealing Tape, 25 m roll …", "2 × piece Hardie™ 9mm Alum Horizontal H Flashing …" with the codes; a hand-made batten material on a wall never adds a second batten line.
+2. Expected: the Axon block lists the sheets, then "90 × 35 H3 pine batten — N mm length" (pieces, lengths from 1,200 to 6,000 in 300 mm steps), "… · Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length" (pieces) and "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560" with **Order quantity (rolls)** 1. Each starts at what the schedule shows. Nothing reads "Hardie Cavity Batten" or "405307".
+3. API (scripts/tests/takeoff-api.test.mjs "wall-by-wall step 4"): an order with every Axon line stores pine battens and the codes 305613 and 304560 (the tape as unit "roll"), never 405307; the exported snapshot has ONE material block holding them (units piece, piece, roll); the supplier PDF is served. Engine (scripts/tests/takeoff-tc-autobattens.test.mjs and takeoff-tc-hub030.test.mjs): the snapshot rows read "N × piece 90 × 35 H3 pine batten …", "2 × roll Hardie™ 50mm Foam Back Sealing Tape, 25 m roll …", "2 × piece Hardie™ 9mm Alum Horizontal H Flashing …"; two claddings share one set of batten lines; a hand-made batten material on a wall never adds a second batten line.
 - [ ] Pass  [ ] Fail
 
 **TC-24 — Review order › from the last wall (wall-by-wall step 5, UI Review)**
 1. `?takeoffSeed=mixed` → Timber and cladding → **Measure** → **Axon cladding** → trace a run of four walls → **Review walls** → **Next wall ›** until "5 of 5" (North wall).
 2. Expected: **Review order ›** at the bottom instead of **Next wall ›**. Tap it → **New order**. Expected: the **Orders** window, the same as **Review & export order**; the Axon sheet quantities are the walls' sheets (the lines at the top of each wall) plus the schedule's spares. **Back** returns to the overview.
 3. Nothing to order: a job whose only cladding wall is 4,000 × 4,200 Axon 400 smooth with no joint row. Expected: on the overview **Review & export order** is greyed out; **Review walls** → "1 of 1" → **Review order ›** is greyed with "Nothing to order yet", so no empty draft (and no order number) is made. Tap **Use a 10 mm joint with an H-flashing** on the wall: **Review order ›** works and opens **Orders**. Screens: e2e/ui-review/tc-review.spec.js.
+- [ ] Pass  [ ] Fail
+
+**TC-25 — Before you can order: Review order ›, three chips, Export (HUB 029, UI Review)**
+1. `?reviewRole=admin&section=timber_cladding&takeoffSeed=cladding-wall3` (390 × 844) → overview → **Axon 400 smooth** (the first) → **Setup**.
+2. Expected: the card shows "1 thing to fix before ordering" with one button "Wall 3: enter the Wall height ›". Tap it → Wall 3 opens with **Wall height** ready to type. Type 3600, Enter, **Done** → back on the card: "Ready to order · Review order ›".
+3. Tap **Review order ›**. Expected: the **Orders** window with a Timber and cladding draft already made, both Axons on it, no Installation chip. The box "Not ready to order yet:" shows the chips **Use Other Steel Supplies (your last timber and cladding order)**, **Choose ›**, **As soon as possible** and **Use my phone (0400 123 456)**.
+4. Tap the supplier chip ("Saved on this order."), **As soon as possible**, then **Use my phone**. Expected: "Ready: … to Other Steel Supplies." with no **Save order details** button; **Export supplier PDF** is enabled. Export → "Export 1 is frozen. Nothing has been sent." That is 5 taps from **Review order ›** (e2e/ui-review/tc-hub029.spec.js counts them).
+- [ ] Pass  [ ] Fail
+
+**TC-26 — Order without … (HUB 029, UI Review + API)**
+1. Same seed, with Wall 3 left empty → overview → **Review & export order** → **New order**.
+2. Expected: only the second Axon's lines are on the order (the held ones are left off). The box has one button "Wall 3 on Axon 400 smooth (Walls 1, 3–6): enter the Wall height ›" and no "Axon 400 smooth: …" bullet. Tap the three chips (step 4 above). Expected: a tick box "Order without **Axon 400 smooth** (Walls 1, 3–6): Wall 3 has no Wall height"; **Export supplier PDF** is greyed.
+3. Tick it. Expected: "Ready: … without Axon 400 smooth." and Export is enabled. Untick it, tap the Wall 3 button → Wall 3 at **Wall height** → 3600 → **Done** → back on **Timber and cladding orders**. Expected: the tick box is gone; **Add all N lines to this order** ("Added N lines — saved.") puts the first Axon on; "Ready: …".
+4. API (scripts/tests/takeoff-api.test.mjs "HUB 029 step 5"): the preview lists exactly "Order without Axon front (Walls 1, 3): Wall 3 has no Wall height." and nothing else; an item with nothing measured adds nothing; the export without `acknowledgeLeftOff` is refused (400, nothing frozen); a draft PDF never needs it; with it the export is frozen with `notIncluded` [Axon front, Walls 1, 3] and `leftOffAcknowledged`, and the site appendix PDF is served. The orders list's hints offer the section's last supplier and this person's last phone.
+- [ ] Pass  [ ] Fail
+
+**TC-27 — Update all out-of-date lines (HUB 029, UI Review)**
+1. `?takeoffSeed=mixed` → Timber and cladding → make a draft with two or more generic lines → **Save order details** → change something both lines come from (e.g. the rafter pitch, SOP 20-08).
+2. Expected: **Update all N lines** next to **Remove all N out-of-date lines**. Tap it. Expected: "Updated N lines to what the takeoff needs now — saved." with no stale box left and no **Save order details** button.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

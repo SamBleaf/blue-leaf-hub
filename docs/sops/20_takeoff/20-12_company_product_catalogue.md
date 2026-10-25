@@ -1,7 +1,7 @@
 ---
-sop_version: 1.4.1
-last_reviewed: 2026-10-25
-app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
+sop_version: 1.5
+last_reviewed: 2026-10-26
+app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
 screenshot_status: placeholders_only
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -95,6 +95,8 @@ Company products live in one catalogue, grouped by kind (Timber, Fibre cement cl
 3. Changes you make on the job now apply to this job only.
 
 > 💡 **Timber (HUB 027):** a company timber product also shows in the timber card's **Size and grade** list, under **Company products**, for the purpose it was saved for (a Battens product on Battens only). Picking it there fills only its size, grade, treatment, species, supplier and supplier code (SOP 20-08 Section 5A step 4). **Use on this job** here still copies the whole product. Save each supplier's LVL as a company timber product for Studs, with its own grade and treatment: the app has no built-in LVL grade or treatment.
+
+> 💡 **Battens (HUB 030, Sam 25 Oct 2026: "we always use 90 x 35 pine for battens"):** a **Support battens** item with no product uses the Blue Leaf default, "90 × 35 H3 pine batten, 1,200–6,000 mm in 300 mm steps", at 600 centres with fixings not counted. The cladding's own battens are always that pine batten, never the Hardie Cavity Batten. **Change** on the batten card picks a company or researched batten for one job; **Use Blue Leaf default** puts the pine back. A batten product saved on a job is never swapped for the default.
 
 ### E. Make a new company version
 
@@ -307,6 +309,12 @@ Next review date: 2027-04-14
 2. Read the **Company products** list and the presets list.
 3. Supervisor (`reviewRole=supervisor`) and the Worker-app office login (`/worker/takeoff/carpentry/cjb-1?section=timber_cladding&takeoffWorker=office`) → **Add aluminium**; then the leading hand (`/worker/takeoff/carpentry/cjb-1?section=timber_cladding`) → **Add aluminium**, **Close**, **Add timber**.
 4. Expected result: step 1 — "Added “Aluminium angle 50 × 50 × 3” to company products. Other jobs can use it; this job keeps its own copy."; step 2 — listed under **ALUMINIUM PROFILES** with **rev 1**; the preset has `spec.kerfMm` 3, `spec.kerfConfirmed` false, `spec.stockLengthMm` 6500 and no `rules.carried` / `defaultsFrom` / `companyDefault`; the job material keeps its confirmed tick and has no `fromPresetId`; step 3 — **Add to company products** shows for the supervisor and the office login (no **New company product** in the Worker app); the leading hand has neither button and reads "No company products for this yet." (never "Set one up here"), and on **Add timber** the same, never "researched catalogue". Full flow: SOP 20-10 TC-13; the review fixes (a different size, someone else saving first, a job's own new version): SOP 20-10 TC-15.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Support battens start from the Blue Leaf pine batten (HUB 030, UI Review)**
+1. `?reviewRole=admin&section=timber_cladding&takeoffSeed=support-battens-empty` → the Support battens item → **Setup**.
+2. Expected: "Blue Leaf default: 90 × 35 H3 pine batten, 1,200–6,000 mm in 300 mm steps" with **Change**; "600 centres (Blue Leaf default)"; "Not counted (Blue Leaf default)"; nothing to fix.
+3. **Change** → **Hardie Cavity Batten** (the job's material now names it) → **Use Blue Leaf default**. Expected: the pine default again, and the item's product is no longer the Hardie batten.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

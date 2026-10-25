@@ -199,3 +199,19 @@ Owner requests single-tap corner points, double-tap finish as one site-cut/folde
 ## OWNER-2026-10-25 — timber stock in 300 mm steps
 
 Owner decision (Sam, 25 Oct 2026: "Yes, 300 mm steps"). Timber stock is 1200 mm minimum, then 300 mm increments (1200, 1500, 1800 …), for all suppliers and every timber item. It replaces the 600 mm increments of OWNER-2026-10-14. A product's longest length and the lengths it doesn't stock still only restrict the grid. Flashings, cladding sheets, aluminium and the cladding followers keep their own stock rules.
+
+## OWNER-2026-10-25 — battens are 90 × 35 H3 pine (HUB 030)
+
+Owner decision (Sam, 25 Oct 2026: "we NEVER use the hardies cavity batten - we always use 90 x 35 pine for battens"; then "H3", "6.0 m" and "Whole job"). Every batten the takeoff works out for a cladding is a 90 × 35 H3 pine batten (`OWNER_BATTEN` in `shared/takeoff/engine/families.js`), bought in 1200 mm to 6000 mm lengths in 300 mm steps, with offcuts shared across every cladding on the job. A batten joins only past 6000 mm. The set-out rule that merges two battens closer than a batten's face stays at 70 mm (`BATTEN_SETOUT_FACE_MM`), so the positions are unchanged from the earlier rule. A Support battens item with no product takes the same pine batten; a product chosen on purpose is kept. The Hardie Cavity Batten stays in the researched catalogue for older jobs only.
+
+## OWNER-2026-10-25 — Support battens defaults (HUB 029 / HUB 030)
+
+Owner decision (Sam, 25 Oct 2026: "Yes, 600 and no fixings"). A Support battens item with no spacing entered uses 600 mm maximum centres, and with no fixing rule its batten fixings to the studs are not counted ("Batten fixings to the studs aren't counted (as the automatic battens)."), the same as the automatic battens (`SUPPORT_BATTEN_DEFAULTS`). Both can be changed on the card. This is a company quantity default, not an installation rule: installation stays not checked by the app.
+
+## OWNER-2026-10-25 — a wall with no height holds the whole cladding (HUB 029)
+
+Owner decision (Sam, 25 Oct 2026: "Hold the whole cladding"). When one of a cladding's walls has no Wall height, nothing of that cladding (sheets, battens, tape, H-flashing) is orderable until it is entered. The order can go without it only through an explicit "Order without …" acknowledgement, which is recorded in the export snapshot (`notIncluded`, `leftOffAcknowledged`) and printed on the site appendix.
+
+## OWNER-2026-10-25 — default Walls framing products (decision 6)
+
+Owner decision (Sam, 25 Oct 2026: "studs are 90x35 LVL smart 10 h2, noggings 90x35 mgp10 untreated, top and bottom plate 90x45 mgp10 H2, or 90x45 LVL 10 smart H2 for long plates or all plates but i dont love the way they absorbs moisture on the ground"; grade MGP10). A new Walls item starts with studs 90 × 35 LVL Smart 10 H2, plates 90 × 45 MGP10 H2, long plates (over 6.0 m) 90 × 45 LVL Smart 10 H2 up to 11.0 m, and noggins 90 × 35 MGP10 untreated (`WALL_PART_DEFAULTS`). These are the company's usual purchase, not a structural check: the app never sizes framing.

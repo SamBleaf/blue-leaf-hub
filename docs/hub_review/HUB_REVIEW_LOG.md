@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 25 October 2026, HUB 028 built)
+## Current state (updated 26 October 2026, HUB 029 and HUB 030 built)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -39,9 +39,11 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 025 Aluminium Conflict explained (false conflict fixed) | Implemented, live | 7e6759e | iPhone check |
 | HUB 026 Aluminium plan measuring first | Implemented, live | 7e6759e | iPhone check |
 | HUB 027 Timber presets by purpose | Implemented, live | 7e6759e | iPhone check |
-| HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, awaiting deploy (built on takeoff-r03, not on main) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f, 36ad816 + final review fixes | Sam's deploy, then iPhone check |
+| HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, live (25 October, main 0b9d6dc) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f, 36ad816, cfaca0f, 9bf6138 | iPhone check |
+| HUB 029 Blockers you can tap; an order you can place | Implemented, awaiting deploy | f33c7b5, 6557910, 058186a, a3a7ee2 + docs | Deploy, then Sam's 3-tap restore on job 413d9151 and the Wall 3 height |
+| HUB 030 Battens are 90 × 35 H3 pine | Implemented, awaiting deploy | 678fedf | Deploy, then iPhone check |
 
-**Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October). HUB 028 needs none.
+**Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October). HUB 028, HUB 029 and HUB 030 need none.
 
 **Decisions waiting on Sam:** HUB 028's main questions are answered (25 October, rounds 1–3). Its smaller build defaults
 are tagged [Default, needs Sam] in docs/hub_review/WALLS_FRAMING_PLAN.md (for example LVL stock in 300 mm steps with
@@ -55,6 +57,24 @@ drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc com
 (HUB 008/019) and can be resolved.
 
 ## Log
+
+### 2026-10-26 — HUB 029 and HUB 030 built (steps 1–6), deploy on Sam's word once everything passes
+- Plan: docs/hub_review/ORDER_BLOCKERS_PLAN.md with Sam's decisions of 25 October (a wall with no height holds the whole
+  cladding; Support battens with nothing entered = 600 centres, fixings not counted; the mis-tapped Axon on job 413d9151
+  is restored by Sam after the deploy in 3 taps; pine battens H3, 300 mm steps to 6.0 m, pooled for the whole job;
+  decision 6: the Walls default products). Scope cut: no Hardie reconcile row (a read-only check found 0 placed or
+  exported Hardie batten lines).
+- Step 1 f33c7b5: wall_incomplete wording, scope and refs; orderReady; traced walls on a re-scaled page.
+- Step 2 6557910: shared/takeoff/fixes.js (every blocker as a one-tap row with a target); decision 6 defaults.
+- Step 3 678fedf (HUB 030): OWNER_BATTEN pine, shared across the job; SUPPORT_BATTEN_DEFAULTS.
+- Step 4 058186a: the card, the walls and the schedule show fix buttons; Installation "Not checked by the app".
+- Step 5 a3a7ee2: Orders "Before you can order" card (chips save at once, Update all, Add all), "Order without …"
+  (shared/takeoff/leftOff.js, server + mock; snapshot notIncluded; site appendix line), per-section supplier, held lines
+  never pre-filled, Review order › opens a pre-filled draft.
+- Step 6: SOPs 20-05 v2.2, 20-06 v2.7, 20-08 v1.6, 20-09 v2.2, 20-12 v1.5; source register OWNER-2026-10-25 entries.
+- Tests: npm run test:takeoff all 40 suites; lint 0; build; screens and journeys (see the deploy entry). Two older API
+  tests (HUB 022 step 2 and wall-by-wall step 4) fail now and then on random ids, on the previous commit too; flagged as
+  a separate task.
 
 ### 2026-10-25 — HUB 028 Walls built (steps 1–6), not deployed
 - Plan: docs/hub_review/WALLS_FRAMING_PLAN.md with Sam's decisions of 25 October (round 1: Wall height = stud cut, 2

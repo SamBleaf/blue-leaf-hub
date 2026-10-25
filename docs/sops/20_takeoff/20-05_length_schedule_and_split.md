@@ -1,7 +1,7 @@
 ---
-sop_version: 2.1
-last_reviewed: 2026-10-21
-app_version: takeoff-r03 (TC-R04 build, commit 8f9190f)
+sop_version: 2.2
+last_reviewed: 2026-10-26
+app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
 screenshot_status: needs_replacement
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -65,7 +65,8 @@ The schedule lists every flashing piece you need, grouped by material and profil
    - On the right: "N ordered · M left" (+ "· N surplus") or "not ordered" — counted **only** from orders the Director has recorded as placed.
 4. Tap a flashing line to expand it: each problem in words and every source piece, e.g. "Measured 4,312 + allowance 200 → order 4,600 mm", "Counted 3 × 2,400 mm (finished length, no allowance)", "Entered 3 × 4,312 mm (finished length, no allowance)", or for a continuous run "Run R-xxxxxxxx: 10,000 mm tight along the path · 1 corner(s) at 6,000 mm — cut/folded on site, no extra pieces" with each piece. Each group ends with "N pieces · X LM".
 5. **Other material groups** (timber, cladding, AAC, foam, timber cladding, battens, aluminium, accessories): name, kind and spec line, provenance ("Size: manual selection (not structurally checked)", "Cutting: 3 mm kerf, 0 mm end trim"), the three status chips, "Quantities only — installation details are not verified by the app.", **Needs before ordering:** (blocking) and **Note:** lines (advisory), accessory scope, per-wall areas ("North wall: net 12.15 m² (gross 12.96 − openings 0.81) · Entered length and heights"), spares actually added, cut-plan summaries, then rows such as "18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length", "4 sheets · … — 2,750 × 1,200 mm", "2 bars · equal-angle 50 × 50 × 3 — 6,500 mm length (no joins)", "57 LM · … — random lengths (LM)" (**estimate — not a piece count**), "3 boxes · …". The group footer totals each unit separately ("18 pieces", "4 sheets"). **How this was worked out** shows every calculation step.
-6. A cladding's own **battens**, **H-flashing** and **foam tape** (worked out from its walls — SOP 20-09, Section F2) are rows in the cladding's group, after its sheets or boards, each with its product code ("14 pieces · Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length", "1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"). The footer totals each unit on its own ("4 sheets · 1 roll"). Their spares are their own and named ("Spares added: 1 sheet, 2 sheets, 7 battens, 1 H-flashing length (10%) …"), and so are their cutting plans ("Battens: cuts need … mm …", "H-flashing: cuts need … mm …"). With two Axon claddings on one job the foam tape and H-flashing are worked out once for the job and listed under the first cladding; the other says "its foam tape is ordered once for the job with …". **Show on wall** from a batten row opens the wall on **Supports**.
+6. A cladding's own **battens**, **H-flashing** and **foam tape** (worked out from its walls — SOP 20-09, Section F2) are rows in the cladding's group, after its sheets or boards, with their product codes ("2 pieces · 90 × 35 H3 pine batten — 5,700 mm length" (HUB 030: Blue Leaf's pine, bought once for the whole job), "1 roll · Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"). The footer totals each unit on its own ("4 sheets · 1 roll"). Their spares are their own and named ("Spares added: 1 sheet, 2 sheets, 7 battens, 1 H-flashing length (10%) …"), and so are their cutting plans ("Battens: cuts need … mm …", "H-flashing: cuts need … mm …"). With two Axon claddings on one job the foam tape and H-flashing are worked out once for the job and listed under the first cladding; the other says "its foam tape is ordered once for the job with …". **Show on wall** from a batten row opens the wall on **Supports**.
+6a. **Needs before ordering (HUB 029):** each item is a button that opens its fix, for example "Wall 3: enter the Wall height ›" opens Wall 3 with **Wall height** ready to type, and **Done** comes back to the schedule. **Installation** reads "Not checked by the app" (grey). It never stops an order, and the installation notes are one short line, not a list of fixes.
 7. Tap a row of another material to see its note, cut list ("Cuts: 18 × 5,196.2 mm — one cut from each 5,400 mm length" or "Cut plan (planned — not cut yet): …"), **Comes from** (each source by name and kind) and **Show on plan** / **Show on wall** / **Show openings** (only when there is somewhere to show it).
 
 | Finished length (default rules) | Shows | Can it be ordered? |
@@ -302,6 +303,12 @@ Next review date: 2027-04-14
 1. Mixed job → **Review & export order** → **New order** → set **Cavity battens** quantity 0 → **Save order details** → **Export supplier PDF** → **Record order placed…** → Export 1 → **Record order placed**.
 2. **Back** → **Rafters 90 × 45** → **Setup** → Grade "MGP12" → wait for **Saved** → **Close** → **Open schedule**.
 3. Expected result: box "Placed, but no longer in the takeoff" with "A measurement, product or stock changed after these were ordered. The placed orders are unchanged …" and an entry "18 pieces · 90 × 45 MGP10 H2 — 5,400 mm length · placed on FO-001001"; the Rafters row now reads "18 pieces · 90 × 45 MGP12 H2 — 5,400 mm length" **not ordered**; Axon "4 sheets ordered · 0 left".
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Needs before ordering are buttons (HUB 029, UI Review)**
+1. `?reviewRole=admin&section=timber_cladding&takeoffSeed=cladding-wall3` → **Open schedule** → the first **Axon 400 smooth** group.
+2. Expected: "Needs before ordering:" holds a button naming Wall 3 ("… enter the Wall height ›"); **Installation: Not checked by the app** (grey); no installation sentence among the needs; every batten row reads "90 × 35 H3 pine batten — …".
+3. Tap the Wall 3 button → Wall 3 with **Wall height** focused → 3600 → **Done**. Expected: back on the schedule, and the group reads **Ordering: Ready to order**.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
