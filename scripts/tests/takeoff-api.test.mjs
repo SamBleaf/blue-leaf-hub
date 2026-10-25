@@ -1676,6 +1676,52 @@ await t("HUB 028 step 2: a Walls item (wall_framing@1) keeps its four parts (par
   assert.equal(await rev(), before, "nothing saved");
 });
 
+await t("HUB 028 step 3: the REAL server works out a Walls run like the shared engine (21 studs, plates, 13 noggins) and keeps each order line's part", async () => {
+  const { computeWorkspace: compute, wallFramingDefaults } = await import("../../shared/takeoff/index.js");
+  const w = id(), walls = id(), w1 = id(), w2 = id(), d1 = id(), o1 = id();
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB028 s3" })).status, 200);
+  // three saved company products (one per part, with treatments), so nothing is "missing product"
+  const prod = (purpose, widthMm = 45) => ({ id: purpose, isActive: true, rules: {},
+    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP10", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
+  const spec = wallFramingDefaults([prod("studs"), prod("plates"), prod("noggins", 35)]);
+  const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false } }] },
+    measurements: { upsert: [
+      { id: w1, kind: "wall", inputs: { kind: "rect", widthMm: 6000, heightMm: 2700, name: "Wall 1" } },
+      { id: w2, kind: "wall", inputs: { kind: "rect", widthMm: 4000, heightMm: 2700, name: "Wall 2" } },
+      { id: d1, kind: "opening", parentId: w1, inputs: { xMm: 1000, sillMm: 0, widthMm: 820, heightMm: 2040, label: "D1", type: "door" } },
+      { id: o1, kind: "opening", parentId: w2, inputs: { xMm: 1200, sillMm: 900, widthMm: 1800, heightMm: 1200, label: "W1", type: "window" } }] },
+    contributions: { upsert: [{ id: id(), measurementId: w1, jobMaterialId: walls, role: "wall" }, { id: id(), measurementId: w2, jobMaterialId: walls, role: "wall" }] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const rows = (computed, part) => computed.scheduleLines.filter((l) => l.component === part).map((l) => [l.quantity, l.finishedLengthMm]);
+  assert.deepEqual([rows(r.data.computed, "studs"), rows(r.data.computed, "plates"), rows(r.data.computed, "noggins")], [[[21, 2700]], [[2, 6000], [2, 4200]], [[1, 4800], [1, 1800]]]);
+  // a reload works out exactly the same lines, and they are the shared engine's own on the stored snapshot
+  const again = (await S(`/workspaces/${w}`)).data;
+  assert.deepEqual(again.computed.scheduleLines, r.data.computed.scheduleLines);
+  assert.deepEqual(compute(again.snapshot).scheduleLines, again.computed.scheduleLines);
+  assert.deepEqual(again.computed.materialResults[walls].appendix.timber.map((x) => x.title), ["Studs cut list", "Plates cut list", "Noggins cut list"]);
+  // the Timber and cladding order keeps each line's part in its stored item (what the "Update" suggestion matches on)
+  const oid = id();
+  const o = await SP(`/workspaces/${w}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier });
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls));
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
+  assert.equal(pr.status, 200, JSON.stringify(pr.data));
+  const stored = (await q("SELECT quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY item->>'description'", [oid])).rows;
+  assert.deepEqual(stored.map((x) => [x.item.component, x.quantity, Number(x.finished_length_mm), x.item.description]), [
+    ["noggins", 1, 1800, "Noggins 90 × 35 MGP10 H2 — 1,800 mm length"], ["noggins", 1, 4800, "Noggins 90 × 35 MGP10 H2 — 4,800 mm length"],
+    ["plates", 2, 4200, "Plates 90 × 45 MGP10 H2 — 4,200 mm length"], ["plates", 2, 6000, "Plates 90 × 45 MGP10 H2 — 6,000 mm length"],
+    ["studs", 21, 2700, "Studs 90 × 45 MGP10 H2 — 2,700 mm length"]]);
+  const lines = (await S(`/workspaces/${w}/orders`)).data.orders.find((x) => x.id === oid).lines;
+  assert.deepEqual(lines.map((l) => l.item.component).sort(), ["noggins", "noggins", "plates", "plates", "studs"]);
+  // the draft export carries the per-part cut lists in its site appendix
+  const e = await SP(`/orders/${oid}/exports`, { isDraft: true, idempotencyKey: "hub028-s3-exp", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await rev() });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
+  assert.deepEqual(snap.appendix.timber.map((x) => [x.materialName, x.title]), [["Walls", "Studs cut list"], ["Walls", "Plates cut list"], ["Walls", "Noggins cut list"]]);
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

@@ -128,6 +128,8 @@ export const WALL_LONG_PLATE_DEFAULT = Object.freeze({ depthMm: 90, widthMm: 45,
 export const WALL_LVL_STOCK_MIN_MM = 6300;
 /** Walls rules (bounded scalars the server already keeps): one Stud centres and one Double top plate per item. */
 export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate: false });
+/** Sam, round 2 (25 Oct 2026): 2 full-length studs each side of every opening on Walls (windows, doors and other). */
+export const WALL_STUDS_EACH_SIDE = 2;
 
 const LVL_RE = /\blvl/i;
 /** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */
@@ -238,14 +240,18 @@ const txt = (v, max = 80) => (v == null ? null : String(v).replace(/[\u0000-\u00
 const lengthsList = (arr, label) => (Array.isArray(arr) ? [...new Set(arr.map((x) => num(x, label, { allowNull: false })))].sort((a, b) => a - b) : []);
 
 /** One Walls part, cleaned with the same field rules as a timber spec; a part's problem names it ("Plates: …"). */
-function normaliseWallPart(p, label) {
+function normaliseWallPart(p, label, part) {
   const x = p && typeof p === "object" ? p : {};
+  const maxMm = num(x.stock?.maxMm, `${label}: longest available length`);
+  // "not stocked" lengths are grid lengths; the Long plates' own longest length (11,000, off the 300 mm grid) is one
+  // of their stock lengths too (longPlateStockLengths), so it can be marked not stocked as well
+  const longest = part === "longPlates" ? maxMm ?? WALL_PART_DEFAULT_MAX_MM.longPlates : null;
   return {
     section: { depthMm: num(x.section?.depthMm, `${label}: section depth`), widthMm: num(x.section?.widthMm, `${label}: section width`) },
     grade: txt(x.grade, 40), treatment: txt(x.treatment, 40), species: txt(x.species, 40),
     supplierName: txt(x.supplierName), productCode: txt(x.productCode, 60),
-    stock: { maxMm: num(x.stock?.maxMm, `${label}: longest available length`),
-      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter(onTimberGrid) },
+    stock: { maxMm,
+      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter((l) => onTimberGrid(l) || l === longest) },
   };
 }
 
@@ -265,7 +271,7 @@ export function normaliseFamilySpec(spec) {
       return { ...base, spareRate: 0, purpose: WALLS_PURPOSE,
         section: { depthMm: null, widthMm: null }, grade: null, treatment: null, species: null, plies: 1,
         stock: { ...TIMBER_GRID, maxMm: null, unavailableMm: [] }, sizing, endAllowanceMm: 0,
-        components: Object.fromEntries(WALL_PARTS.map((k) => [k, normaliseWallPart(parts[k], WALL_PART_LABELS[k])])) };
+        components: Object.fromEntries(WALL_PARTS.map((k) => [k, normaliseWallPart(parts[k], WALL_PART_LABELS[k], k)])) };
     }
     const maxMm = num(s.stock?.maxMm, "Longest available length");
     return { ...base,

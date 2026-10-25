@@ -8,6 +8,10 @@
 // Step 2, material and registry (engine/families.js, methods.js, dispatch.js methodReads): the Walls spec (purpose
 // "walls", four parts incl. Long plates = 90 × 45 LVL, Sam's round 3), its normaliser, identity, needs and line,
 // wallPartFill / wallFramingDefaults, wall_framing@1 reading walls only, and the 300 mm grid for ALL timber.
+// Step 3, the Walls calculation (engine/dispatch.js runWallFraming, purchaseLines, schedule.js): both worked examples
+// recomputed under Sam's round 2 (2 studs each side, full-length bottom plate, 300 mm steps) through the real
+// computeWorkspace, the switch, separate lines and cut lists per part, item-wide blocks, the double-count note, round 3
+// LVL long plates, touching studs and order independence.
 //   node scripts/tests/takeoff-tc-hub028.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -24,8 +28,9 @@ import {
   CALCULATION_VERSION, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PRESETS, TIMBER_PURPOSES, WALLS_PURPOSE, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT,
   WALL_PARTS, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
   longPlateStockLengths, methodFor, methodReads, normaliseFamilySpec, onTimberGrid, orderLineState, orderStatus, productionMethods, stockIdentityKey, timberProductFill,
-  wallFramingDefaults, wallPartFill, wallPartProducts,
+  wallFramingDefaults, wallPartFill, wallPartProducts, WALL_STUDS_EACH_SIDE,
 } from "../../shared/takeoff/index.js";
+import { JOB_GENERATED_LIMIT } from "../../shared/takeoff/engine/dispatch.js";
 import { TIMBER_ORDERING_POLICY } from "../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../shared/takeoff/products/seed.js";
 import { cleanMaterialContent } from "../../server/lib/takeoff/takeoffService.mjs";
@@ -755,6 +760,478 @@ t("Long plates stock: 300 mm steps from 6,300 up to 11,000, plus 11,000 itself; 
   assert.equal(longPlateStockLengths({ stock: { maxMm: 12000 } }).at(-1), 12000);
   assert.deepEqual(longPlateStockLengths({ stock: { maxMm: null } }), lv, "no longest length → Sam's 11,000");
   assert.deepEqual(longPlateStockLengths(undefined), lv);
+});
+
+// ══ Step 3: the Walls calculation (engine/dispatch.js runWallFraming, purchaseLines, schedule.js) ═══════════════════
+// Sam's round 2: 2 full-length studs each side of every opening, the bottom plate bought full length; round 3: a plate
+// piece over the pine plates' longest length (6,000) is ONE 90 × 45 LVL length, joined over a stud only past 11,000.
+const READY = () => wallFramingDefaults([product("p-stud", "studs"), product("p-plate", "plates"), product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 } })]);
+const LVL_READY = () => wallFramingDefaults([product("p-stud", "studs"), product("p-plate", "plates"), product("p-lvl", "plates", { grade: "LVL", treatment: "H2" }),
+  product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 } })]);
+const withPart = (spec, k, over) => ({ ...spec, components: { ...spec.components, [k]: { ...spec.components[k], ...over } } });
+const wm = (id, widthMm, heightMm, name, over = {}) => ({ id, kind: "wall", inputs: { kind: "rect", widthMm, heightMm, name, ...over } });
+const om = (id, parentId, label, type, xMm, widthMm, heightMm, sillMm, detail) => ({ id, kind: "opening", parentId,
+  inputs: { xMm, sillMm, widthMm, heightMm, label, type, ...(detail ? { detail } : {}) } });
+const onW = (measurementId, jobMaterialId = "walls") => ({ id: `c-${measurementId}-${jobMaterialId}`, measurementId, jobMaterialId, role: "wall" });
+/** A Walls item (and any other materials) through the real computeWorkspace; every wall is on the Walls item unless told. */
+const wf = (measurements, { spec = READY(), rules = { ...WALL_FRAMING_RULES }, extra = [], contributions = null } = {}) =>
+  computeWorkspace(tSnap([walls(spec, rules), ...extra], measurements, contributions || measurements.filter((m) => m.kind === "wall").map((m) => onW(m.id))));
+const WR = (c) => c.materialResults.walls;
+const wl = (c, name) => WR(c).layouts.find((l) => l.wallLabel === name);
+const st = (l) => l.ticks.filter((x) => x.state !== "removed").map((x) => x.positionMm);
+const partLines = (c, part) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes("walls") && l.component === part);
+const partRows = (c, part) => partLines(c, part).map((l) => [l.quantity, l.finishedLengthMm]);
+const partDemands = (c, part) => WR(c).demands.filter((d) => d.identity.component === part);
+const cutList = (c, title) => WR(c).appendix.timber.find((x) => x.title === title);
+const msgs = (c) => WR(c).problems.map((p) => [p.code, p.blocking, p.message]);
+const hasMsg = (c, code, blocking, message) => msgs(c).some(([k, b, m]) => k === code && b === blocking && m === message);
+const pieceSum = (c, part) => partDemands(c, part).reduce((a, d) => a + d.quantity, 0);
+const fittedMm = (c, part) => partDemands(c, part).reduce((a, d) => a + d.quantity * d.lengthMm, 0);
+// the worked example: one Line run A → B → C. Wall 1 (A to B) 6,000 with D1 820 × 2,040 at 1,000; Wall 2 (B to C) 4,000
+// with W1 1,800 × 1,200 at 1,200 from the corner, sill 900 (its edges on the 600 grid on purpose, to show the merge)
+const EXAMPLE = (H, H2 = H) => [wm("w1", 6000, H, "Wall 1"), wm("w2", 4000, H2, "Wall 2"),
+  om("d1", "w1", "D1", "door", 1000, 820, 2040, 0), om("o1", "w2", "W1", "window", 1200, 1800, 1200, 900)];
+const ex = (H, { doubleTopPlate = false, spec, H2 } = {}) => wf(EXAMPLE(H, H2), { spec, rules: { centresMm: 600, doubleTopPlate } });
+const WALL1_AT = [0, 600, 932.5, 977.5, 1842.5, 1887.5, 2400, 3000, 3600, 4200, 4800, 5400, 6000];
+const WALL2_AT = [0, 600, 1132.5, 1177.5, 3022.5, 3067.5, 3600, 4000];
+const nogLengths = (c, wallId) => partDemands(c, "noggins").filter((d) => d.sourceRefs[0].wallId === wallId).flatMap((d) => Array(d.quantity).fill(d.lengthMm));
+const NOT_COUNTED = "Lintels, jacks and trimmers at D1, W1 aren't counted.";
+const STUDS_NO_MAX = "Studs: the longest length isn't set. Confirm it before ordering.";
+
+t("Walls, the 2,700 example (round 2): 21 studs × 2,700, plates 2 × 6,000 + 2 × 4,200 (bottom = top, full length), 13 noggins 6,525 mm", () => {
+  const c = ex(2700);
+  const r = WR(c);
+  assert.deepEqual(Object.keys(c.materialResults), ["walls"], "one material, one wall-framing result (not three takeoffs)");
+  assert.deepEqual([r.methodKey, r.layouts.map((l) => [l.wallLabel, l.method])], ["wall_framing", [["Wall 1", "wall_framing@1"], ["Wall 2", "wall_framing@1"]]]);
+  // studs: 9 grid + 2 each side of D1 = 13; Wall 2: 1,200 and 3,000 merge into the first studs beside W1, 4 grid + 4 = 8
+  nearAll(st(wl(c, "Wall 1")), WALL1_AT, "Wall 1");
+  nearAll(st(wl(c, "Wall 2")), WALL2_AT, "Wall 2");
+  // the layout keys openings by their measurement id (as Studs does), and carries the plan label for the notes
+  assert.deepEqual(wl(c, "Wall 1").ticks.filter((x) => x.state === "side").map((x) => [x.positionMm, x.besideOpeningIds]),
+    [[932.5, ["d1"]], [977.5, ["d1"]], [1842.5, ["d1"]], [1887.5, ["d1"]]]);
+  assert.deepEqual([wl(c, "Wall 1").openings.map((o) => [o.id, o.label]), wl(c, "Wall 2").openings.map((o) => [o.id, o.label])], [[["d1", "D1"]], [["o1", "W1"]]]);
+  assert.deepEqual(wl(c, "Wall 2").ticks.filter((x) => x.state === "removed").map((x) => x.openingId), ["o1", "o1"]);
+  assert.deepEqual(wl(c, "Wall 2").ticks.filter((x) => x.state === "side").map((x) => [x.positionMm, x.mergedMm]), [[1132.5, []], [1177.5, [1200]], [3022.5, [3000]], [3067.5, []]]);
+  assert.deepEqual(wl(c, "Wall 2").ticks.filter((x) => x.state === "removed").map((x) => x.positionMm), [1800, 2400]);
+  assert.equal(wl(c, "Wall 1").sideStudsEachSide, WALL_STUDS_EACH_SIDE);
+  assert.equal(WALL_STUDS_EACH_SIDE, 2);
+  assert.deepEqual(partRows(c, "studs"), [[21, 2700]], "cut = Wall height, one 2,700 length each (300 mm steps)");
+  assert.ok(partDemands(c, "studs").every((d) => d.role === "stud" && d.lengthMm === 2700));
+  assert.deepEqual(partDemands(c, "studs").filter((d) => /beside/.test(d.label)).map((d) => d.label).slice(0, 4),
+    ["Wall 1 stud @ 932.5 (beside D1)", "Wall 1 stud @ 977.5 (beside D1)", "Wall 1 stud @ 1,842.5 (beside D1)", "Wall 1 stud @ 1,887.5 (beside D1)"]);
+  // plates: the bottom plate is the full wall like the top plate (no door gap), one stock length per piece
+  for (const [name, L] of [["Wall 1", 6000], ["Wall 2", 4000]]) {
+    assert.deepEqual(wl(c, name).plates.layers.map((l) => [l.tag, l.piecesMm, l.longPiecesMm, "gapsMm" in l]), [["bottom", [L], [], false], ["top", [L], [], false]], name);
+  }
+  assert.deepEqual(partRows(c, "plates"), [[2, 6000], [2, 4200]]);
+  assert.deepEqual(partRows(c, "longPlates"), [], "no plate over 6,000, so no LVL");
+  // noggins: 1 row (Sam's rule), bay = gap less half of each 45 mm stud; none in an opening bay or between touching studs
+  nearAll(nogLengths(c, "w1"), [555, 287.5, 467.5, 555, 555, 555, 555, 555, 555]);
+  nearAll(nogLengths(c, "w2"), [555, 487.5, 487.5, 355]);
+  near(sum(nogLengths(c, "w1")), 4640); near(sum(nogLengths(c, "w2")), 1885);
+  assert.equal(pieceSum(c, "noggins"), 13); near(fittedMm(c, "noggins"), 6525);
+  const shut = (name) => wl(c, name).noggins.bays.filter((b) => b.closed).map((b) => [b.fromMm, b.toMm]);
+  assert.deepEqual([shut("Wall 1"), shut("Wall 2")], [[[932.5, 977.5], [1842.5, 1887.5]], [[1132.5, 1177.5], [3022.5, 3067.5]]], "touching studs: no noggin, no block");
+  assert.deepEqual(wl(c, "Wall 1").noggins.bays.filter((b) => b.openingId).map((b) => [b.fromMm, b.toMm, b.openingId]), [[977.5, 1842.5, "d1"]]);
+  assert.deepEqual([wl(c, "Wall 1").noggins.rows, wl(c, "Wall 1").noggins.rowsSource, wl(c, "Wall 1").noggins.rowsRuleRef], [1, "owner-rule", NOGGIN_ROW_RULES.one]);
+  // shared across the item at the 6,000 default, on the 300 mm grid: 4,800 + 1,800 = 6,600, the least possible for 6,525
+  assert.deepEqual(partRows(c, "noggins"), [[1, 4800], [1, 1800]]);
+  assert.deepEqual(wl(c, "Wall 1").totals, { studs: 13, studLengthMm: 2700, bottomPlateMm: 6000, topPlateMm: 6000, secondTopPlateMm: null, longPlateMm: 0, noggins: 9, nogginRows: 1 });
+  assert.deepEqual(wl(c, "Wall 2").totals, { studs: 8, studLengthMm: 2700, bottomPlateMm: 4000, topPlateMm: 4000, secondTopPlateMm: null, longPlateMm: 0, noggins: 4, nogginRows: 1 });
+  // the order: studs, then plates, then noggins, each named by its part
+  assert.deepEqual(c.scheduleLines.map((l) => [l.component, l.item.component, l.item.description]), [
+    ["studs", "studs", "Studs 90 × 45 MGP10 H2 — 2,700 mm length"],
+    ["plates", "plates", "Plates 90 × 45 MGP10 H2 — 6,000 mm length"], ["plates", "plates", "Plates 90 × 45 MGP10 H2 — 4,200 mm length"],
+    ["noggins", "noggins", "Noggins 90 × 35 MGP10 H2 — 4,800 mm length"], ["noggins", "noggins", "Noggins 90 × 35 MGP10 H2 — 1,800 mm length"]]);
+  // never a king, jack, trimmer or lintel; one plain "aren't counted" note, which doesn't block (quantity stays incomplete, as Studs)
+  assert.deepEqual([...new Set(r.demands.map((d) => d.role))].sort(), ["bottom-plate", "noggin", "stud", "top-plate"]);
+  assert.ok(!r.demands.some((d) => /king|jack|trimmer|lintel/i.test(`${d.role} ${d.label}`)));
+  assert.deepEqual(msgs(c), [["opening_framing_not_counted", false, NOT_COUNTED], ["stock_max_unset", false, STUDS_NO_MAX]]);
+  assert.deepEqual([wl(c, "Wall 1").openingsNotCounted, wl(c, "Wall 2").openingsNotCounted], [["d1"], ["o1"]]);
+  assert.deepEqual(r.problems.find((p) => p.code === "opening_framing_not_counted").refs,
+    [{ measurementId: "w1", openingId: "d1", openingLabel: "D1" }, { measurementId: "w2", openingId: "o1", openingLabel: "W1" }]);
+  assert.deepEqual([r.status.quantity, r.status.procurement, c.orderReady], ["incomplete", "ready", true]);
+  assert.ok(c.scheduleLines.every((l) => !l.problems.length && l.notes.filter((x) => x === NOT_COUNTED).length === 1), "said once on every line");
+});
+
+t("Walls, the 2,700 example with no noggin longest length: 13 × 1,200 and one plain note; a saved noggin product's 6,000 shares with no note", () => {
+  const c = ex(2700, { spec: withPart(READY(), "noggins", { stock: { maxMm: null, unavailableMm: [] } }) });
+  assert.deepEqual(partRows(c, "noggins"), [[13, 1200]]);
+  // the plan's wording: "its own 1,200 length" when every noggin buys a 1,200
+  assert.ok(hasMsg(c, "noggins_not_shared", false, "Noggins: each is cut from its own 1,200 length. Set the noggins' longest length under Details to share lengths across walls."), JSON.stringify(msgs(c)));
+  // wide centres (1,500): each 1,455 noggin buys a 1,500 length, and the note says so
+  const wide = wf([wm("w", 3000, 2700, "Wall 1")], { spec: withPart(READY(), "noggins", { stock: { maxMm: null, unavailableMm: [] } }), rules: { centresMm: 1500, doubleTopPlate: false } });
+  assert.deepEqual(partRows(wide, "noggins"), [[2, 1500]]);
+  assert.ok(hasMsg(wide, "noggins_not_shared", false, "Noggins: each is cut from its own 1,500 length. Set the noggins' longest length under Details to share lengths across walls."), JSON.stringify(msgs(wide)));
+  assert.ok(hasMsg(c, "stock_max_unset", false, "Studs and noggins: the longest length isn't set. Confirm it before ordering."));
+  assert.ok(!msgs(c).some(([, , m]) => /for this product/.test(m)), "never the unnamed 'for this product'");
+  // every part with a saved longest length: no longest-length notes at all, and the noggins share
+  const stocked = (over = {}) => ({ stock: { maxMm: 6000, unavailableMm: [] }, ...over });
+  const full = ex(2700, { spec: wallFramingDefaults([product("p-stud", "studs", stocked()), product("p-plate", "plates", stocked()),
+    product("p-nog", "noggins", stocked({ section: { depthMm: 90, widthMm: 35 } }))]) });
+  assert.deepEqual(partRows(full, "noggins"), [[1, 4800], [1, 1800]]);
+  assert.deepEqual(msgs(full), [["opening_framing_not_counted", false, NOT_COUNTED]]);
+});
+
+t("Walls, the 3,000 example with Double top plate: 21 × 3,000, plates 3 × 6,000 + 3 × 4,200, 26 noggins (2 rows) 13,050 mm", () => {
+  const c = ex(3000, { doubleTopPlate: true });
+  nearAll(st(wl(c, "Wall 1")), WALL1_AT, "positions don't depend on height");
+  nearAll(st(wl(c, "Wall 2")), WALL2_AT);
+  assert.deepEqual(partRows(c, "studs"), [[21, 3000]]);
+  assert.deepEqual(wl(c, "Wall 1").plates.layers.map((l) => [l.tag, l.piecesMm]), [["bottom", [6000]], ["top", [6000]], ["top-2", [6000]]]);
+  assert.deepEqual(partRows(c, "plates"), [[3, 6000], [3, 4200]]);
+  assert.ok(partDemands(c, "noggins").every((d) => d.quantity === 2), "2 rows (owner rule): each bay twice");
+  assert.equal(wl(c, "Wall 2").noggins.rowsRuleRef, NOGGIN_ROW_RULES.two);
+  assert.equal(pieceSum(c, "noggins"), 26); near(fittedMm(c, "noggins"), 13050);
+  // 4,800 + 4,500 + 3,900 = 13,200, the least possible in 300 mm steps (13,050 needed; 2 × 6,000 is too short)
+  assert.deepEqual(partRows(c, "noggins"), [[1, 4800], [1, 4500], [1, 3900]]);
+  assert.deepEqual(wl(c, "Wall 1").totals, { studs: 13, studLengthMm: 3000, bottomPlateMm: 6000, topPlateMm: 6000, secondTopPlateMm: 6000, longPlateMm: 0, noggins: 18, nogginRows: 2 });
+  assert.deepEqual(wl(c, "Wall 2").totals, { studs: 8, studLengthMm: 3000, bottomPlateMm: 4000, topPlateMm: 4000, secondTopPlateMm: 4000, longPlateMm: 0, noggins: 8, nogginRows: 2 });
+  assert.deepEqual(cutList(c, "Plates cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm, x.labels]), [
+    [3, 6000, 6000, ["Wall 1 bottom plate 0–6,000", "Wall 1 second top plate 0–6,000", "Wall 1 top plate 0–6,000"]],
+    [3, 4000, 4200, ["Wall 2 bottom plate 0–4,000", "Wall 2 second top plate 0–4,000", "Wall 2 top plate 0–4,000"]]]);
+  // no noggin longest length: 26 × 1,200 = 31,200
+  const own = ex(3000, { doubleTopPlate: true, spec: withPart(READY(), "noggins", { stock: { maxMm: null, unavailableMm: [] } }) });
+  assert.deepEqual(partRows(own, "noggins"), [[26, 1200]]);
+});
+
+t("Double top plate changes only the top-2 demands (at 2,700 and 3,000): the studs, bottom plate and noggins stay identical", () => {
+  for (const H of [2700, 3000]) {
+    const off = ex(H), on = ex(H, { doubleTopPlate: true });
+    const offIds = new Set(WR(off).demands.map((d) => d.id));
+    const added = WR(on).demands.filter((d) => !offIds.has(d.id));
+    assert.deepEqual(added.map((d) => [d.role, d.lengthMm, d.label]), [["top-2-plate", 6000, "Wall 1 second top plate 0–6,000"], ["top-2-plate", 4000, "Wall 2 second top plate 0–4,000"]], String(H));
+    assert.deepEqual(WR(on).demands.filter((d) => offIds.has(d.id)), WR(off).demands, `${H}: every other demand unchanged`);
+    const same = (c, part) => partLines(c, part).map((l) => [l.bucketKey, l.quantity, l.finishedLengthMm, l.item.description, l.problems]);
+    for (const part of ["studs", "noggins"]) assert.deepEqual(same(on, part), same(off, part), `${H} ${part}`);
+    assert.deepEqual(partRows(on, "plates"), partRows(off, "plates").map(([q, len]) => [q + 1, len]), "the second top plate: 1 × 6,000 and 1 × 4,200 more");
+    for (const name of ["Wall 1", "Wall 2"]) {
+      const { secondTopPlateMm, ...rest } = wl(on, name).totals;
+      assert.deepEqual(rest, (({ secondTopPlateMm: _x, ...o }) => o)(wl(off, name).totals), `${H} ${name} totals`);
+      assert.equal(secondTopPlateMm, wl(off, name).totals.topPlateMm);
+    }
+  }
+});
+
+t("a mixed run (Wall 1 at 2,700, Wall 2 at 3,000): cuts and noggin rows per wall; an item-wide stud height is never read; 2,701 is over", () => {
+  const c = wf(EXAMPLE(2700, 3000), { rules: { centresMm: 600, doubleTopPlate: false, studHeightMm: 2400 } });
+  assert.deepEqual(partRows(c, "studs"), [[8, 3000], [13, 2700]]);
+  assert.deepEqual(WR(c).layouts.map((l) => [l.wallLabel, l.totals.studLengthMm, l.totals.nogginRows, l.totals.noggins]), [["Wall 1", 2700, 1, 9], ["Wall 2", 3000, 2, 8]]);
+  assert.deepEqual(WR(c).layouts.map((l) => l.noggins.rowsRuleRef), [NOGGIN_ROW_RULES.one, NOGGIN_ROW_RULES.two]);
+  assert.equal(pieceSum(c, "noggins"), 17);
+  const rowsAt = (H) => wl(wf([wm("w", 2400, H, "Wall 1")]), "Wall 1").totals.nogginRows;
+  assert.deepEqual([rowsAt(2400), rowsAt(2700), rowsAt(2701), rowsAt(4000)], [1, 1, 2, 2]);
+});
+
+t("corners: an L run has 2 studs at its corner, a closed 3,000 square 24 studs (8 at corners), a straight wall split by a height change one more", () => {
+  const L = ex(2700);
+  assert.deepEqual([st(wl(L, "Wall 1")).at(-1), st(wl(L, "Wall 2"))[0]], [6000, 0], "one end stud from each wall at B");
+  const square = wf([1, 2, 3, 4].map((i) => wm(`s${i}`, 3000, 2700, `Wall ${i}`)));
+  assert.deepEqual(partRows(square, "studs"), [[24, 2700]]);
+  assert.equal(WR(square).layouts.flatMap((l) => l.ticks.filter((x) => x.positionMm === 0 || x.positionMm === 3000)).length, 8);
+  const count = (c) => pieceSum(c, "studs");
+  assert.equal(count(wf([wm("a", 6000, 2700, "Wall 1")])), 11);
+  assert.equal(count(wf([wm("a", 3000, 2700, "Wall 1"), wm("b", 3000, 3000, "Wall 2")])), 12);
+  assert.equal(count(wf([wm("a", 2500, 2700, "Wall 1"), wm("b", 3500, 3000, "Wall 2")])), 13);
+});
+
+t("bottom plate (round 2): bought the full wall length like the top plate; doors, windows and 'other' never cut it, a full-width door neither", () => {
+  const c = wf([wm("w", 6000, 2700, "Wall 1"), om("a", "w", "D1", "door", 1000, 820, 2040, 0), om("b", "w", "D2", "door", 3000, 820, 2040, 0),
+    om("x", "w", "X1", "other", 4500, 900, 2000, 0)]);
+  assert.deepEqual(wl(c, "Wall 1").plates.layers.map((l) => [l.tag, l.piecesMm]), [["bottom", [6000]], ["top", [6000]]]);
+  assert.deepEqual(partDemands(c, "plates").map((d) => [d.label, d.lengthMm]), [["Wall 1 bottom plate 0–6,000", 6000], ["Wall 1 top plate 0–6,000", 6000]]);
+  assert.deepEqual(partRows(c, "plates"), [[2, 6000]]);
+  assert.ok(WR(c).explain.includes("Bottom plate: one continuous 6,000 mm piece (no joints selected from the framing detail)"));
+  const full = wf([wm("w", 820, 2700, "Wall 1"), om("a", "w", "D1", "door", 0, 820, 2040, 0)]);
+  assert.deepEqual(wl(full, "Wall 1").plates.layers.map((l) => l.piecesMm), [[820], [820]]);
+  assert.deepEqual([partRows(full, "plates"), st(wl(full, "Wall 1")), pieceSum(full, "noggins")], [[[2, 1200]], [0, 820], 0], "its 2 end studs, no noggin in the doorway");
+  assert.ok(!msgs(full).some(([, blocking]) => blocking), JSON.stringify(msgs(full)));
+});
+
+t("2 studs each side: between openings g apart there are floor(g ÷ 45) side studs (at least 1, at most 4), never a further stud inside an opening", () => {
+  const two = { openingSideStuds: { studWidthMm: W, perSide: 2 } };
+  const A = { id: "A", xLeftMm: 1000, xRightMm: 1250, sillMm: 900, headMm: 2100 };
+  const between = (g) => at(studs(6000, [A, { id: "B", xLeftMm: 1250 + g, xRightMm: 2300, sillMm: 900, headMm: 2100 }], two)).filter((x) => x >= 1250 - 1e-6 && x <= 1250 + g + 1e-6);
+  for (const [g, n] of [[0, 1], [10, 1], [30, 1], [44.9, 1], [45, 1], [67.5, 1], [89, 1], [90, 2], [134, 2], [135, 3], [179, 3], [180, 4], [300, 4]]) {
+    const xs = between(g);
+    assert.equal(xs.length, n, `gap ${g}: ${xs}`);
+    if (g >= W) assert.ok(xs.every((x) => x - W / 2 >= 1250 - 1e-6 && x + W / 2 <= 1250 + g + 1e-6), `gap ${g}: every stud fits in the gap ${xs}`);
+  }
+  nearAll(between(90), [1272.5, 1317.5], "90 apart: two studs filling the gap");
+  nearAll(between(300), [1272.5, 1317.5, 1482.5, 1527.5]);
+  // one each side (Studs, perSide default 1) is unchanged: 2 from 90 up, whatever the gap
+  assert.equal(at(studs(6000, [A, { id: "B", xLeftMm: 1550, xRightMm: 2300, sillMm: 900, headMm: 2100 }])).filter((x) => x > 1250 && x < 1550).length, 2);
+  assert.deepEqual(codes(studs(6000, [A], { openingSideStuds: { studWidthMm: W, perSide: 0 } })), ["invalid_input"]);
+  assert.deepEqual(codes(studs(6000, [A], { openingSideStuds: { studWidthMm: W, perSide: 1.5 } })), ["invalid_input"]);
+});
+
+t("touching studs beside openings: no noggin and no block; a door at the wall start merges into the end stud; openings 90 apart share 2 studs", () => {
+  const c = wf([wm("w", 6000, 2700, "Wall 1"), om("a", "w", "D2", "door", 0, 820, 2040, 0), om("b", "w", "D3", "door", 2000, 820, 2040, 0),
+    om("e", "w", "W2", "window", 2910, 690, 1200, 900)]);
+  const l = wl(c, "Wall 1");
+  nearAll(st(l), [0, 842.5, 887.5, 1200, 1800, 1932.5, 1977.5, 2842.5, 2887.5, 3622.5, 3667.5, 4200, 4800, 5400, 6000]);
+  assert.deepEqual(l.ticks.find((x) => x.positionMm === 0).besideOpeningIds, ["a"], "the end stud is D2's stud too");
+  // 90 apart: D3's second stud is W2's first and W2's second is D3's first (each stud beside both)
+  assert.deepEqual([2842.5, 2887.5].map((x) => l.ticks.find((y) => y.positionMm === x).besideOpeningIds), [["b", "e"], ["e", "b"]]);
+  assert.deepEqual(partDemands(c, "studs").filter((d) => [2842.5, 2887.5].includes(d.sourceRefs[0].station)).map((d) => d.label),
+    ["Wall 1 stud @ 2,842.5 (beside D3, W2)", "Wall 1 stud @ 2,887.5 (beside W2, D3)"], "the cut list names them by label");
+  assert.deepEqual(l.noggins.bays.filter((b) => b.closed).map((b) => [b.fromMm, b.toMm]), [[842.5, 887.5], [1932.5, 1977.5], [2842.5, 2887.5], [3622.5, 3667.5]]);
+  nearAll(nogLengths(c, "w"), [267.5, 555, 87.5, 487.5, 555, 555, 555]);
+  assert.deepEqual(l.plates.layers.map((x) => x.piecesMm), [[6000], [6000]], "no 0 mm piece, no door gap");
+  assert.ok(!msgs(c).some(([, blocking]) => blocking), JSON.stringify(msgs(c)));
+  assert.equal(WR(c).status.procurement, "ready");
+  // trace noise: a 6,010 wall's 6,000 stud merges into its end stud (11) and the noggins are normal
+  const noisy = wf([wm("w", 6010, 2700, "Wall 1")]);
+  assert.deepEqual([pieceSum(noisy, "studs"), pieceSum(noisy, "noggins")], [11, 10]);
+});
+
+t("round 3: a 9,000 wall's bottom and top plates are each ONE 9,000 LVL length, on their own 'Plates 90 × 45 LVL' line and cut list", () => {
+  const c = wf([wm("w", 9000, 2700, "Wall 1")], { spec: LVL_READY() });
+  assert.deepEqual(wl(c, "Wall 1").plates.layers.map((l) => [l.tag, l.piecesMm, l.longPiecesMm, l.joinsOverStudsMm]), [["bottom", [9000], [9000], []], ["top", [9000], [9000], []]]);
+  assert.deepEqual([partRows(c, "longPlates"), partRows(c, "plates")], [[[2, 9000]], []], "not joined, no pine plate");
+  assert.deepEqual(partLines(c, "longPlates").map((l) => [l.item.component, l.item.description]), [["longPlates", "Plates 90 × 45 LVL H2 — 9,000 mm length"]]);
+  assert.deepEqual(cutList(c, "Long plates cut list").rows, [{ cutMm: 9000, stockMm: 9000, qty: 2, labels: ["Wall 1 bottom plate 0–9,000", "Wall 1 top plate 0–9,000"] }]);
+  assert.deepEqual(WR(c).appendix.timber.map((x) => x.title), ["Studs cut list", "Long plates cut list", "Noggins cut list"]);
+  assert.deepEqual(c.scheduleLines.map((l) => l.component), ["studs", "longPlates", "noggins", "noggins"]);
+  assert.deepEqual([wl(c, "Wall 1").totals.bottomPlateMm, wl(c, "Wall 1").totals.topPlateMm, wl(c, "Wall 1").totals.longPlateMm], [9000, 9000, 18000], "the plate totals include the LVL metres");
+  assert.ok(WR(c).explain.includes("Top plate: one continuous 9,000 mm piece (one long plate, over the 6,000 mm plates)"), WR(c).explain.join("\n"));
+  assert.deepEqual([WR(c).status.procurement, msgs(c).filter(([, b]) => b)], ["ready", []], "a saved LVL product: nothing to fix");
+  // Double top plate: three 9,000 LVL lengths
+  assert.deepEqual(partRows(wf([wm("w", 9000, 2700, "Wall 1")], { spec: LVL_READY(), rules: { centresMm: 600, doubleTopPlate: true } }), "longPlates"), [[3, 9000]]);
+  // the built-in LVL part (no treatment): its need shows now, naming the part, and holds the order
+  const d = wf([wm("w", 9000, 2700, "Wall 1")]);
+  assert.ok(hasMsg(d, "material_incomplete", true, "Long plates: enter the treatment (or \"untreated\")."), JSON.stringify(msgs(d)));
+  assert.deepEqual([WR(d).status.procurement, d.orderReady, partLines(d, "longPlates")[0].item.description], ["missing-product", false, "Plates 90 × 45 LVL — 9,000 mm length"]);
+});
+
+t("round 3: a 6,000 wall stays pine (no LVL line or need); a 12,000 wall at 600 centres joins over the stud at 10,800: 10,800 LVL + 1,200 pine per layer", () => {
+  const six = wf([wm("w", 6000, 2700, "Wall 1")]);
+  assert.deepEqual([partRows(six, "plates"), partRows(six, "longPlates")], [[[2, 6000]], []]);
+  assert.ok(!msgs(six).some(([, , m]) => /^Long plates/.test(m)), "the LVL part's needs only show once it is used");
+  assert.equal(WR(six).status.procurement, "ready");
+  const twelve = wf([wm("w", 12000, 2700, "Wall 1")], { spec: LVL_READY() });
+  assert.deepEqual(wl(twelve, "Wall 1").plates.layers.map((l) => [l.tag, l.piecesMm, l.longPiecesMm, l.joinsOverStudsMm]),
+    [["bottom", [10800, 1200], [10800], [10800]], ["top", [10800, 1200], [10800], [10800]]]);
+  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[2, 1200]]]);
+  assert.ok(WR(twelve).explain.includes("Top plate: 12,000 mm joined over the stud at 10,800 mm (longest length 11,000 mm) → 10,800 + 1,200 mm (10,800 mm as a long plate, over the 6,000 mm plates)"));
+  assert.deepEqual(cutList(twelve, "Plates cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm, x.labels]), [[2, 1200, 1200, ["Wall 1 bottom plate 10,800–12,000", "Wall 1 top plate 10,800–12,000"]]]);
+  // one job, both kinds: the 6,000 wall's plates are pine, the 9,000 wall's LVL, each on its own lines (studs, plates, LVL, noggins)
+  const both = wf([wm("a", 6000, 2700, "Wall 1"), wm("b", 9000, 2700, "Wall 2")]);
+  assert.deepEqual([partRows(both, "plates"), partRows(both, "longPlates")], [[[2, 6000]], [[2, 9000]]]);
+  assert.deepEqual([...new Set(both.scheduleLines.map((l) => l.component))], ["studs", "plates", "longPlates", "noggins"]);
+  assert.ok(hasMsg(both, "material_incomplete", true, "Long plates: enter the treatment (or \"untreated\")."), "a plate now uses the LVL part, so its needs show");
+  // trace noise past 6,000: a 6,010 wall buys the first LVL length (6,300) for each plate
+  assert.deepEqual(partRows(wf([wm("w", 6010, 2700, "Wall 1")], { spec: LVL_READY() }), "longPlates"), [[2, 6300]]);
+  // only past 11,000 with no stud in range is a plate blocked: a window 11.3 m wide leaves no stud to join over
+  const wide = wf([wm("w", 12000, 2700, "Wall 5"), om("o", "w", "W9", "window", 500, 11300, 1200, 900)], { spec: LVL_READY() });
+  assert.ok(hasMsg(wide, "plate_too_long", true, "Wall 5: the bottom plate has no stud to join over from 477.5 to 11,822.5 mm. That is 11,345 mm, longer than the 11,000 mm longest length. Set a longer longest length for the long plates."), JSON.stringify(msgs(wide)));
+  assert.ok(wide.scheduleLines.length && wide.scheduleLines.every((l) => l.problems.some((p) => p.startsWith("Wall 5: the bottom plate has no stud"))), "the block holds every line of the item");
+});
+
+t("item-wide blocks: overlapping openings give that wall no quantities, the other walls keep theirs, and every line of the item carries the block", () => {
+  const c = wf([wm("w1", 6000, 2700, "Wall 1"), wm("w2", 4000, 2700, "Wall 2"), om("a", "w2", "W1", "window", 500, 1000, 1200, 900), om("b", "w2", "W2", "window", 1200, 1000, 1200, 900)]);
+  const block = "Wall 2: Openings W1 and W2 overlap along the wall — frame them as one opening or with explicit members.";
+  assert.ok(hasMsg(c, "invalid_input", true, block), JSON.stringify(msgs(c)));
+  assert.deepEqual(WR(c).layouts.map((l) => l.wallLabel), ["Wall 1"], "Wall 2 gets no quantities");
+  assert.ok(WR(c).demands.length && WR(c).demands.every((d) => d.sourceRefs.every((s) => s.wallId === "w1")));
+  assert.deepEqual([partRows(c, "studs"), partRows(c, "plates")], [[[11, 2700]], [[2, 6000]]], "Wall 1 still shows its quantities");
+  assert.ok(c.scheduleLines.length === 3 && c.scheduleLines.every((l) => l.problems.includes(block)), "studs and noggins held too");
+  assert.deepEqual([WR(c).status.procurement, c.orderReady], ["draft", false]);
+  // a sloped, gable or outline wall, or one with no height: one blocking line each naming the wall, on every line
+  const g = wf([wm("w1", 6000, 2700, "Wall 1"), { id: "w3", kind: "wall", inputs: { kind: "rake", widthMm: 3000, startHeightMm: 2400, endHeightMm: 3000, name: "Wall 3" } },
+    { id: "w4", kind: "wall", inputs: { kind: "rect", widthMm: 3000, name: "Wall 4" } },
+    { id: "w6", kind: "wall", inputs: { kind: "gable", widthMm: 3000, eavesHeightMm: 2400, apexHeightMm: 3600, apexXMm: 1500, name: "Wall 6" } },
+    { id: "w7", kind: "wall", inputs: { kind: "polygon", polygon: [{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2400 }], name: "Wall 7" } }]);
+  const blocks = msgs(g).filter(([, b]) => b);
+  assert.deepEqual(blocks, [
+    ["wall_not_straight", true, "Wall 3 is sloped or traced as an outline. Walls only works out straight walls of one height."],
+    ["wall_incomplete", true, "Wall 4: enter the Wall height."],
+    ["wall_not_straight", true, "Wall 6 is sloped or traced as an outline. Walls only works out straight walls of one height."],
+    ["wall_not_straight", true, "Wall 7 is sloped or traced as an outline. Walls only works out straight walls of one height."]]);
+  assert.deepEqual(WR(g).layouts.map((l) => l.wallLabel), ["Wall 1"]);
+  assert.ok(g.scheduleLines.every((l) => blocks.every(([, , m]) => l.problems.includes(m))));
+  // no stud section: nothing can be laid out, and it says why
+  const bare = wf([wm("w1", 6000, 2700, "Wall 1")], { spec: withPart(READY(), "studs", { section: { depthMm: 90, widthMm: null } }) });
+  assert.deepEqual(msgs(bare), [["material_incomplete", true, "Studs: enter the timber section (e.g. 90 × 45)."]], "the need said once, and never 'trace the walls'");
+  assert.deepEqual([WR(bare).layouts, WR(bare).demands], [[], []]);
+});
+
+t("a window head above the studs is clipped on Walls with a note naming its wall (no block); a Studs item still refuses it, as before", () => {
+  const tall = [wm("w2", 4000, 2700, "Wall 2"), om("o5", "w2", "W5", "window", 1000, 1000, 1900, 900)];
+  const c = wf(tall);
+  assert.ok(hasMsg(c, "opening_clipped", false, "Wall 2 W5: its head (2,800 mm) is above the 2,700 mm studs, so it is taken to the top of the studs."), JSON.stringify(msgs(c)));
+  assert.equal(wl(c, "Wall 2").openings[0].headMm, 2700);
+  assert.ok(pieceSum(c, "studs") > 0 && !msgs(c).some(([, b]) => b));
+  const studsItem = computeWorkspace(tSnap([tMat("st", "wall_frame", "studs", { centresMm: 600 })], tall, [onW("w2", "st")]));
+  assert.ok(studsItem.materialResults.st.problems.some((p) => p.code === "invalid_input" && p.blocking !== false), "Studs unchanged: still refused");
+});
+
+t("an explicit framing detail on an opening still adds its own members, with a note to check the studs beside it; the others stay 'not counted'", () => {
+  const detail = { source: "explicit", aboveHead: { required: false },
+    members: [{ id: "L1", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 300, identity: { section: "190x45", grade: "LVL", treatment: "H2" }, stock: { maxMm: 6000 } }] };
+  const c = wf([wm("w1", 6000, 2700, "Wall 1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0, detail), om("o2", "w1", "W1", "window", 3000, 1200, 1200, 900)]);
+  assert.ok(hasMsg(c, "framing_detail_members", false, "Wall 1 D1: its framing detail adds its own members. Check the studs beside D1 aren't counted twice."), JSON.stringify(msgs(c)));
+  assert.ok(hasMsg(c, "opening_framing_not_counted", false, "Lintels, jacks and trimmers at W1 aren't counted."));
+  const lintel = WR(c).demands.filter((d) => d.role === "lintel");
+  assert.deepEqual(lintel.map((d) => [d.lengthMm, d.label]), [[1120, "Wall 1 D1 lintel × 1 @ 1,120 mm"]]);
+  assert.ok(c.scheduleLines.some((l) => l.item.description === "190 × 45 LVL H2 — 1,200 mm length" && !l.component), "its own line, not a Walls part");
+  assert.deepEqual(wl(c, "Wall 1").openingsNotCounted, ["o2"], "the opening's measurement id (its label is on layout.openings)");
+  // without the detail no lintel is ever counted
+  assert.ok(!WR(wf([wm("w1", 6000, 2700, "Wall 1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0)])).demands.some((d) => d.role === "lintel"));
+});
+
+t("studs and plates of the same 90 × 45 MGP10 H2 stay on separate lines and cut lists, named by part; an order line is only offered its own part", () => {
+  const c = wf([wm("w", 4000, 4200, "Wall 1")]);
+  const stud = partLines(c, "studs"), plate = partLines(c, "plates");
+  assert.deepEqual([stud.map((l) => [l.quantity, l.finishedLengthMm]), plate.map((l) => [l.quantity, l.finishedLengthMm])], [[[8, 4200]], [[2, 4200]]]);
+  assert.notEqual(stud[0].bucketKey, plate[0].bucketKey);
+  assert.equal(stud[0].materialKey, plate[0].materialKey, "one material");
+  assert.deepEqual([stud[0].item.component, plate[0].item.component, stud[0].item.description, plate[0].item.description],
+    ["studs", "plates", "Studs 90 × 45 MGP10 H2 — 4,200 mm length", "Plates 90 × 45 MGP10 H2 — 4,200 mm length"]);
+  assert.deepEqual(WR(c).appendix.timber.map((x) => x.title), ["Studs cut list", "Plates cut list", "Noggins cut list"]);
+  assert.deepEqual(cutList(c, "Studs cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm]), [[8, 4200, 4200]]);
+  assert.deepEqual(cutList(c, "Plates cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm]), [[2, 4000, 4200]]);
+  assert.deepEqual(c.scheduleLines.map((l) => l.component), ["studs", "plates", "noggins", "noggins"]);
+  // a draft line that went out of date (e.g. its product changed) is offered its own part's 4,200 line, never the other part's
+  const mats = new Map([["walls", walls(READY())]]);
+  const stale = (component) => orderLineState({ bucketKey: "gone", jobMaterialId: "walls", finishedLengthMm: 4200, quantity: 2, unit: "piece", ...(component ? { item: { component } } : {}) }, c, mats);
+  assert.equal(stale("plates").suggestion?.bucketKey, plate[0].bucketKey, "a plate line is offered the plate line (the stud line comes first in the list)");
+  assert.equal(stale("studs").suggestion?.bucketKey, stud[0].bucketKey);
+  assert.equal(stale(null).suggestion, null, "a line with no part is never guessed onto one");
+  assert.deepEqual([stale("plates").stale, stale("plates").problem], [true, "line_stale_missing"]);
+});
+
+t("noggins on Walls use the stud's thickness (555 bays at 600 centres); a wall also on Studs or Noggins gets one note on Walls, theirs unchanged", () => {
+  const studsItem = { ...tMat("st", "wall_frame", "studs", { centresMm: 600 }), name: "Studs 1" };
+  const nogItem = { ...tMat("ng", "linear_stock", "noggins", { centresMm: 600, nogginRows: 1 }, { maxMm: 6000 }), name: "Noggins 1" };
+  nogItem.spec = { ...nogItem.spec, section: { depthMm: 90, widthMm: 35 } };
+  const plateItem = { ...tMat("pl", "linear_stock", "plates"), name: "Plates 1" };
+  const meas = [wm("w1", 2400, 2700, "Wall 1"), wm("w2", 2400, 2700, "Wall 2"), wm("w3", 3000, 2700, "Wall 3")];
+  const both = wf(meas, { extra: [studsItem, nogItem, plateItem],
+    contributions: [onW("w1"), onW("w2"), onW("w3"), onW("w2", "st"), onW("w2", "ng"), onW("w3", "pl")] });
+  const alone = computeWorkspace(tSnap([studsItem, nogItem, plateItem], meas, [onW("w2", "st"), onW("w2", "ng"), onW("w3", "pl")]));
+  const note = "Wall 2 is also on Noggins 1 and Studs 1, so its framing may be counted twice.";
+  const note3 = "Wall 3 is also on Plates 1, so its framing may be counted twice.";
+  assert.deepEqual(WR(both).problems.filter((p) => p.code === "walls_counted_twice").map((p) => [p.blocking, p.message]), [[false, note], [false, note3]]);
+  assert.ok(partLines(both, "studs").every((l) => l.notes.includes(note) && l.notes.includes(note3) && !l.problems.length), "a note, not a block");
+  assert.equal(both.orderReady, true);
+  const own = (c, id) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes(id));
+  for (const id of ["st", "ng", "pl"]) {
+    assert.deepEqual(own(both, id), own(alone, id), `${id} lines unchanged`);
+    assert.deepEqual(both.materialResults[id], alone.materialResults[id], `${id} result unchanged`);
+  }
+  assert.ok(!both.materialResults.st.problems.some((p) => /counted twice/.test(p.message)), "no note on their side");
+  // the same 2,400 wall: Walls 4 × 555 (the 45 mm stud), the Noggins item its own 35 mm width: 4 × 565, as before
+  assert.deepEqual(partDemands(both, "noggins").filter((d) => d.sourceRefs[0].wallId === "w2").map((d) => d.lengthMm), [555, 555, 555, 555]);
+  assert.deepEqual(both.materialResults.ng.demands.map((d) => d.lengthMm), [565, 565, 565, 565]);
+  // a wall only on Walls gets no note
+  assert.ok(!msgs(wf(meas)).some(([code]) => code === "walls_counted_twice"));
+});
+
+t("needs: a Walls item with no company products blocks ordering, naming each part, but its quantities are still worked out", () => {
+  const c = ex(2700, { spec: wallFramingDefaults([]) });
+  assert.equal(WR(c).status.procurement, "missing-product");
+  const needs = msgs(c).filter(([code]) => code === "material_incomplete").map(([, b, m]) => [b, m]);
+  assert.deepEqual(needs, [[true, "Studs: enter the treatment (or \"untreated\")."], [true, "Plates: enter the grade or species."], [true, "Plates: enter the treatment (or \"untreated\")."],
+    [true, "Noggins: enter the grade or species."], [true, "Noggins: enter the treatment (or \"untreated\")."]]);
+  assert.ok(c.scheduleLines.every((l) => l.problems.includes("Plates: enter the treatment (or \"untreated\").")));
+  assert.equal(c.orderReady, false);
+  assert.deepEqual([pieceSum(c, "studs"), partRows(c, "plates"), pieceSum(c, "noggins")], [21, [[2, 6000], [2, 4200]], 13]);
+  assert.deepEqual(partLines(c, "studs")[0].item.description, "Studs 90 × 45 MGP10 — 2,700 mm length");
+  assert.ok(!msgs(c).some(([, , m]) => /choose the .* before ordering/.test(m)), "the part's needs once, never the engine's own wording as well");
+});
+
+t("the Walls layout keys openings by measurement id (as Studs does) and carries their labels; notes and cut lists use the labels", () => {
+  // what the wall pages look up: layout.openings[].id, ticks' openingId / besideOpeningIds and bays' openingId are the
+  // opening measurements' ids, so WallsScreen's lookups by opening.id find them
+  const meas = [wm("w2", 4000, 2700, "Wall 2"), om("o5", "w2", "W5", "window", 1000, 1000, 1200, 900), om("o6", "w2", "W6", "window", 2600, 800, 300, 2800)];
+  const c = wf(meas);
+  const l = wl(c, "Wall 2");
+  assert.deepEqual(l.openings.map((o) => [o.id, o.label]), [["o5", "W5"]]);
+  assert.deepEqual(l.openingsAboveStuds, [{ id: "o6", label: "W6", xLeftMm: 2600, xRightMm: 3400 }]);
+  for (const o of meas.filter((x) => x.kind === "opening" && x.id === "o5")) assert.ok(l.openings.find((x) => x.id === o.id), "found by the opening's measurement id");
+  const ids = new Set(["o5", "o6"]);
+  assert.ok(l.ticks.every((t) => (t.openingId == null || ids.has(t.openingId)) && (t.besideOpeningIds || []).every((x) => ids.has(x))), JSON.stringify(l.ticks));
+  assert.ok(l.noggins.bays.every((b) => b.openingId == null || ids.has(b.openingId)));
+  assert.deepEqual(l.openingsNotCounted, ["o5"]);
+  assert.ok(hasMsg(c, "opening_clipped", false, "Wall 2 W6 is above the top of the 2,700 mm studs (sill 2,800 mm), so it doesn't change this wall's framing. Check the wall height or the opening."), JSON.stringify(msgs(c)));
+  assert.ok(hasMsg(c, "opening_framing_not_counted", false, "Lintels, jacks and trimmers at W5 aren't counted."));
+  assert.ok(partDemands(c, "studs").some((d) => d.label === "Wall 2 stud @ 977.5 (beside W5)"));
+  assert.ok(WR(c).explain.includes("W5: 2 full-height stud(s) strictly inside 1,000–2,000 removed"), WR(c).explain.join("\n"));
+  // overlapping openings are named by their labels too
+  const clash = wf([wm("w", 4000, 2700, "Wall 1"), om("x1", "w", "W1", "window", 500, 1000, 1200, 900), om("x2", "w", "W2", "window", 1200, 1000, 1200, 900)]);
+  assert.ok(hasMsg(clash, "invalid_input", true, "Wall 1: Openings W1 and W2 overlap along the wall — frame them as one opening or with explicit members."), JSON.stringify(msgs(clash)));
+});
+
+t("two openings with the same label on one wall are named along the wall (W1, then W1 (2)), whatever order they were added", () => {
+  const wall = wm("w", 6000, 2700, "Wall 1");
+  const a = om("zz", "w", "W1", "window", 1000, 900, 1200, 900), b = om("aa", "w", "W1", "window", 3500, 900, 1200, 900);
+  const fwd = wf([wall, a, b]), rev = wf([wall, b, a]);
+  assert.deepEqual(wl(fwd, "Wall 1").openings.map((o) => [o.id, o.label]), [["zz", "W1"], ["aa", "W1 (2)"]], "the left one is W1");
+  assert.deepEqual(partDemands(fwd, "studs").filter((d) => /beside/.test(d.label)).map((d) => d.label),
+    ["Wall 1 stud @ 932.5 (beside W1)", "Wall 1 stud @ 977.5 (beside W1)", "Wall 1 stud @ 1,922.5 (beside W1)", "Wall 1 stud @ 1,967.5 (beside W1)",
+      "Wall 1 stud @ 3,432.5 (beside W1 (2))", "Wall 1 stud @ 3,477.5 (beside W1 (2))", "Wall 1 stud @ 4,422.5 (beside W1 (2))", "Wall 1 stud @ 4,467.5 (beside W1 (2))"]);
+  assert.ok(hasMsg(fwd, "opening_framing_not_counted", false, "Lintels, jacks and trimmers at W1, W1 (2) aren't counted."), JSON.stringify(msgs(fwd)));
+  assert.deepEqual(WR(rev), WR(fwd));
+  // the same lines; only the draft-line staleness key follows the stored order of the openings (as for every material)
+  const noKey = (c) => c.scheduleLines.map(({ dependencyKey: _k, item: { dependencyKey: _i, ...item }, ...l }) => ({ ...l, item }));
+  assert.deepEqual(noKey(rev), noKey(fwd));
+});
+
+t("a framing-detail member's own need still blocks on Walls, naming its wall; the parts' needs are still said once", () => {
+  const detail = { source: "explicit", aboveHead: { required: false },
+    members: [{ id: "L1", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 300, identity: { section: "190x45", grade: "LVL" }, stock: { maxMm: 6000 } }] };
+  const c = wf([wm("w1", 6000, 2700, "Wall 1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0, detail)]);
+  assert.ok(hasMsg(c, "timber_identity_incomplete", true, "Wall 1 D1 L1: choose the treatment before ordering."), JSON.stringify(msgs(c)));
+  assert.deepEqual([WR(c).status.procurement, c.orderReady], ["draft", false]);
+  assert.ok(c.scheduleLines.every((l) => l.problems.includes("Wall 1 D1 L1: choose the treatment before ordering.")));
+  // with its treatment the item is ready again
+  const ok = wf([wm("w1", 6000, 2700, "Wall 1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0,
+    { ...detail, members: [{ ...detail.members[0], identity: { section: "190x45", grade: "LVL", treatment: "H2" } }] })]);
+  assert.deepEqual([WR(ok).status.procurement, msgs(ok).filter(([, b]) => b)], ["ready", []]);
+  // a Walls part's own identity problem never shows twice (the needs test: once each, from the part)
+  assert.ok(!msgs(ex(2700, { spec: wallFramingDefaults([]) })).some(([code]) => code === "timber_identity_incomplete"));
+});
+
+t("the 'aren't counted' note names every opening without a framing detail (never 'and n more')", () => {
+  const meas = [wm("w", 12000, 2700, "Wall 1"), ...Array.from({ length: 9 }, (_, i) => om(`o${i}`, "w", `W${i + 1}`, "window", 300 + i * 1300, 600, 1200, 900))];
+  const c = wf(meas, { spec: LVL_READY() });
+  assert.ok(hasMsg(c, "opening_framing_not_counted", false, "Lintels, jacks and trimmers at W1, W2, W3, W4, W5, W6, W7, W8, W9 aren't counted."), JSON.stringify(msgs(c)));
+});
+
+t("round 3: an LVL longest length marked not stocked (11,000, off the 300 mm grid) is kept by the normaliser and never bought", () => {
+  const spec = withPart(LVL_READY(), "longPlates", { stock: { maxMm: 11000, unavailableMm: [11000, 10800] } });
+  const n = normaliseFamilySpec(spec);
+  assert.deepEqual(n.components.longPlates.stock, { maxMm: 11000, unavailableMm: [10800, 11000] });
+  assert.deepEqual(normaliseFamilySpec(n), n, "a fixed point");
+  assert.deepEqual(longPlateStockLengths(n.components.longPlates).slice(-2), [10200, 10500]);
+  // a 10,900 wall: no 11,000 or 10,800 LVL, so each plate joins over the stud at 10,200 (10,200 LVL + 700 pine)
+  const c = wf([wm("w", 10900, 2700, "Wall 1")], { spec });
+  assert.deepEqual([partRows(c, "longPlates"), partRows(c, "plates")], [[[2, 10200]], [[2, 1200]]]);
+  assert.deepEqual(wl(c, "Wall 1").plates.layers.map((l) => [l.piecesMm, l.joinsOverStudsMm]), [[[10200, 700], [10200]], [[10200, 700], [10200]]]);
+  // a pine plate's not-stocked length off the grid still comes out, as before
+  assert.deepEqual(normaliseFamilySpec(withPart(LVL_READY(), "plates", { stock: { maxMm: 6000, unavailableMm: [6100, 5700] } })).components.plates.stock.unavailableMm, [5700]);
+  // a Long plates part with no longest length: 11,000 is its longest, so it can be marked not stocked too
+  assert.deepEqual(normaliseFamilySpec(withPart(LVL_READY(), "longPlates", { stock: { maxMm: null, unavailableMm: [11000] } })).components.longPlates.stock.unavailableMm, [11000]);
+});
+
+t("order independence: the walls in any order (and the same input twice) give the same lines, layouts and notes; the job limit still applies", () => {
+  const base = ex(2700);
+  const m = EXAMPLE(2700);
+  const shuffled = wf([m[3], m[1], m[2], m[0]], { rules: { centresMm: 600, doubleTopPlate: false }, contributions: [onW("w2"), onW("w1")] });
+  assert.deepEqual(shuffled.scheduleLines, base.scheduleLines);
+  assert.deepEqual(WR(shuffled), WR(base));
+  assert.deepEqual(ex(2700), base, "the same input twice");
+  // ten walls traced in reverse: same lines and the same wall order on the result
+  const ten = Array.from({ length: 10 }, (_, i) => wm(`w${i}`, 3000 + i * 450, 2700 + (i % 3) * 150, `Wall ${i + 1}`));
+  const fwd = wf(ten), rev = wf([...ten].reverse());
+  assert.deepEqual(rev.scheduleLines, fwd.scheduleLines);
+  assert.deepEqual(WR(rev).layouts.map((l) => l.wallLabel), ["Wall 1", "Wall 2", "Wall 3", "Wall 4", "Wall 5", "Wall 6", "Wall 7", "Wall 8", "Wall 9", "Wall 10"]);
+  assert.deepEqual(WR(rev), WR(fwd));
+  // JOB_GENERATED_LIMIT: studs, plates and both noggin rows all count
+  assert.equal(JOB_GENERATED_LIMIT, 20000);
+  const many = Array.from({ length: 25 }, (_, i) => wm(`m${i}`, 30000, 3000, `Wall ${i + 1}`));
+  assert.throws(() => wf(many, { rules: { centresMm: 100, doubleTopPlate: false } }), (e) => e instanceof TakeoffValidationError && /more than 20,000 pieces \(stopped at Walls\)/.test(e.message));
 });
 
 console.log(`takeoff-tc-hub028: ${pass} passed, ${fail} failed`);

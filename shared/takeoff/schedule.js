@@ -18,7 +18,7 @@ import { profileGeometryKey, profileProblems } from "./profile.js";
 import { fabricationIdentity, specProblems } from "./catalogue.js";
 import { computeFlashingPath } from "./engine/flashingPath.js";
 import { computeGenericMaterials, genericMaterialKey, isGenericMaterial } from "./engine/dispatch.js";
-import { familyProblems } from "./engine/families.js";
+import { WALL_PARTS, familyProblems } from "./engine/families.js";
 
 export const LIMITS = Object.freeze({
   measurementsPerWorkspace: 500,
@@ -296,9 +296,11 @@ export function computeWorkspace(ws) {
     }
   }
   const flashingLines = [...lines.values()].sort((a, b) => (a.specKey === b.specKey ? b.finishedLengthMm - a.finishedLengthMm : a.specKey < b.specKey ? -1 : 1));
-  // within a cladding its own lines come first, then its automatic battens, H-flashing and foam tape (wall-by-wall step 4)
+  // within a cladding its own lines come first, then its automatic battens, H-flashing and foam tape (wall-by-wall step 4);
+  // within a Walls item (HUB 028) the studs, then the plates, the long plates and the noggins
   const followerRank = (l) => ({ battens: 1, hflashing: 2, tape: 3 })[l.follower] || 0;
-  const genericLines = gen.lines.sort((a, b) => (a.materialKey === b.materialKey ? (followerRank(a) - followerRank(b) || (a.unit === b.unit ? (b.finishedLengthMm || 0) - (a.finishedLengthMm || 0) : a.unit < b.unit ? -1 : 1)) : a.materialKey < b.materialKey ? -1 : 1));
+  const partRank = (l) => WALL_PARTS.indexOf(l.component) + 1;
+  const genericLines = gen.lines.sort((a, b) => (a.materialKey === b.materialKey ? (followerRank(a) - followerRank(b) || partRank(a) - partRank(b) || (a.unit === b.unit ? (b.finishedLengthMm || 0) - (a.finishedLengthMm || 0) : a.unit < b.unit ? -1 : 1)) : a.materialKey < b.materialKey ? -1 : 1));
   const scheduleLines = [...flashingLines, ...genericLines];
   // a measurement that produced NO pieces (invalid run, no scale, …) is a missing requirement, not zero:
   // it is listed and blocks ordering of that material (R04b R1)
@@ -332,8 +334,11 @@ export function orderLineState(line, computed, materials) {
   const ownKey = mat ? materialSpecKey(mat) : null;
   // generic lines (TC-R04) key the MATERIAL separately from the purchase identity/unit/stock
   const keyOf = (x) => (x.generic ? x.materialKey : x.specKey);
+  // HUB 028: a Walls item's parts share one material key, so the line's part must match too (a 4,200 stud line is never
+  // offered the 4,200 plate line)
+  const partOf = (x) => x.item?.component ?? null;
   const suggestion = mat ? computed.scheduleLines.find((x) => keyOf(x) === ownKey && x.jobMaterialIds.includes(mat.id) && x.finishedLengthMm === line.finishedLengthMm
-    && (x.unit || "piece") === (line.unit || "piece")) || null : null;
+    && (x.unit || "piece") === (line.unit || "piece") && partOf(x) === partOf(line)) || null : null;
   let problem = null;
   if (!sl) problem = "line_stale_missing";
   else if (line.jobMaterialId && (!mat || ownKey !== keyOf(sl) || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";

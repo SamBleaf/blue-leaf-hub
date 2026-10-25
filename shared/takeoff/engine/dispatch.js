@@ -4,7 +4,8 @@
 //
 // Flashing keeps schedule.js's own path. Every other family (engine/families.js) comes through here:
 //   timber      repeated_members@2 (rafters/joists/battens), wall_frame@1 (studs), linear_stock@1 (plates,
-//               noggins, trim, other members, manual/count entries), wall_framing@1 (HUB 028 Walls: reads walls only)
+//               noggins, trim, other members, manual/count entries), wall_framing@1 (HUB 028 Walls: reads walls only;
+//               studs, plates, long LVL plates and noggins of every traced wall together, each part on its own lines)
 //   aluminium   linear_stock@1 — window three-edge preset per opening + measured runs, pooled into 6500 bars
 //   cladding    sheet_layout@2 / course_layout@1 / panel_grid@1 / aac_panel_layout@1 / area_to_linear@2
 //   batten      support_grid@1;  accessory  accessory_routes@1
@@ -16,8 +17,10 @@
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
-import { FAMILIES, TIMBER_GRID, familyIdentity, familyProblems, normaliseFamilySpec, stockIdentityKey } from "./families.js";
-import { computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity } from "./timber.js";
+import { FAMILIES, TIMBER_GRID, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
+  normaliseFamilySpec, stockIdentityKey } from "./families.js";
+import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
+  wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
@@ -190,6 +193,7 @@ function connectedRuns(ms, ctx, sink, lengthOf) {
 }
 
 function runTimber(mat, n, items, ctx, sink) {
+  if (mat.methodKey === "wall_framing") return runWallFraming(mat, n, items, ctx, sink);
   const rules = mat.rules || {};
   const identity = timberId(n);
   // a schedule/engineer source counts only WITH its reference; otherwise the size is a manual selection
@@ -277,6 +281,177 @@ function runTimber(mat, n, items, ctx, sink) {
         : { id: m.id, kind: "cut", measurementId: m.id, quantity: m.quantity, lengthMm: m.finishedLengthMm })) }));
   }
   if (!results.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Nothing measured for this timber yet.", blocking: false });
+  return results;
+}
+
+// ── HUB 028 Walls: one traced run → studs, plates and noggins together ─────────
+
+/** A Walls part's procurement identity, tagged with its part so each part buys on its own lines and cut list. */
+const wallPartIdentity = (p, part) => timberIdentity({ section: sectionText(p), grade: p.grade, treatment: p.treatment, species: p.species, supplier: p.supplierName, component: part });
+/** What the supplier reads for a Walls part: "Studs 90 × 45 MGP10 H2", "Plates 90 × 45 LVL" (Long plates are plates too). */
+const wallPartText = (identity) => `${identity.component === "longPlates" ? WALL_PART_LABELS.plates : WALL_PART_LABELS[identity.component]} ${timberText(identity)}`;
+const andList = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+/** Is this a Walls part's own identity problem ("Studs: choose the treatment …"), which familyProblems already says? */
+const isPartIdentityProblem = (p) => p.code === "timber_identity_incomplete" && WALL_PARTS.some((k) => String(p.message).startsWith(`${WALL_PART_LABELS[k]}:`));
+
+/**
+ * HUB 028 Walls (wall_framing@1): each traced wall of the item gets its studs, plates and noggins together, in ONE
+ * result per wall, from the item's four parts. Sam's rules (25 Oct 2026, rounds 1 to 3):
+ *  - studs at the Stud centres from each wall's first traced point, plus both wall ends (so a corner gets 2, one per
+ *    wall; nothing at T-junctions); stud cut = that wall's own Wall height (never the item's studHeightMm);
+ *  - 2 full-length studs each side of every opening (window, door, other), merged with any closer than a stud
+ *    thickness; centre studs inside an opening come out; nothing under sills or over heads;
+ *  - a bottom and a top plate the FULL wall length (no door gaps: the crew cuts the doorway out after standing the
+ *    frame), a second top plate on every wall when Double top plate is on; a plate longer than the plates' longest
+ *    length is ONE long plate (90 × 45 LVL by default, its own line and cut list), joined over a stud only past the
+ *    long plates' longest length;
+ *  - noggins on the counted studs, clear bay = gap less half of each bordering stud (the stud's thickness), 1 row at
+ *    2,700 or under and 2 rows over, none in a bay that overlaps an opening or between touching studs; they share
+ *    lengths across every wall of the item (one allocator call per material).
+ * Kings, jacks, trimmers and lintels are never counted (one plain note says so); an explicit framing detail on an
+ * opening still adds its own members. A sloped, gable or outline wall, or one with no length or height, blocks the
+ * item with a line naming it. Never a structural check.
+ * Layout contract (the wall pages read it): every id is the measurement id (layout.openings[].id, ticks' openingId
+ * and besideOpeningIds, noggin bays' openingId, openingsNotCounted, refs); layout.openings[].label is the opening's
+ * plan name ("D1"), which the notes and cut-list labels use.
+ */
+function runWallFraming(mat, n, items, ctx, sink) {
+  const rules = mat.rules || {};
+  const parts = n.components;
+  const scheduled = n.sizing?.provenance && n.sizing.provenance !== "manual" && n.sizing.reference;
+  const sizing = scheduled ? { source: "projectSchedule", ref: n.sizing.reference } : { source: "manual" };
+  const part = (k) => ({ materialId: mat.id, identity: wallPartIdentity(parts[k], k), stock: timberStock(parts[k]), label: WALL_PART_LABELS[k], sizing });
+  const longPlates = { identity: wallPartIdentity(parts.longPlates, "longPlates"), lengthsMm: longPlateStockLengths(parts.longPlates), label: WALL_PART_LABELS.longPlates };
+  const studW = parts.studs.section?.widthMm; // the stud's thickness along the wall (45 for a 90 × 45)
+  const centresMm = rules.centresMm ?? WALL_FRAMING_RULES.centresMm;
+  const results = [];
+  // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
+  const seen = new Set();
+  const once = (p) => { const k = `${p.blocking !== false}|${p.message}`; if (seen.has(k)) return false; seen.add(k); return true; };
+  const notCounted = []; // openings with no framing detail, so no lintel, jacks or trimmers: { name, tag, measurementId, openingId }
+  const noMax = new Set(); // the parts with no longest length (studs on a new Walls item: Sam stated none)
+  // walls in a fixed order (by their names), so the notes and every line read the same whatever order they were traced
+  const tagOf = (x) => sink.wallTags.get(x.m.id) || x.m.inputs?.name || x.m.label || "Wall";
+  const walls = items.filter((x) => x.m.kind === "wall")
+    .sort((a, b) => tagOf(a).localeCompare(tagOf(b), "en", { numeric: true }) || (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0));
+  // no stud thickness: nothing can be laid out. familyProblems already blocks with "Studs: enter the timber section", once
+  for (const { m } of studW ? walls : []) {
+    const w = resolveWall(m, ctx);
+    sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
+    const tag = sink.wallTags.get(m.id) || w.label;
+    const block = (code, message) => sink.problems.push({ code, message, blocking: true, refs: [{ measurementId: m.id }] });
+    const L = w.wall.widthMm;
+    const H = Number(w.wall.heightMm);
+    if (w.wall.kind !== "rect") { block("wall_not_straight", `${tag} is sloped or traced as an outline. Walls only works out straight walls of one height.`); continue; }
+    if (!(L > 0)) { block("wall_incomplete", `${tag}: trace the wall length.`); continue; }
+    if (!(H > 0)) { block("wall_incomplete", `${tag}: enter the Wall height.`); continue; }
+    // openings along the wall (then by id), each named by its plan label (D1, W1 …), unique on the wall, so the names
+    // and notes don't depend on the order the openings were added. The id stays the measurement id.
+    const names = new Set();
+    const nameOf = new Map();
+    const openings = [...w.openings].sort((a, b) => a.xMm - b.xMm || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((o) => {
+      const base = o.label || `Opening ${String(o.id).slice(0, 4)}`;
+      let name = base;
+      for (let k = 2; names.has(name); k++) name = `${base} (${k})`;
+      names.add(name);
+      nameOf.set(o.id, name);
+      return { id: o.id, label: name, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.detail ? { detail: o.detail } : {}) };
+    });
+    // "Wall 2 W1: its head …" when the note starts with an opening, else "Wall 2: …"
+    const onWall = (msg) => ([...names].some((nm) => msg.startsWith(`${nm}:`) || msg.startsWith(`${nm} `)) ? `${tag} ${msg}` : `${tag}: ${msg}`);
+    const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
+      openings, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true });
+    const refused = studs.problems.filter((p) => p.code === "invalid_input");
+    if (refused.length) {
+      // e.g. overlapping openings: this wall gets no quantities, the other walls keep theirs, and the block holds every
+      // line of the item until it is fixed
+      for (const p of refused) block("invalid_input", onWall(p.message));
+      continue;
+    }
+    const counted = studs.layout.ticks.filter((t) => t.state !== "removed");
+    const centres = counted.map((t) => t.positionMm);
+    const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
+      layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
+      joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
+    const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: centres.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
+      openings: studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), skipClosedBays: true });
+    const byPart = { studs, plates, noggins };
+    const three = Object.values(byPart);
+    const problems = [];
+    const here = [];
+    for (const [k, r] of Object.entries(byPart)) for (const p of r.problems) {
+      // a part's needs are the item's own (familyProblems names the part, "Plates: enter the treatment …"): said once.
+      // A framing-detail member's own need ("D1 L1: choose the treatment …") stays, naming its wall, and blocks.
+      if (isPartIdentityProblem(p)) continue;
+      // no framing detail: one plain note for the item (below), never "opening framing incomplete" per opening
+      if (p.code === "opening_framing_incomplete") { here.push(p.refs?.[0]?.openingId); continue; }
+      // no longest length on a part: one note for the item naming the parts (below), never "for this product" (a
+      // framing-detail member's own note names its member and stays)
+      if (p.code === "stock_max_unset" && p.message === STOCK_MAX_UNSET_NOTE) { noMax.add(k); continue; }
+      const q = p.code === "plate_too_long" ? p : { ...p, message: onWall(p.message) };
+      if (once(q)) problems.push(q);
+    }
+    for (const id of here) notCounted.push({ name: nameOf.get(id) ?? id, tag, measurementId: m.id, openingId: id });
+    // an explicit framing detail adds its own members (kings …) on top of the studs beside the opening
+    for (const lo of studs.layout.openings) {
+      const det = openings.find((o) => o.id === lo.id)?.detail;
+      if (!lo.complete || !Array.isArray(det?.members) || !det.members.length) continue;
+      const nm = lo.label || lo.id;
+      const q = { code: "framing_detail_members", message: `${tag} ${nm}: its framing detail adds its own members. Check the studs beside ${nm} aren't counted twice.`, blocking: false };
+      if (once(q)) problems.push(q);
+    }
+    const demands = three.flatMap((r) => r.demands);
+    for (const d of demands) {
+      if (d.identity?.component) d.itemDescription = wallPartText(d.identity);
+      // the cut lists name each piece's wall ("Wall 2 stud @ 1,177.5 (beside W1)", "Wall 1 second top plate 0–6,000")
+      d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Bottom plate|Top plate|Second top plate|Noggin)\b/, (x) => x.toLowerCase())}`;
+    }
+    const layers = plates.layout?.layers || [];
+    const layerMm = (t) => (layers.find((l) => l.tag === t)?.piecesMm || []).reduce((a, b) => a + b, 0);
+    results.push({
+      demands,
+      // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
+      layout: { ...studs.layout, method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm,
+        plates: plates.layout ? { layers } : null,
+        noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
+        openingsNotCounted: here,
+        totals: { studs: counted.length, studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
+          secondTopPlateMm: layers.some((l) => l.tag === "top-2") ? layerMm("top-2") : null,
+          longPlateMm: layers.reduce((a, l) => a + (l.longPiecesMm || []).reduce((s, x) => s + x, 0), 0),
+          noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null } },
+      problems,
+      status: { quantity: three.every((r) => r.status.quantity === "calculated") ? "calculated" : "incomplete", installation: studs.status.installation, procurement: "draft" },
+      explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...studs.explain, ...plates.explain, ...noggins.explain],
+    });
+  }
+  if (notCounted.length) {
+    // "D1, W1"; a label on two walls is named with its wall ("W1 on Wall 1, W1 on Wall 2")
+    const twice = new Set(notCounted.map((o) => o.name).filter((nm, i, all) => all.indexOf(nm) !== i));
+    const named = [...new Set(notCounted.map((o) => (twice.has(o.name) ? `${o.name} on ${o.tag}` : o.name)))];
+    sink.problems.push({ code: "opening_framing_not_counted", message: `Lintels, jacks and trimmers at ${named.join(", ")} aren't counted.`, blocking: false, framingGap: true,
+      refs: notCounted.map((o) => ({ measurementId: o.measurementId, openingId: o.openingId, openingLabel: o.name })) });
+  }
+  // a wall also on a Studs, Plates or Noggins item (older jobs): both are still counted, Walls says so
+  for (const { m } of walls) {
+    const on = sink.framedElsewhere?.(m.id) || [];
+    if (on.length) sink.problems.push({ code: "walls_counted_twice", message: `${sink.wallTags.get(m.id) || "A wall"} is also on ${andList(on)}, so its framing may be counted twice.`, blocking: false, refs: [{ measurementId: m.id }] });
+  }
+  if (noMax.size) {
+    const named = WALL_PARTS.filter((k) => noMax.has(k)).map((k, i) => (i ? WALL_PART_LABELS[k].toLowerCase() : WALL_PART_LABELS[k]));
+    sink.problems.push({ code: "stock_max_unset", message: `${andList(named)}: the longest length isn't set. Confirm it before ordering.`, blocking: false });
+  }
+  const partDemands = (k) => results.flatMap((r) => r.demands.filter((d) => d.identity?.component === k));
+  const used = (k) => partDemands(k).length > 0;
+  // the allocator's "pieces are not shared" (no longest length on the noggins), as one plain note naming the length
+  // each noggin buys ("its own 1,200 length") when they all buy the same one
+  if (parts.noggins.stock?.maxMm == null && used("noggins")) {
+    const each = [...new Set(partDemands("noggins").map((d) => selectStock(d.lengthMm, d.stockPolicy).stockMm))];
+    const own = each.length === 1 && each[0] ? `its own ${fmt(each[0])} length` : "its own length";
+    sink.problems.push({ code: "noggins_not_shared", message: `Noggins: each is cut from ${own}. Set the noggins' longest length under Details to share lengths across walls.`, blocking: false });
+  }
+  // the Long plates part's needs (e.g. its treatment) only count once a plate is long enough to use it
+  sink.usesLongPlates = used("longPlates");
+  if (!walls.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Trace the walls for this Walls item.", blocking: false });
   return results;
 }
 
@@ -511,6 +686,9 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         finishedLengthMm: finishedLengthMm ?? null, quantity: 0, exact: 0, item, jobMaterialIds: [mat.id], contributionIds: [], demandIds: [], problems: [], notes: [], handlingFlag: false, ceilingExceeded: false };
       // wall-by-wall step 4: an automatic batten / tape / H-flashing line of this cladding (kept apart for its own spares)
       if (FOLLOWER_KINDS.includes(identity?.follower)) l.follower = identity.follower;
+      // HUB 028 Walls: the part a line buys (studs, plates, long plates or noggins), on the line and on its order item, so
+      // an out-of-date stud line is never offered a plate line of the same length
+      if (WALL_PARTS.includes(identity?.component)) { l.component = identity.component; l.item = { ...l.item, component: identity.component }; }
       lines.set(bucketKey, l);
     }
     l.exact += qty;
@@ -558,12 +736,14 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       }
     } else {
       // one cut list for the material's own pieces, and (wall-by-wall step 4) one each for its automatic battens and
-      // H-flashing — a batten and an H-flashing of the same length are never one row
+      // H-flashing — a batten and an H-flashing of the same length are never one row. HUB 028 Walls: one per part
+      // ("Studs cut list", "Plates cut list", "Long plates cut list", "Noggins cut list"), even for the same product
       const lists = new Map();
       const listOf = (g) => {
         const d = demById.get(g.bars[0]?.cuts[0]?.demandId || g.unavailable?.[0]?.demandId);
-        const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : "";
-        if (!lists.has(f)) lists.set(f, { title: f === "battens" ? `battens cut list (${FOLLOWER_TEXT.battens})` : f === "hflashing" ? `H-flashing cut list (${FOLLOWER_TEXT.hflashing})` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
+        const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : WALL_PARTS.includes(d?.identity?.component) ? d.identity.component : "";
+        if (!lists.has(f)) lists.set(f, { title: f === "battens" ? `battens cut list (${FOLLOWER_TEXT.battens})` : f === "hflashing" ? `H-flashing cut list (${FOLLOWER_TEXT.hflashing})`
+          : WALL_PART_LABELS[f] ? `${WALL_PART_LABELS[f]} cut list` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
         return lists.get(f).rows;
       };
       for (const g of allocation.groups) {
@@ -581,7 +761,10 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       }
       // labels in natural order ("Rafter @ 600" before "@ 1,200") so a site reader can follow the stations
       const natural = (a, b) => String(a).localeCompare(String(b), "en", { numeric: true });
-      for (const [f, l] of [...lists.entries()].sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a < b ? -1 : 1))) {
+      // the material's own list first, then a Walls item's parts in their order (studs, plates, long plates, noggins), then
+      // the followers
+      const listRank = (k) => (k === "" ? -1 : WALL_PARTS.includes(k) ? WALL_PARTS.indexOf(k) : WALL_PARTS.length);
+      for (const [f, l] of [...lists.entries()].sort(([a], [b]) => listRank(a) - listRank(b) || (a < b ? -1 : a > b ? 1 : 0))) {
         appendix.timber.push({ ...(f || n.family !== "timber" ? { title: l.title } : {}), rows: [...l.rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm) });
       }
     }
@@ -736,6 +919,16 @@ export function computeGenericMaterials(materials, contributions, ctx) {
     handMade.set(c.measurementId, h);
   }
   const handMadeOn = (wallMeasId) => { const h = handMade.get(wallMeasId); return { battens: h ? [...h.battens].sort() : [], tape: h ? [...h.tape].sort() : [], joints: h ? [...h.joints].sort() : [] }; };
+  // HUB 028: the walls a Studs, Plates or Noggins item also frames (older jobs) — a Walls item on the same wall notes
+  // that its framing may be counted twice (both are still counted; Studs, Plates and Noggins don't change)
+  const framedOn = new Map();
+  for (const c of contributions) {
+    const m = matById.get(c.jobMaterialId), meas = ctx.measurementsById.get(c.measurementId);
+    if (meas?.kind !== "wall" || m?.spec?.family !== "timber") continue;
+    if (!(m.methodKey === "wall_frame" || (m.methodKey === "linear_stock" && ["plates", "noggins"].includes(m.spec.purpose)))) continue;
+    framedOn.set(c.measurementId, new Set([...(framedOn.get(c.measurementId) || []), m.name || "a timber item"]));
+  }
+  const framedElsewhere = (wallMeasId) => [...(framedOn.get(wallMeasId) || [])].sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
   let generated = 0;
   // wall-by-wall step 4 (Sam: "rounded up once per job"): the foam tape and the H-flashing of EVERY Axon cladding on the
   // job are one product each — they are pooled here and bought once, after the loop (buyPooledFollowers)
@@ -743,11 +936,11 @@ export function computeGenericMaterials(materials, contributions, ctx) {
   for (const mat of ordered) {
     const mine = contributions.filter((c) => c.jobMaterialId === mat.id);
     const items = mine.map((c) => ({ c, role: c.role || "primary", m: ctx.measurementsById.get(c.measurementId) })).filter((x) => x.m);
-    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn };
+    const sink = { problems: [], measProblems: new Map(), offcuts, wallTags: new Map(), layoutInfoFor, sheetJointsFor: (id) => sheetJointsByWall.get(id) || [], handMadeOn, framedElsewhere };
     const names = items.filter((x) => x.m.kind === "wall").map((x) => ({ id: x.m.id, name: x.m.inputs?.name || x.m.label || "Wall" }));
     for (const w of names) sink.wallTags.set(w.id, names.filter((o) => o.name === w.name).length > 1 ? `${w.name} (${String(w.id).slice(0, 4)})` : w.name);
     let n = null, methodResults = [];
-    const matProblems = familyProblems(mat.spec).map((p) => ({ ...p, blocking: true }));
+    let matProblems = familyProblems(mat.spec).map((p) => ({ ...p, blocking: true }));
     try {
       n = normaliseFamilySpec(mat.spec);
       // nothing measured for this material yet: not an error, not "calculated" — just nothing to work out
@@ -760,6 +953,8 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       if (e?.name !== "TakeoffValidationError" && !(e instanceof TypeError) && !(e instanceof RangeError)) throw e;
       sink.problems.push({ code: "invalid_input", message: e?.name === "TakeoffValidationError" ? e.message : `${mat.name}: a setting has the wrong form and couldn't be worked out — check its setup.`, blocking: true });
     }
+    // HUB 028 Walls: the Long plates part's needs count only once a plate uses it
+    if (sink.usesLongPlates) matProblems = familyProblems(mat.spec, { usesLongPlates: true }).map((p) => ({ ...p, blocking: true }));
     const demands = methodResults.flatMap((r) => r.demands || []);
     generated += demands.reduce((a, d) => a + (UNIT_INTEGER.has(d.unit) && d.kind !== "volume" && d.kind !== "area" ? Math.max(1, Math.ceil(d.quantity || 1)) : 1), 0);
     if (generated > JOB_GENERATED_LIMIT) {
@@ -849,7 +1044,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       // a measurement that should feed purchases but produced none (and has problems) is a missing requirement
       if (!pieces.length && problems.length) out.unplaced.push({ contributionId: c.id, jobMaterialId: mat.id, specKey: matKey, problems, explanation: null });
     }
-    const quantityStatus = blocking.length || !demands.length || methodProblems.some((p) => p.framingGap) ? "incomplete" : methodResults.some((r) => r.status?.quantity === "estimate") ? "estimate" : "calculated";
+    const quantityStatus = blocking.length || !demands.length || [...methodProblems, ...sink.problems].some((p) => p.framingGap) ? "incomplete" : methodResults.some((r) => r.status?.quantity === "estimate") ? "estimate" : "calculated";
     const installs = methodResults.map((r) => r.status?.installation).filter(Boolean);
     // before anything is measured: a SELECTED (unreviewed) assembly is source-pending; no assembly is unspecified
     if (!installs.length && n?.assemblyId) installs.push("source-pending");

@@ -17,10 +17,13 @@
 //  T7 computeManualTimber (count, cut, individual member e.g. hip by true/projected length, orderedStock bypass).
 //
 // HUB 028 Walls options (each OFF unless asked for, so every existing result is unchanged): identity `component`
-// (studs / plates / noggins buy apart); computeStudWall openingSideStuds (Sam: a stud each side of every opening;
-// default, needs Sam: face on the opening edge, studs closer than one stud thickness are one: end, then side, then
-// centre) and clipOpeningLevels (default, needs Sam); computePlates per-layer gapsMm (unused by Walls since Sam's
-// round 2 buys the bottom plate full length) and joinOverStuds (Sam's join rule, splitPlateAtStuds); computeNoggins
+// (studs / plates / noggins buy apart); computeStudWall openingSideStuds (Sam: studs each side of every opening, 1
+// by default and 2 on Walls from his round 2, the first one's face on the opening edge and the second against it,
+// studs closer than one stud thickness are one: end, then side, then centre), an opening `label` (its plan name in
+// notes and cut-list labels; ids stay the measurement ids) and clipOpeningLevels (default, needs Sam);
+// computePlates per-layer gapsMm (unused by Walls since Sam's round 2 buys the bottom plate full length),
+// joinOverStuds (Sam's join rule, splitPlateAtStuds) and longPlates (Sam's round 3: a plate over the plates' longest
+// length is one long LVL length, joined over a stud only past the LVL's longest); computeNoggins
 // rowsSource "owner-rule" (Sam: wallNogginRows, 1 row at 2,700 or under, 2 over) and skipClosedBays (default, needs
 // Sam); `label` names the part in its identity problem ("Studs: …").
 //
@@ -70,6 +73,8 @@ const ROW_SOURCES = ["entered", "reviewed-detail", "owner-rule"];
 export const NOGGIN_TWO_ROWS_OVER_MM = 2700;
 /** The owner-rule references the rows are recorded with (both are Sam's rules, never "entered" or inferred). */
 export const NOGGIN_ROW_RULES = Object.freeze({ one: "HUB 028: 2,700 mm or under = 1 row", two: "HUB 028: over 2,700 mm = 2 rows" });
+/** The note a timber input with no longest stock length gives (HUB 028 Walls says it once, naming its parts). */
+export const STOCK_MAX_UNSET_NOTE = "The longest available stock isn't set for this product — confirm it before ordering.";
 
 const fmt = (mm) => formatMm(mm);
 const fail = (message, field) => { throw new TakeoffValidationError(message, field); };
@@ -311,10 +316,10 @@ function setup(input, role) {
   const stockPolicy = timberStockPolicy({ ...(input.stock || {}), sharePieces: flag(share[0], "Cut allocation", SHARED_STOCK_BY_DEFAULT.has(role)) });
   const ctx = { materialId, identity, stockPolicy, installation: sizing.installation, problems: [], explain: [...sizing.explain] };
   // HUB 028: a Walls part names itself in its identity problem ("Studs: …"); everything else keeps the plain
-  // "Timber" wording. The stock note is never labelled, so the same note from every part shows once.
+  // "Timber" wording. The stock note is never labelled (a Walls item says it once, naming the parts without one).
   checkIdentity(ctx, identity, role, text(input.label) || "Timber");
   if (stockPolicy.maxMm === null) {
-    ctx.problems.push(problem("stock_max_unset", "The longest available stock isn't set for this product — confirm it before ordering.", { blocking: false }));
+    ctx.problems.push(problem("stock_max_unset", STOCK_MAX_UNSET_NOTE, { blocking: false }));
   }
   ctx.explain.push(`Stock: ${GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
     + `${stockPolicy.unavailableMm.length ? `, unavailable ${stockPolicy.unavailableMm.map(fmt).join("/")} mm` : ""}`
@@ -608,31 +613,35 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
   const out = list(raw, "Openings").map((o, i) => {
     if (!o || typeof o !== "object") fail(`Opening ${i + 1} is invalid.`, "openings");
     const id = uniqueId(o.id, seen, "opening");
-    const xLeftMm = num(o.xLeftMm, `${id} left edge`);
-    const xRightMm = num(o.xRightMm, `${id} right edge`);
-    if (xRightMm <= xLeftMm + EPS_MM || xRightMm > wallLengthMm + EPS_MM) fail(`${id} must lie within the wall, right edge after left edge.`, "openings");
-    const sillMm = Math.max(0, num(o.sillMm, `${id} sill level`) - datumMm);
-    let headMm = num(o.headMm, `${id} head level`, { above: true }) - datumMm;
+    // HUB 028: an opening's plan label ("D1") names it in every note and cut-list label; its id (the measurement id)
+    // stays its id in the layout and refs. Without a label (Studs) the id names it, as before.
+    const label = text(o.label) || null;
+    const name = label || id;
+    const xLeftMm = num(o.xLeftMm, `${name} left edge`);
+    const xRightMm = num(o.xRightMm, `${name} right edge`);
+    if (xRightMm <= xLeftMm + EPS_MM || xRightMm > wallLengthMm + EPS_MM) fail(`${name} must lie within the wall, right edge after left edge.`, "openings");
+    const sillMm = Math.max(0, num(o.sillMm, `${name} sill level`) - datumMm);
+    let headMm = num(o.headMm, `${name} head level`, { above: true }) - datumMm;
     // HUB 028 clipOpeningLevels [Default, needs Sam]: sill and head are clipped into the stud height with a note
     // instead of blocking. A head above the studs is taken to the top of the studs. An opening wholly above the
     // studs (sill at or above them) has no height left in the stud frame, so it doesn't change this wall's framing.
     if (clip && headMm > sillMm + EPS_MM && headMm > studLengthMm + EPS_MM) {
       const ref = { blocking: false, refs: [{ wallId: clip.wallId, openingId: id }] };
       if (sillMm >= studLengthMm - EPS_MM) {
-        clip.ctx.problems.push(problem("opening_clipped", `${id} is above the top of the ${fmt(studLengthMm)} mm studs (sill ${fmt(sillMm)} mm), so it doesn't change this wall's framing. Check the wall height or the opening.`, ref));
-        return { id, xLeftMm, xRightMm, sillMm: studLengthMm, headMm: studLengthMm, detail: o.detail ?? null, aboveStuds: true };
+        clip.ctx.problems.push(problem("opening_clipped", `${name} is above the top of the ${fmt(studLengthMm)} mm studs (sill ${fmt(sillMm)} mm), so it doesn't change this wall's framing. Check the wall height or the opening.`, ref));
+        return { id, name, label, xLeftMm, xRightMm, sillMm: studLengthMm, headMm: studLengthMm, detail: o.detail ?? null, aboveStuds: true };
       }
-      clip.ctx.problems.push(problem("opening_clipped", `${id}: its head (${fmt(headMm)} mm) is above the ${fmt(studLengthMm)} mm studs, so it is taken to the top of the studs.`, ref));
+      clip.ctx.problems.push(problem("opening_clipped", `${name}: its head (${fmt(headMm)} mm) is above the ${fmt(studLengthMm)} mm studs, so it is taken to the top of the studs.`, ref));
       headMm = studLengthMm;
     }
-    if (headMm <= sillMm + EPS_MM || headMm > studLengthMm + EPS_MM) fail(`${id}: sill and head must sit within the stud height, sill below head.`, "openings");
-    return { id, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null };
+    if (headMm <= sillMm + EPS_MM || headMm > studLengthMm + EPS_MM) fail(`${name}: sill and head must sit within the stud height, sill below head.`, "openings");
+    return { id, name, label, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null };
   });
   // only openings in the stud frame can clash (an opening wholly above the studs is never framed)
   const byX = out.filter((o) => !o.aboveStuds).sort((a, b) => a.xLeftMm - b.xLeftMm);
   for (let i = 1; i < byX.length; i++) {
     if (byX[i].xLeftMm < byX[i - 1].xRightMm - EPS_MM) {
-      fail(`Openings ${byX[i - 1].id} and ${byX[i].id} overlap along the wall — frame them as one opening or with explicit members.`, "openings");
+      fail(`Openings ${byX[i - 1].name} and ${byX[i].name} overlap along the wall — frame them as one opening or with explicit members.`, "openings");
     }
   }
   return out;
@@ -659,20 +668,20 @@ function openingFraming(ctx, o, removed, kept, w) {
     const lengths = { stud: w.studLengthMm, openingWidth: o.xRightMm - o.xLeftMm, headLevel: o.headMm, sillLevel: o.sillMm };
     const memberIds = new Set();
     for (const m of d.members) {
-      uniqueId(m?.id, memberIds, `${o.id} member`);
-      const r = explicitMember(ctx, m, { owner: o.id, lengths, allowanceMm: w.allowanceMm, idParts: [w.wallId, o.id], sourceRef: { ...w.ref, openingId: o.id } });
+      uniqueId(m?.id, memberIds, `${o.name} member`);
+      const r = explicitMember(ctx, m, { owner: o.name, lengths, allowanceMm: w.allowanceMm, idParts: [w.wallId, o.id], sourceRef: { ...w.ref, openingId: o.id } });
       if (r.missing) missing.push(r.missing);
       else members.push(r);
     }
   }
   if (missing.length) return out;
-  out.explain.push(`${o.id}: framing from ${d.source === "reviewed-detail" ? `reviewed detail ${text(d.ref)}` : `explicit quantities${text(d.ref) ? ` (${text(d.ref)})` : ""}`} — quantities only, not a design check`);
+  out.explain.push(`${o.name}: framing from ${d.source === "reviewed-detail" ? `reviewed detail ${text(d.ref)}` : `explicit quantities${text(d.ref) ? ` (${text(d.ref)})` : ""}`} — quantities only, not a design check`);
   for (const [key, role, height] of regions) {
     if (height <= EPS_MM || !d[key].required) continue;
-    const deduction = num(d[key].deductionMm, `${o.id} ${role} deduction`);
+    const deduction = num(d[key].deductionMm, `${o.name} ${role} deduction`);
     const len = height - deduction;
     if (len <= EPS_MM) {
-      out.explain.push(`${o.id}: the ${role} region (${fmt(height)} mm) is used up by the ${fmt(deduction)} mm detail deduction — no ${role} pieces`);
+      out.explain.push(`${o.name}: the ${role} region (${fmt(height)} mm) is used up by the ${fmt(deduction)} mm detail deduction — no ${role} pieces`);
       continue;
     }
     budget(out.demands.length + removed.length * w.plies);
@@ -680,18 +689,18 @@ function openingFraming(ctx, o, removed, kept, w) {
       for (let k = 1; k <= w.plies; k++) {
         out.demands.push(piece(ctx, {
           id: demandId(ctx.materialId, role, w.wallId, o.id, posKey(s.x), `p${k}`), role, lengthMm: len + w.allowanceMm,
-          label: `${o.id} ${role} @ ${fmt(s.x)}${w.plies > 1 ? ` ply ${k}` : ""}`, sourceRefs: [{ ...w.ref, openingId: o.id, station: s.x, role }],
+          label: `${o.name} ${role} @ ${fmt(s.x)}${w.plies > 1 ? ` ply ${k}` : ""}`, sourceRefs: [{ ...w.ref, openingId: o.id, station: s.x, role }],
         }));
       }
     }
-    out.explain.push(`${o.id}: ${removed.length} ${role} station(s) × ${w.plies} at ${fmt(height)} − ${fmt(deduction)} = ${fmt(len)} mm`);
+    out.explain.push(`${o.name}: ${removed.length} ${role} station(s) × ${w.plies} at ${fmt(height)} − ${fmt(deduction)} = ${fmt(len)} mm`);
   }
-  const reconcile = flag(d.reconcileCoincident, `${o.id} reconcile coincident studs`, false);
+  const reconcile = flag(d.reconcileCoincident, `${o.name} reconcile coincident studs`, false);
   for (const r of members) {
     if (reconcile && r.role === "king" && r.atMm !== undefined) {
-      const positions = list(r.atMm, `${o.id} king positions`).map((p) => num(p, `${o.id} king position`));
+      const positions = list(r.atMm, `${o.name} king positions`).map((p) => num(p, `${o.name} king position`));
       if (identityKey(r.identity) !== identityKey(ctx.identity) || Math.abs(r.baseMm - w.studLengthMm) > EPS_MM) {
-        out.explain.push(`${o.id}: kings differ from the common studs (product or length) — not reconciled`);
+        out.explain.push(`${o.name}: kings differ from the common studs (product or length) — not reconciled`);
       } else {
         for (const p of positions.slice(0, r.quantity)) {
           const s = kept.find((k) => Math.abs(k.x - p) <= EPS_MM && !w.reconciled.has(k.stationId));
@@ -707,10 +716,14 @@ function openingFraming(ctx, o, removed, kept, w) {
   return out;
 }
 
-function sideStudWidth(raw) {
+/** Side-stud option → { w, perSide } or null (off). perSide (HUB 028 round 2) defaults to 1, so Studs is unchanged. */
+function sideStudOption(raw) {
   if (raw === undefined || raw === null || raw === false) return null;
   if (typeof raw !== "object" || Array.isArray(raw)) fail("Side studs need the stud thickness along the wall.", "openingSideStuds");
-  return num(raw.studWidthMm, "Stud thickness along the wall", { above: true });
+  return {
+    w: num(raw.studWidthMm, "Stud thickness along the wall", { above: true }),
+    perSide: num(raw.perSide, "Studs each side of an opening", { min: 1, def: 1, integer: true }),
+  };
 }
 
 const STUD_RANK = { end: 0, side: 1, centre: 2 };
@@ -718,35 +731,52 @@ const STUD_NAME = { end: "end stud", side: "side stud", centre: "stud" };
 
 /**
  * HUB 028 side studs and merge. [Sam, 24 Oct 2026] A full stud each side of every opening, added to the kept T1
- * stations. [Default, needs Sam] for the rest:
- *  - its face sits on the opening edge (centre at xLeft − w/2 and xRight + w/2), never outside the wall;
- *  - two openings closer than half a stud thickness share one stud, centred in the gap between them (a stud
- *    there would otherwise sit inside the other opening);
+ * stations. [Sam, round 2, 25 Oct 2026] Walls asks for 2 each side (perSide):
+ *  - the first stud's face sits on the opening edge (centre at xLeft − w/2 and xRight + w/2), never outside the
+ *    wall; each further stud sits against the one before (centres at xLeft − 3w/2, xRight + 3w/2 …);
  *  - studs whose centres are closer than one stud thickness are one stud: an end stud beats a side stud, a side
- *    stud beats a centre stud (equal kinds: the first along the wall). Studs that touch, or sit further apart,
- *    are all kept. So openings under 2 stud thicknesses apart get 1 stud between them, and from 2 up get 2.
+ *    stud beats a centre stud, a first side stud beats a further one (equal: the first along the wall). Studs that
+ *    touch, or sit further apart, are all kept. With 1 each side, openings under 2 stud thicknesses apart get 1 stud
+ *    between them, and from 2 up get 2.
+ * [Default, needs Sam] for the rest:
+ *  - a further stud that would sit even partly inside the neighbouring opening, or whose centre would fall outside
+ *    the wall, isn't placed (so with 2 each side, two openings g apart get floor(g ÷ w) side studs between them, at
+ *    least 1 and at most 4);
+ *  - two openings closer than half a stud thickness share one stud, centred in the gap between them (a stud
+ *    there would otherwise sit inside the other opening), and get no further studs on that side.
  * Returns the counted stations along the wall.
  */
-function framedStations(ctx, stations, run, openings, w, wallId) {
+function framedStations(ctx, stations, run, openings, side, wallId) {
+  const { w, perSide } = side;
   const L = run.runMm;
   const last = stations.length - 1;
   const cands = [];
   stations.forEach((s, i) => {
     if (s.opening) return;
     const end = (i === 0 && !run.excluded.includes("start")) || (i === last && !run.excluded.includes("end"));
-    cands.push({ x: s.x, kind: end ? "end" : "centre", beside: [] });
+    cands.push({ x: s.x, kind: end ? "end" : "centre", order: 0, beside: [] });
   });
+  const inWall = (x) => x >= -EPS_MM && x <= L + EPS_MM;
   const byX = [...openings].sort((a, b) => a.xLeftMm - b.xLeftMm); // never overlapping (wallOpenings)
   byX.forEach((o, i) => {
     const prev = byX[i - 1];
     const next = byX[i + 1];
     const left = prev && o.xLeftMm - w / 2 < prev.xRightMm - EPS_MM ? { x: (prev.xRightMm + o.xLeftMm) / 2, shared: true } : { x: o.xLeftMm - w / 2 };
     const right = next && o.xRightMm + w / 2 > next.xLeftMm + EPS_MM ? { x: (o.xRightMm + next.xLeftMm) / 2, shared: true } : { x: o.xRightMm + w / 2 };
-    if (right.shared) ctx.explain.push(`${o.id} and ${next.id} are ${fmt(next.xLeftMm - o.xRightMm)} mm apart, so they share one stud at ${fmt(right.x)}`);
-    for (const s of [left, right]) cands.push({ x: Math.min(L, Math.max(0, s.x)), kind: "side", beside: [o.id], shared: !!s.shared });
+    if (right.shared) ctx.explain.push(`${o.name} and ${next.name} are ${fmt(next.xLeftMm - o.xRightMm)} mm apart, so they share one stud at ${fmt(right.x)}`);
+    for (const s of [left, right]) cands.push({ x: Math.min(L, Math.max(0, s.x)), kind: "side", order: 1, beside: [o.id], shared: !!s.shared });
+    for (let k = 2; k <= perSide; k++) {
+      const off = ((2 * k - 1) * w) / 2;
+      const lx = o.xLeftMm - off;
+      const rx = o.xRightMm + off;
+      // a further stud goes in only where it sits wholly outside the neighbouring opening (its far face at or past the
+      // neighbour's edge), so between two openings there are never more studs than fit in the gap
+      if (!left.shared && inWall(lx) && !(prev && lx - w / 2 < prev.xRightMm - EPS_MM)) cands.push({ x: lx, kind: "side", order: k, beside: [o.id] });
+      if (!right.shared && inWall(rx) && !(next && rx + w / 2 > next.xLeftMm + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
+    }
   });
   const accepted = [];
-  for (const c of [...cands].sort((a, b) => STUD_RANK[a.kind] - STUD_RANK[b.kind] || a.x - b.x)) {
+  for (const c of [...cands].sort((a, b) => STUD_RANK[a.kind] - STUD_RANK[b.kind] || a.order - b.order || a.x - b.x)) {
     let near = null;
     for (const a of accepted) if (Math.abs(a.x - c.x) < w - EPS_MM && (!near || Math.abs(a.x - c.x) < Math.abs(near.x - c.x))) near = a;
     if (!near) { accepted.push({ ...c, beside: [...c.beside], merged: [] }); continue; }
@@ -772,7 +802,7 @@ function framedStations(ctx, stations, run, openings, w, wallId) {
  *   includeEnd?:boolean, plies?:number, allowanceMm?:number, levelsFrom?:"studBase"|"frameBase",
  *   height:{ mode:"studCut", studLengthMm:number } | { mode:"frameHeight", frameHeightMm:number, bottomPlateMm:number,
  *     topPlateMm:number, deductions?:Array<{label:string, mm:number}> },
- *   openings?:Array<{ id:string, xLeftMm:number, xRightMm:number, sillMm:number, headMm:number, detail?:{
+ *   openings?:Array<{ id:string, label?:string, xLeftMm:number, xRightMm:number, sillMm:number, headMm:number, detail?:{
  *     source:"reviewed-detail"|"explicit", ref?:string, belowSill?:{required:boolean, deductionMm?:number},
  *     aboveHead?:{required:boolean, deductionMm?:number}, reconcileCoincident?:boolean,
  *     members:Array<{ id:string, role:string, quantity:number, lengthMm?:number,
@@ -780,9 +810,12 @@ function framedStations(ctx, stations, run, openings, w, wallId) {
  *       identity?:object, materialId?:string, stock?:object, atMm?:number[] }> } }>,
  *   extras?:Array<{ id:string, role:string, quantity:number, lengthMm?:number, lengthFrom?:"stud", sameAsStud?:boolean,
  *     identity?:object }>, stock?:object, cutAllocation?:boolean, sizing?:object,
- *   openingSideStuds?:{ studWidthMm:number }, clipOpeningLevels?:boolean, label?:string }} input
- *   HUB 028 options (off unless given): openingSideStuds adds a stud each side of every opening and merges studs
- *   closer than studWidthMm (ticks state "side"; labels "Stud @ 977.5 (beside D1)", never a king);
+ *   openingSideStuds?:{ studWidthMm:number, perSide?:number }, clipOpeningLevels?:boolean, label?:string }} input
+ *   HUB 028 options (off unless given): openingSideStuds adds perSide studs (default 1; Walls asks for 2, Sam's
+ *   round 2) each side of every opening and merges studs closer than studWidthMm (ticks state "side"; labels
+ *   "Stud @ 977.5 (beside D1)", never a king); an opening's label names it in every note, explain line and
+ *   cut-list label, while its id stays its id everywhere else (layout.openings[].id, ticks' openingId and
+ *   besideOpeningIds, refs, demand ids); layout.openings[] then carries the label too;
  *   clipOpeningLevels clips sill and head into the stud height with a non-blocking "opening_clipped" note: a head
  *   above the studs is taken to the top of the studs, and an opening wholly above them frames nothing in this wall
  *   (layout.openingsAboveStuds lists it; it is not in layout.openings).
@@ -794,7 +827,7 @@ export function computeStudWall(input) {
     const wallId = text(input.wallId) || fail("Trace the wall first.", "wallId");
     const plies = num(input.plies, "Plies", { min: 1, def: 1, integer: true });
     const allowanceMm = num(input.allowanceMm, "End allowance", { def: 0 });
-    const sideW = sideStudWidth(input.openingSideStuds);
+    const side = sideStudOption(input.openingSideStuds);
     const clip = flag(input.clipOpeningLevels, "Clip opening levels", false);
     const height = studHeight(input.height);
     ctx.explain.push(height.explain);
@@ -814,33 +847,34 @@ export function computeStudWall(input) {
     const stations = run.positions.map((x) => ({
       x, stationId: demandId(wallId, posKey(x)), opening: openings.find((o) => x > o.xLeftMm + EPS_MM && x < o.xRightMm - EPS_MM) ?? null,
     }));
-    const kept = sideW === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, sideW, wallId);
+    const kept = side === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, side, wallId);
     const w = { wallId, ref, plies, allowanceMm, studLengthMm: height.studLengthMm, reconciled: new Map() };
     const framing = [];
     const openingLayout = [];
-    for (const o of aboveStuds) ctx.explain.push(`${o.id}: above the ${fmt(height.studLengthMm)} mm studs, so no studs are removed for it`);
+    for (const o of aboveStuds) ctx.explain.push(`${o.name}: above the ${fmt(height.studLengthMm)} mm studs, so no studs are removed for it`);
     for (const o of openings) {
       const removed = stations.filter((s) => s.opening === o);
       const f = openingFraming(ctx, o, removed, kept, w);
       framing.push(...f.demands);
-      ctx.explain.push(`${o.id}: ${removed.length} full-height stud(s) strictly inside ${fmt(o.xLeftMm)}–${fmt(o.xRightMm)} removed`, ...f.explain);
+      ctx.explain.push(`${o.name}: ${removed.length} full-height stud(s) strictly inside ${fmt(o.xLeftMm)}–${fmt(o.xRightMm)} removed`, ...f.explain);
       if (f.missing.length) {
-        ctx.problems.push(problem("opening_framing_incomplete", `${o.id}: ${OPENING_FRAMING_INCOMPLETE} — needs ${f.missing.join("; ")}.`, { refs: [{ wallId, openingId: o.id }] }));
+        ctx.problems.push(problem("opening_framing_incomplete", `${o.name}: ${OPENING_FRAMING_INCOMPLETE} — needs ${f.missing.join("; ")}.`, { refs: [{ wallId, openingId: o.id }] }));
       }
       openingLayout.push({
-        id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: o.sillMm, headMm: o.headMm,
+        id: o.id, ...(o.label ? { label: o.label } : {}), xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: o.sillMm, headMm: o.headMm,
         removedStationIds: removed.map((s) => s.stationId), complete: !f.missing.length, missing: f.missing,
         detail: o.detail && typeof o.detail === "object" ? { source: o.detail.source ?? null, ref: text(o.detail.ref) || null } : null,
       });
     }
     budget(kept.length * plies);
     const demands = [];
+    const nameOf = new Map(listed.map((o) => [o.id, o.name]));
     for (const s of kept) {
       for (let k = 1; k <= plies; k++) {
         if (k === 1 && w.reconciled.has(s.stationId)) continue;
         demands.push(piece(ctx, {
           id: demandId(ctx.materialId, "stud", s.stationId, `p${k}`), role: "stud", lengthMm: height.studLengthMm + allowanceMm,
-          label: `Stud @ ${fmt(s.x)}${s.beside?.length ? ` (beside ${s.beside.join(", ")})` : ""}${plies > 1 ? ` ply ${k}` : ""}`,
+          label: `Stud @ ${fmt(s.x)}${s.beside?.length ? ` (beside ${s.beside.map((id) => nameOf.get(id) ?? id).join(", ")})` : ""}${plies > 1 ? ` ply ${k}` : ""}`,
           sourceRefs: [{ ...ref, station: s.x, role: "stud" }],
         }));
       }
@@ -858,14 +892,14 @@ export function computeStudWall(input) {
       } else demands.push(r.demand);
     }
     const openingsComplete = openingLayout.every((o) => o.complete);
-    const sideCount = sideW === null ? 0 : kept.filter((s) => s.kind === "side").length;
-    ctx.explain.push(`${kept.length} ${sideW === null ? "common " : ""}stud station(s) × ${plies}${allowanceMm ? ` at ${fmt(height.studLengthMm)} + ${fmt(allowanceMm)} allowance` : ""}`
-      + `${sideW === null ? "" : `, ${sideCount} of them beside openings (face on the opening edge)`}`
+    const sideCount = side === null ? 0 : kept.filter((s) => s.kind === "side").length;
+    ctx.explain.push(`${kept.length} ${side === null ? "common " : ""}stud station(s) × ${plies}${allowanceMm ? ` at ${fmt(height.studLengthMm)} + ${fmt(allowanceMm)} allowance` : ""}`
+      + `${side === null ? "" : `, ${sideCount} of them beside openings (${side.perSide > 1 ? `${side.perSide} each side, the first with its face on the opening edge` : "face on the opening edge"})`}`
       + `${w.reconciled.size ? `; ${w.reconciled.size} serve as kings (detail permits)` : ""}`,
     `Corners, T-junctions, brace panels, point loads and hold-downs are explicit additions only (${extras.length} entered)`);
     const scope = openingsComplete ? (openings.length ? "studs with explicit opening framing" : "base studs") : OPENING_FRAMING_INCOMPLETE;
     if (!openingsComplete) ctx.explain.push(cap(OPENING_FRAMING_INCOMPLETE));
-    const ticks = sideW === null
+    const ticks = side === null
       ? stations.map((s) => ({
         stationId: s.stationId, positionMm: s.x, state: s.opening ? "removed" : "full", openingId: s.opening?.id ?? null,
         reconciledWith: w.reconciled.get(s.stationId) ?? null,
@@ -880,11 +914,11 @@ export function computeStudWall(input) {
       }))].sort((a, b) => a.positionMm - b.positionMm);
     return result(ctx, demands, {
       kind: "studWall", wallId, wallLengthMm: run.runMm, studLengthMm: height.studLengthMm, plies, scope,
-      ...(sideW === null ? {} : { studWidthMm: sideW }),
+      ...(side === null ? {} : { studWidthMm: side.w, ...(side.perSide > 1 ? { sideStudsEachSide: side.perSide } : {}) }),
       ticks,
       openings: openingLayout,
       // HUB 028 clipOpeningLevels: openings wholly above the studs, which frame nothing here (only when there are some)
-      ...(aboveStuds.length ? { openingsAboveStuds: aboveStuds.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })) } : {}),
+      ...(aboveStuds.length ? { openingsAboveStuds: aboveStuds.map((o) => ({ id: o.id, ...(o.label ? { label: o.label } : {}), xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })) } : {}),
     }, openingsComplete && additionsComplete);
   });
 }
@@ -898,12 +932,14 @@ export function computeStudWall(input) {
  * problem names the wall and the stretch with no stud (and there are no pieces). Pure.
  * [Default, needs Sam] Top and bottom joins are not staggered (Sam didn't say).
  * Example: a 9,000 plate at 600 centres with a 6,000 longest length → 6,000 + 3,000, joined over the stud at 6,000.
- * @param {{ fromMm:number, toMm:number, studCentresMm:number[], maxMm:number, wallLabel?:string, plateName?:string }} opts
- *   plateName names the layer in the problem ("top plate"); without it, "plate".
+ * @param {{ fromMm:number, toMm:number, studCentresMm:number[], maxMm:number, wallLabel?:string, plateName?:string,
+ *   stockName?:string }} opts
+ *   plateName names the layer in the problem ("top plate"); without it, "plate". stockName names whose longest length
+ *   to raise ("long plates"); without it, "plates".
  * @returns {{ pieces:Array<{ fromMm:number, toMm:number, lengthMm:number }>, joinsMm:number[], problem:null }
  *   | { pieces:null, joinsMm:null, problem:object }} (throws TakeoffValidationError on invalid input)
  */
-export function splitPlateAtStuds({ fromMm, toMm, studCentresMm, maxMm, wallLabel, plateName } = {}) {
+export function splitPlateAtStuds({ fromMm, toMm, studCentresMm, maxMm, wallLabel, plateName, stockName } = {}) {
   const a = num(fromMm, "Plate start");
   const b = num(toMm, "Plate end");
   if (b <= a + EPS_MM) fail("The plate must end after it starts.", "plate");
@@ -921,7 +957,7 @@ export function splitPlateAtStuds({ fromMm, toMm, studCentresMm, maxMm, wallLabe
       return {
         pieces: null, joinsMm: null,
         problem: problem("plate_too_long", `${text(wallLabel) || "This wall"}: the ${text(plateName) || "plate"} has no stud to join over from ${fmt(start)} to ${fmt(to)} mm.`
-          + ` That is ${fmt(to - start)} mm, longer than the ${fmt(max)} mm longest length. Set a longer longest length for the plates.`,
+          + ` That is ${fmt(to - start)} mm, longer than the ${fmt(max)} mm longest length. Set a longer longest length for the ${text(stockName) || "plates"}.`,
         { refs: [{ fromMm: a, toMm: b, noStudFromMm: start, noStudToMm: to }] }),
       };
     }
@@ -966,6 +1002,19 @@ function joinOption(raw) {
   return { studCentresMm: list(raw.studCentresMm, "Stud centres").map((x, i) => num(x, `Stud centre ${i + 1}`)), wallLabel: text(raw.wallLabel) };
 }
 
+/** HUB 028 round 3 long plates (e.g. 90 × 45 LVL): their product, stock list and name, or null (off). */
+function longPlateOption(raw, join) {
+  if (raw === undefined || raw === null || raw === false) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) fail("Long plates need their product and stock lengths.", "longPlates");
+  if (!join) fail("Long plates go with plate joins over studs (the stud centres).", "longPlates");
+  const lengthsMm = [...new Set(list(raw.lengthsMm, "Long plate lengths").map((x, i) => num(x, `Long plate length ${i + 1}`, { above: true })))].sort((a, b) => a - b);
+  return {
+    identity: timberIdentity(raw.identity), label: text(raw.label) || "Long plates", lengthsMm,
+    // one long length per piece, bought from the part's own list (300 mm steps plus its longest, Sam's round 3)
+    stockPolicy: Object.freeze({ kind: "list", lengthsMm: Object.freeze([...lengthsMm]), sharePieces: false }),
+  };
+}
+
 /**
  * T5 plates: wall run × explicit layers. A layer is ONE continuous piece unless joints selected from the
  * framing detail (jointDetailRef) split it; never aggregate LM. Roles keep the layer tag ("<tag>-plate").
@@ -975,11 +1024,17 @@ function joinOption(raw) {
  * however short. joinOverStuds applies Sam's join rule (splitPlateAtStuds) to every piece longer than the longest
  * stock length (product maximum, less unavailable lengths and the allowance). A piece no stud lets it join gives one
  * blocking "plate_too_long" for the wall.
+ * longPlates (HUB 028 round 3, Sam: "lvl 90x45 plates come up 10 11m long and we use them when long plates are
+ * required"; needs joinOverStuds): a piece longer than the plates' longest length is ONE long plate (its own identity,
+ * bought from its own stock list) instead of being joined; only a piece longer than the long plates' longest length
+ * is joined over a stud, against that longest length, and each resulting piece is then a long plate when it is over
+ * the plates' longest length, else a plate. [Default, needs Sam] for the pieces after such a join.
  * @param {{ materialId:string, wallId:string, measurementId?:string, identity:object, runMm:number,
  *   layers:Array<{ tag:string, jointsMm?:number[], gapsMm?:Array<{ id?:string, fromMm:number, toMm:number }> }>,
  *   jointDetailRef?:string, allowanceMm?:number, joinOverStuds?:{ studCentresMm:number[], wallLabel?:string },
+ *   longPlates?:{ identity:object, lengthsMm:number[], label?:string },
  *   label?:string, stock?:object, cutAllocation?:boolean, sizing?:object }} input
- * @returns {object} MethodResult
+ * @returns {object} MethodResult (with longPlates, each layer lists longPiecesMm: the pieces bought as long plates)
  */
 export function computePlates(input) {
   return guarded(() => {
@@ -991,8 +1046,13 @@ export function computePlates(input) {
     if (!layers.length) fail("Add the plate layers (for example one bottom and two top).", "layers");
     const jointRef = text(input.jointDetailRef);
     const join = joinOption(input.joinOverStuds);
+    const long = longPlateOption(input.longPlates, join);
     const permitted = join && ctx.stockPolicy.maxMm !== null ? permittedStockLengths(ctx.stockPolicy) : null;
     const longestMm = permitted?.length ? permitted[permitted.length - 1] : null; // nothing to split against without one
+    // round 3: the long plates' longest length, when it goes past the plates' own (else they never apply)
+    const longLongestMm = long?.lengthsMm.length && longestMm !== null && long.lengthsMm[long.lengthsMm.length - 1] > longestMm + EPS_MM
+      ? long.lengthsMm[long.lengthsMm.length - 1] : null;
+    let longChecked = false;
     let blocked = null;
     const ref = { wallId, ...(text(input.measurementId) ? { measurementId: text(input.measurementId) } : {}) };
     const tags = new Set();
@@ -1012,12 +1072,16 @@ export function computePlates(input) {
       if (gaps.length) spans = spans.flatMap((s) => lessGaps(s, gaps));
       const studJoins = [];
       let dropped = 0;
+      const limit = longestMm !== null ? longestMm - allowanceMm : null;
+      // the length a piece is joined against: the long plates' longest when they apply, else the plates' own
+      const splitMm = longLongestMm ?? longestMm;
       if (longestMm !== null) {
-        const limit = longestMm - allowanceMm;
+        const splitLimit = splitMm - allowanceMm;
         spans = spans.flatMap(([a, b]) => {
-          if (b - a <= limit + EPS_MM) return [[a, b]];
+          if (b - a <= splitLimit + EPS_MM) return [[a, b]];
           const plateName = PLATE_NAMES[tag] ?? `${tag} plate`;
-          const r = limit > EPS_MM ? splitPlateAtStuds({ fromMm: a, toMm: b, studCentresMm: join.studCentresMm, maxMm: limit, wallLabel: join.wallLabel || wallId, plateName })
+          const r = splitLimit > EPS_MM ? splitPlateAtStuds({ fromMm: a, toMm: b, studCentresMm: join.studCentresMm, maxMm: splitLimit, wallLabel: join.wallLabel || wallId, plateName,
+            stockName: longLongestMm !== null ? long.label.toLowerCase() : undefined })
             : { problem: problem("plate_too_long", `${join.wallLabel || wallId}: the end allowance leaves no ${plateName} within the longest length. Lower the end allowance.`) };
           if (r.problem) {
             // one blocking problem per wall, however many pieces can't be joined; the piece itself isn't ordered
@@ -1030,30 +1094,41 @@ export function computePlates(input) {
         });
       }
       const pieces = [];
+      const longPieces = [];
       for (const [a, b] of spans) {
         pieces.push(b - a);
+        const isLong = longLongestMm !== null && b - a > limit + EPS_MM;
+        if (isLong) {
+          longPieces.push(b - a);
+          // the long plates' needs are checked only once one is used (a job with no long plate never asks for them)
+          if (!longChecked) { checkIdentity(ctx, long.identity, "plate", long.label); longChecked = true; }
+        }
         demands.push(piece(ctx, {
           id: demandId(ctx.materialId, role, wallId, posKey(a)), role, lengthMm: b - a + allowanceMm,
           label: `${cap(tag)} plate ${fmt(a)}–${fmt(b)}`, sourceRefs: [{ ...ref, role: tag }],
+          ...(isLong ? { identity: long.identity, stockPolicy: long.stockPolicy } : {}),
         }));
       }
       layout.push({
         tag, jointsMm: joints, piecesMm: pieces,
         ...(hasGaps ? { gapsMm: gaps.map((g) => ({ ...(g.id ? { id: g.id } : {}), fromMm: g.fromMm, toMm: g.toMm })) } : {}),
         ...(join ? { joinsOverStudsMm: studJoins } : {}),
+        ...(long ? { longPiecesMm: longPieces } : {}),
       });
+      const longText = longPieces.length ? ` (${longPieces.length === pieces.length ? (pieces.length === 1 ? "one long plate" : "all long plates")
+        : `${longPieces.map(fmt).join(" + ")} mm as ${longPieces.length === 1 ? "a long plate" : "long plates"}`}, over the ${fmt(longestMm)} mm plates)` : "";
       if (!gaps.length && !studJoins.length && !dropped) {
         ctx.explain.push(joints.length
-          ? `${cap(tag)} plate: split at ${joints.map(fmt).join(", ")} mm per ${jointRef} → ${pieces.map(fmt).join(" + ")} mm`
-          : `${cap(tag)} plate: one continuous ${fmt(runMm)} mm piece (no joints selected from the framing detail)`);
+          ? `${cap(tag)} plate: split at ${joints.map(fmt).join(", ")} mm per ${jointRef} → ${pieces.map(fmt).join(" + ")} mm${longText}`
+          : `${cap(tag)} plate: one continuous ${fmt(runMm)} mm piece${longText || " (no joints selected from the framing detail)"}`);
       } else {
         const steps = [
           ...(joints.length ? [`split at ${joints.map(fmt).join(", ")} mm per ${jointRef}`] : []),
           ...(gaps.length ? [`less ${gaps.map((g) => `${g.id ? `${g.id} ` : ""}${fmt(g.fromMm)}–${fmt(g.toMm)}`).join(", ")}`] : []),
-          ...(studJoins.length ? [`joined over the stud${studJoins.length > 1 ? "s" : ""} at ${studJoins.map(fmt).join(", ")} mm (longest length ${fmt(longestMm)} mm)`] : []),
-          ...(dropped ? [`${dropped} piece${dropped > 1 ? "s" : ""} longer than ${fmt(longestMm)} mm with no stud to join over, not ordered`] : []),
+          ...(studJoins.length ? [`joined over the stud${studJoins.length > 1 ? "s" : ""} at ${studJoins.map(fmt).join(", ")} mm (longest length ${fmt(splitMm)} mm)`] : []),
+          ...(dropped ? [`${dropped} piece${dropped > 1 ? "s" : ""} longer than ${fmt(splitMm)} mm with no stud to join over, not ordered`] : []),
         ];
-        ctx.explain.push(`${cap(tag)} plate: ${fmt(runMm)} mm ${steps.join("; ")} → ${pieces.length ? `${pieces.map(fmt).join(" + ")} mm` : "no plate"}`);
+        ctx.explain.push(`${cap(tag)} plate: ${fmt(runMm)} mm ${steps.join("; ")} → ${pieces.length ? `${pieces.map(fmt).join(" + ")} mm` : "no plate"}${longText}`);
       }
     }
     if (blocked) ctx.problems.push(blocked);

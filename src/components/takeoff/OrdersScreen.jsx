@@ -36,13 +36,16 @@ const STALE_CODES = Object.keys(GENERIC_STALE);
 
 /**
  * A stale purchase line whose length / stock changed (e.g. a new pitch moved the rafters from 5,400 to 6,600 stock)
- * gets no same-length suggestion from orderLineState. When its material now buys exactly ONE line in the same unit,
- * offer that line — explicitly ("Update to what's needed now") — instead of leaving only "Remove line".
+ * gets no same-length suggestion from orderLineState. When its material now buys exactly ONE line in the same unit
+ * (and, on a Walls item, the same part), offer that line — explicitly ("Update to what's needed now") — instead of
+ * leaving only "Remove line".
  */
 function withGenericSuggestion(state, computed) {
   const l = state.line;
   if (!state.stale || state.suggestion || !isGenericLine(l) || !l.jobMaterialId || state.problem === "line_stale_quantity") return state;
-  const same = (computed?.scheduleLines || []).filter((x) => x.generic && x.bucketKey !== l.bucketKey && x.jobMaterialIds.includes(l.jobMaterialId) && (x.unit || "piece") === (l.unit || "piece"));
+  // HUB 028: on a Walls item, the same part too (a stud line is never offered a plate line)
+  const same = (computed?.scheduleLines || []).filter((x) => x.generic && x.bucketKey !== l.bucketKey && x.jobMaterialIds.includes(l.jobMaterialId) && (x.unit || "piece") === (l.unit || "piece")
+    && (x.item?.component ?? null) === (l.item?.component ?? null));
   return same.length === 1 ? { ...state, suggestion: same[0] } : state;
 }
 
