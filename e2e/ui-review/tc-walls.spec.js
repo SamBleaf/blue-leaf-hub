@@ -267,14 +267,14 @@ test.describe("TC walls — phone journeys", () => {
     await page.getByRole("radio", { name: "Supports" }).click();
     await expect(page.getByRole("radio", { name: "Supports" })).toHaveAttribute("aria-checked", "true");
     await expect(cells(page)).toHaveCount(0);
-    // wall-by-wall step 4: the Axon's own battens — 11 uprights up to the rakes, the bottom (3,000 + 3,000) and a sloped
-    // batten on each rake (√(3,000² + 600²) = 3,059.4, joined over the upright at 2,400 / 3,600) = 17 pieces, 41.52 m
-    await expect(page.locator('[data-el-state="support"]')).toHaveCount(17);
+    // wall-by-wall step 4: the Axon's own battens — 11 uprights up to the rakes, the 6,000 bottom and a sloped batten on
+    // each rake (√(3,000² + 600²) = 3,059.4), each one pine length (HUB 030: joins only past 6,000) = 14 pieces, 41.52 m
+    await expect(page.locator('[data-el-state="support"]')).toHaveCount(14);
     // the explanation folds under More (wall-by-wall step 5); the wall's short line at the top has the count
     await expect(page.locator("[data-elevation-note]")).toHaveCount(0);
     await page.locator("[data-wall-more] summary").click();
     const about = page.locator("[data-wall-more] [data-elevation-about]");
-    await expect(about.first()).toHaveText("Battens worked out from Axon 400 smooth: 17 pieces, 41.52 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+    await expect(about.first()).toHaveText("Battens worked out from Axon 400 smooth: 14 pieces, 41.52 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
     await expect(about.first()).toBeVisible();
     await expect(page.locator("[data-supports-empty]")).toHaveCount(0);
     await page.getByRole("radio", { name: "Accessories" }).click();
@@ -922,7 +922,7 @@ test.describe("TC walls — adversarial review regressions", () => {
     await expect(page.getByLabel("Wall height")).toBeFocused();
     await page.getByLabel("Wall height").fill("2700"); await page.getByLabel("Wall height").press("Enter");
     await expect(page.locator("[data-provenance]")).toHaveText("Derived from plan + entered heights");
-    await expect(page.locator("[data-wall-result]")).toHaveText("Net 10.80 m² of 10.80 m² · Axon 400 smooth: 4 sheets, 12 batten pieces");   // + its own battens, as pieces cut (step 4)
+    await expect(page.locator("[data-wall-result]")).toHaveText("Net 10.80 m² of 10.80 m² · Axon 400 smooth: 4 sheets, 10 batten pieces");   // + its own battens, as pieces cut (step 4; HUB 030 pine lengths)
   });
 
   test("problems go to the right wall ('North' never takes 'North wall: …'); a material with no wall reads 'Nothing measured yet', never Calculated", async ({ page }) => {

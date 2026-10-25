@@ -397,16 +397,18 @@ test("Sheet joint rows: a draft until positions + gap + detail are all entered; 
 });
 
 // ── support battens ────────────────────────────────────────────────────────────────────────────────────────
-test("Support battens: max spacing is required and never defaulted; offsets / existing saved; orientation change flags spacing", async ({ page }) => {
+test("Support battens: Sam's defaults (HUB 030 decision 2) — 600 centres and fixings not counted until changed; offsets / existing saved; orientation change flags spacing", async ({ page }) => {
   await addCladding(page);
   await family(page, "Support battens");
   await expect(page.locator('[data-setup="batten"]')).toBeVisible();
   const spacing = page.getByLabel("Maximum support spacing");
   await expect(spacing).toHaveValue("");
-  await expect(page.locator("[data-needs]")).toContainText("maximum support spacing");
+  // nothing entered: the Blue Leaf defaults, never a need (Sam, 25 Oct 2026)
+  await noText(page, "[data-needs]", "maximum support spacing");
   await noText(page, "[data-needs]", "Effective cover");
+  await expect(page.locator('[data-component="Supports"]')).toContainText("600 centres (Blue Leaf default)");
   await pick(page, P.cavityBatten);
-  await expect(page.locator('[data-component="Fixings"]')).toContainText("Fixings not quantified — detail required.");
+  await expect(page.locator('[data-component="Fixings"]')).toContainText("Not counted (Blue Leaf default)");
   await enter(spacing, 600);
   await enter(page.getByLabel(/Spacing authority/), "H02 Table 1 N2 — SM");
   await enter(page.getByLabel("Start offset"), 50);
@@ -972,8 +974,9 @@ test("CAT01: a new company product on an existing method — Product | Ordering 
     return { lines: lines.map((l) => [l.unit, l.quantity]), explain: ws.materialResults[m.id].explain.join(" ") };
   }, saved);
   // 12 m² ÷ 0.120 m = 100 LM, + 5 % = 105 LM (whole LM after the 0.3 m increment); wall-by-wall step 4: its own battens
-  // across the flat boards at 450 (0, 450 … 4,500, 4,800 = 12 of 2,500) + ceil(12 × 5 %) = 13
-  expect(calc.lines).toEqual([["lm", 105], ["piece", 13]]);
+  // across the flat boards at 450 (0, 450 … 4,500, 4,800 = 12 of 2,500), two to a 5,100 pine length (HUB 030) = 6,
+  // + ceil(6 × 5 %) = 7
+  expect(calc.lines).toEqual([["lm", 105], ["piece", 7]]);
   expect(calc.explain).toContain("100");
   // the server accepts it as an ordinary preset; it then lists under its own family, not under flashing
   const r = await postPreset(page, { content: saved });
@@ -1717,8 +1720,10 @@ test("PH-02: support battens can reach an order — fixings from a rule, or By o
   await openMixedSetup(page, "Cavity battens");
   const b = page.locator('[data-setup="batten"]');
   const fx = b.locator("[data-support-fixings]");
-  await expect(b.locator("[data-needs]")).toContainText("Support fixings");
-  await expect(b.locator("[data-engine-problems]")).toContainText("fixings not quantified");
+  // HUB 030 decision 2: with nothing entered the fixings are Not counted (Blue Leaf default) — nothing holds the order
+  await expect(fx.locator('[data-chips="fixing-scope"]').getByRole("button", { name: "Not counted" })).toHaveAttribute("aria-pressed", "true");
+  await expect(b.locator("[data-needs]", { hasText: "Support fixings" })).toHaveCount(0);
+  await expect(b.locator("[data-engine-problems]", { hasText: "fixings not quantified" })).toHaveCount(0);
   await fx.locator('[data-chips="fixing-scope"]').getByRole("button", { name: "By others" }).click();
   await expect(b.locator("[data-needs]")).toContainText("Record why the support fixings are by others.");
   await enter(fx.getByLabel("Why they're by others"), "Framer supplies and fixes them");
@@ -1766,7 +1771,10 @@ test("F10: a board joint rule — over supports at given centres, or between sup
   await expect(h.locator('[data-status="quantity"]')).toHaveAttribute("data-value", "calculated");
   await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]').filter({ hasText: "Linea" })).toContainText("36 pieces");
   // wall-by-wall step 4: and the boards' own upright battens at 600 (0 … 6,000: 11 of 2,700)
-  await expect(h.locator('[data-quantity-preview] [data-preview-line="piece"]').filter({ hasText: "Hardie Cavity Batten" })).toContainText("11 pieces");
+  // (HUB 030: 90 × 35 H3 pine, two 2,700s to a 5,400 length → 6)
+  const pine = h.locator('[data-quantity-preview] [data-preview-line="piece"]').filter({ hasText: "90 × 35 H3 pine batten" });
+  await expect(pine).toHaveCount(2);
+  await expect(pine.nth(0)).toContainText("5 pieces"); await expect(pine.nth(1)).toContainText("1 piece");
   await shot(page, "f10-board-joints");
   // end-matched timber boards may join between supports
   const tc = { id: "mat-tc", name: "Spotted gum", methodKey: "course_layout", methodVersion: 1, rules: {},
@@ -1854,6 +1862,7 @@ test("Phone 375 px: installation conditions, board joints, panel orientation and
   await mount(page, "setup", { family: "cladding", groupId: "James Hardie|Matrix|590|8", methodKey: "panel_grid", methodVersion: 1, wallMm: [2390, 2990] });
   await check("panel orientation");
   await mount(page, "setup", { family: "batten", groupId: P.cavityBatten, methodKey: "support_grid", methodVersion: 1, wallMm: [4800, 2700], rules: { maxSpacingMm: 600 } });
+  await page.locator('#tc-harness [data-chips="fixing-scope"]').getByRole("button", { name: "From a rule" }).click();   // the default is Not counted (HUB 030)
   await page.locator('#tc-harness [data-chips="fixing-mode"]').getByRole("button", { name: "Spacing along each batten" }).click();
   await check("support fixings");
   await shot(page, "phone-375-support-fixings");

@@ -29,13 +29,13 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
+import { SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
-import { FOAM_TAPE, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
+import { FOAM_TAPE, FOLLOWER_TEXT, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
 import { applyCompanyDefault, defaultSummary, findCompanyDefault, isDefaulted, withoutDefaultsFrom } from "../../../shared/takeoff/companyDefaults.js";
 import { Banner, Btn, TextField } from "./ui.jsx";
 
@@ -792,8 +792,12 @@ function fixingGaps(f) {
   if (!filled(f?.ruleRef)) gaps.push("the rule reference");
   return gaps;
 }
+/** HUB 030 decision 2 (Sam, 25 Oct 2026): no fixing rule and no scope = batten fixings not counted (the engine's
+ *  SUPPORT_BATTEN_DEFAULTS), so there is nothing to enter until someone chooses to count them. */
+const fixingsByDefault = (r) => !r.fixingScope && !r.fixing && !r.fixingDraft;
 function fixingNeeds(r) {
   if (r.existing === true) return []; // existing supports are not purchased or fixed
+  if (fixingsByDefault(r)) return [];
   const scope = r.fixingScope?.status || "include";
   if (scope !== "include") return filled(r.fixingScope?.reason) ? [] : [`Record why the support fixings are ${SCOPE_WHY[scope]}.`];
   if (r.fixing && !r.fixingDraft) return [];
@@ -815,7 +819,7 @@ function setupNeeds(cur, result) {
   }
   if (mk === "aac_panel_layout" && !isNum(r.adhesiveJointMm)) out.push("Enter the system's approved adhesive joint from the current guide for this exact system — it is never defaulted.");
   if (mk === "panel_grid" && !isNum(s.product?.gapMm) && !isNum(r.jointGapMm)) out.push("Enter the expressed-joint gap from the selected assembly.");
-  if (mk === "support_grid" && !isNum(r.maxSpacingMm)) out.push("Enter the maximum support spacing from the selected rule or project detail — no default spacing is assumed.");
+  // HUB 030 decision 2: no spacing entered = the Blue Leaf default 600 centres, so it is never a need
   if (mk === "support_grid") out.push(...fixingNeeds(r));
   if (mk === "panel_grid" && panelSize(s) && !panelSize(s).square && !["portrait", "landscape"].includes(r.panelOrientation)) out.push("Choose portrait or landscape panels.");
   // 02 §2: projected rafter lengths need the roof pitch — it is never assumed (a cleared pitch is not 0°)
@@ -864,8 +868,10 @@ function componentRows(s, r = {}) {
     const fix = r.existing === true ? ["Fixings", "Existing supports — no fixings are ordered.", "na"]
       : scope !== "include" ? ["Fixings", `${SCOPE_TEXT[scope]}${filled(r.fixingScope?.reason) ? ` — ${r.fixingScope.reason}` : " — record why"}. Recorded as omitted, not as zero.`, filled(r.fixingScope?.reason) ? "na" : "open"]
         : r.fixing && !r.fixingDraft ? ["Fixings", `From ${r.fixing.ruleRef} — counted per batten on the order.`, "ok"]
-          : ["Fixings", "Fixings not quantified — detail required.", "open"];
-    return [["Supports", "From your walls once the maximum spacing is set: clipped at openings and rakes.", "ok"], fix];
+          : fixingsByDefault(r) ? ["Fixings", "Not counted (Blue Leaf default), as the automatic battens. Choose From a rule to count them.", "na"]
+            : ["Fixings", "Fixings not quantified — detail required.", "open"];
+    const spacing = isNum(r.maxSpacingMm) ? `at ${fmt(r.maxSpacingMm)} centres` : `at ${fmt(SUPPORT_BATTEN_DEFAULTS.maxSpacingMm)} centres (Blue Leaf default)`;
+    return [["Supports", `From your walls ${spacing}: clipped at openings and rakes.`, "ok"], fix];
   }
   if (s.family === "accessory") return [];
   // wall-by-wall step 4: Axon, Linea / Stria and timber cladding work out their own battens (and Axon its tape and H-flashing)
@@ -875,7 +881,7 @@ function componentRows(s, r = {}) {
   const supports = auto ? (!auto.battens ? ["Battens", "Direct fix: no battens.", "na"]
     // the route is still the user's choice (never stored for them): until it is chosen, the battens are counted as a cavity
     : !r.route ? ["Battens", `Counted as a cavity until you choose: ${followerRuleText(auto)}. Choose Direct fix if it's fixed straight to the frame.`, needsRoute(a) ? "open" : "ok"]
-      : ["Battens", `Worked out from your walls: ${followerRuleText(auto)}. Hardie Cavity Batten, offcuts shared across the walls. Nothing to set up; fixings to the studs are not counted.`, "ok"])
+      : ["Battens", `Worked out from your walls: ${followerRuleText(auto)}. ${FOLLOWER_TEXT.battens}, bought once for the job with offcuts shared across the walls. Nothing to set up; fixings to the studs are not counted.`, "ok"])
     : !needsRoute(a) || !r.route ? ["Supports", `${needsRoute(a) ? "Choose direct fix or cavity, then a" : "A"}dd a Support battens material for any cavity / support layer (or record existing framing).`, "open"]
       : r.route === "cavity" ? ["Supports", "Cavity: add a Support battens material for the cavity battens — spacing from the reviewed rule or project detail.", "open"]
         : ["Supports", "Direct fix: no batten layer — fixes to the existing frame. Record the frame as existing supports for a fixing layout.", "open"];
@@ -1543,12 +1549,14 @@ function BoardJointsField({ spec, value, draft, needed, onApply, onDraft, onClea
 /** Support-to-frame fixings for a batten layer (PH-02): a reviewed rule, or By others / Exclude with the reason. */
 function SupportFixings({ rules, update }) {
   const r = rules || {};
-  const scope = r.fixingScope?.status || "include";
+  const scope = fixingsByDefault(r) ? "default" : r.fixingScope?.status || "include";
   const src = r.fixingDraft || r.fixing || {};
   const id = src.identity || {};
   const setScope = (v) => update((c) => {
-    const rr = withoutCarried(c.rules, "fixingScope");
-    if (v === "include") delete rr.fixingScope;
+    const rr = withoutCarried(withoutCarried(c.rules, "fixingScope"), "fixingDraft");
+    if (v === "default") { delete rr.fixingScope; delete rr.fixing; delete rr.fixingDraft; }
+    // "From a rule" starts an empty draft (never quantified until it is complete), so the card asks for the fastener
+    else if (v === "include") { delete rr.fixingScope; if (!rr.fixing) rr.fixingDraft = { ...(c.rules?.fixingDraft || {}) }; }
     else rr.fixingScope = { status: v, ...(c.rules?.fixingScope?.reason ? { reason: c.rules.fixingScope.reason } : {}) };
     return { ...c, rules: rr };
   });
@@ -1568,8 +1576,10 @@ function SupportFixings({ rules, update }) {
   return (
     <fieldset className="space-y-2 rounded-lg border border-hairline p-2" data-support-fixings="">
       <legend className="px-1 text-xs font-semibold text-ink">Support fixings (batten to frame)</legend>
-      <Chips label="Fixings" name="fixing-scope" compact value={scope} onChange={setScope} options={[["include", "From a rule"], ["by-others", "By others"], ["exclude", "Exclude"]]} />
-      {scope !== "include" ? (
+      <Chips label="Fixings" name="fixing-scope" compact value={scope} onChange={setScope} options={[["default", "Not counted"], ["include", "From a rule"], ["by-others", "By others"], ["exclude", "Exclude"]]} />
+      {scope === "default" ? (
+        <p className="text-[11px] text-muted" data-fixings-default="">{"Batten fixings to the studs aren't counted (Blue Leaf default, as the automatic battens)."}</p>
+      ) : scope !== "include" ? (
         <>
           <CommitText label={`Why they're ${SCOPE_WHY[scope]}`} value={r.fixingScope?.reason} maxLength={60} placeholder="e.g. Framer supplies and fixes them" onCommit={setReason} />
           <p className="text-[11px] text-muted">Recorded as omitted on the order — not as zero.</p>
@@ -2131,7 +2141,7 @@ function BattenFields({ d, result, lines }) {
       <fieldset className="space-y-2 rounded-lg border border-hairline p-2">
         <legend className="px-1 text-xs font-semibold text-ink">Spacing (from the selected rule or project detail)</legend>
         <NumberField label="Maximum support spacing" value={isNum(r.maxSpacingMm) ? r.maxSpacingMm : null} min={1} max={3000} onCommit={(n) => setRule("maxSpacingMm", n)}
-          help="Required — never defaulted. It varies with wind class, product and fixing (e.g. Axon Table 1)." />
+          help={`Blank = ${fmt(SUPPORT_BATTEN_DEFAULTS.maxSpacingMm)} centres (Blue Leaf default). Change it for the wind class, product or fixing (e.g. Axon Table 1).`} />
         <CommitText label="Spacing authority (guide / table / row or project detail, reviewer)" value={r.spacingRef} maxLength={60} onCommit={(t) => setRule("spacingRef", t)} />
         <div className="grid grid-cols-2 gap-2">
           <NumberField label="Start offset" value={isNum(r.startOffsetMm) ? r.startOffsetMm : null} min={0} onCommit={(n) => setRule("startOffsetMm", n)} help="Blank = 0 at the wall start." />

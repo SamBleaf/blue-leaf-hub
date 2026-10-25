@@ -151,11 +151,12 @@ t("each wall's line reads its own numbers (the same as the layout's own follower
     const text = wallCladdingText(tot);
     assert.match(text, /^\d+ sheets?( · \d+ pieces? from other walls)? · \d+ batten pieces · [\d.]+ m foam tape( · [\d.]+ m H-flashing)?$/, `${w.inputs.name}: ${text}`);
   }
-  // Wall 1: 6,000 × 2,700 with W1 and W2 — the step-4 check job's North wall: 27 batten pieces, 8.4 m of tape
+  // Wall 1: 6,000 × 2,700 with W1 and W2 — the step-4 check job's North wall: 25 batten pieces (HUB 030: the 6,000
+  // bottom and top are one pine length each), 8.4 m of tape
   const byName = Object.fromEntries(perWall(snap, c).map((r) => [r.w.inputs.name, r.t]));
-  assert.equal(byName["Wall 1"].battens, 27);
+  assert.equal(byName["Wall 1"].battens, 25);
   assert.equal(byName["Wall 1"].tapeMm, 8400);
-  assert.equal(wallCladdingText(byName["Wall 1"]), "5 sheets · 27 batten pieces · 8.4 m foam tape");
+  assert.equal(wallCladdingText(byName["Wall 1"]), "5 sheets · 25 batten pieces · 8.4 m foam tape");
   // the gable: its own H joint between the rakes (1,525 → 4,475 at 3,000 / 3,010) and 12.46 m of tape
   assert.equal(byName.Gable.hFlashingMm, 2950);
   assert.match(wallCladdingText(byName.Gable), / · 12\.5 m foam tape · 2\.95 m H-flashing$/);

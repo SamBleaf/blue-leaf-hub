@@ -21,7 +21,7 @@ async function ready(page) {
 }
 const computed = (page) => page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).computed);
 const AXON400 = "James Hardie|Axon 400 smooth|1200|9";
-const BATTEN = "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length";
+const BATTEN = "90 × 35 H3 pine batten";   // HUB 030: never the Hardie Cavity Batten
 const HFLASH = "Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length";
 const TAPE = "Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560";
 const supports = (page) => page.locator('[data-wall-elevation] [data-el-kind="line"][data-el-state="support"]');
@@ -60,44 +60,47 @@ test("step 4 / acceptance 10: Axon 400 smooth from the Blue Leaf defaults works 
   await sheet.getByLabel("Wall length").fill("4000"); await sheet.getByLabel("Wall length").press("Enter");
   await page.getByLabel("Wall height").fill("3600"); await page.getByLabel("Wall height").press("Enter");
   await expect(page.locator("[data-auto-joint]")).toContainText("Joint added automatically at 3,000 mm");
-  // Supports: 8 uprights (both ends, the joins at 1,200 / 2,400 / 3,600 and every 600), each joined over the H-joint
-  // batten (3,000 + 600); the bottom, the top and the H-joint batten (3,000 + 1,000 each) → 22 pieces, 40.80 m
+  // Supports: 8 uprights (both ends, the joins at 1,200 / 2,400 / 3,600 and every 600) of 3,600, one pine length each;
+  // the bottom, the top and the H-joint batten of 4,000 each → 11 pieces, 40.80 m (HUB 030: pine up to 6,000)
   await page.getByRole("radio", { name: "Supports" }).click();
-  await expect(supports(page)).toHaveCount(22);
+  await expect(supports(page)).toHaveCount(11);
   // the explanation folds under More (wall-by-wall step 5); the wall's short line at the top has the count
   await expect(page.locator("[data-elevation-note]")).toHaveCount(0);
-  await expect(page.locator("[data-wall-line-text]")).toContainText("22 batten pieces");
+  await expect(page.locator("[data-wall-line-text]")).toContainText("11 batten pieces");
   await page.locator("[data-wall-more] summary").click();
-  await expect(page.locator("[data-wall-more] [data-elevation-about]").first()).toHaveText("Battens worked out from Axon 400 smooth: 22 pieces, 40.80 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
+  await expect(page.locator("[data-wall-more] [data-elevation-about]").first()).toHaveText("Battens worked out from Axon 400 smooth: 11 pieces, 40.80 m on this wall. Nothing to set up. Fixings to the studs are not counted.");
   await expect(page.locator("[data-wall-more] [data-elevation-about]").first()).toBeVisible();
   await page.locator("[data-wall-more] summary").click();
   await expect(page.locator("[data-supports-empty]")).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/supports-axon-defaults-390x844.png` });
   // tap a batten: what it is and what it is cut from
   await clickBox(page, supports(page).first());
-  const info = page.getByRole("region", { name: /^Batten — upright at 0 \(1 of 2\)$/ });
-  await expect(info.locator("[data-element-info]")).toContainText("Length3,000 mm");
-  await expect(info.locator("[data-element-info]")).toContainText("Cut from a 3,000 mm Hardie Cavity Batten");
+  const info = page.getByRole("region", { name: /^Batten — upright at 0$/ });
+  await expect(info.locator("[data-element-info]")).toContainText("Length3,600 mm");
+  await expect(info.locator("[data-element-info]")).toContainText("Cut from a 3,600 mm 90 × 35 H3 pine batten");
   await expect(info).toContainText("Worked out from the cladding. Fixings to the studs are not counted.");
   await page.getByRole("button", { name: "Close panel" }).click();
   // the wall's own quantities list them (before spares): battens, H-flashing by the metre, tape in metres
   const qty = page.getByRole("region", { name: "Quantities on this wall" });
-  await expect(qty).toContainText("Battens — cut from 3,000 mm lengths22 pieces · 40.80 m installed");
+  await expect(qty).toContainText("Battens — cut from 3,600 mm lengths8 pieces · 28.80 m installed");
+  await expect(qty).toContainText("Battens — cut from 4,200 mm lengths3 pieces · 12.00 m installed");
   await expect(qty).toContainText("H-flashing — cut from 3,000 mm lengths2 pieces · 4.00 m installed");
   await expect(qty).toContainText("Foam tape10.8 m");   // 3 joins × (3,000 + 590)
   // the short totals count batten PIECES (the order buys whole battens, with the offcuts shared across the walls)
-  await expect(page.locator("[data-wall-result]")).toContainText(/Axon 400 smooth: \d+ sheets, 22 batten pieces$/);
+  await expect(page.locator("[data-wall-result]")).toContainText(/Axon 400 smooth: \d+ sheets, 11 batten pieces$/);
   // the schedule: under the cladding, with their codes, exactly the engine's quantities (10 % spares from the default)
   await page.getByRole("button", { name: "‹ Walls" }).click();
   await page.getByRole("button", { name: "Back", exact: true }).click();
-  await expect.poll(async () => (await computed(page)).scheduleLines.filter((l) => l.follower).length).toBe(3);   // saved
+  await expect.poll(async () => (await computed(page)).scheduleLines.filter((l) => l.follower).length).toBe(4);   // saved (battens in 2 pine lengths)
   const c = await computed(page);
   const mat = c.scheduleLines.find((l) => l.follower === "battens").jobMaterialIds[0];
   const want = Object.fromEntries(c.scheduleLines.filter((l) => l.follower).map((l) => [l.follower, l.quantity]));
   expect(Object.keys(want).sort()).toEqual(["battens", "hflashing", "tape"]);
   await page.getByRole("button", { name: "Open schedule" }).click();
   const g = page.locator(`[data-generic-group="${mat}"]`);
-  await expect(g.getByRole("button", { name: new RegExp(`^${want.battens} pieces\\s*${BATTEN}`) })).toBeVisible();
+  const bLines = c.scheduleLines.filter((l) => l.follower === "battens");
+  expect(bLines.map((l) => l.finishedLengthMm).sort()).toEqual([3600, 4200]);
+  for (const l of bLines) await expect(g.getByRole("button", { name: new RegExp(`^${l.quantity} pieces\\s*${l.item.description}`) })).toBeVisible();
   await expect(g.getByRole("button", { name: new RegExp(`^${want.hflashing} pieces?\\s*${HFLASH}`) })).toBeVisible();
   await expect(g.getByRole("button", { name: new RegExp(`^${want.tape} rolls?\\s*${TAPE}`) })).toBeVisible();
   await g.getByRole("button", { name: new RegExp(TAPE) }).click();
@@ -111,7 +114,8 @@ test("step 4 / acceptance 10: Axon 400 smooth from the Blue Leaf defaults works 
   const og = page.locator(`[data-order-group="${mat}"]`);
   await expect(og.locator('[data-unit="roll"]')).toContainText(TAPE);
   await expect(og.locator('[data-unit="roll"]').getByLabel(/Order quantity.*\(rolls?\)/)).toHaveValue(String(want.tape));
-  await expect(og.locator('[data-unit="piece"]').filter({ hasText: "code 405307" }).getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue(String(want.battens));
+  for (const l of bLines) await expect(og.locator('[data-unit="piece"]').filter({ hasText: l.item.description }).getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue(String(l.quantity));
+  await expect(og).not.toContainText("405307");
   await expect(og.locator('[data-unit="piece"]').filter({ hasText: "code 305613" }).getByLabel(/Order quantity.*\(pieces?\)/)).toHaveValue(String(want.hflashing));
   await page.screenshot({ path: `${SHOTS}/order-axon-followers-390x844.png`, fullPage: true });
 });
@@ -123,22 +127,23 @@ test("step 4, the check job (?takeoffSeed=battens): each wall shows its own batt
   const res = c.materialResults["mat-axon400"];
   const pieces = (label) => res.layouts.find((L) => L.wallLabel === label).followers.battens.lines.length;
   // the engine's own per-wall pieces (exact working in takeoff-tc-autobattens.test.mjs)
-  expect(["Wall 1", "Wall 2", "Wall 3", "Wall 4", "Gable"].map(pieces)).toEqual([27, 14, 18, 12, 23]);
+  // HUB 030: pine battens up to 6,000, so a run joins only past 6,000 (fewer pieces, the same metres)
+  expect(["Wall 1", "Wall 2", "Wall 3", "Wall 4", "Gable"].map(pieces)).toEqual([25, 13, 16, 10, 15]);
   await openWallsOf(page, "Axon 400 smooth");
   // the wall rows: sheets and battens — tape and H-flashing are on each wall's page
   const row = (name) => page.getByRole("button", { name: `Open ${name}` });
   // the row chips fold under the list's More (wall-by-wall step 5): hidden first, shown once More is tapped
-  await expect(row("Wall 2").getByText("14 batten pieces", { exact: true })).toBeHidden();
+  await expect(row("Wall 2").getByText("13 batten pieces", { exact: true })).toBeHidden();
   await page.locator("[data-rows-more]").click();
-  await expect(row("Wall 2").getByText("14 batten pieces", { exact: true })).toBeVisible();
-  await expect(row("Gable").getByText("23 batten pieces", { exact: true })).toBeVisible();
+  await expect(row("Wall 2").getByText("13 batten pieces", { exact: true })).toBeVisible();
+  await expect(row("Gable").getByText("15 batten pieces", { exact: true })).toBeVisible();
   await row("Gable").click();
   await page.getByRole("radio", { name: "Supports" }).click();
-  await expect(supports(page)).toHaveCount(23);
+  await expect(supports(page)).toHaveCount(15);
   // the rakes get sloped battens (a line that is neither upright nor level)
   const sloped = await supports(page).evaluateAll((els) => els.map((g) => g.querySelector("line")).filter(Boolean)
     .filter((l) => Math.abs(Number(l.getAttribute("x1")) - Number(l.getAttribute("x2"))) > 1 && Math.abs(Number(l.getAttribute("y1")) - Number(l.getAttribute("y2"))) > 1).length);
-  expect(sloped).toBe(4);
+  expect(sloped).toBe(2, "one sloped batten per rake (under 6,000)");
   const qty = page.getByRole("region", { name: "Quantities on this wall" });
   await expect(qty).toContainText("H-flashing — cut from 3,000 mm lengths1 piece · 2.95 m installed");
   await expect(qty).toContainText("Foam tape12.5 m");
@@ -147,12 +152,12 @@ test("step 4, the check job (?takeoffSeed=battens): each wall shows its own batt
   await page.getByRole("button", { name: "‹ Walls" }).click();
   await row("Wall 2").click();
   await page.getByRole("radio", { name: "Supports" }).click();
-  await expect(supports(page)).toHaveCount(14);
+  await expect(supports(page)).toHaveCount(13);
   // Wall 1: the battens round W1 and W2 are drawn OVER the windows (they lie on the window edges), so they can be seen
   await page.getByRole("button", { name: "‹ Walls" }).click();
   await row("Wall 1").click();
   await page.getByRole("radio", { name: "Supports" }).click();
-  await expect(supports(page)).toHaveCount(27);
+  await expect(supports(page)).toHaveCount(25);
   const after = await page.evaluate(() => {
     const lastOpening = [...document.querySelectorAll("[data-wall-elevation] [data-opening-id]")].at(-1);
     return [...document.querySelectorAll('[data-wall-elevation] [data-el-kind="line"][data-el-state="support"]')]
@@ -182,7 +187,7 @@ test("step 4, the check job (?takeoffSeed=battens): each wall shows its own batt
   await expect(g.locator('[data-alloc-summary="hflashing"]')).toContainText(/^H-flashing: cuts need [\d,]+ mm/);
   await expect(g).toContainText(/Battens: suggested cut plan/);
   // "Show on wall" from the batten line opens the wall on its Supports
-  await g.getByRole("button", { name: new RegExp(BATTEN) }).click();
+  await g.getByRole("button", { name: new RegExp(BATTEN) }).first().click();   // the battens come in several pine lengths
   await g.getByRole("button", { name: "Show on wall" }).first().click();
   await expect(page.getByRole("radio", { name: "Supports" })).toHaveAttribute("aria-checked", "true");
   await expect.poll(() => supports(page).count()).toBeGreaterThan(0);

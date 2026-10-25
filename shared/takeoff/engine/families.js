@@ -31,6 +31,21 @@ export function onTimberGrid(mm) {
   return isFiniteNumber(n) && n >= TIMBER_GRID.minMm && (n - TIMBER_GRID.minMm) % TIMBER_GRID.incrementMm === 0;
 }
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
+/**
+ * HUB 030 (Sam, 25 Oct 2026): "we NEVER use the hardies cavity batten - we always use 90 x 35 pine for battens"; in
+ * chat: H3 treatment, 6.0 m longest, bought in 300 mm steps like all timber, offcuts shared. The ONE batten definition:
+ * the automatic cladding battens (engine/followers.js) and an empty Support battens item both use it. An ordering
+ * choice only: it makes no installation claim (installation stays as the cladding's assembly says).
+ */
+const ownerBattenLengths = () => { const out = []; for (let l = TIMBER_GRID.minMm; l <= 6000; l += TIMBER_GRID.incrementMm) out.push(l); return out; };
+export const OWNER_BATTEN = Object.freeze({ id: "owner-batten-90x35-h3", name: "90 × 35 H3 pine batten", widthMm: 90, thicknessMm: 35, treatment: "H3",
+  lengthsMm: Object.freeze(ownerBattenLengths()), source: "OWNER-2026-10-25" });
+/** Is this batten product the owner's default (an empty Support battens item reads it as picked)? */
+export const isOwnerBatten = (p) => !!p && p.id === OWNER_BATTEN.id;
+/** Sam, 25 Oct 2026 (decision 2): a Support battens item with nothing entered uses 600 centres and counts no batten
+ *  fixings, the same as the automatic battens; both are Blue Leaf ordering defaults the card shows and can change. */
+export const SUPPORT_BATTEN_DEFAULTS = Object.freeze({ maxSpacingMm: 600, fixingScope: Object.freeze({ status: "exclude",
+  reason: "Batten fixings to the studs aren't counted (as the automatic battens)." }), source: "OWNER-2026-10-25" });
 
 // ── HUB 027: timber size choices per purpose (owner, 21 Oct 2026) ─────────────────────────────────────────────
 // ORDERING setup only, never a structural size: a row fills the section, and the grade only where the owner named
@@ -348,7 +363,12 @@ export function normaliseFamilySpec(spec) {
     };
   }
   // panel / sheet / board families: a product snapshot from the catalogue (or a custom/foam/timber entry)
-  const p = s.product || {};
+  // HUB 030: a Support battens item with no product at all (no id, name, size or lengths) takes the owner's pine
+  // batten, so it never waits for a product to be chosen; a half-typed custom batten (it has an id) is never replaced
+  const raw = s.product || {};
+  const emptyBatten = family === "batten" && !raw.id && !raw.name && raw.widthMm == null && raw.thicknessMm == null && raw.lengthMm == null && !(Array.isArray(raw.lengthsMm) && raw.lengthsMm.length);
+  const p = emptyBatten ? { id: OWNER_BATTEN.id, name: OWNER_BATTEN.name, widthMm: OWNER_BATTEN.widthMm, thicknessMm: OWNER_BATTEN.thicknessMm, lengthsMm: [...OWNER_BATTEN.lengthsMm],
+    sourceRefs: [OWNER_BATTEN.source] } : raw;
   const dims = { lengthMm: num(p.lengthMm, "Product length"), widthMm: num(p.widthMm, "Product width"), thicknessMm: num(p.thicknessMm, "Product thickness") };
   return { ...base,
     product: { id: txt(p.id, 80), manufacturer: txt(p.manufacturer), name: txt(p.name), sku: txt(p.sku, 40), ...dims,

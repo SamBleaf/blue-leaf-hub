@@ -84,60 +84,64 @@ await t("rules: Axon sheets get battens + foam tape + H-flashing; Linea / Stria 
   assert.equal(rule(specFromGroup(group("Matrix", 1190))), null);
   assert.equal(rule(specFromGroup(productGroups({ family: "aac" })[0])), null);
   assert.equal(rule({ family: "foam", layout: "sheet", product: { name: "Rendex" } }), null);
-  assert.deepEqual([BATTEN.name, BATTEN.code, BATTEN.widthMm, BATTEN.thicknessMm, [...BATTEN.lengthsMm]], ["Hardie Cavity Batten", "405307", 70, 19, [3000]], "the catalogue's Cavity Batten and its stock lengths");
+  // HUB 030 (Sam, 25 Oct 2026): the owner's 90 × 35 H3 pine, never the Hardie Cavity Batten; 1,200–6,000 in 300 mm steps
+  assert.deepEqual([BATTEN.name, BATTEN.code, BATTEN.widthMm, BATTEN.thicknessMm, [...BATTEN.lengthsMm]],
+    ["90 × 35 H3 pine batten", null, 90, 35, Array.from({ length: 17 }, (_, i) => 1200 + i * 300)], "the owner's pine batten and its 300 mm stock lengths");
   assert.deepEqual([FOAM_TAPE.code, FOAM_TAPE.rollMm, H_FLASHING.code, H_FLASHING.lengthMm], ["304560", 25000, "305613", 3000]);
 });
 
-await t("one Axon wall (4,800 × 2,700 + a 900 window): 18 batten pieces, 36.6 m → 14 Cavity Battens; 8.1 m of tape → 1 roll; no H joint, no H-flashing", () => {
+await t("one Axon wall (4,800 × 2,700 + a 900 window): 16 batten pieces, 36.6 m → 7 pine battens; 8.1 m of tape → 1 roll; no H joint, no H-flashing", () => {
   const c = computeWorkspace(ws([{ ...axon400(), ...fam(specFromGroup(group("Axon 133 smooth"))), rules: {} }], [rect("n", 4800, 2700, "North"), op("w", "n", 1350, 900, 900, 900, "W01")]));
   const b = battens(c, "North");
   // uprights at 0, 600 … 4,800 (joins 1,200 / 2,400 / 3,600 among them): 9, the one at 1,800 cut round the window (900 + 900)
   assert.deepEqual(b.lines.filter((l) => l.kind === "upright").map((l) => l.a.x), [0, 600, 1200, 1800, 1800, 2400, 3000, 3600, 4200, 4800]);
   assert.deepEqual(lens(b, "upright"), [2700, 2700, 2700, 900, 900, 2700, 2700, 2700, 2700, 2700]);
-  assert.deepEqual([lens(b, "bottom"), lens(b, "top")], [[3000, 1800], [3000, 1800]], "4,800 bottom and top join over the upright at 3,000");
+  assert.deepEqual([lens(b, "bottom"), lens(b, "top")], [[4800], [4800]], "4,800 bottom and top are one pine batten each (they join only past 6,000)");
   assert.deepEqual([lens(b, "jamb"), lens(b, "head"), lens(b, "sill")], [[900, 900], [900], [900]], "both sides, the head and the sill of the window");
-  assert.equal(b.lines.length, 18); near(b.totalMm, 36600);
-  // 8 × 2,700 take a batten each (300 left), 2 × 3,000 one each, 1,800 + 900 / 1,800 + 900 / 900 × 3 / 900 → 4 more
-  assert.deepEqual(linesOf(c).map((l) => `${l.quantity} ${l.unit}${l.finishedLengthMm ? ` @${l.finishedLengthMm}` : ""}`), ["4 sheet @2750", "14 piece @3000", "1 roll"]);
+  assert.equal(b.lines.length, 16); near(b.totalMm, 36600);
+  // 36.6 m cut from the 300 mm pine lengths with offcuts shared: 2 × 5,700 + 4 × 5,400 + 3,600 = 36.6 m, nothing wasted
+  assert.deepEqual(linesOf(c).map((l) => `${l.quantity} ${l.unit}${l.finishedLengthMm ? ` @${l.finishedLengthMm}` : ""}`), ["4 sheet @2750", "2 piece @5700", "4 piece @5400", "1 piece @3600", "1 roll"]);
   assert.equal(lay(c, "North").followers.tape.totalMm, 8100, "3 joins × 2,700, the window clear of every join");
   assert.equal(follower(c, "hflashing").length, 0);
   assert.equal(c.orderReady, true, JSON.stringify(c.scheduleLines.map((l) => l.problems)));
 });
 
-await t("the multi-wall job — every wall's battens exactly: North 27 pieces 46.5 m, East (door) 14 / 29.6 m, Tall (H joint) 15 / 30.6 m, Gable 23 / 47.837 m, Outline 18 / 34.4 m", () => {
+await t("the multi-wall job — every wall's battens exactly: North 25 pieces 46.5 m, East (door) 13 / 29.6 m, Tall (H joint) 9 / 30.6 m, Gable 15 / 47.837 m, Outline 16 / 34.4 m", () => {
   const c = job();
-  // North: 11 uprights; the four inside W1 / W2 (1,200 1,800 4,200 4,800) are cut to 900 below + 600 above; 6,000 bottom and
-  // top join over the upright at 3,000; W1 and W2 each get two sides, a head and a sill of 1,200 → 15 + 4 + 8 = 27
+  // North: 11 uprights; the four inside W1 / W2 (1,200 1,800 4,200 4,800) are cut to 900 below + 600 above; the 6,000
+  // bottom and top are one pine batten each (HUB 030: joins only past 6,000); W1 and W2 each get two sides, a head and a
+  // sill of 1,200 → 15 + 2 + 8 = 25
   const n = battens(c, "North");
-  assert.deepEqual([n.lines.length, n.totalMm], [27, 46500]);
-  assert.deepEqual([lens(n, "bottom"), lens(n, "top"), lens(n, "jamb").length, lens(n, "head").length, lens(n, "sill").length], [[3000, 3000], [3000, 3000], 4, 2, 2]);
+  assert.deepEqual([n.lines.length, n.totalMm], [25, 46500]);
+  assert.deepEqual([lens(n, "bottom"), lens(n, "top"), lens(n, "jamb").length, lens(n, "head").length, lens(n, "sill").length], [[6000], [6000], 4, 2, 2]);
   // East: the upright at 1,800 is inside the door (600 above it); the one at 2,400 IS the door's right side (counted once);
   // the bottom batten stops at the door (1,500 + 1,600); the door has a left side and a head, no sill
   const e = battens(c, "East");
-  assert.deepEqual([e.lines.length, e.totalMm], [14, 29600]);
+  assert.deepEqual([e.lines.length, e.totalMm], [13, 29600], "the 4,000 top is one batten");
   assert.deepEqual([lens(e, "bottom"), lens(e, "jamb"), lens(e, "head"), lens(e, "sill")], [[1500, 1600], [2100], [900], []]);
-  // Tall: 6 uprights of 3,600 join over the H-joint batten (3,000 + 600 each), bottom, top and the joint batten 3,000 each
+  // Tall: 6 uprights of 3,600, one pine length each (no join under 6,000); bottom, top and the joint batten 3,000 each
   const tl = battens(c, "Tall");
-  assert.deepEqual([tl.lines.length, tl.totalMm], [15, 30600]);
-  assert.deepEqual(lens(tl, "upright"), [3000, 600, 3000, 600, 3000, 600, 3000, 600, 3000, 600, 3000, 600]);
+  assert.deepEqual([tl.lines.length, tl.totalMm], [9, 30600]);
+  assert.deepEqual(lens(tl, "upright"), [3600, 3600, 3600, 3600, 3600, 3600]);
   assert.deepEqual(tl.lines.filter((l) => l.kind === "joint").map((l) => [l.lengthMm, l.a.y]), [[3000, 3005]], "centred on the 10 mm joint");
-  // Gable: uprights at 0 … 6,000 rise 2,400 → 3,600 → 2,400 (sum 32,400); the five over 3,000 join over the joint batten;
-  // two rakes of √(3,000² + 1,200²) = 3,231.099 each join over the upright at 2,400 / 3,600 (2,584.879 + 646.220);
-  // the batten behind the H joint at 3,005 runs between the rakes: 1,512.5 → 4,487.5 = 2,975
+  // Gable: uprights at 0 … 6,000 rise 2,400 → 3,600 → 2,400 (sum 32,400), one pine length each (none over 6,000);
+  // two rakes of √(3,000² + 1,200²) = 3,231.099, one length each; the batten behind the H joint at 3,005 runs between
+  // the rakes: 1,512.5 → 4,487.5 = 2,975
   const g = battens(c, "Gable");
-  assert.equal(g.lines.length, 23);
+  assert.equal(g.lines.length, 15);
   near(g.totalMm, 32400 + 6000 + 2 * Math.hypot(3000, 1200) + 2975, 0.01);
-  assert.deepEqual(lens(g, "top"), [2584.879, 646.22, 2584.879, 646.22], "sloped top battens, joined over an upright");
+  assert.deepEqual(lens(g, "top").map((L) => Math.round(L * 1000) / 1000), [3231.099, 3231.099], "sloped top battens, one length each");
   assert.ok(g.lines.filter((l) => l.kind === "top").every((l) => l.orientation === "sloped"));
   assert.deepEqual(lens(g, "joint"), [2975]);
-  assert.deepEqual(lens(g, "upright").filter((L) => L > 2999), [3000, 3000, 3000, 3000, 3000]);
-  // Outline (a Rectangle on the elevation): 8 uprights of 3,000, two cut by W3 (1,000 + 800); 3,000 + 1,000 bottom / top; W3 × 4
+  assert.deepEqual(lens(g, "upright").map((L) => Math.round(L * 1000) / 1000), [2400, 2640, 2880, 3120, 3360, 3600, 3360, 3120, 2880, 2640, 2400], "one upright per station, rising with the rakes");
+  // Outline (a Rectangle on the elevation): 8 uprights of 3,000, two cut by W3 (1,000 + 800); 4,000 bottom / top in one
+  // length each; W3 × 4
   const o = battens(c, "Outline");
-  assert.deepEqual([o.lines.length, o.totalMm], [18, 34400]);
+  assert.deepEqual([o.lines.length, o.totalMm], [16, 34400]);
   assert.deepEqual([lens(o, "jamb"), lens(o, "head"), lens(o, "sill")], [[1200, 1200], [1200], [1200]]);
   assert.equal(c.orderReady, true, JSON.stringify(c.scheduleLines.map((l) => l.problems)));
-  // every piece fits a 3,000 batten and nothing is longer
-  for (const L of c.materialResults.clad.layouts) for (const l of L.followers.battens.lines) assert.ok(l.lengthMm <= 3000 + 1e-6 && l.lengthMm > 0, `${l.label} ${l.lengthMm}`);
+  // every piece fits the longest pine batten (6,000) and nothing is longer
+  for (const L of c.materialResults.clad.layouts) for (const l of L.followers.battens.lines) assert.ok(l.lengthMm <= 6000 + 1e-6 && l.lengthMm > 0, `${l.label} ${l.lengthMm}`);
 });
 
 await t("uprights: both ends, every vertical sheet join and no gap over 600, set out from the first sheet (a 400 part strip moves the grid with it)", () => {
@@ -188,36 +192,43 @@ await t("H-flashing on every horizontal joint by the metre, cut from 3,000 lengt
   assert.equal(qtyOf(long, "hflashing"), 3);
 });
 
-await t("battens are cut with offcuts shared across ALL walls of the material: two 3,500 walls need 19, not 10 + 10", () => {
-  // each wall: 7 uprights of 2,700, bottom and top 3,000 + 500 → 7 + 2 + 1 (500 + 500) = 10 on its own;
-  // together the four 500s share one batten: 14 + 4 + 1 = 19
+await t("battens are cut with offcuts shared across ALL walls of the material: two 3,500 walls need 11, not 6 + 6", () => {
+  // each wall: 7 uprights of 2,700 and a 3,500 bottom and top → on its own 3 × 5,400 (two uprights each), 1 × 2,700 and
+  // 2 × 3,600 = 6; together the two odd uprights share one 5,400: 7 × 5,400 + 4 × 3,600 = 11 (HUB 030 pine lengths)
   const one = job({ measurements: [rect("a", 3500, 2700, "A")] });
-  assert.equal(qtyOf(one, "battens"), 10);
+  assert.equal(qtyOf(one, "battens"), 6);
   const both = job({ measurements: [rect("a", 3500, 2700, "A"), rect("b", 3500, 2700, "B")] });
-  assert.equal(qtyOf(both, "battens"), 19);
+  assert.equal(qtyOf(both, "battens"), 11);
   const g = both.materialResults.clad.allocation.groups.find((x) => x.identityKey.includes("\"follower\":\"battens\""));
-  const offcutBar = g.bars.find((b) => b.cuts.length === 4);
-  assert.ok(offcutBar && new Set(offcutBar.cuts.map((cut) => cut.label.split(" ")[0])).size === 2, "one batten's cuts serve both walls");
+  const shared = g.bars.find((b) => new Set(b.cuts.map((cut) => cut.label.split(" ")[0])).size === 2);
+  assert.ok(shared && shared.stockLengthMm === 5400, "one batten's cuts serve both walls");
 });
 
-await t("the whole job's battens: every piece cut exactly once from a 3,000 batten, and the order count is the cutting plan's", () => {
+await t("the whole job's battens: every piece cut exactly once from a pine length, and the order count is the cutting plan's", () => {
   const c = job();
   const r = c.materialResults.clad;
   const pieces = r.demands.filter((d) => d.follower === "battens");
-  assert.equal(pieces.length, 27 + 14 + 15 + 23 + 18);
+  assert.equal(pieces.length, 25 + 13 + 9 + 15 + 16);
   const g = r.allocation.groups.find((x) => x.identityKey.includes("\"follower\":\"battens\""));
   const cut = g.bars.flatMap((b) => b.cuts.map((x) => x.demandId));
   assert.equal(cut.length, pieces.length); assert.equal(new Set(cut).size, pieces.length);
-  for (const b of g.bars) assert.ok(b.cuts.reduce((s, x) => s + x.lengthMm, 0) <= 3000 + 1e-6 && b.stockLengthMm === 3000);
+  for (const b of g.bars) assert.ok(b.cuts.reduce((s, x) => s + x.lengthMm, 0) <= b.stockLengthMm + 1e-6 && BATTEN.lengthsMm.includes(b.stockLengthMm));
   const total = pieces.reduce((s, d) => s + d.lengthMm, 0);
-  const [line] = follower(c, "battens");
-  assert.equal(line.quantity, g.barCount);
-  assert.ok(line.quantity >= Math.ceil(total / 3000) && line.quantity <= pieces.length);
-  assert.equal(line.item.description, "Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length");
-  assert.match(line.item.note, /^188\.94 m of battens on 5 walls, cut with offcuts shared across the walls · fixings to the studs not counted$/);
-  // the contributions share out the whole order (conservation)
-  const owned = c.contributions.filter((x) => x.jobMaterialId === "clad").flatMap((x) => x.pieces).filter((p) => p.bucketKey === line.bucketKey).reduce((n, p) => n + p.quantity, 0);
-  assert.equal(owned, line.quantity);
+  const lines = follower(c, "battens");
+  const qty = lines.reduce((n, l) => n + l.quantity, 0);
+  assert.equal(qty, g.barCount);
+  assert.ok(qty >= Math.ceil(total / 6000) && qty <= pieces.length);
+  assert.deepEqual(lines.map((l) => `${l.quantity} × ${l.item.description}`), ["28 × 90 × 35 H3 pine batten — 6,000 mm length", "2 × 90 × 35 H3 pine batten — 5,700 mm length",
+    "1 × 90 × 35 H3 pine batten — 5,400 mm length", "1 × 90 × 35 H3 pine batten — 4,500 mm length"]);
+  assert.ok(lines.every((l) => / m of battens on \d walls?, cut with offcuts shared across the walls · fixings to the studs not counted$/.test(l.item.note)), lines.map((l) => l.item.note).join(" | "));
+  // the lines' fitted metres add up to the job's 188.94 m of battens
+  const fitted = lines.reduce((m, l) => m + Number(/^([\d.]+) m/.exec(l.item.note)[1]), 0);
+  assert.ok(Math.abs(fitted - 188.94) < 0.011, `${fitted}`);
+  // the contributions share out the whole order (conservation), line by line
+  for (const line of lines) {
+    const owned = c.contributions.filter((x) => x.jobMaterialId === "clad").flatMap((x) => x.pieces).filter((p) => p.bucketKey === line.bucketKey).reduce((n, p) => n + p.quantity, 0);
+    assert.equal(owned, line.quantity);
+  }
   // nothing is counted as nails or fixings, and nothing here holds up the order
   assert.ok(!r.demands.some((d) => String(d.role).startsWith("fixing")));
   assert.ok(!r.problems.some((p) => p.blocking !== false && /batten|tape|flashing/i.test(p.message)), JSON.stringify(r.problems.filter((p) => p.blocking !== false).map((p) => p.message)));
@@ -229,35 +240,35 @@ await t("Linea (boards flat) → upright battens at 600 round nothing else; Stri
   const c = computeWorkspace(ws([linea], [rect("a", 3000, 2400, "A"), op("w", "a", 600, 900, 900, 900, "W1")]));
   const b = battens(c, "A", "lin");
   assert.deepEqual(b.lines.map((l) => [l.kind, l.a.x, l.lengthMm]), [["upright", 0, 2400], ["upright", 600, 2400], ["upright", 1200, 900], ["upright", 1200, 600], ["upright", 1800, 2400], ["upright", 2400, 2400], ["upright", 3000, 2400]]);
-  assert.equal(qtyOf(c, "battens", "lin"), 6, "5 × 2,400 one each; the 600 goes on a 2,400's offcut; the 900 one more");
+  assert.equal(qtyOf(c, "battens", "lin"), 3, "13,500 of battens from pine lengths, nothing over: 5,700 + 5,400 + 2,400");
   assert.equal(follower(c, "tape", "lin").length + follower(c, "hflashing", "lin").length, 0);
   // Stria smooth 325 standing on a 2,400 × 2,700 wall: horizontals at 600 / 1,200 / 1,800 / 2,400 + the bottom and top
   const stria = { id: "str", name: "Stria", ...fam(specFromGroup(group("Stria smooth", 325))), rules: {} };
   const s = computeWorkspace(ws([stria], [rect("a", 2400, 2700, "A")]));
   const sb = battens(s, "A", "str");
   assert.deepEqual(sb.lines.map((l) => [l.kind, l.a.y, l.lengthMm]), [["across", 600, 2400], ["across", 1200, 2400], ["across", 1800, 2400], ["across", 2400, 2400], ["bottom", 0, 2400], ["top", 2700, 2400]]);
-  assert.equal(qtyOf(s, "battens", "str"), 6);
+  assert.equal(qtyOf(s, "battens", "str"), 3, "6 × 2,400 = 3 × 4,800");
 });
 
-await t("timber cladding → battens across the boards at 450 (random-length LM too); a raked top gets a sloped batten; runs over 3,000 join end to end", () => {
+await t("timber cladding → battens across the boards at 450 (random-length LM too); a raked top gets a sloped batten; uprights up to 6,000 are one length", () => {
   const shiplap = (orientation, extra = {}) => ({ id: "tc", name: "Shiplap", ...fam({ family: "timber-cladding", layout: "course", orientation, supply: "random", orderIncrementM: 1, product: { name: "Shiplap", widthMm: 135, thicknessMm: 19, effectiveCoverMm: 120 }, ...extra }), rules: {} });
-  // flat boards on 3,000 × 2,400: uprights 0, 450 … 2,700, 3,000 → 8 × 2,400 → 8 battens; the LM estimate is untouched
+  // flat boards on 3,000 × 2,400: uprights 0, 450 … 2,700, 3,000 → 8 × 2,400 → 4 × 4,800 pine; the LM estimate is untouched
   const c = computeWorkspace(ws([shiplap("horizontal")], [rect("a", 3000, 2400, "A")]));
   assert.deepEqual(battens(c, "A", "tc").lines.map((l) => l.a.x), [0, 450, 900, 1350, 1800, 2250, 2700, 3000]);
-  assert.equal(qtyOf(c, "battens", "tc"), 8);
+  assert.equal(qtyOf(c, "battens", "tc"), 4);
   assert.deepEqual(linesOf(c, "tc").filter((l) => l.unit === "lm").map((l) => l.quantity), [60], "3,000 × 2,400 ÷ 120 cover = 60 LM, as before");
-  // standing boards on 1,800 × 2,700: horizontals at 450 … 2,250 + bottom + top = 7 × 1,800 → 7 battens
+  // standing boards on 1,800 × 2,700: horizontals at 450 … 2,250 + bottom + top = 7 × 1,800 → 2 × 5,400 + 1,800
   const v = computeWorkspace(ws([shiplap("vertical")], [rect("a", 1800, 2700, "A")]));
   assert.deepEqual(battens(v, "A", "tc").lines.map((l) => l.a.y), [450, 900, 1350, 1800, 2250, 0, 2700]);
-  assert.equal(qtyOf(v, "battens", "tc"), 7);
-  // Linea on a 4,000 gable (eaves 2,400, apex 3,200 at 2,000): uprights rise to the rakes; 3,120 and 3,040 join end to end at
-  // 3,000; each rake (√(2,000² + 800²) = 2,154.066) gets a sloped batten → 8 + 2 + 2 = 12 pieces
+  assert.equal(qtyOf(v, "battens", "tc"), 3);
+  // Linea on a 4,000 gable (eaves 2,400, apex 3,200 at 2,000): uprights rise to the rakes, each one length (none over
+  // 6,000); each rake (√(2,000² + 800²) = 2,154.066) gets a sloped batten → 8 + 2 = 10 pieces
   const lin = computeWorkspace(ws([{ id: "lin", name: "Linea", ...fam(specFromGroup(group("Linea", 150))), rules: {} }], [gable("g", 4000, 2400, 2000, 3200, "G")]));
   const b = battens(lin, "G", "lin");
-  assert.equal(b.lines.length, 12);
+  assert.equal(b.lines.length, 10);
   near(b.totalMm, 2400 + 2640 + 2880 + 3120 + 3040 + 2800 + 2560 + 2400 + 2 * Math.hypot(2000, 800), 0.01);
   assert.deepEqual(lens(b, "top"), [2154.066, 2154.066]);
-  assert.deepEqual(lens(b, "upright").filter((L) => L > 2999 || L < 200), [3000, 120, 3000, 40]);
+  assert.deepEqual(lens(b, "upright").map((L) => Math.round(L * 1000) / 1000), [2400, 2640, 2880, 3120, 3040, 2800, 2560, 2400]);
 });
 
 await t("direct-fixed cladding gets no battens — Axon keeps its foam tape and H-flashing; direct-fixed boards get nothing", () => {
@@ -276,8 +287,8 @@ await t("a wall with battens set up BY HAND (older job) keeps them: no automatic
   const c = computeWorkspace(ws([axon400(), hand], meas, [con("hb", "a", "bat")]));
   assert.equal(lay(c, "A").followers.battens.state, "hand-made"); assert.deepEqual(lay(c, "A").followers.battens.by, ["Cavity battens"]);
   assert.equal(lay(c, "A").followers.battens.lines.length, 0);
-  assert.equal(battens(c, "B").lines.length, 12, "4,000 × 2,700: 8 uprights + 2 bottom + 2 top");
-  assert.equal(qtyOf(c, "battens"), 11, "B only: 8 × 2,700, 2 × 3,000 and 1,000 + 1,000");
+  assert.equal(battens(c, "B").lines.length, 10, "4,000 × 2,700: 8 uprights + bottom + top (one length each)");
+  assert.equal(qtyOf(c, "battens"), 6, "B only: 8 × 2,700 on 4 × 5,400, and the 4,000 bottom and top on 2 × 4,200");
   assert.ok(c.materialResults.clad.problems.some((p) => p.code === "followers_hand_made" && p.blocking === false && /^A: battens come from Cavity battens \(set up by hand\), so the automatic battens from Axon 400 smooth aren't added on this wall — nothing is counted twice\.$/.test(p.message)));
   // the hand-made battens are exactly what they were before this step: uprights at the sheet joins and every 600
   const bt = c.materialResults.bat.layouts[0];
@@ -330,10 +341,11 @@ await t("an accessory set made by hand that already has the joint foam tape or H
 await t("spares: battens and H-flashing each get their OWN spare at the cladding's rate; foam tape takes it on the metres before the rolls; a sheet pack size never rounds battens", () => {
   const c = job({ spareRate: 10 });
   assert.equal(sheetsOf(c), 23 + 3, "23 sheets + ceil(2.3) = 3 spare, as before");
-  const [b] = follower(c, "battens"), [h] = follower(c, "hflashing"), [tp] = follower(c, "tape");
+  const bl = follower(c, "battens"), [h] = follower(c, "hflashing"), [tp] = follower(c, "tape");
   const base = qtyOf(job(), "battens");
-  assert.deepEqual([b.quantity, b.spareQuantity], [base + Math.ceil(base * 0.1), Math.ceil(base * 0.1)]);
-  assert.match(b.item.note, /incl\. \d+ spare \(10% of the battens\)$/);
+  // one spare count for the battens (ceil of 10 %), spread over their pine lengths
+  assert.deepEqual([bl.reduce((n, l) => n + l.quantity, 0), bl.reduce((n, l) => n + (l.spareQuantity || 0), 0)], [base + Math.ceil(base * 0.1), Math.ceil(base * 0.1)]);
+  assert.ok(bl.some((l) => /incl\. \d+ spare \(10% of the battens\)$/.test(l.item.note)), bl.map((l) => l.item.note).join(" | "));
   assert.deepEqual([h.quantity, h.spareQuantity], [3, 1]); assert.match(h.item.note, /incl\. 1 spare \(10% of the H-flashing\)$/);
   assert.deepEqual([tp.quantity, tp.spareQuantity ?? 0], [2, 0], "41.84 m + 10% = 46.02 m → still 2 rolls");
   assert.match(tp.item.note, /^41\.84 m behind the vertical sheet joins \+ 10% spare = 46\.02 m → 2 rolls of 25 m$/);
@@ -357,7 +369,7 @@ await t("acceptance 4: one wall made 3,600 changes only that wall's sheets, batt
   }
   const n = lay(b, "North").followers;
   assert.deepEqual(n.hFlashing.runs.map((r) => r.lengthMm), [6000], "the new joint at 3,000 clears both windows");
-  assert.equal(n.battens.lines.filter((l) => l.kind === "joint").length, 2, "its batten joins over the upright at 3,000");
+  assert.equal(n.battens.lines.filter((l) => l.kind === "joint").length, 1, "its joint batten is one 6,000 pine length");
   assert.ok(n.battens.totalMm > lay(a, "North").followers.battens.totalMm);
   assert.equal(qtyOf(b, "hflashing"), qtyOf(a, "hflashing") + 2, "6,000 more of joint = two more lengths");
 });
@@ -370,7 +382,7 @@ await t("the same walls in any order give the same battens, tape and H-flashing;
   const blocked = job({ rules: { jointRows: undefined }, measurements: [rect("t", 3000, 3600, "Tall"), rect("a", 4000, 2700, "A")] });
   assert.ok(blocked.materialResults.clad.problems.some((p) => p.code === "sheet_too_tall"));
   assert.equal(lay(blocked, "Tall").followers, undefined);
-  assert.equal(battens(blocked, "A").lines.length, 12);
+  assert.equal(battens(blocked, "A").lines.length, 10, "8 uprights + the 4,000 bottom and top in one length each");
 });
 
 await t("their own order-line key: battens appearing or going (a batten material set up by hand) never makes the sheet lines stale, and the other way round", () => {
@@ -398,7 +410,9 @@ await t("the Timber and cladding order lists the battens, the tape in rolls and 
   assert.equal(snapshot.items.length, 1, "one material: the battens, tape and H-flashing sit under the cladding");
   const rows = snapshot.items[0].lines.map((l) => `${l.quantity} ${l.unit} ${l.description}`);
   const nB = qtyOf(c, "battens");
-  assert.deepEqual(rows.slice(3), [`${nB} piece ${FOLLOWER_TEXT.battens} — 3,000 mm length`, `2 piece ${FOLLOWER_TEXT.hflashing} — 3,000 mm length`, `2 roll ${FOLLOWER_TEXT.tape}`]);
+  // HUB 030: the pine battens in their 300 mm lengths (no product code: the owner's own timber)
+  assert.deepEqual(rows.slice(3), [`28 piece ${FOLLOWER_TEXT.battens} — 6,000 mm length`, `2 piece ${FOLLOWER_TEXT.battens} — 5,700 mm length`, `1 piece ${FOLLOWER_TEXT.battens} — 5,400 mm length`,
+    `1 piece ${FOLLOWER_TEXT.battens} — 4,500 mm length`, `2 piece ${FOLLOWER_TEXT.hflashing} — 3,000 mm length`, `2 roll ${FOLLOWER_TEXT.tape}`]);
   assert.deepEqual(snapshot.totals.byUnit, { sheet: 23, piece: nB + 2, roll: 2 });
   const pdf = await renderSupplierOrderPdf(snapshot, { exportNo: 1, isDraft: false, snapshotSha256: "abc" });
   const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), isEvalSupported: false, verbosity: 0 }).promise;
@@ -406,14 +420,15 @@ await t("the Timber and cladding order lists the battens, the tape in rolls and 
   for (let i = 1; i <= doc.numPages; i++) text += (await (await doc.getPage(i)).getTextContent()).items.map((x) => x.str).join(" ") + " ";
   await doc.destroy();
   // (a long description wraps onto a second line in the table)
-  for (const code of ["405307", "304560", "305613"]) assert.match(text, new RegExp(`code\\s+${code}`), `PDF lists code ${code}`);
-  assert.match(text, /\b\d+ ×\s+piece\s+Hardie Cavity Batten 70 × 19/); assert.match(text, /2 ×\s+roll\s+Hardie™ 50mm Foam Back Sealing Tape, 25 m roll/); assert.match(text, /2 ×\s+piece\s+Hardie™ 9mm Alum Horizontal H Flashing/);
+  for (const code of ["304560", "305613"]) assert.match(text, new RegExp(`code\\s+${code}`), `PDF lists code ${code}`);
+  assert.doesNotMatch(text, /405307|Cavity Batten/, "never the Hardie Cavity Batten (HUB 030)");
+  assert.match(text, /\b\d+ ×\s+piece\s+90 × 35 H3 pine batten/); assert.match(text, /2 ×\s+roll\s+Hardie™ 50mm Foam Back Sealing Tape, 25 m roll/); assert.match(text, /2 ×\s+piece\s+Hardie™ 9mm Alum Horizontal H Flashing/);
   // the site appendix: a cut list for the battens and one for the H-flashing (never one row for both), naming each piece
   assert.deepEqual(snapshot.appendix.timber.map((x) => x.title), [`battens cut list (${FOLLOWER_TEXT.battens})`, `H-flashing cut list (${FOLLOWER_TEXT.hflashing})`]);
   const hRows = snapshot.appendix.timber[1].rows;
   assert.deepEqual(hRows.map((r) => [r.qty, r.cutMm, r.stockMm]), [[1, 3000, 3000], [1, 2950, 3000]]);
   assert.deepEqual(hRows.flatMap((r) => r.labels), ["Tall H-flashing — joint 1", "Gable H-flashing — joint 1"]);
-  assert.equal(snapshot.appendix.timber[0].rows.reduce((n, r) => n + r.qty, 0), 27 + 14 + 15 + 23 + 18);
+  assert.equal(snapshot.appendix.timber[0].rows.reduce((n, r) => n + r.qty, 0), 25 + 13 + 9 + 15 + 16);
   const app = await renderSiteAppendixPdf(snapshot, { exportNo: 1, snapshotSha256: "abc" });
   const adoc = await pdfjs.getDocument({ data: new Uint8Array(app), isEvalSupported: false, verbosity: 0 }).promise;
   let atext = "";
@@ -432,7 +447,7 @@ await t("acceptance 10: Axon 400 set up from the Blue Leaf company default — t
   assert.deepEqual([mat.rules.route, mat.spec.spareRate, mat.rules.jointRows], ["cavity", 10, { atMm: [], gapMm: 10, detailRef: "H-flashing" }]);
   const c = computeWorkspace(ws([mat], [rect("a", 4000, 3600, "Wall 1")]));
   const units = linesOf(c).map((l) => [l.follower || "sheets", l.unit]);
-  assert.deepEqual(units.map((u) => u[0]), ["sheets", "sheets", "battens", "hflashing", "tape"]);
+  assert.deepEqual(units.map((u) => u[0]), ["sheets", "sheets", "battens", "battens", "hflashing", "tape"], "the battens in two pine lengths (3,600 uprights, 4,200 for the 4,000 bottom, top and joint)");
   const b = battens(c, "Wall 1");
   // uprights at the joins (1,200 / 2,400 / 3,600) and every 600, plus the bottom and top battens and the one behind the H joint
   assert.deepEqual([...new Set(b.lines.filter((l) => l.kind === "upright").map((l) => l.a.x))], [0, 600, 1200, 1800, 2400, 3000, 3600, 4000]);
@@ -447,10 +462,11 @@ await t("a wall whose sheets are all cut from another wall's sheets or offcuts s
   const r = battens(c, "Return");
   assert.deepEqual([r.lines.length, r.totalMm], [7, 9800]);
   assert.equal(lay(c, "Return").followers.tape.totalMm, 1000);
-  // Under bay: 9 uprights × 1,400, bottom and top 3,000 + 1,800 → 13. Together 9 × 1,400, 2 × 3,000, 2 × 2,400, 2 × 1,800,
-  // 5 × 1,000 on 3,000 battens: 3,000 × 2, 2,400 × 2, 1,800 + 1,000 × 2, 1,400 + 1,400 × 4, 1,400 + 1,000, 1,000 + 1,000 → 12
-  assert.equal(qtyOf(c, "battens"), 12);
-  assert.match(follower(c, "battens")[0].item.note, /^32\.00 m of battens on 2 walls/);
+  // Under bay: 9 uprights × 1,400 and a 4,800 bottom and top → 11. Together 32.0 m of battens, cut from pine lengths with
+  // offcuts shared across both walls: 5,700 + 4 × 4,800 + 4,200 + 3,000 = 32.1 m → 7 (HUB 030)
+  assert.equal(qtyOf(c, "battens"), 7);
+  const fitted = follower(c, "battens").reduce((m, l) => m + Number(/^([\d.]+) m of battens/.exec(l.item.note)[1]), 0);
+  assert.ok(Math.abs(fitted - 32) < 0.011, `${fitted} m`);
   assert.equal(c.orderReady, true);
   // a second pair: Small's one piece comes off Big's offcut, and Small still gets its own: uprights at 0, 600, 1,200, the bottom and the top
   const d = job({ measurements: [rect("a", 2400, 1300, "Big"), rect("b", 1200, 1100, "Small")] });
@@ -458,7 +474,7 @@ await t("a wall whose sheets are all cut from another wall's sheets or offcuts s
   assert.deepEqual(battens(d, "Small").lines.map((l) => [l.kind, l.lengthMm]), [["upright", 1100], ["upright", 1100], ["upright", 1100], ["bottom", 1200], ["top", 1200]]);
 });
 
-await t("two Axon claddings on one job: the foam tape is rounded into rolls ONCE and the H-flashing is one cutting plan for the job, listed under the first cladding", () => {
+await t("two Axon claddings on one job: the battens and the foam tape are bought ONCE and the H-flashing is one cutting plan for the job, listed under the first cladding", () => {
   const two = (a, b, wa, wb) => computeWorkspace({ ...ws([a, b], [wa, wb]), contributions: [con("ca", wa.id, a.id), con("cb", wb.id, b.id)] });
   // Axon 133 smooth (3,600 sheets, no H joint) on A 2,400 × 3,600: tape 3,600 at the 1,200 join; Axon 400 on B: 3,000 + 590
   const a133 = { ...axon400(), id: "a1", name: "Axon 133 smooth", ...fam({ ...specFromGroup(group("Axon 133 smooth")), assemblyId: "axon-vertical", spareRate: 0 }) };
@@ -471,9 +487,12 @@ await t("two Axon claddings on one job: the foam tape is rounded into rolls ONCE
   const h = c.scheduleLines.filter((l) => l.follower === "hflashing");
   assert.deepEqual(h.map((l) => [l.quantity, l.jobMaterialIds]), [[1, ["a2"]]]);
   assert.ok(h[0].bucketKey.includes("|a2|"));
-  assert.ok(c.materialResults.a2.problems.some((p) => p.code === "followers_pooled" && p.blocking === false && p.message === "Axon 400 smooth: its foam tape is ordered once for the job with Axon 133 smooth."));
-  // battens stay each cladding's own (offcuts shared across that cladding's walls)
-  assert.deepEqual(c.scheduleLines.filter((l) => l.follower === "battens").map((l) => l.jobMaterialIds), [["a1"], ["a2"]]);
+  assert.ok(c.materialResults.a2.problems.some((p) => p.code === "followers_pooled" && p.blocking === false && p.message === "Axon 400 smooth: its battens and foam tape are ordered once for the job with Axon 133 smooth."));
+  // HUB 030 (Sam: "Whole job"): the pine battens are bought once for the job too, offcuts shared across both claddings,
+  // and sit under the first cladding
+  const bl = c.scheduleLines.filter((l) => l.follower === "battens");
+  assert.deepEqual(bl.map((l) => [l.quantity, l.finishedLengthMm, l.jobMaterialIds]), [[5, 6000, ["a1", "a2"]], [5, 3600, ["a1", "a2"]]]);
+  assert.ok(bl.every((l) => l.bucketKey.includes("|a1|")));
   // the contributions share out exactly what is ordered
   for (const l of c.scheduleLines) assert.equal(c.contributions.flatMap((x) => x.pieces).filter((p) => p.bucketKey === l.bucketKey).reduce((n, p) => n + p.quantity, 0), l.quantity, l.item?.description);
   // two Axon 400 materials (front and side), 1,500 × 3,600 each: H-flashing 1,500 + 1,500 → ONE 3,000 length; tape 3.59 m each → 1 roll
@@ -484,7 +503,7 @@ await t("two Axon claddings on one job: the foam tape is rounded into rolls ONCE
   assert.match(hf.item.note, /^3\.00 m of horizontal joints on 2 walls, cut with offcuts shared across the walls, no lap · for Axon 400 front and Axon 400 side, worked out once for the job/);
   const [tf] = f.scheduleLines.filter((l) => l.follower === "tape");
   assert.deepEqual([tf.quantity, tf.jobMaterialIds], [1, ["f", "s"]]);
-  assert.ok(f.materialResults.s.problems.some((p) => p.message === "Axon 400 side: its H-flashing and foam tape are ordered once for the job with Axon 400 front."));
+  assert.ok(f.materialResults.s.problems.some((p) => p.message === "Axon 400 side: its battens, H-flashing and foam tape are ordered once for the job with Axon 400 front."));
   assert.equal(f.materialResults.f.appendix.timber.filter((x) => /H-flashing/.test(x.title)).length, 1);
   assert.equal(f.orderReady, true);
   // the Timber and cladding order: the job's one tape and one H-flashing line sit in the FIRST cladding's block, once
@@ -500,27 +519,27 @@ await t("two Axon claddings on one job: the foam tape is rounded into rolls ONCE
   assert.equal(snapshot.totals.byUnit.roll, 1);
   // one cladding alone is exactly as before (its own key, under its own section)
   const one = job({ measurements: [rect("t", 3000, 3600, "Tall")] });
-  assert.deepEqual(one.scheduleLines.filter((l) => l.follower).map((l) => [l.follower, l.jobMaterialIds]), [["battens", ["clad"]], ["hflashing", ["clad"]], ["tape", ["clad"]]]);
+  assert.deepEqual(one.scheduleLines.filter((l) => l.follower).map((l) => [l.follower, l.jobMaterialIds]), [["battens", ["clad"]], ["battens", ["clad"]], ["battens", ["clad"]], ["hflashing", ["clad"]], ["tape", ["clad"]]]);
 });
 
 await t("battens closer than a batten's face (70 mm): a join 30 mm from the wall end is one batten, a window edge 30 mm from an upright has no jamb, a 600 batten next to an end moves halfway", () => {
-  // 4,830 wall: the join at 4,800 and the end at 4,830 → one upright at the join (13 pieces, 13 battens — the same as 4,800)
+  // 4,830 wall: the join at 4,800 and the end at 4,830 → one upright at the join (11 pieces, 7 pine lengths — the same as 4,800)
   const c = job({ measurements: [rect("a", 4830, 2700, "A")] });
   const xs = [...new Set(battens(c, "A").lines.filter((l) => l.kind === "upright").map((l) => l.a.x))];
   assert.deepEqual(xs, [0, 600, 1200, 1800, 2400, 3000, 3600, 4200, 4800]);
-  assert.deepEqual([lens(battens(c, "A"), "bottom"), lens(battens(c, "A"), "top")], [[3000, 1830], [3000, 1830]], "the bottom and top still run to the wall end");
-  assert.equal(battens(c, "A").lines.length, 13);
+  assert.deepEqual([lens(battens(c, "A"), "bottom"), lens(battens(c, "A"), "top")], [[4830], [4830]], "the bottom and top still run to the wall end");
+  assert.equal(battens(c, "A").lines.length, 11);
   assert.equal(qtyOf(c, "battens"), qtyOf(job({ measurements: [rect("a", 4800, 2700, "A")] }), "battens"));
   // first sheet from 650: the 600 batten would land 50 from the wall start, so it moves halfway (325) — the same count,
   // no gap over 600, none closer than a batten's face; the rest stay on the 600 grid from the first sheet
   const d = job({ measurements: [rect("a", 3000, 2700, "A")], rules: { datumByWall: { a: 650 } } });
   assert.deepEqual([...new Set(battens(d, "A").lines.filter((l) => l.kind === "upright").map((l) => l.a.x))], [0, 325, 650, 1250, 1850, 2450, 3000]);
   // 3,600 × 2,700 with a window 1,230 → 2,370: its sides sit on the full-height uprights at 1,200 and 2,400 → no jambs;
-  // 6 uprights + 1,800 cut (900 + 600), bottom and top 3,000 + 600, the head and the sill → 14 pieces
+  // 6 uprights + 1,800 cut (900 + 600), the 3,600 bottom and top in one length each, the head and the sill → 12 pieces
   const w = job({ measurements: [rect("a", 3600, 2700, "A"), op("w", "a", 1230, 900, 1140, 1200, "W1")] });
   const b = battens(w, "A");
   assert.deepEqual([lens(b, "jamb"), lens(b, "head"), lens(b, "sill")], [[], [1140], [1140]]);
-  assert.equal(b.lines.length, 14);
+  assert.equal(b.lines.length, 12);
   // Linea on a 3,020 wall: the 600 batten at 3,000 would sit 20 from the end batten, so it moves halfway (2,710)
   const lin = computeWorkspace(ws([{ id: "lin", name: "Linea", ...fam(specFromGroup(group("Linea", 150))), rules: {} }], [rect("a", 3020, 2400, "A")]));
   assert.deepEqual(battens(lin, "A", "lin").lines.map((l) => l.a.x), [0, 600, 1200, 1800, 2400, 2710, 3020]);
@@ -536,7 +555,7 @@ await t("no head batten along the wall top over a door or window that reaches it
   // a window 2,400 → 3,600 from 1,500 up to the top: a sill, no head; the top batten stops at 2,400
   const w = battens(job({ measurements: [rect("a", 3600, 2700, "A"), op("w", "a", 2400, 1500, 1200, 1200, "W1")] }), "A");
   assert.deepEqual([lens(w, "head"), lens(w, "sill"), lens(w, "top")], [[], [1200], [2400]]);
-  assert.equal(w.lines.length, 11);
+  assert.equal(w.lines.length, 10, "the 3,600 bottom is one length");
   // a window down to the floor (sill 0): no sill batten under it, the head stays
   const f = battens(job({ measurements: [rect("a", 3600, 2700, "A"), op("w", "a", 1350, 0, 900, 2100, "W2")] }), "A");
   assert.deepEqual([lens(f, "head"), lens(f, "sill")], [[900], []]);
@@ -547,8 +566,11 @@ await t("each batten piece is named so it can be found on the wall: 'upright at 
   const labels = (label) => battens(c, label).lines.map((l) => l.label.replace(/^.*? batten — /, ""));
   assert.ok(labels("North").includes("upright at 1,200, below W1") && labels("North").includes("upright at 1,200, above W1"), labels("North").join(" | "));
   assert.ok(labels("East").includes("bottom, left of D1") && labels("East").includes("bottom, right of D1"));
-  assert.ok(labels("Tall").includes("upright at 0 (1 of 2)") && labels("Tall").includes("upright at 0 (2 of 2)"));
-  assert.deepEqual(labels("Gable").filter((x) => /rake/.test(x)).sort(), ["left rake (1 of 2)", "left rake (2 of 2)", "right rake (1 of 2)", "right rake (2 of 2)"]);
+  // a run longer than the longest pine batten (6,000) is joined, and each piece says which it is
+  const long = job({ measurements: [rect("l", 7200, 2700, "Long")] });
+  assert.deepEqual(battens(long, "Long").lines.map((l) => l.label.replace(/^.*? batten — /, "")).filter((x) => /bottom|top/.test(x)), ["bottom (1 of 2)", "bottom (2 of 2)", "top (1 of 2)", "top (2 of 2)"]);
+  assert.ok(labels("Tall").includes("upright at 0") && !labels("Tall").some((x) => /of 2/.test(x)), "a 3,600 upright is one length");
+  assert.deepEqual(labels("Gable").filter((x) => /rake/.test(x)).sort(), ["left rake", "right rake"]);
   assert.ok(labels("North").includes("W1 head") && labels("North").includes("W1 sill") && labels("North").includes("W1 left side"));
   for (const L of c.materialResults.clad.layouts) assert.equal(new Set(L.followers.battens.lines.map((l) => l.label)).size, L.followers.battens.lines.length, `${L.wallLabel}: every piece has its own name`);
 });

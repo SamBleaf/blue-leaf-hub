@@ -37,7 +37,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
-import { followerRule } from "../../../shared/takeoff/engine/followers.js";
+import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
 import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
@@ -637,7 +637,7 @@ function followerElements(claddingEntries) {
           id: `${prefix}fb${i}`, kind: "line", state: "support", auto: true, a: ln.a, b: ln.b, over: ["jamb", "head", "sill"].includes(ln.kind),
           info: {
             title: `Batten — ${ln.label.replace(/^.*? batten — /, "")}`,
-            rows: [["Length", `${fmtMm(Math.round(ln.lengthMm))} mm`], ["Stock", a?.stockLengthMm ? `Cut from a ${fmtMm(a.stockLengthMm)} mm Hardie Cavity Batten` : "Hardie Cavity Batten"]],
+            rows: [["Length", `${fmtMm(Math.round(ln.lengthMm))} mm`], ["Stock", a?.stockLengthMm ? `Cut from a ${fmtMm(a.stockLengthMm)} mm ${FOLLOWER_TEXT.battens}` : FOLLOWER_TEXT.battens]],
             note: "Worked out from the cladding. Fixings to the studs are not counted.",
           },
         });

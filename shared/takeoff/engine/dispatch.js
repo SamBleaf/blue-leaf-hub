@@ -18,7 +18,7 @@ import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
 import { FAMILIES, TIMBER_GRID, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
-  normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
+  SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
@@ -624,12 +624,15 @@ function runWallMethod(mat, n, items, ctx, sink) {
       for (const d of r.demands || []) if (d.unit === "lm" && Number.isFinite(r.layout?.withSpareLm)) d.exactLm = r.layout.withSpareLm;
     } else if (mat.methodKey === "support_grid") {
       r = supportGrid({ id: tag, polygon: built.polygon }, w.openings, { id: mat.id, materialId: mat.id, orientation: n.orientation === "horizontal" ? "horizontal" : "vertical",
-        identity: familyIdentity(n), stockPolicy: n.product?.lengthsMm?.length ? { kind: "list", lengthsMm: n.product.lengthsMm, sharePieces: false } : undefined,
-        maxSpacingMm: rules.maxSpacingMm, startOffsetMm: rules.startOffsetMm, endOffsetMm: rules.endOffsetMm,
+        identity: familyIdentity(n), stockPolicy: supportStockPolicy(n),
+        // HUB 030 decision 2: no spacing entered = the Blue Leaf default 600 centres (shown on the card, changeable)
+        maxSpacingMm: Number.isFinite(Number(rules.maxSpacingMm)) && Number(rules.maxSpacingMm) > 0 ? rules.maxSpacingMm : SUPPORT_BATTEN_DEFAULTS.maxSpacingMm,
+        startOffsetMm: rules.startOffsetMm, endOffsetMm: rules.endOffsetMm,
         // stations the cladding NEEDS (its vertical sheet joints on this wall) plus any entered ones — never snapped away
         requiredStationsMm: [...(Array.isArray(rules.requiredStationsMm) ? rules.requiredStationsMm : []),
           ...(n.orientation === "horizontal" ? [] : sink.sheetJointsFor(m.id).map((atMm) => ({ atMm, ref: "sheet joint" })))],
-        existing: rules.existing === true, fixing: rules.fixing, fixingScope: rules.fixingScope }, {});
+        // HUB 030 decision 2: no fixing rule and no scope = batten fixings not counted, with the reason (as the automatic battens)
+        existing: rules.existing === true, fixing: rules.fixing, fixingScope: rules.fixingScope ?? (rules.fixing ? undefined : SUPPORT_BATTEN_DEFAULTS.fixingScope) }, {});
     } else if (mat.methodKey === "accessory_routes") {
       // B5: the recipe's groups follow this wall's real routes; joints come from the cladding laid out on the SAME wall
       const recipe = rules.recipe && Array.isArray(rules.recipe.groups) ? rules.recipe : null;
@@ -648,6 +651,14 @@ function runWallMethod(mat, n, items, ctx, sink) {
   const rule = followerRule(mat, n);
   if (rule) addFollowers(mat, rule, results, sink);
   return results;
+}
+
+/** A Support battens item's stock: the listed lengths (the owner's pine batten shares offcuts across the walls, as
+ *  the automatic battens do; another product keeps its own), or its one stock length as a one-length list (HUB 029/030:
+ *  a single length never leaves the item without a stock policy). */
+function supportStockPolicy(n) {
+  const lengths = n.product?.lengthsMm?.length ? n.product.lengthsMm : Number(n.product?.lengthMm) > 0 ? [Number(n.product.lengthMm)] : null;
+  return lengths ? { kind: "list", lengthsMm: lengths, sharePieces: isOwnerBatten(n.product) } : undefined;
 }
 
 /**
@@ -1158,7 +1169,9 @@ export function computeGenericMaterials(materials, contributions, ctx) {
 }
 
 /** The followers bought ONCE for the whole job, whichever cladding they come from (Sam, 21 Oct 2026). */
-const POOLED_FOLLOWERS = new Set(["tape", "hflashing"]);
+// HUB 030 (Sam, 25 Oct 2026: "Whole job"): the pine battens are bought once for the job too, offcuts shared across
+// every cladding's walls
+const POOLED_FOLLOWERS = new Set(["tape", "hflashing", "battens"]);
 
 /**
  * Split a purchase line's WHOLE quantity across the contributions whose demands it serves (largest share first,
@@ -1187,15 +1200,15 @@ function attributeLine(l, contribOf, perContribution) {
 
 /**
  * Wall-by-wall step 4: the foam tape (metres → whole 25 m rolls) and the H-flashing (one cutting plan, offcuts shared,
- * no lap) of every Axon cladding on the job, worked out ONCE for the job — two Axon products on one job never round up
- * twice. Each line sits under the first cladding that has it (its section on the schedule and the order) and names the
+ * no lap) of every Axon cladding on the job, and (HUB 030) the pine battens of every cladding, worked out ONCE for the
+ * job — two claddings on one job never round up twice. Each line sits under the first cladding that has it (its section on the schedule and the order) and names the
  * others; each wall's share is attributed to its own cladding's contribution. Spares at the highest rate among them.
  * With one cladding this is exactly that cladding's own tape and H-flashing.
  */
 function buyPooledFollowers(pool, out) {
   const perContribution = new Map(pool.flatMap((e) => [...e.resById.keys()].map((cid) => [cid, []])));
   const elsewhere = new Map();   // pool entry → [{ what, owner }] (the tape / H-flashing bought under another cladding)
-  for (const kind of ["hflashing", "tape"]) {
+  for (const kind of ["battens", "hflashing", "tape"]) {
     const entries = pool.filter((e) => e.demands.some((d) => d.follower === kind));
     if (!entries.length) continue;
     const owner = entries[0];
@@ -1231,7 +1244,7 @@ function buyPooledFollowers(pool, out) {
       for (const p of sink.problems) (p.blocking === false ? l.notes : l.problems).push(p.message);
       attributeLine(l, (did) => entryOf.get(did)?.contribOf(did), perContribution);
     }
-    for (const e of entries.slice(1)) elsewhere.set(e, [...(elsewhere.get(e) || []), { what: kind === "tape" ? "foam tape" : "H-flashing", owner: owner.mat.name }]);
+    for (const e of entries.slice(1)) elsewhere.set(e, [...(elsewhere.get(e) || []), { what: kind === "tape" ? "foam tape" : kind === "battens" ? "battens" : "H-flashing", owner: owner.mat.name }]);
     out.lines.push(...pl.lines);
   }
   for (const e of pool) for (const [cid, r] of e.resById) r.pieces.push(...(perContribution.get(cid) || []));
@@ -1242,7 +1255,7 @@ function buyPooledFollowers(pool, out) {
   for (const [e, list] of elsewhere) {
     const byOwner = new Map();
     for (const x of list) byOwner.set(x.owner, [...(byOwner.get(x.owner) || []), x.what]);
-    const msg = `${e.mat.name}: ${[...byOwner].map(([o, w]) => `its ${w.join(" and ")} ${w.length > 1 ? "are" : "is"} ordered once for the job with ${o}`).join("; ")}.`;
+    const msg = `${e.mat.name}: ${[...byOwner].map(([o, w]) => `its ${andList(w)} ${w.length > 1 ? "are" : "is"} ordered once for the job with ${o}`).join("; ")}.`;
     out.results[e.mat.id].problems.push(followerNote("followers_pooled", msg));
     for (const l of e.ownLines) if (!l.notes.includes(msg)) l.notes.push(msg);
   }

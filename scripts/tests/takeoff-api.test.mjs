@@ -747,8 +747,10 @@ await t("TC J2 over HTTP: Axon wall + window → 4 sheets; an opening must name 
     contributions: { upsert: [{ id: t5.cw, measurementId: t5.wall, jobMaterialId: t5.clad, role: "wall" }] } } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const ls = r.data.computed.scheduleLines.filter((l) => l.jobMaterialIds.includes(t5.clad));
-  // + the Axon's own 14 battens and 1 roll of foam tape, worked out by the server (wall-by-wall step 4)
-  assert.deepEqual(ls.map((l) => `${l.quantity} ${l.unit} @${l.finishedLengthMm}${l.follower ? ` ${l.follower}` : ""}`), ["4 sheet @2750", "14 piece @3000 battens", "1 roll @null tape"]);
+  // + the Axon's own battens (HUB 030: 90 × 35 H3 pine, 36.6 m in 300 mm lengths) and 1 roll of foam tape, worked out by the
+  // server (wall-by-wall step 4)
+  assert.deepEqual(ls.map((l) => `${l.quantity} ${l.unit} @${l.finishedLengthMm}${l.follower ? ` ${l.follower}` : ""}`).sort(),
+    ["1 piece @3600 battens", "1 roll @null tape", "2 piece @5700 battens", "4 piece @5400 battens", "4 sheet @2750"]);
 });
 await t("TC aluminium + continuous flashing over HTTP; generic order lines keep unit/item; export freezes items + appendix; appendix PDF served", async () => {
   const { aluminiumPreset } = await import("../../shared/takeoff/products/index.js");
@@ -775,7 +777,7 @@ await t("TC aluminium + continuous flashing over HTTP; generic order lines keep 
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.filter((l) => l.generic).map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = await q("SELECT unit, quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY unit", [oid]);
-  assert.deepEqual(stored.rows.map((x) => x.unit).sort(), ["bar", "piece", "piece", "roll", "sheet"]); // + the Axon's battens and foam tape (step 4)
+  assert.deepEqual(stored.rows.map((x) => x.unit).sort(), ["bar", "piece", "piece", "piece", "piece", "roll", "sheet"]); // + the Axon's battens (three pine lengths) and foam tape (step 4)
   const sheetRow = stored.rows.find((x) => x.unit === "sheet");
   assert.equal(sheetRow.quantity, 4); assert.match(sheetRow.item.description, /Axon 133 smooth/);
   const wsRev = await w5rev();
@@ -783,7 +785,7 @@ await t("TC aluminium + continuous flashing over HTTP; generic order lines keep 
   assert.equal(e.status, 200, JSON.stringify(e.data));
   const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
   assert.equal(snap.category, "timber_cladding");
-  assert.deepEqual(snap.totals.byUnit, { piece: 18 + 14, sheet: 4, bar: 1, roll: 1 });
+  assert.deepEqual(snap.totals.byUnit, { piece: 18 + 7, sheet: 4, bar: 1, roll: 1 }); // 18 rafters + the Axon's 7 pine battens (HUB 030)
   assert.deepEqual([...new Set(snap.items.map((g) => g.groupLabel))], ["Timber", "Cladding"]); // Timber part first, then Cladding (aluminium sits there)
   assert.equal(snap.groups.length, 0);
   assert.equal(snap.appendix.aluminium[0].bars[0].cuts.length, 3);
@@ -1350,20 +1352,22 @@ await t("wall-by-wall step 4: the REAL server works out an Axon's battens, foam 
   const row = (await q("SELECT spec, rules FROM takeoff_job_materials WHERE id=$1", [clad])).rows[0];
   assert.equal(JSON.stringify(row).includes("follower"), false);
   const sum = (c) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes(clad)).map((l) => `${l.quantity} ${l.unit}${l.follower ? ` ${l.follower}` : ""} — ${l.item.description}`);
-  // Tall: 6 × (3,000 + 600) uprights, bottom, top and the batten behind the H joint at 3,000 → 15 pieces; East: 14 pieces
-  // (door: no sill, the bottom stops at it) → 18 + 4 + 2 + 2 (3,000 / 1,000 / 1,500 + 1,600 / 2,100 + 900 …) on 3,000 battens;
+  // Tall: 6 uprights of 3,600, bottom, top and the batten behind the H joint at 3,000 → 9 pieces; East: 13 pieces (door: no
+  // sill, the bottom stops at it), cut from 90 × 35 H3 pine lengths (HUB 030, never the Hardie Cavity Batten);
   // tape 7.18 + 6.0 m → 1 roll; H-flashing 3,000 → 1 length
   const lines1 = sum(r1.data.computed);
-  assert.deepEqual(lines1.filter((x) => / (battens|hflashing|tape) — /.test(x)).map((x) => x.replace(/^\d+ /, "N ")), [
-    "N piece battens — Hardie Cavity Batten 70 × 19, code 405307 — 3,000 mm length",
+  const followerLines = lines1.filter((x) => / (battens|hflashing|tape) — /.test(x));
+  assert.ok(followerLines.filter((x) => / battens — /.test(x)).length >= 1 && followerLines.filter((x) => / battens — /.test(x)).every((x) => / battens — 90 × 35 H3 pine batten — [\d,]+ mm length$/.test(x)), followerLines.join(" | "));
+  assert.deepEqual(followerLines.filter((x) => !/ battens — /.test(x)).map((x) => x.replace(/^\d+ /, "N ")), [
     "N piece hflashing — Hardie™ 9mm Alum Horizontal H Flashing, code 305613 — 3,000 mm length",
     "N roll tape — Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560"]);
+  assert.ok(!lines1.some((x) => /405307|Cavity Batten/.test(x)));
   const res = r1.data.computed.materialResults[clad];
   const lay = (mid) => res.layouts.find((L) => L.wallMeasurementId === mid).followers;
-  assert.deepEqual([lay(tall).battens.lines.length, lay(tall).battens.totalMm, lay(tall).tape.totalMm, lay(tall).hFlashing.totalMm], [15, 30600, 7180, 3000]);
-  assert.deepEqual([lay(east).battens.lines.length, lay(east).battens.totalMm, lay(east).tape.totalMm, lay(east).hFlashing.totalMm], [14, 29600, 6000, 0]);
-  const bLine = r1.data.computed.scheduleLines.find((l) => l.jobMaterialIds.includes(clad) && l.follower === "battens");
-  assert.equal(bLine.quantity, res.allocation.groups.find((g) => g.identityKey.includes("\"follower\":\"battens\"")).barCount);
+  assert.deepEqual([lay(tall).battens.lines.length, lay(tall).battens.totalMm, lay(tall).tape.totalMm, lay(tall).hFlashing.totalMm], [9, 30600, 7180, 3000]);
+  assert.deepEqual([lay(east).battens.lines.length, lay(east).battens.totalMm, lay(east).tape.totalMm, lay(east).hFlashing.totalMm], [13, 29600, 6000, 0]);
+  const bLines = r1.data.computed.scheduleLines.filter((l) => l.jobMaterialIds.includes(clad) && l.follower === "battens");
+  assert.equal(bLines.reduce((n, l) => n + l.quantity, 0), res.allocation.groups.find((g) => g.identityKey.includes("\"follower\":\"battens\"")).barCount);
   // reload: the same followers from the stored walls alone
   const again = (await S(`/workspaces/${w}`)).data;
   assert.deepEqual(sum(again.computed), lines1);
@@ -1384,13 +1388,15 @@ await t("wall-by-wall step 4: the REAL server works out an Axon's battens, foam 
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = (await q("SELECT unit, quantity, item FROM takeoff_order_lines WHERE order_id=$1", [oid])).rows;
-  for (const code of ["405307", "305613", "304560"]) assert.ok(stored.some((x) => x.item.description.includes(`code ${code}`)), `order line with code ${code}`);
+  for (const code of ["305613", "304560"]) assert.ok(stored.some((x) => x.item.description.includes(`code ${code}`)), `order line with code ${code}`);
+  assert.ok(stored.some((x) => x.item.description.startsWith("90 × 35 H3 pine batten")) && !stored.some((x) => /405307/.test(x.item.description)), "pine battens, never the Hardie Cavity Batten");
   assert.deepEqual(stored.find((x) => x.item.description.includes("304560")).unit, "roll");
   const e = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "step4-exp", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await rev() });
   assert.equal(e.status, 200, JSON.stringify(e.data));
   const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [e.data.export.exportId])).rows[0].snapshot;
   assert.equal(snap.items.length, 1, "the battens, tape and H-flashing sit under the cladding");
-  assert.deepEqual(snap.items[0].lines.filter((l) => /code (405307|305613|304560)/.test(l.description)).map((l) => l.unit), ["piece", "piece", "roll"]);
+  assert.deepEqual(snap.items[0].lines.filter((l) => /code (305613|304560)/.test(l.description)).map((l) => l.unit), ["piece", "roll"]);
+  assert.ok(snap.items[0].lines.some((l) => l.unit === "piece" && /^90 × 35 H3 pine batten/.test(l.description)));
   const pdf = await S(`/exports/${e.data.export.exportId}/pdf`);
   assert.equal(pdf.data.subarray(0, 4).toString(), "%PDF");
 });

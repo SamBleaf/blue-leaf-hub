@@ -368,7 +368,7 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await expect(page.locator(`[data-wall-qty="${axonId}"]`)).toContainText("4 sheets");
     await saved();
     // wall-by-wall step 4: the cladding also orders its own battens (14 for this wall and window) and foam tape (1 roll)
-    await expect.poll(async () => linesOf(await server(), axonId).map((l) => [l.quantity, l.unit]), { timeout: 20_000 }).toEqual([[4, "sheet"], [14, "piece"], [1, "roll"]]);
+    await expect.poll(async () => linesOf(await server(), axonId).map((l) => [l.quantity, l.unit]), { timeout: 20_000 }).toEqual([[4, "sheet"], [2, "piece"], [4, "piece"], [1, "piece"], [1, "roll"]]);   // HUB 030: the battens in pine lengths (2 × 5,700, 4 × 5,400, 3,600)
     observed.J2.final = linesOf(await server(), axonId).map(lineText);
     await toOverview();
   });
@@ -697,13 +697,13 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     await shot("order-review", `Timber and cladding order: Timber and Cladding parts, every line defaults to what is still needed; ${isMobile ? "pick up (branch, ASAP)" : "deliver (address, required-by date)"}, site contact + phone`);
     const ready = await saveUntilReady("J5");
     observed.J5 = { ready };
-    await expect(page.getByTestId("order-totals")).toContainText("32 pieces");   // 18 timber + 14 automatic Axon battens (step 4)
+    await expect(page.getByTestId("order-totals")).toContainText("25 pieces");   // 18 timber + 7 automatic Axon pine battens (step 4; HUB 030 lengths)
     await expect(page.getByTestId("order-totals")).toContainText("1 roll");      // the Axon foam tape
     await expect(page.getByTestId("order-totals")).toContainText("4 sheets");
     await expect(page.getByTestId("order-totals")).toContainText("1 bar");
     await expect(page.getByTestId("order-totals")).not.toContainText("flashing");
     const { S, A } = await exportAndRead("J5");
-    const checks = runChecks("J5", [...tcChecks(S, A), ["supplier", S, /Order total: 1 bar · 1 roll · 32 pieces · 4 sheets/], ["supplier", S, /Hardie Cavity Batten 70 × 19, code 405307/], ["supplier", S, /Foam Back Sealing Tape, 25 m roll/]]);
+    const checks = runChecks("J5", [...tcChecks(S, A), ["supplier", S, /Order total: 1 bar · 1 roll · 25 pieces · 4 sheets/], ["supplier", S, /90 × 35 H3 pine batten/], ["supplier", S, /Foam Back Sealing Tape, 25 m roll/]]);
     appendixFindings("J5", A);
     // 2) Flashings — its own order
     await toOverview();

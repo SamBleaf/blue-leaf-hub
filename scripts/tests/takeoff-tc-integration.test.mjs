@@ -77,11 +77,12 @@ const j2 = (widthMm = 4800) => ws({
     { id: "win", kind: "opening", parentId: "wall", inputs: { xMm: 1350, sillMm: 900, widthMm: 900, heightMm: 900, label: "W01" } }],
   contributions: [con("c-wall", "wall", "clad", "wall")] });
 
-await t("J2: 4,800 × 2,700 Axon, window inside one cell → 4 sheets (2750), net 12.15 m² (+ its own 14 battens and 1 roll of foam tape, wall-by-wall step 4)", () => {
+await t("J2: 4,800 × 2,700 Axon, window inside one cell → 4 sheets (2750), net 12.15 m² (+ its own 7 pine battens and 1 roll of foam tape, wall-by-wall step 4)", () => {
   const c = computeWorkspace(j2());
   const ls = linesOf(c, "clad");
   // step 4 (21 Oct 2026): the Axon works out its own battens and foam tape — takeoff-tc-autobattens.test.mjs has the working
-  assert.deepEqual(summary(ls), ["1 roll", "14 piece @3000", "4 sheet @2750"]);
+  // HUB 030: the battens are 90 × 35 H3 pine in 300 mm lengths (36.6 m → 2 × 5,700 + 4 × 5,400 + 3,600)
+  assert.deepEqual(summary(ls), ["1 piece @3600", "1 roll", "2 piece @5700", "4 piece @5400", "4 sheet @2750"]);
   const lay = c.materialResults.clad.layouts[0];
   assert.ok(Math.abs(lay.areas.netM2 - 12.15) < 1e-9, String(lay.areas.netM2));
   assert.equal(ls[0].item.sku, "403932");
@@ -158,7 +159,7 @@ const j5 = () => {
 await t("J5: mixed job — units never merge (pieces, sheets, bars, flashing lengths)", () => {
   const c = computeWorkspace(j5());
   // + the Axon's own battens (pieces) and foam tape (a roll), wall-by-wall step 4 — still never merged
-  assert.deepEqual(c.scheduleLines.map((l) => l.unit || "flashing").sort(), ["bar", "flashing", "piece", "piece", "roll", "sheet"]);
+  assert.deepEqual(c.scheduleLines.map((l) => l.unit || "flashing").sort(), ["bar", "flashing", "piece", "piece", "piece", "piece", "roll", "sheet"], "rafters + the battens' three pine lengths");
   assert.equal(c.totalLm, 3.2); // LM total is flashing only
   assert.equal(c.orderReady, true, JSON.stringify(c.scheduleLines.map((l) => l.problems)));
 });
@@ -170,7 +171,7 @@ await t("J5: order snapshot → MATERIAL ORDER PDF (bars/sheets/pieces) + separa
     lines, supplier: { id: "s", name: "Supplier" }, company: { name: "Blue Leaf", phone: "08" }, jobLabel: "1 Example St", rendererVersion: "test" });
   assert.deepEqual(problems, []);
   assert.equal(snapshot.items.length, 3);
-  assert.deepEqual(snapshot.totals.byUnit, { piece: 18 + 14, sheet: 4, bar: 1, roll: 1 }); // 18 rafters + the Axon's 14 battens; its tape roll
+  assert.deepEqual(snapshot.totals.byUnit, { piece: 18 + 7, sheet: 4, bar: 1, roll: 1 }); // 18 rafters + the Axon's 7 pine battens; its tape roll
   assert.equal(snapshot.appendix.aluminium[0].bars.length, 1);
   assert.equal(snapshot.appendix.flashingRuns.length, 1);
   const pdf = await renderSupplierOrderPdf(snapshot, { exportNo: 1, isDraft: false, snapshotSha256: "abc" });
@@ -276,12 +277,12 @@ await t("QO-08: random-length LM is rounded ONCE per material (not per wall then
 });
 await t("QO-09/F12: full packs only when the supplier requires them; QO-14: spare % is per material, not per line", () => {
   const w = j2(); w.materials[0].spec = { ...w.materials[0].spec, product: { ...w.materials[0].spec.product, packQuantity: 3, fullPackRequired: true } };
-  // the sheet pack size never rounds the Axon's own battens (step 4): still 14
-  assert.deepEqual(summary(linesOf(computeWorkspace(w), "clad").filter((l) => l.unit !== "roll")), ["14 piece @3000", "6 sheet @2750"]);
+  // the sheet pack size never rounds the Axon's own battens (step 4): still the 7 pine lengths
+  assert.deepEqual(summary(linesOf(computeWorkspace(w), "clad").filter((l) => l.unit !== "roll")), ["1 piece @3600", "2 piece @5700", "4 piece @5400", "6 sheet @2750"]);
   const w2 = j2(); w2.materials[0].spec = { ...w2.materials[0].spec, spareRate: 10 };
   const ls = linesOf(computeWorkspace(w2), "clad");
   assert.equal(ls.filter((l) => l.unit === "sheet").reduce((a, l) => a + (l.spareQuantity || 0), 0), 1); // ceil(4 × 10 %) = 1 for the whole material
-  assert.equal(ls.find((l) => l.follower === "battens").spareQuantity, 2, "the battens' own spare: ceil(14 × 10 %)");
+  assert.equal(ls.filter((l) => l.follower === "battens").reduce((a, l) => a + (l.spareQuantity || 0), 0), 1, "the battens' own spare: ceil(7 × 10 %), once for their lengths");
 });
 await t("QO-10/PH-06: connected collinear runs are one grid (18, not 20); a run traced twice is blocked; noise past a multiple adds no member", () => {
   const two = j1(); two.measurements[0] = line("d1", "distribution", 5000); two.measurements.push({ ...line("d2", "distribution", 5000), points: [{ x: 1 + 5000 / U, y: 1 }, { x: 1 + 10000 / U, y: 1 }] });

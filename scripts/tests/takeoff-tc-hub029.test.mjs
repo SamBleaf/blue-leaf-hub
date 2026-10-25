@@ -195,17 +195,20 @@ t("a Studs (wall_frame) or Walls wall_incomplete says which wall and field too, 
   assert.ok(n.materialResults.ng.problems.some((p) => p.message === "Enter the stud/noggin section so the clear bays can be worked out."));
 });
 
-t("one incomplete wall holds every line of its cladding and the pooled tape and H-flashing; the other cladding's own lines stay clear", () => {
+t("one incomplete wall holds every line of its cladding and the job's pooled battens, tape and H-flashing; the other cladding's own sheets stay clear", () => {
   const c = computeWorkspace(JOB());
   const block = "Wall 3: enter the Wall height.";
   const own = linesOf(c, "clad");
   assert.ok(own.length >= 4 && own.every((l) => l.problems.includes(block)), JSON.stringify(own.map((l) => [l.item?.description, l.problems])));
   // the complete walls' quantities are still shown (sheets, battens) — never counted as zero
   assert.ok(own.some((l) => l.unit === "sheet" && l.quantity > 0) && own.some((l) => l.follower === "battens" && l.quantity > 0));
-  const pooled = c.scheduleLines.filter((l) => l.follower === "tape" || l.follower === "hflashing");
-  assert.deepEqual(pooled.map((l) => [l.follower, l.jobMaterialIds]).sort(), [["hflashing", ["clad", "clad2"]], ["tape", ["clad", "clad2"]]]);
-  assert.ok(pooled.every((l) => l.problems.includes(block)), "its share of the job's tape and H-flashing is short by that wall");
-  const second = linesOf(c, "clad2").filter((l) => !l.follower || l.follower === "battens");
+  // HUB 030 (Sam: "Whole job"): the pine battens are bought once for the job too, so they carry the block as the tape
+  // and H-flashing do — their quantity is short by that wall's share
+  const pooled = c.scheduleLines.filter((l) => l.follower === "tape" || l.follower === "hflashing" || l.follower === "battens");
+  // (a pine length can serve walls of the first cladding only, so some batten lines name it alone)
+  assert.deepEqual([...new Set(pooled.map((l) => `${l.follower} ${l.jobMaterialIds.join("+")}`))].sort(), ["battens clad", "battens clad+clad2", "hflashing clad+clad2", "tape clad+clad2"]);
+  assert.ok(pooled.every((l) => l.problems.includes(block)), "its share of the job's battens, tape and H-flashing is short by that wall");
+  const second = linesOf(c, "clad2").filter((l) => !l.follower);
   assert.ok(second.length && second.every((l) => !l.jobMaterialIds.includes("clad") && l.problems.length === 0), JSON.stringify(second.map((l) => l.problems)));
   assert.deepEqual(c.materialResults.clad.status.quantity, "incomplete");
   assert.equal(c.orderReady, false);
@@ -234,11 +237,13 @@ t("at Wall height 3,600 every line clears and the job is ready; a measured item 
   const c = computeWorkspace(ready);
   assert.ok(c.scheduleLines.length && c.scheduleLines.every((l) => l.problems.length === 0), JSON.stringify(c.scheduleLines.filter((l) => l.problems.length).map((l) => l.problems)));
   assert.deepEqual([c.materialResults.clad.status, c.orderReady], [{ quantity: "calculated", installation: "source-pending", procurement: "ready" }, true]);
-  // a Support battens item on Wall 1 with no product: blocked, no lines at all — the job isn't ready while it is held
-  const bat = { id: "bat", name: "Support battens", ...fam({ family: "batten", product: {} }), rules: {} };
-  const held = computeWorkspace({ ...ready, materials: [...ready.materials, bat], contributions: [...ready.contributions, con("s1", "w1", "bat")] });
-  assert.deepEqual(linesOf(held, "bat"), []);
-  assert.ok(held.materialResults.bat.problems.some((p) => p.blocking !== false));
+  // a Walls item on a wall with no height: blocked, no lines at all — the job isn't ready while it is held (HUB 030 made
+  // an empty Support battens product the owner's pine batten, so that is no longer the example)
+  const wf = { id: "wf", name: "Walls", ...fam(wallFramingDefaults()), rules: {} };
+  const held = computeWorkspace({ ...ready, materials: [...ready.materials, wf], measurements: [...ready.measurements, rect("wx", 3000, null, "Wall X")],
+    contributions: [...ready.contributions, con("s1", "wx", "wf")] });
+  assert.deepEqual(linesOf(held, "wf"), []);
+  assert.ok(held.materialResults.wf.problems.some((p) => p.blocking !== false && p.code === "wall_incomplete"));
   assert.ok(held.scheduleLines.every((l) => l.problems.length === 0), "every listed line is clear");
   assert.deepEqual(held.unplaced, [], "nothing unplaced either: only the held item says it isn't ready");
   assert.equal(held.orderReady, false);
@@ -313,7 +318,7 @@ t("every familyProblems need names its card field (one of FAMILY_NEED_FIELDS), a
     { family: "timber", purpose: "rafters", section: {} },
     { family: "timber", purpose: "walls", components: { studs: blank("studs"), plates: blank("plates"), longPlates: blank("longPlates"), noggins: blank("noggins") } },
     { family: "aluminium", profile: {}, stockLengthMm: 6500 },
-    { family: "batten", product: {} },
+    { family: "batten", product: { id: "custom-batten" } },   // an EMPTY batten product takes the owner's pine (HUB 030)
     { family: "accessory", product: {} },
     { family: "cladding", layout: "sheet", product: {} },
     { family: "cladding", layout: "grid", product: {} },
@@ -331,12 +336,13 @@ t("every familyProblems need names its card field (one of FAMILY_NEED_FIELDS), a
     }
   }
   assert.deepEqual([...used].sort(), [...FAMILY_NEED_FIELDS].sort(), "every field is one a need really names");
-  assert.deepEqual(familyProblems({ family: "batten", product: {} }).map((p) => [p.field, p.message]), [
+  assert.deepEqual(familyProblems({ family: "batten", product: {} }), [], "HUB 030: an empty Support battens product is the owner's pine batten, so it needs nothing");
+  assert.deepEqual(familyProblems({ family: "batten", product: { id: "custom-batten" } }).map((p) => [p.field, p.message]), [
     ["product", "Choose the batten / rail product."], ["product.size", "Enter the batten section (width × thickness)."], ["product.lengths", "Enter the stock length(s)."]]);
   assert.deepEqual(familyProblems({ family: "timber", purpose: "walls", components: { studs: { ...blank("studs"), section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", stock: { maxMm: 6000 } } } })
     .filter((p) => p.part === "studs").map((p) => [p.part, p.field, p.message]), [["studs", "treatment", "Studs: enter the treatment (or \"untreated\")."]]);
   // the field travels onto the material's own problems (the panel and the fix rows read them there)
-  const c = computeWorkspace(ws([{ id: "bat", name: "Support battens", ...fam({ family: "batten", product: {} }), rules: {} }], [rect("w1", 3000, 2700, "Wall 1")], [con("s", "w1", "bat")]));
+  const c = computeWorkspace(ws([{ id: "bat", name: "Support battens", ...fam({ family: "batten", product: { id: "custom-batten" } }), rules: {} }], [rect("w1", 3000, 2700, "Wall 1")], [con("s", "w1", "bat")]));
   assert.deepEqual(probs(c, "bat", "material_incomplete").map((p) => [p.field, p.blocking]), [["product", true], ["product.size", true], ["product.lengths", true]]);
 });
 
@@ -366,13 +372,15 @@ t("fixes: the recorded job's one blocker is exactly ONE row, a wall target at it
   // the two Axon items share a name, so the row names this one's walls
   assert.equal(r.walls, "Walls 1, 3–4");
   assert.equal(r.text, "Wall 3 on Axon 400 smooth (Walls 1, 3–4): enter the Wall height");
-  // every line that carries it points at this row: all of the first Axon's lines and the job's pooled tape and H-flashing
+  // every line that carries it points at this row: all of the first Axon's lines and the job's pooled battens (HUB 030),
+  // tape and H-flashing
+  const pooledKeys = c.scheduleLines.filter((l) => l.follower === "tape" || l.follower === "hflashing" || l.follower === "battens").map((l) => l.bucketKey).sort();
   assert.deepEqual([...r.bucketKeys].sort(), blockedKeys(c, "Wall 3: enter the Wall height."));
-  assert.ok(c.scheduleLines.filter((l) => l.follower === "tape" || l.follower === "hflashing").every((l) => r.bucketKeys.includes(l.bucketKey)), "the pooled lines too");
+  assert.ok(pooledKeys.every((k) => r.bucketKeys.includes(k)), "the pooled lines too");
   // the second Axon's panel lists the pooled lines, so it shows the same row (the first Axon's, naming its walls)
   const second = fixesFor(c, w, { materialId: "clad2" });
   assert.deepEqual(second.map((x) => [x.key, x.materialId, x.text]), [[r.key, "clad", r.text]]);
-  assert.deepEqual([...second[0].bucketKeys].sort(), c.scheduleLines.filter((l) => l.follower === "tape" || l.follower === "hflashing").map((l) => l.bucketKey).sort());
+  assert.deepEqual([...second[0].bucketKeys].sort(), c.scheduleLines.filter((l) => l.follower && l.jobMaterialIds.includes("clad2")).map((l) => l.bucketKey).sort(), "the pooled lines it lists");
   // the Timber and cladding section has it; Flashings has nothing
   assert.deepEqual(fixesFor(c, w, { section: "timber_cladding" }).map((x) => x.key), [r.key]);
   assert.deepEqual(fixesFor(c, w, { section: "flashings" }), []);
@@ -507,10 +515,14 @@ t("fixes: dedupe by target — one tap that fixes many problems is one row", () 
   const ruled = { ...tall, rules: { route: "cavity", jointRows: { atMm: [1000], gapMm: 10, detailRef: "H-flashing" } } };
   const wr = rowsOf(ws([ruled], [rect("w2", 3000, 4200, "Wall 2")], [con("a", "w2", "clad")]));
   assert.deepEqual(wr.map((r) => [r.code, r.target]), [["sheet_too_tall", { kind: "wall", materialId: "clad", measurementId: "w2", sheet: "jointRow" }]]);
-  // a Support battens item with no spacing on two walls: one 'enter the maximum spacing' row
+  // a Support battens item with no spacing on two walls: nothing to fix (HUB 030 decision 2: 600 centres and no counted
+  // fixings are Sam's defaults); a fixing scope marked "by others" with no reason on both walls is ONE row
   const bat = { id: "bat", name: "Support battens", ...fam({ family: "batten", product: { name: "Pine", widthMm: 90, thicknessMm: 35, lengthsMm: [3600, 4200] } }), rules: {} };
-  const b = rowsOf(ws([bat], [rect("w1", 3600, 2700, "Wall 1"), rect("w2", 3000, 2700, "Wall 2")], [con("a", "w1", "bat"), con("b", "w2", "bat")]));
-  assert.deepEqual(b.map((r) => [r.code, r.target]), [["support-spacing-unresolved", { kind: "card", materialId: "bat", field: "rules.maxSpacingMm" }]]);
+  const two = (rules) => ws([{ ...bat, rules }], [rect("w1", 3600, 2700, "Wall 1"), rect("w2", 3000, 2700, "Wall 2")], [con("a", "w1", "bat"), con("b", "w2", "bat")]);
+  assert.deepEqual(rowsOf(two({})), []);
+  const b = rowsOf(two({ fixingScope: { status: "by-others" } }));
+  assert.equal(b.length, 1, JSON.stringify(b.map((r) => r.short)));
+  assert.deepEqual([b[0].code, b[0].target.kind, b[0].target.materialId], ["scope-reason-missing", "card", "bat"]);
   // a material need and the engine's own copy of it are one row (the aluminium kerf)
   const al = { id: "al", name: "Angle", methodKey: "linear_stock", methodVersion: 1, spec: { family: "aluminium", profile: { shape: "angle", aMm: 50, bMm: 50, tMm: 3 }, stockLengthMm: 6500 }, rules: {} };
   const ar = rowsOf(ws([al], [{ id: "r1", kind: "run", documentId: "d", pageIndex: 0, calibrationId: "cal", points: [{ x: 1, y: 1 }, { x: 101, y: 1 }] }], [con("a", "r1", "al", "primary")]));
@@ -702,7 +714,9 @@ function blockedCorpus() {
   [con("a", "w1", "mis"), con("b", "w2", "tall"), con("c", "w3", "hor"), con("d", "w4", "jr"), con("e", "w5", "bare")]));
   out.push({ ...ws([axon("clad")], [{ ...traced("t1", 3000, "T1", { heightMm: 2700 }), pageIndex: 1, calibrationId: "calu" }, { ...traced("t4", 3000, "T4", { widthMm: 3000, heightMm: 2700 }), calibrationId: "gone" },
     runM("r1")], [con("a", "t1", "clad"), con("b", "t4", "clad"), con("e", "r1", "clad", "primary")]), calibrations: [CAL, UNCHECKED] });
-  out.push(ws([bat("b1", {}), bat("b2", { name: "Pine", widthMm: 90, thicknessMm: 35, lengthMm: 6000 }, { maxSpacingMm: 600 })], [rect("w1", 3600, 2700, "Wall 1")], [con("a", "w1", "b1"), con("b", "w1", "b2")]));
+  // HUB 030: an EMPTY product is the owner's pine batten and a single length is a one-length list, so these are the
+  // Support battens blockers that can still happen: a half-typed custom batten, and a product with no stock length
+  out.push(ws([bat("b1", { id: "custom-batten", name: "Pine" }), bat("b2", { name: "Pine", widthMm: 90, thicknessMm: 35 }, { maxSpacingMm: 600 })], [rect("w1", 3600, 2700, "Wall 1")], [con("a", "w1", "b1"), con("b", "w1", "b2")]));
   out.push(ws([timber("raf", "rafters", {}, { lengthSource: "projected", pitchDeg: 20 }), timber("raf2", "rafters", { section: {} }), timber("long", "rafters", { stock: { maxMm: 3600 } }, { lengthSource: "entered", enteredLengthMm: 7000 }),
     timber("dup", "rafters", {}, { lengthSource: "entered", enteredLengthMm: 3000 })],
   [runM("r1", 200), { id: "mem", kind: "member", documentId: "d", pageIndex: 0, calibrationId: "cal", points: [{ x: 1, y: 1 }, { x: 100, y: 1 }] }, runM("r3", 200), runM("r4", 200), runM("r5", 100)],
@@ -749,7 +763,8 @@ t("guard: on a corpus of blocked takeoffs every blocker has an explicit target o
   // the corpus reaches every target kind and the blocker families of the audit (B1–B4, B7–B10, B12–B13, B15, B17–B20, B22–B25)
   for (const code of ["wall_incomplete", "wall_dimension_invalid", "wall_polygon_invalid", "wall_self_intersecting", "opening_outside_wall", "opening_invalid", "calibration_superseded",
     "calibration_not_ready", "calibration_missing", "measurement_unused", "assembly_method_mismatch", "sheet_too_tall", "joint_rows_invalid", "orientation_not_permitted",
-    "material_incomplete", "product_parameter_missing", "support-spacing-unresolved", "stock-policy-missing", "member_missing", "distribution_missing", "distribution_overlap", "unavailable_stock", "plates_missing",
+    // support-spacing-unresolved is gone: with no spacing entered a Support battens item uses Sam's 600 (HUB 030 decision 2)
+    "material_incomplete", "product_parameter_missing", "stock-policy-missing", "member_missing", "distribution_missing", "distribution_overlap", "unavailable_stock", "plates_missing",
     "wall_not_straight", "kerf_unconfirmed", "recipe_missing", "routes-missing"]) assert.ok(seen.has(code), `the corpus raises ${code}`);
 });
 

@@ -21,8 +21,9 @@
 //                                   standing → horizontals), plus a sloped batten along a gable / outline top
 //   Timber cladding                 the same at 450 centres
 //
-// Battens are the catalogue's Hardie Cavity Batten, cut from its listed stock lengths with offcuts shared across
-// every wall of the material (one allocator group). Direct-fixed cladding (route "direct") gets no battens. Batten-to-
+// Battens are the owner's 90 × 35 H3 pine (HUB 030, Sam 25 Oct 2026; engine/families.js OWNER_BATTEN), never the Hardie
+// Cavity Batten, bought in 300 mm steps up to 6,000 with offcuts shared across every wall of EVERY cladding on the job
+// (bought once for the job, like the tape and H-flashing — dispatch.js buyPooledFollowers). Direct-fixed cladding (route "direct") gets no battens. Batten-to-
 // stud fixings are "not counted" and never block the order. A wall that already has a batten material set up by hand
 // keeps it (no automatic battens there); a hand-made accessory set keeps the H joints when it has a joint strip or
 // decided them, and the foam tape only when it holds the joint foam tape itself (code 304560) — never for its window /
@@ -32,7 +33,7 @@
 import { formatMm } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, problem } from "./contract.js";
 import { normaliseOutline, prepareOpenings, requiredStations, segmentCover } from "./supports.js";
-import { CATALOGUE_SEED } from "../products/seed.js";
+import { OWNER_BATTEN } from "./families.js";
 
 /** Bumped when the automatic battens / tape / H-flashing rules change (their order lines are then reviewed). */
 export const FOLLOWERS_VERSION = 1;
@@ -42,28 +43,23 @@ export const TIMBER_CENTRES_MM = 450;
 /** Sam's product details (jameshardie.com.au, 21 Oct 2026). */
 export const FOAM_TAPE = Object.freeze({ code: "304560", name: "Hardie™ 50mm Foam Back Sealing Tape", rollMm: 25000 });
 export const H_FLASHING = Object.freeze({ code: "305613", name: "Hardie™ 9mm Alum Horizontal H Flashing", lengthMm: 3000 });
-export const BATTEN_PRODUCT_ID = "hardie-405307";
 /** What each follower is called on the schedule, the order and the supplier PDF (with its product code). */
 export const FOLLOWER_KINDS = Object.freeze(["battens", "hflashing", "tape"]);
 
 const fmt = (v) => formatMm(Math.round(v * 10) / 10, 1);
 const round3 = (v) => Math.round(v * 1000) / 1000;
-const BATTEN_REC = CATALOGUE_SEED.products.find((p) => p.id === BATTEN_PRODUCT_ID) || null;
-/** Every listed stock length of the Cavity Batten (same maker, name and section). */
-const BATTEN_LENGTHS = BATTEN_REC ? [...new Set(CATALOGUE_SEED.products.filter((p) => p.family === "batten" && p.manufacturer === BATTEN_REC.manufacturer && p.name === BATTEN_REC.name
-  && p.dimensionsMm?.width === BATTEN_REC.dimensionsMm.width && p.dimensionsMm?.thickness === BATTEN_REC.dimensionsMm.thickness).map((p) => p.dimensionsMm.length))].sort((a, b) => a - b) : [];
-export const BATTEN = Object.freeze({
-  name: BATTEN_REC?.name || "Hardie Cavity Batten", code: BATTEN_REC?.sku || null, widthMm: BATTEN_REC?.dimensionsMm?.width ?? 70,
-  thicknessMm: BATTEN_REC?.dimensionsMm?.thickness ?? 19, lengthsMm: Object.freeze(BATTEN_LENGTHS.length ? BATTEN_LENGTHS : [3000]),
-});
-const BATTEN_IDENTITY = Object.freeze({ family: "batten", follower: "battens", manufacturer: BATTEN_REC?.manufacturer || "James Hardie", name: BATTEN.name, sku: BATTEN.code,
-  widthMm: BATTEN.widthMm, thicknessMm: BATTEN.thicknessMm });
+/** HUB 030: the automatic batten is the owner's 90 × 35 H3 pine, 1,200–6,000 in 300 mm steps. */
+export const BATTEN = Object.freeze({ name: OWNER_BATTEN.name, code: null, widthMm: OWNER_BATTEN.widthMm, thicknessMm: OWNER_BATTEN.thicknessMm, lengthsMm: OWNER_BATTEN.lengthsMm });
+/** Two battens closer than this can't both be fixed. Kept at the 70 mm face the battens were set out with before
+ *  HUB 030, so changing the product moves no batten (positions, merges and joins are unchanged). */
+export const BATTEN_SETOUT_FACE_MM = 70;
+const BATTEN_IDENTITY = Object.freeze({ family: "batten", follower: "battens", name: BATTEN.name, widthMm: BATTEN.widthMm, thicknessMm: BATTEN.thicknessMm });
 const H_IDENTITY = Object.freeze({ family: "accessory", follower: "hflashing", manufacturer: "James Hardie", name: H_FLASHING.name, sku: H_FLASHING.code });
 const TAPE_IDENTITY = Object.freeze({ family: "accessory", follower: "tape", manufacturer: "James Hardie", name: FOAM_TAPE.name, sku: FOAM_TAPE.code, rollMm: FOAM_TAPE.rollMm });
 const BATTEN_POLICY = Object.freeze({ kind: "list", lengthsMm: BATTEN.lengthsMm, kerfMm: 0, finalEndAcceptable: true, sharePieces: true });
 const H_POLICY = Object.freeze({ kind: "fixed", lengthMm: H_FLASHING.lengthMm, kerfMm: 0, finalEndAcceptable: true, sharePieces: true });
 export const FOLLOWER_TEXT = Object.freeze({
-  battens: `${BATTEN.name} ${BATTEN.widthMm} × ${BATTEN.thicknessMm}${BATTEN.code ? `, code ${BATTEN.code}` : ""}`,
+  battens: BATTEN.name,   // "90 × 35 H3 pine batten" (the name carries the size and treatment)
   hflashing: `${H_FLASHING.name}, code ${H_FLASHING.code}`,
   tape: `${FOAM_TAPE.name}, ${FOAM_TAPE.rollMm / 1000} m roll, code ${FOAM_TAPE.code}`,
 });
@@ -220,7 +216,7 @@ export function wallFollowers(wall, openings, layout, opts) {
     // or an end moves halfway between its neighbours instead: the same count, still no gap over the centres
     const mergeStations = (stations) => {
       const rank = (st) => (st.kinds.includes("required") ? 3 : st.kinds.includes("end") ? 2 : 1);
-      const near = (p, q) => p && q && Math.abs(p.atMm - q.atMm) < BATTEN.widthMm - EPS_MM;
+      const near = (p, q) => p && q && Math.abs(p.atMm - q.atMm) < BATTEN_SETOUT_FACE_MM - EPS_MM;
       const kept = [];
       for (const st of [...stations].sort((p, q) => p.atMm - q.atMm)) {
         const prev = kept[kept.length - 1];
@@ -310,7 +306,7 @@ export function wallFollowers(wall, openings, layout, opts) {
     for (const p of pieces.map((x, i) => ({ x, i })).sort((a, b) => tier(a.x) - tier(b.x) || a.i - b.i).map(({ x }) => x)) {
       const L = lineOf(p);
       if (L && tier(p) > 0) {
-        const host = kept.find((k) => { const K = lineOf(k); return K && k.orientation === p.orientation && Math.abs(K.at - L.at) < BATTEN.widthMm - EPS_MM && K.lo <= L.lo + 0.5 && K.hi >= L.hi - 0.5; });
+        const host = kept.find((k) => { const K = lineOf(k); return K && k.orientation === p.orientation && Math.abs(K.at - L.at) < BATTEN_SETOUT_FACE_MM - EPS_MM && K.lo <= L.lo + 0.5 && K.hi >= L.hi - 0.5; });
         if (host) continue;
       }
       kept.push(p);
@@ -321,7 +317,7 @@ export function wallFollowers(wall, openings, layout, opts) {
     for (const p of kept) {
       const len = Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y);
       const at = rule.kind !== "axon" && p.orientation !== "sloped" ? [] : p.joinAt === "x" ? crossingsX(p.a, p.b, uprightXs) : crossingsY(p.a, p.b, jointYs);
-      const sp = splitPiece(len, at, maxBatten, BATTEN.widthMm);
+      const sp = splitPiece(len, at, maxBatten, BATTEN_SETOUT_FACE_MM);
       if (sp.butt) butt++;
       sp.parts.forEach(([s, e], j) => {
         const a = along(p.a, p.b, s), b = along(p.a, p.b, e), L = round3(e - s);

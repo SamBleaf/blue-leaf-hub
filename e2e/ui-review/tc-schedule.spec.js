@@ -100,17 +100,15 @@ test.describe("TC-R04 schedule", () => {
     const tc = group(page, "mat-tc");
     await expect(tc.getByRole("button", { name: /^57 LM\s*Shiplap 19 thick — random lengths \(LM\)\s*estimate — not a piece count/ })).toBeVisible();
     await expect(tc.locator('[data-status="quantity"]')).toHaveText("Quantity: Estimate");
-    // battens: blocking problems listed, ordering blocked — never shown as ready
+    // battens: with no fixing rule their fixings are Not counted (Blue Leaf default, HUB 030 decision 2) — nothing holds them
     const bat = group(page, "mat-bat");
-    await expect(bat.getByRole("alert")).toContainText("Needs before ordering:");
-    await expect(bat.getByRole("alert")).toContainText("fixings not quantified — detail required");
-    // the batten product itself is complete (no cladding cover asked of a batten) — its fixings keep it a draft
-    await expect(bat.locator('[data-status="procurement"]')).toHaveText("Ordering: Draft");
-    await expect(bat.locator('[data-status="quantity"]')).toHaveText("Quantity: Incomplete");
+    await expect(bat.getByRole("alert")).toHaveCount(0);
+    await expect(bat.locator('[data-status="procurement"]')).toHaveText("Ordering: Ready to order");
+    await expect(bat.locator('[data-status="quantity"]')).toHaveText("Quantity: Calculated");
     // per-material totals are per unit — never "pieces + sheets"
     await expect(axon.locator("p.text-right")).toHaveText("4 sheets · 1 roll");
     await expect(raf.locator("p.text-right")).toHaveText("18 pieces");
-    await expect(tc.locator("p.text-right")).toHaveText("7 pieces · 57 LM");   // + its own battens across the boards at 450 (step 4)
+    await expect(tc.locator("p.text-right")).toHaveText("4 pieces · 57 LM");   // + its own battens across the boards at 450 (step 4), in pine lengths (HUB 030)
     for (const g of [raf, axon, al, tc, bat]) await expect(g.locator("p.text-right")).not.toContainText(/pieces.*sheets|sheets.*pieces|LM.*pieces|bars.*LM/);
     await page.screenshot({ path: `${SHOTS}/schedule-mixed-390x844.png`, fullPage: true });
     const o = await overflowPx(page);
@@ -243,8 +241,9 @@ test.describe("TC-R04 supplier order", () => {
     await expect(orderGroup(page, "mat-tc").getByText("estimate — not a piece count")).toBeVisible();
     // the visible label is the unit word only (the screen-reader hint names the item)
     const labels = await page.locator("[data-order-group] label").evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !n.classList?.contains("sr-only")).map((n) => n.textContent).join("")));
-    // rafters, trimmers, Axon + its foam tape, battens, aluminium, shiplap + its own battens (wall-by-wall step 4)
-    expect(labels.length).toBe(8);
+    // rafters, trimmers, Axon + its foam tape, battens, aluminium, shiplap + its own pine battens (wall-by-wall step 4;
+    // HUB 030: the battens in their 300 mm pine lengths)
+    expect(labels.length).toBe(9);
     for (const t of labels) expect(t).toMatch(/^Order quantity \((pieces|sheets|bars|LM|rolls)\)$/);
     await expect(axon.getByLabel(/Order quantity.*\(rolls\)/)).toHaveValue("1");
     await expect(axon.locator('[data-unit="roll"]')).toContainText("Hardie™ 50mm Foam Back Sealing Tape, 25 m roll, code 304560");
@@ -268,15 +267,15 @@ test.describe("TC-R04 supplier order", () => {
     await sheets.fill("4");
     await sheets.press("Enter");
     await expect(axon.getByRole("alert")).toHaveCount(0);
-    // export a SUBSET: battens (incomplete) stay off this order
+    // export a SUBSET: the battens (ready now: their fixings are Not counted by default, HUB 030) are left off this order
     const bat = orderGroup(page, "mat-bat");
-    await expect(bat.getByText("needs attention")).toBeVisible();
+    await expect(bat.getByText("needs attention")).toHaveCount(0);
     await bat.getByLabel(/Order quantity.*\(pieces\)/).fill("0");
     await bat.getByLabel(/Order quantity.*\(pieces\)/).press("Enter");
     const totals = page.getByTestId("order-totals");
-    // timber pieces (18 rafters + 4 trimmers) + the shiplap's own 7 battens, sheets, bars, LM and the Axon's roll of foam tape
-    // (wall-by-wall step 4) each on their own (flashings are their own order — HUB 007)
-    await expect(totals).toHaveText(/^On this order: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
+    // timber pieces (18 rafters + 4 trimmers) + the shiplap's own 4 pine battens, sheets, bars, LM and the Axon's roll of
+    // foam tape (wall-by-wall step 4) each on their own (flashings are their own order — HUB 007)
+    await expect(totals).toHaveText(/^On this order: 26 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
     await page.screenshot({ path: `${SHOTS}/order-generic-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
     const o = await overflowPx(page);
@@ -287,7 +286,7 @@ test.describe("TC-R04 supplier order", () => {
     expect(o2.right, "order wider than the 375 px screen").toBeLessThanOrEqual(1);
     expect(o2.scroll).toBeLessThanOrEqual(0);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders \(review branch\)\.$/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 26 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders \(review branch\)\.$/)).toBeVisible();
     await page.getByRole("button", { name: "Export supplier PDF" }).tap();
     await expect(page.getByText(/Export 1 is frozen\. Nothing has been sent\./)).toBeVisible();
     // site appendix sits next to the supplier PDF and opens separately
@@ -785,9 +784,9 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
       .toEqual(["mat-raf", "mat-trim", "mat-axon", "mat-bat", "mat-al", "mat-tc", "mat-fix"]);
     const boxes = orderGroup(page, "mat-fix").getByLabel(/Order quantity.*\(boxes\)/);
     await expect(boxes).toHaveValue("3");
-    // 32 + the shiplap's own 7 battens (step 4), and the Axon's own roll of foam tape: the fixings set's "Tape: by others" is
-    // its window / wrap tape, never the foam tape behind the sheet joins, so it doesn't switch that off
-    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: 39 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes · 1 roll$/);
+    // 32 + the shiplap's own pine battens (step 4; HUB 030 lengths), and the Axon's own roll of foam tape: the fixings set's
+    // "Tape: by others" is its window / wrap tape, never the foam tape behind the sheet joins, so it doesn't switch that off
+    await expect(page.getByTestId("order-totals")).toHaveText(/^On this order: 36 pieces · 4 sheets · 2 bars · 57 LM · 3 boxes · 1 roll$/);
     const review = page.getByTestId("accessory-scope-review");
     await expect(review).toContainText("Accessories not supplied on this order:");
     await expect(review.locator('[data-scope-material="mat-fix"] [data-scope="by-others"]')).toHaveText("By others: Membrane / wrap (Wrap by the framer), Tape");
@@ -800,10 +799,10 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
       await q.fill("0");
       await q.press("Enter");
     }
-    // + the shiplap's own 7 battens and the Axon's roll of foam tape (step 4)
-    await expect(page.getByTestId("order-totals")).toHaveText(/: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
+    // + the shiplap's own pine battens (HUB 030 lengths) and the Axon's roll of foam tape (step 4)
+    await expect(page.getByTestId("order-totals")).toHaveText(/: 26 pieces · 4 sheets · 2 bars · 57 LM · 1 roll$/);
     await page.getByRole("button", { name: "Save order details" }).tap();
-    await expect(page.getByText(/^Ready: 29 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders/)).toBeVisible();
+    await expect(page.getByText(/^Ready: 26 pieces · 4 sheets · 2 bars · 57 LM · 1 roll to Fielders/)).toBeVisible();
     await expect(page.getByTestId("not-on-order")).toHaveText(/Cavity battens — 10 pieces\s*Cladding fixings — 3 boxes/);
     await page.screenshot({ path: `${SHOTS}/order-fixings-review-390x844.png`, fullPage: true });
     expect(await smallTargets(page)).toEqual([]);
