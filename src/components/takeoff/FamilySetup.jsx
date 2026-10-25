@@ -3,9 +3,12 @@
 //   * TimberSetup    — purpose → "Size and grade" list (HUB 027: the owner's sizes for that purpose + company timber
 //                      products saved for it, or Custom) → section/grade/treatment (always shown, editable) →
 //                      centres / length source / pitch → 1200 + 300n stock
-//   * WallsSetup     — HUB 028 Walls item (studs, plates and noggins from one trace): the parts' needs, then Name. No
-//                      Purpose chips and no company-product picker (one tap there would turn the item into another
-//                      timber purpose or replace its parts). The plan's build step 5 adds the rest of the Walls card.
+//   * WallsSetup     — HUB 028 Walls item (studs, plates and noggins from one trace): the parts' needs and the notes
+//                      (lintels note first), Name, Stud centres, Double top plate and the Walls line (why a wall isn't
+//                      counted under it), then the closed "Studs, plates, noggins" fold (each part's HUB 027 Size and
+//                      grade list through WallPartSizeChoice, filled with wallPartFill; Long plates after Plates). No
+//                      Purpose chips, no company-product picker and no Save as company product (one tap there would
+//                      turn the item into another timber purpose or replace its parts).
 //   * CladdingSetup  — material → product (searchable catalogue; Walsc first for AAC) → orientation → assembly
 //                      → stock / spares / supplier. Also hosts the support-batten layer and the accessory card.
 //   * BattenSetup    — support layer: product/section, orientation, max spacing (required), offsets, existing
@@ -26,8 +29,10 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, applyTimberPreset, describeFamilySpec, familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid,
-  timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches } from "../../../shared/takeoff/index.js";
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
+  familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
+  wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
+import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
 import { FOAM_TAPE, H_FLASHING, followerRule, followerRuleText } from "../../../shared/takeoff/engine/followers.js";
@@ -1022,10 +1027,13 @@ function AvailabilityChips({ value, onChange }) {
  * nothing: the fields below stay for an unusual size. The list shows the choice the saved fields match exactly
  * (nothing new is stored). Ordering setup only, never a structural size.
  */
-function TimberSizeChoice({ d, presets }) {
+function TimberSizeChoice({ d, presets, builtIn: ownBuiltIn = null, products: ownProducts = null, fillProduct = timberProductFill, lvlHint = true }) {
   const s = d.cur.spec || {};
-  const builtIn = timberPresetsFor(s.purpose);
-  const products = useMemo(() => (presets || []).filter((p) => p?.isActive !== false && p?.spec?.family === "timber" && p.spec.purpose === s.purpose && p.rules?.companyDefault !== true), [presets, s.purpose]);
+  // HUB 028: a Walls part passes its own rows, products and fill (wallPartFill: the product's stock too); a Timber card
+  // uses its purpose's rows and products, filled with timberProductFill (HUB 027, unchanged)
+  const builtIn = ownBuiltIn || timberPresetsFor(s.purpose);
+  const purposeProducts = useMemo(() => (presets || []).filter((p) => p?.isActive !== false && p?.spec?.family === "timber" && p.spec.purpose === s.purpose && p.rules?.companyDefault !== true), [presets, s.purpose]);
+  const products = ownProducts || purposeProducts;
   // the row last picked here: shown while the fields still hold it (two choices can hold the same fields), "custom"
   // until another row is picked; otherwise the list shows what the saved fields match
   const [picked, setPicked] = useState(null);
@@ -1040,7 +1048,7 @@ function TimberSizeChoice({ d, presets }) {
     const preset = builtIn.find((x) => x.id === v);
     if (preset) { d.update((c) => ({ ...c, spec: applyTimberPreset(c.spec, preset) })); return; }
     const product = products.find((x) => x.id === v);
-    if (product) d.update((c) => ({ ...c, spec: timberProductFill(c.spec, product.spec) }));
+    if (product) d.update((c) => ({ ...c, spec: fillProduct(c.spec, product.spec) }));
   };
   return (
     <div data-timber-choice={shown || "none"}>
@@ -1056,7 +1064,7 @@ function TimberSizeChoice({ d, presets }) {
         )}
         <option value="custom">Custom (enter below)</option>
       </select>
-      {s.purpose === "studs" && <p className="mt-1 text-[11px] text-muted" data-lvl-hint="">LVL: pick your supplier&apos;s LVL from the company products. The app doesn&apos;t assume an LVL grade or treatment.</p>}
+      {lvlHint && s.purpose === "studs" && <p className="mt-1 text-[11px] text-muted" data-lvl-hint="">LVL: pick your supplier&apos;s LVL from the company products. The app doesn&apos;t assume an LVL grade or treatment.</p>}
     </div>
   );
 }
@@ -1161,23 +1169,115 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
 }
 
 // ── Walls (HUB 028) ──────────────────────────────────────────────────────────────────────────────────────────
+/** Long plates' one built-in row: Sam's round 3 "90 × 45 LVL" (the other parts use their HUB 027 purpose rows). */
+const LONG_PLATE_ROW = Object.freeze({ id: "longPlates-90x45-lvl", depthMm: WALL_LONG_PLATE_DEFAULT.depthMm, widthMm: WALL_LONG_PLATE_DEFAULT.widthMm, grade: WALL_LONG_PLATE_DEFAULT.grade });
+/** The HUB 027 purpose a Walls part's built-in rows and company products come from (Long plates are plates). */
+const partPurpose = (part) => (part === "longPlates" ? "plates" : part);
+
 /**
- * The Walls card (the Line panel's "Details ›" and the overview row's Setup). At the top, what the parts still need,
- * each naming its part ("Plates: enter the treatment …"), as the engine says (Long plates only once a plate uses them);
- * then the Name. It has no Purpose chips and no company-product picker, so a Walls item stays a Walls item.
+ * One Walls part's "Size and grade" list: HUB 027's TimberSizeChoice through a small adaptor. It shows and edits
+ * spec.components[part] (as if it were a timber spec of that part's purpose), lists that part's built-in rows and
+ * the company products saved for it (wallPartProducts: pine plates for Plates, LVL plates for Long plates), and a
+ * product pick fills the part with wallPartFill (the product's longest length and "not stocked" lengths too). A pick is
+ * ONE change (one Undo step). Rendered with one key per part, so a pick can never show against another part.
  */
-export function WallsSetup({ value, onChange, result }) {
+function WallPartSizeChoice({ d, part, presets }) {
+  const purpose = partPurpose(part);
+  const asSpec = (c) => ({ ...(c.spec?.components?.[part] || {}), purpose });
+  const pd = {
+    cur: { spec: asSpec(d.cur) },
+    update: (fn) => d.update((c) => {
+      const next = { ...fn({ ...c, spec: asSpec(c) }).spec };
+      delete next.purpose;
+      return { ...c, spec: { ...c.spec, components: { ...(c.spec?.components || {}), [part]: next } } };
+    }),
+  };
+  return <TimberSizeChoice d={pd} presets={presets} builtIn={part === "longPlates" ? [LONG_PLATE_ROW] : timberPresetsFor(purpose)}
+    products={wallPartProducts(presets, part)} fillProduct={(s, ps) => wallPartFill(s, ps, part)} lvlHint={false} />;
+}
+
+/** The normaliser's bounds for a part's lengths (over 0, up to 1,000,000 mm), so a refused value is said at the field. */
+const PART_MM = Object.freeze({ min: 1, max: 1000000 });
+
+/**
+ * One part in the fold: its Size and grade list, then section, grade, treatment and longest length (always editable).
+ * The "not stocked" lengths a saved product brought with it are shown (read only) under the longest length, because
+ * they change what is bought (6,000 not stocked → "Long plates (over 5.7 m)").
+ */
+function WallPart({ d, part, presets }) {
+  const p = d.cur.spec?.components?.[part] || {};
+  const set = (patch) => d.update((c) => ({ ...c, spec: { ...c.spec, components: { ...(c.spec?.components || {}), [part]: { ...(c.spec?.components?.[part] || {}), ...patch } } } }));
+  const over = part === "longPlates" ? wallLongPlateOverText(d.cur.spec) : "";
+  const title = part === "longPlates" && over ? `${WALL_PART_LABELS[part]} (${over})` : WALL_PART_LABELS[part];
+  const notStocked = Array.isArray(p.stock?.unavailableMm) ? p.stock.unavailableMm : [];
+  return (
+    <fieldset className="space-y-2 rounded-lg border border-hairline p-2" data-wall-part={part}>
+      <legend className="px-1 text-xs font-semibold text-ink">{title}</legend>
+      <WallPartSizeChoice key={part} d={d} part={part} presets={presets} />
+      <div className="grid grid-cols-2 gap-2">
+        <NumberField label="Section depth" value={p.section?.depthMm} {...PART_MM} onCommit={(n) => set({ section: { ...(p.section || {}), depthMm: n } })} />
+        <NumberField label="Section width" value={p.section?.widthMm} {...PART_MM} onCommit={(n) => set({ section: { ...(p.section || {}), widthMm: n } })} />
+        <CommitText label="Grade (e.g. MGP10)" value={p.grade} maxLength={40} onCommit={(t) => set({ grade: t })} />
+        <CommitText label="Treatment (e.g. H3)" value={p.treatment} maxLength={40} onCommit={(t) => set({ treatment: t })} />
+      </div>
+      <NumberField label="Longest length" value={p.stock?.maxMm} {...PART_MM} onCommit={(n) => set({ stock: { ...(p.stock || {}), maxMm: n } })} />
+      {notStocked.length > 0 && <p className="text-[11px] text-muted" data-wall-part-not-stocked="">Not stocked: {notStocked.map((l) => `${Math.round(l).toLocaleString("en-AU")}`).join(", ")} mm</p>}
+    </fieldset>
+  );
+}
+
+/**
+ * The Walls card (the Line panel's "Details ›" and the overview row's Setup), title "Walls", header button "Trace
+ * walls". At the top, what the parts still need before ordering (each need names its part, "Plates: enter the
+ * treatment …", Long plates only once a plate uses them: the needs "Details: n to fix" counts) and the item's plain
+ * notes (the lintels note first: "Lintels, jacks and trimmers at D1, W1 aren't counted."). Then Name, Stud centres,
+ * Double top plate and the Walls line, with why any wall isn't counted straight under it (as on the Line panel). Then
+ * the closed "Studs, plates, noggins" fold: each part's Size and grade list (the HUB 027 list through
+ * WallPartSizeChoice), section, grade, treatment and longest length, Long plates after Plates.
+ * No Purpose chips, no company-product picker and no Save as company product, so a Walls item stays a Walls item; no
+ * offsets, plies or spares.
+ */
+export function WallsSetup({ value, onChange, result, presets = null, notCounted = [] }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
   const pf = usePendingFields();
   const cur = d.cur;
-  const needs = [...new Set((result ? (result.problems || []).filter((p) => p.code === "material_incomplete" && p.part) : familyProblems(cur.spec || {})).map((p) => p.message))];
+  const r = cur.rules || {};
+  const problems = result?.problems || [];
+  // the Needs are the parts' (what "Details: n to fix" counts); why a wall isn't counted sits under the Walls line,
+  // as on the Line panel
+  const needs = [...new Set((result ? problems.filter((p) => p.code === "material_incomplete" && p.part) : familyProblems(cur.spec || {})).map((p) => p.message))];
+  const blocked = [...new Set(problems.filter((p) => p.blocking !== false && !(p.code === "material_incomplete" && p.part)).map((p) => p.message))];
+  const notes = [...new Set([...problems.filter((p) => p.code === "opening_framing_not_counted"),
+    ...problems.filter((p) => p.blocking === false && !["opening_framing_not_counted", "nothing_measured"].includes(p.code))].map((p) => p.message))];
+  const line = wallFramingText(wallFramingTotals(result), cur.name, notCounted);
+  const centres = r.centresMm ?? WALL_FRAMING_RULES.centresMm;
   return (
     <PendingContext.Provider value={pf.report}>
     <div ref={kb.ref} className="space-y-3" style={{ paddingBottom: kb.pad }} data-setup="walls">
       <UndoBar d={d} pending={pf.pending} />
       <NeedsRow needs={needs} />
+      {notes.length > 0 && (
+        <ul className="ml-4 list-disc space-y-0.5 text-xs text-ink" data-walls-notes="">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
+      )}
       <CommitText label="Name" value={cur.name} required="Give the material a name." onCommit={(t) => d.patch({ name: t })} placeholder="e.g. Walls" />
+      <div className="grid grid-cols-2 items-end gap-2">
+        <NumberField label="Stud centres" value={centres} min={1} max={100000}
+          onCommit={(n) => { const v = n ?? WALL_FRAMING_RULES.centresMm; if (v !== centres) d.patch({ rules: { centresMm: v } }); }} />
+        <label className="flex min-h-[44px] items-center gap-2 text-sm font-medium text-ink" data-walls-card-double="">
+          <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={r.doubleTopPlate === true} onChange={(e) => d.patch({ rules: { doubleTopPlate: e.target.checked } })} />
+          Double top plate
+        </label>
+      </div>
+      {line && <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink" data-walls-card-line="">{line}</p>}
+      {blocked.length > 0 && <ul className="space-y-0.5 text-xs text-amber-800" data-walls-card-problems="">{blocked.map((m) => <li key={m}>{m}</li>)}</ul>}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-parts="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Studs, plates, noggins</summary>
+        <div className="space-y-3 pb-2">
+          <p className="text-[11px] text-muted">Size: <b>manual selection</b>. The app does not check structural adequacy.</p>
+          {WALL_PARTS.map((part) => <WallPart key={part} d={d} part={part} presets={presets} />)}
+        </div>
+      </details>
       {d.error && <Banner tone="error">{d.error}</Banner>}
     </div>
     </PendingContext.Provider>

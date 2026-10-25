@@ -1722,6 +1722,30 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   assert.deepEqual(snap.appendix.timber.map((x) => [x.materialName, x.title]), [["Walls", "Studs cut list"], ["Walls", "Plates cut list"], ["Walls", "Noggins cut list"]]);
 });
 
+await t("HUB 028 step 5: a company timber product saved for a Walls part keeps its longest length and 'not stocked' lengths on the REAL server, so Add walls fills the part with them (the review mock's walls-products seed)", async () => {
+  const { normaliseFamilySpec, wallFramingDefaults } = await import("../../shared/takeoff/index.js");
+  // saved the way the office saves a timber company product (Save as standard → the catalogue editor → /presets)
+  const content = (name, purpose, over) => ({ name, methodKey: "linear_stock", methodVersion: 1, rules: {},
+    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", supplierName: "Yard A", ...over } });
+  const sent = [content("HUB028 noggins 90 × 35", "noggins", { section: { depthMm: 90, widthMm: 35 }, productCode: "NG-9035", stock: { maxMm: 5400, unavailableMm: [4800, 4850] } }),
+    content("HUB028 LVL plates 90 × 45", "plates", { grade: "LVL", supplierName: "Yard B", productCode: "LVL-9045", stock: { maxMm: 11000, unavailableMm: [] } })];
+  const ids = [];
+  for (const c of sent) {
+    const r = await SP("/presets", { content: c });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    ids.push(r.data.preset.presetId);
+  }
+  const kept = (await S("/presets")).data.presets.filter((p) => ids.includes(p.id)).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  // exactly the normalised spec (what the mock's seed stores): the noggins keep 5,400 and the on-grid 4,800 not stocked
+  assert.deepEqual(kept.map((p) => p.spec), sent.map((c) => normaliseFamilySpec(c.spec)));
+  assert.deepEqual(kept.map((p) => [p.spec.stock.maxMm, p.spec.stock.unavailableMm]), [[5400, [4800]], [11000, []]]);
+  // Add walls with these products: each fills its own part, its stock too; nothing is copied to another part
+  const parts = wallFramingDefaults(kept).components;
+  assert.deepEqual([parts.noggins.section, parts.noggins.productCode, parts.noggins.stock], [{ depthMm: 90, widthMm: 35 }, "NG-9035", { maxMm: 5400, unavailableMm: [4800] }]);
+  assert.deepEqual([parts.longPlates.grade, parts.longPlates.supplierName, parts.longPlates.stock.maxMm], ["LVL", "Yard B", 11000]);
+  assert.deepEqual([parts.plates.grade, parts.plates.treatment, parts.plates.stock.maxMm], [null, null, 6000], "the LVL product never fills the pine plates");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

@@ -12,7 +12,11 @@
 //           problems shown in place. Nothing claims installation verification the engine didn't give.
 //           Setout datum is per WALL (rules.datumByWall); "every wall" is an explicit choice with a job-wide preview.
 //           Sheet joint rows: height + gap + detail or a draft (rules.jointRowsDraft) — the Setup card's rule.
-//           Stud walls: each opening's framing detail (opening.inputs.detail) is entered in its sheet.
+//           Stud walls: each opening's framing detail (opening.inputs.detail) is entered in its sheet (a Walls item's too,
+//           HUB 028). A Walls item's wall page leads with this wall's framing line and its own notes (an LVL long
+//           plate, the lintels note for its openings); studs beside an opening are drawn like the other full studs; its
+//           parts' needs are one banner with one Setup; an opening with no detail reads "… aren't counted", never
+//           "base studs only" or "opening framing incomplete".
 //   Review  (wall-by-wall step 5) Review walls opens the material's first wall in run order; every wall page has
 //           ‹ Previous wall / Next wall › at the bottom (n of N) and, on the last wall, Review order ›. Tapping a
 //           sheet, batten or joint shows its details (no stepping through parts any more). Each wall page leads with
@@ -24,7 +28,7 @@
 //
 // Props contract (fixed):
 //   ws          useTakeoffWorkspace() result (view, computed, edit, capabilities, status)
-//   materialId  the job material being set up (cladding / batten / accessory / timber studs, plates, noggins)
+//   materialId  the job material being set up (cladding / batten / accessory / timber studs, plates, noggins, Walls)
 //   wallId      wall measurement open in the editor (null = list)
 //   onOpenWall(id|null), onTrace() (open the plan to trace a wall; null when no plan), onSetup(material), onClose(),
 //   onReviewOrder() (the last wall's Review order ›: the Timber and cladding order), orderReady (false = nothing to
@@ -40,7 +44,8 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallListItems, wallRuns } from "./measure/tools.js";
+import { isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+  wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
 const SNAP_MM = 10;
@@ -586,21 +591,24 @@ function supportElements(entries, bbox, polygon) {
         const d = studDemands.get(t.positionMm);
         const a = d ? alloc.get(d.id) : null;
         const opening = t.openingId ? e.openingLabel(t.openingId) : null;
+        // HUB 028: a stud beside an opening (tick state "side") is a full stud, drawn and counted like the others
+        const beside = (t.besideOpeningIds || []).map((id) => e.openingLabel(id));
         const span = spanAtX(polygon, t.positionMm) || { lo: bbox.y0, hi: bbox.y1 };
         items.push({
           id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : "full",
           a: { x: t.positionMm, y: span.lo }, b: { x: t.positionMm, y: span.hi },
           info: {
-            title: `Stud @ ${fmtMm(t.positionMm)} mm`,
+            title: `Stud @ ${fmtMm(t.positionMm)} mm${beside.length ? ` (beside ${beside.join(", ")})` : ""}`,
             rows: t.state === "removed" ? [["Status", `Removed — inside ${opening || "an opening"}`]]
               : [["Cut length", `${fmtMm(d?.lengthMm ?? l.studLengthMm)} mm`], ["Stock", a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `${fmtMm(a.stockLengthMm)} mm length` : "—"], ...(l.plies > 1 ? [["Plies", String(l.plies)]] : [])],
             note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
           },
         });
       }
-      // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More
+      // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More. A Walls
+      // item (HUB 028) never says "opening framing incomplete": its one plain lintels note, on the wall's line, says it
       notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed").length, "stud")} at ${fmtMm(l.studLengthMm)} mm.`);
-      if (l.scope) about.push(`${e.material.name}: ${l.scope}.`);
+      if (l.scope && l.method !== "wall_framing@1") about.push(`${e.material.name}: ${l.scope}.`);
     } else if (l.kind === "plates") {
       notes.push(`${e.material.name}: ${(l.layers || []).map((x) => `${x.tag} plate ${x.piecesMm.map((p) => fmtMm(p)).join(" + ")} mm`).join("; ")}.`);
     } else if (Array.isArray(l.bays)) {
@@ -918,9 +926,16 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   const memberNo = new Map(s.members.map((m, i) => [m.id, i + 1]));
   const engineText = (t) => String(t).replace(ENGINE_MEMBER, (all, n, what) => (memberNo.has(`m${n}`) ? `member ${memberNo.get(`m${n}`)} ${what}` : all));
 
+  // HUB 028: on a Walls item an opening with no detail is not a fault, just not counted (Sam: Walls says so in one
+  // plain line); a detail started but not finished still says what it needs
+  const walls = (stud?.result?.methodKey || stud?.material?.methodKey) === "wall_framing";
+  const name = opening.label || fr?.label || "this opening";
+  const onlyDetail = (fr?.missing || []).length === 1 && fr.missing[0] === "its framing detail";
   const status = !stud ? null : !fr ? <p className="text-xs text-muted" data-framing-state="none">The studs aren&apos;t calculated on this wall yet — finish the wall first.</p>
     : fr.complete ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="complete">Framing entered — counted as quantities only, not checked as a design.</p>
-      : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Base studs only until the detail is complete — still needs {(fr.missing || []).map(engineText).join("; ")}.</p>;
+      : walls && onlyDetail ? <p className="rounded-lg bg-page px-3 py-2 text-xs text-ink" data-framing-state="not-counted">Lintels, jacks and trimmers at {name} aren&apos;t counted.</p>
+        : walls ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Lintels, jacks and trimmers at {name} aren&apos;t counted until the detail is complete. It still needs {(fr.missing || []).map(engineText).join("; ")}.</p>
+          : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Base studs only until the detail is complete — still needs {(fr.missing || []).map(engineText).join("; ")}.</p>;
 
   if (!canEdit) {
     return (
@@ -1610,11 +1625,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const attributed = new Map(entries.map((e) => [e.material.id, attributeProblems(view, e.material, e.result)]));
   const wallProblemsByMat = new Map(entries.map((e) => [e.material.id, attributed.get(e.material.id).byWall.get(wall.id) || []]));
   const cladEntries = entries.filter((e) => CLADDING_METHODS.has(e.result?.methodKey || e.material.methodKey));
+  const framingEntries = entries.filter((e) => isWallsItem(e.material)); // HUB 028 Walls items on this wall
   const shownClad = cladEntries.find((e) => e.material.id === pick) || cladEntries[0] || null;
   const autoJointsHere = (shownClad?.layout?.joints || []).filter((j) => j.source === "auto");
   const accessoryEntries = entries.filter((e) => e.material.spec?.family === "accessory");
-  // a stud wall frames each opening from its framing detail (03 T4) — edited in the opening's sheet
-  const studEntry = entries.find((e) => (e.result?.methodKey || e.material.methodKey) === "wall_frame") || null;
+  // a stud wall frames each opening from its framing detail (03 T4) — edited in the opening's sheet (a Walls item's
+  // studs too, HUB 028: wall_framing lays its studs out the same way)
+  const studEntry = entries.find((e) => ["wall_frame", "wall_framing"].includes(e.result?.methodKey || e.material.methodKey)) || null;
 
   // elements of the ONE view shown
   // (notes = counts shown by the drawing; about = the explanations, folded under More — wall-by-wall step 5)
@@ -1651,12 +1668,22 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     .map((p) => ({ ...readable(p), materialName: OPENING_GEOMETRY.has(p.code) ? null : e.material.name, materialId: e.material.id })));
   // wall-by-wall step 5: a problem with the material itself (no wall named: missing product sizes, an unfinished setup)
   // blocks the order for every wall, so it shows here too, with the material's Setup — the review never walks past it
-  const materialBlocking = entries.flatMap((e) => (attributed.get(e.material.id)?.general || []).filter((p) => p.blocking !== false)
-    .map((p) => ({ ...readable(p), materialName: e.material.name, materialId: e.material.id, material: e.material, general: true })));
+  // HUB 028: a Walls item's parts' needs are ONE banner ("Walls: 3 parts need setup (studs, plates and noggins).",
+  // the parts "Details: n to fix" counts) with one Setup; the needs themselves are on the Walls card
+  const materialBlocking = entries.flatMap((e) => {
+    const general = (attributed.get(e.material.id)?.general || []).filter((p) => p.blocking !== false);
+    const walls = isWallsItem(e.material);
+    const partNeed = walls ? wallPartsNeedText(e.result) : "";
+    return [...(partNeed ? [{ code: "material_incomplete", message: partNeed, blocking: true }] : []),
+      ...general.filter((p) => !(walls && p.code === "material_incomplete" && p.part)).map(readable)]
+      .map((p) => ({ ...p, materialName: e.material.name, materialId: e.material.id, material: e.material, general: true }));
+  });
   const seenMat = new Set();
   const blockingHere = [...dedupe(inPlace.filter((p) => p.blocking !== false)),
     ...materialBlocking.filter((p) => { const key = `${p.materialId}|${p.message}`; return seenMat.has(key) ? false : (seenMat.add(key), true); })];
-  const notesHere = dedupe(inPlace.filter((p) => p.blocking === false));
+  const notesHere = dedupe(inPlace.filter((p) => p.blocking === false
+    // a Walls item's lintels note names every wall's openings: this wall's own version leads the page (framingLines)
+    && !(p.code === "opening_framing_not_counted" && framingEntries.some((e) => e.material.id === p.materialId))));
   const blockingFor = (id) => blockingHere.some((p) => p.materialId === id);
   const openingProblem = (id) => {
     const k = openingIssue(id);
@@ -1701,11 +1728,23 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   // live result next to the wall fields (the elevation can be scrolled out of view while typing)
   const mine = material ? entries.find((e) => e.material.id === material.id) : null;
   const mineQty = mine ? qtyChips(wallQuantities(mine.result, wall.id, mine.tag)) : [];
-  const resultLine = areas ? `Net ${fmtM2(areas.netM2)} m² of ${fmtM2(areas.grossM2)} m²${mine ? ` · ${mine.material.name}: ${blockingFor(mine.material.id) ? "needs attention (see problems)" : mineQty.length ? mineQty.join(", ") : "nothing calculated yet"}` : ""}` : null;
+  // a Walls item (HUB 028) reads its own framing line here ("13 studs at 2,700 · bottom plate 6.00 m · …"), never its
+  // studs, plates and noggins added up as "pieces"
+  const mineFraming = mine && isWallsItem(mine.material) ? wallFramingText(wallFramingTotals(mine.result, wall.id)) : null;
+  const resultLine = areas ? `Net ${fmtM2(areas.netM2)} m² of ${fmtM2(areas.grossM2)} m²${mine ? ` · ${mine.material.name}: ${mineFraming
+    || (blockingFor(mine.material.id) ? "needs attention (see problems)" : mineQty.length ? mineQty.join(", ") : "nothing calculated yet")}` : ""}` : null;
   // wall-by-wall step 5: one short line per cladding on this wall (its sheets, battens, foam tape and H-flashing)
   const wallLines = cladEntries.map((e) => {
     const text = wallCladdingText(wallCladdingTotals(e.result, wall.id, e.tag));
     return { id: e.material.id, name: e.material.name, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet") };
+  });
+  // HUB 028: each Walls item on this wall leads with this wall's framing line ("13 studs at 2,700 · bottom plate 6.00 m ·
+  // top plate 6.00 m · 9 noggins (1 row)") and its own notes: a long LVL plate ("Plates: 90 × 45 LVL (over 6.0 m)")
+  // and the lintels note for this wall's openings
+  const framingLines = framingEntries.map((e) => {
+    const text = wallFramingText(wallFramingTotals(e.result, wall.id));
+    return { id: e.material.id, name: e.material.name, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet"),
+      notes: wallFramingNotes(e.result, wall.id, e.material.spec) };
   });
 
   // ── handlers ──
@@ -1820,8 +1859,14 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
           )}
           {/* wall-by-wall step 5: this wall's cladding quantities from the layout (sheets, battens, tape, H-flashing) in
               one short line, before spares — the same numbers the order adds up */}
-          {wallLines.length > 0 && (
+          {(wallLines.length > 0 || framingLines.length > 0) && (
             <div className="space-y-0.5 rounded-card border border-hairline bg-white px-3 py-2 text-sm" data-wall-lines="">
+              {framingLines.map((l) => (
+                <div key={l.id} data-wall-line={l.id} data-wall-framing="">
+                  <p><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>
+                  {l.notes.length > 0 && <ul className="mt-0.5 space-y-0.5 text-xs text-muted" data-wall-line-notes="">{l.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
+                </div>
+              ))}
               {wallLines.map((l) => <p key={l.id} data-wall-line={l.id}><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>)}
             </div>
           )}

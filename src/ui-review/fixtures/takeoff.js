@@ -18,6 +18,9 @@
  * automatic battens, foam tape and H-flashing show on the walls, the schedule and the order with nothing set up;
  * ?takeoffSeed=walls (HUB 028) adds one Walls item from the built-in defaults (no company products), nothing traced;
  * ?takeoffSeed=walls-after-cladding adds a cladding with one wall traced with Line at 2,745 on page 1, and no Walls item;
+ * ?takeoffSeed=walls-products adds one active company timber product for each Walls part (studs, pine plates, LVL plates
+ * and noggins), each with its grade, treatment, supplier, code and longest length (noggins 5,400), and no Walls item, so
+ * Add walls fills every part from them;
  * window.__takeoffReviewOffline = true makes commits fail like a dropped connection.
  * HUB 025 (commits behave like the server's): a repeated idempotencyKey returns the original result with replayed:true
  * before the revision check; a save that would leave two live assignments on one (measurement, material) pair is refused
@@ -102,6 +105,7 @@ function seed() {
   if (qs().get("takeoffSeed") === "battens") seedBattens();
   if (qs().get("takeoffSeed") === "walls") seedWalls();
   if (qs().get("takeoffSeed") === "walls-after-cladding") seedWallsAfterCladding();
+  if (qs().get("takeoffSeed") === "walls-products") seedWallsProducts();
   // ?takeoffElevation=1 (HUB 023) — page 3 of the plan is a scaled elevation with nothing measured on it yet (the same
   // scale as page 1, checked), for drawing walls with Rectangle and Area
   if (qs().get("takeoffElevation") === "1") {
@@ -142,6 +146,25 @@ function seedWalls() {
   const spec = wallFramingDefaults([]);
   const m = methodFor(spec);
   state.materials.push({ id: "mat-walls", name: "Walls", spec, methodKey: m.key, methodVersion: m.version, revision: 1, profile: null, rules: { ...WALL_FRAMING_RULES } });
+}
+
+/**
+ * HUB 028 (SYNTHETIC): one active company timber product saved for each Walls part, kept as the server keeps a company
+ * product (its spec normalised): studs, pine plates, an LVL plate (grade "LVL", so it fills Long plates, not Plates)
+ * and noggins with their own 5,400 longest length (not the 6,000 default). No Walls item: Add walls fills every part.
+ */
+function seedWallsProducts() {
+  const product = (id, name, purpose, over) => {
+    const spec = normaliseFamilySpec({ family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", supplierName: "Yard A", ...over });
+    const m = methodFor(spec);
+    return { id, name, revision: 1, isActive: true, updatedAt: "2026-10-25T00:00:00Z", methodKey: m.key, methodVersion: m.version, spec, rules: {}, profile: null, sourceReview: { status: "user_entered" } };
+  };
+  state.presets.push(
+    product("pre-wf-studs", "Studs 90 × 45 MGP10 H2", "studs", { productCode: "ST-9045", stock: { maxMm: 6000, unavailableMm: [] } }),
+    product("pre-wf-plates", "Plates 90 × 45 MGP10 H2", "plates", { productCode: "PL-9045", stock: { maxMm: 6000, unavailableMm: [] } }),
+    product("pre-wf-lvl", "LVL plates 90 × 45", "plates", { grade: "LVL", supplierName: "Yard B", productCode: "LVL-9045", stock: { maxMm: 11000, unavailableMm: [] } }),
+    product("pre-wf-noggins", "Noggins 90 × 35 MGP10 H2", "noggins", { section: { depthMm: 90, widthMm: 35 }, productCode: "NG-9035", stock: { maxMm: 5400, unavailableMm: [] } }),
+  );
 }
 
 /** HUB 028 (SYNTHETIC): a cladding wall traced with Line at 2,745 (a cladding height), no Walls item yet. */

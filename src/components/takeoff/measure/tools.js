@@ -20,10 +20,12 @@
 //                      Wall-by-wall step 5: reviewWalls (the order Review walls steps through) + each wall's cladding
 //                      quantities in one short line (wallCladdingTotals / wallCladdingText)
 //                      HUB 028: a Walls item's framing in one short line (wallFramingTotals / wallFramingText), naming
-//                      any wall the calculation blocked (wallsNotCounted)
+//                      any wall the calculation blocked (wallsNotCounted); a wall page's own notes (wallFramingNotes:
+//                      its LVL plates and its openings' lintels note), the long plates' "over 6.0 m" and the parts
+//                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { WALLS_PURPOSE } from "../../../../shared/takeoff/engine/families.js";
+import { TIMBER_GRID, WALLS_PURPOSE, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -476,6 +478,72 @@ export function wallFramingText(t, label = null, notCounted = []) {
  */
 export function wallPartsToFix(result) {
   return new Set((result?.problems || []).filter((p) => p.code === "material_incomplete" && p.part).map((p) => p.part)).size;
+}
+
+/**
+ * A wall page's one line for a Walls item's parts that still need setup (HUB 028), the same parts the Line panel's
+ * "Details: n to fix ›" counts: "3 parts need setup (studs, plates and noggins)." Their needs themselves are on the
+ * Walls card (its Setup). "" when no part needs anything.
+ */
+export function wallPartsNeedText(result) {
+  const need = new Set((result?.problems || []).filter((p) => p.code === "material_incomplete" && p.part).map((p) => p.part));
+  const names = WALL_PARTS.filter((k) => need.has(k)).map((k) => WALL_PART_LABELS[k].toLowerCase());
+  if (!names.length) return "";
+  const list = names.length < 2 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${names.length} part${names.length === 1 ? " needs" : "s need"} setup (${list}).`;
+}
+
+/**
+ * The length above which a Walls item's plate is one long (LVL) plate (HUB 028 round 3): the longest pine plate it
+ * buys, i.e. the longest timber-grid length (1,200, then 300 mm steps) within the plates' longest length, less the
+ * lengths marked not stocked. Null when no plate can be a long plate, as the calculation decides (computePlates): the
+ * plates have no longest length (or no stock length within it), or the Long plates' own longest length isn't past it.
+ */
+export function wallLongPlateOverMm(spec) {
+  const s = spec?.components?.plates?.stock || {};
+  const max = Number(s.maxMm);
+  if (s.maxMm == null || s.maxMm === "" || !(max >= TIMBER_GRID.minMm)) return null;
+  const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
+  let pine = null;
+  for (let l = TIMBER_GRID.minMm + Math.floor((max - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) * TIMBER_GRID.incrementMm; l >= TIMBER_GRID.minMm; l -= TIMBER_GRID.incrementMm) {
+    if (!off.has(l)) { pine = l; break; }
+  }
+  if (pine == null) return null;
+  const long = longPlateStockLengths(spec?.components?.longPlates);
+  return long.length && long[long.length - 1] > pine ? pine : null;
+}
+
+/** "over 6.0 m" (wallLongPlateOverMm), or "" when no plate can be a long plate. */
+export function wallLongPlateOverText(spec) {
+  const mm = wallLongPlateOverMm(spec);
+  return mm == null ? "" : `over ${(mm / 1000).toFixed(1)} m`;
+}
+
+/** A Walls part as it reads on a wall page: "90 × 45 LVL", "90 × 45 MGP10 H2" (grade, species, treatment; each once). */
+export function wallPartText(part) {
+  const p = part || {};
+  const sec = p.section?.depthMm && p.section?.widthMm ? `${p.section.depthMm} × ${p.section.widthMm}` : "section?";
+  const seen = new Set();
+  const words = [p.grade, p.species, p.treatment].map((x) => (x == null ? "" : String(x).trim())).filter((x) => x && !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()));
+  return [sec, ...words].join(" ");
+}
+
+/**
+ * A wall page's own notes for a Walls item (HUB 028), under its Walls line: "Plates: 90 × 45 LVL (over 6.0 m)" when a
+ * plate on this wall is a long (LVL) plate (Sam's round 3), and "Lintels, jacks and trimmers at D1 aren't counted."
+ * for this wall's own openings with no framing detail (the item's note names every wall's).
+ */
+export function wallFramingNotes(result, wallId, spec) {
+  const out = [];
+  const lay = (result?.layouts || []).find((l) => l?.method === "wall_framing@1" && l.totals && l.wallMeasurementId === wallId);
+  if (lay && lay.totals.longPlateMm > 0) {
+    const over = wallLongPlateOverText(spec);
+    out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
+  }
+  const names = [...new Set((result?.problems || []).filter((p) => p.code === "opening_framing_not_counted")
+    .flatMap((p) => (p.refs || []).filter((r) => r?.measurementId === wallId).map((r) => r.openingLabel || r.openingId)).filter(Boolean))];
+  if (names.length) out.push(`Lintels, jacks and trimmers at ${names.join(", ")} aren't counted.`);
+  return out;
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────

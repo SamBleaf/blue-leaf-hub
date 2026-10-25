@@ -6,7 +6,15 @@
 // Step 4 (entry and plan): Add walls goes straight to the plan with Line (no Timber card), the Line panel's Wall height,
 // Stud centres and Double top plate, the Walls line (the real engine's figures: plan screen steps 1-6 and 9-13, Sam's
 // round 2) and "Details: n to fix ›". Details › and the row's Setup open the Walls card (no Purpose chips, no company-product
-// picker, "Trace walls"); its parts' fold and the wall pages arrive in step 5.
+// picker, "Trace walls").
+// Step 5 (the Walls card and the wall pages): the card's needs and notes (lintels note first), Stud centres, Double top
+// plate, its Walls line and the closed "Studs, plates, noggins" fold (each part's HUB 027 Size and grade list, filled
+// with wallPartFill; Long plates (over 6.0 m) after Plates); each wall page's own Walls line and notes (LVL plates, its
+// openings' lintels note), studs beside openings drawn as full studs, the framing detail in an opening's sheet; plan
+// screen steps 7 (reload) and 8 (walls-products: saved products fill every part, the noggins' longest length too).
+// The step 5 review: the card's Needs are the parts' only (a blocked wall's reason sits under its line); a wall page
+// shows the parts' needs as one banner, its live result as the framing line, and "… aren't counted" (never "base studs
+// only") for an opening with no detail; the fold shows a product's not-stocked lengths and refuses a 0 at the field.
 //   UI_REVIEW_PORT=5196 npx playwright test --config=playwright.ui-review.config.js e2e/ui-review/tc-hub028.spec.js
 import { test, expect } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -451,5 +459,313 @@ test.describe("HUB 028 step 4: Add walls, the Line panel and the Walls line — 
     await expect(page.getByRole("radio", { name: "Wall", exact: true })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "Line", exact: true })).toHaveCount(0);
     await expect(page.locator("[data-walls-rules], [data-walls-summary]")).toHaveCount(0);
+  });
+});
+
+// ══ Step 5: the Walls card and the wall pages ════════════════════════════════════════════════════════════════════
+
+const MIXED = "Walls: 27 studs (21 at 2,700, 6 at 2,800) · bottom plate 13.00 m · top plate 2 × 13.00 m · 23 noggins (1–2 rows)";
+const card = (page) => page.locator('[data-setup="walls"]');
+const part = (page, k) => card(page).locator(`[data-wall-part="${k}"]`);
+const fold = (page) => card(page).locator("[data-walls-parts]");
+const isOpen = (loc) => loc.evaluate((el) => el.open);
+/** A typed field on the card: type, then Enter (one change, one Undo step). */
+async function enter(loc, v) { await loc.fill(String(v)); await loc.press("Enter"); }
+/** Review walls (the Line panel or the run card) → the first wall of the item. */
+async function reviewWalls(page) {
+  await page.locator("[data-review-walls]").first().click();
+  await expect(page.locator("[data-wall-nav]")).toBeVisible();
+}
+const wallPage = (page) => ({
+  title: page.locator("[data-takeoff-focus] h1, [data-takeoff-focus] h2").first(),
+  line: page.locator("[data-wall-framing] [data-wall-line-text]"),
+  notes: page.locator("[data-wall-framing] [data-wall-line-notes] li"),
+  studs: page.locator('[data-wall-elevation] [data-el-state="full"]'),
+  removed: page.locator('[data-wall-elevation] [data-el-state="removed"]'),
+});
+const nextWall = (page) => page.locator("[data-wall-nav]").getByRole("button", { name: "Next wall ›" }).click();
+/** The Walls item's parts as the (fake) server holds them: section, grade, treatment, supplier, code, longest length. */
+const partsBrief = async (page) => Object.fromEntries(Object.entries((await wallsState(page)).materials[0].spec.components)
+  .map(([k, p]) => [k, [p.section.depthMm, p.section.widthMm, p.grade, p.treatment, p.supplierName, p.productCode, p.stock.maxMm]]));
+
+test.describe("HUB 028 step 5: the Walls card and the wall pages — phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("screen 7: reload brings back the same walls, settings and line; each wall page leads with its own Walls line and notes, side studs drawn as full studs; an opening's sheet takes a framing detail", async ({ page }) => {
+    const SEEDED = `${TIMBER}&takeoffSeed=walls`;
+    await openMeasure(page, SEEDED);
+    await setHeight(page, 2700);
+    await traceL(page);
+    await addOpening(page, "door", D1_ENDS, { heightMm: 2040 });
+    await addOpening(page, "window", W1_ENDS, { heightMm: 1200, sillMm: 900 });
+    await doubleTop(page).check();
+    await setHeight(page, 2800);
+    await tapAt(page, at(2000, 5000));
+    await tapAt(page, at(5000, 5000), 2);
+    await expect(wallsLine(page)).toHaveText(MIXED);
+    await saved(page);
+    const before = await wallsState(page);
+    // 7. reload: the same walls (points, heights, runs), openings, settings and line
+    await reloadTakeoff(page, SEEDED);
+    const n = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.getByRole("button", { name: /^Measure$/ }).click();
+    await viewerReady(page, n);
+    await expect(wallsLine(page)).toHaveText(MIXED);
+    await expect(centresField(page)).toHaveValue("600");
+    await expect(doubleTop(page)).toBeChecked();
+    await expect(heightField(page)).toHaveValue("2800");
+    expect(await wallsState(page)).toEqual(before);
+    expect(before.walls.map((w) => [w.inputs.name, w.inputs.heightMm, w.inputs.seq])).toEqual([["Wall 1", 2700, 1], ["Wall 2", 2700, 2], ["Wall 3", 2800, 1]]);
+    // each wall page leads with its own line (the same figures the plan line adds up) and its own notes
+    await reviewWalls(page);
+    const w = wallPage(page);
+    await expect(page.getByRole("heading", { name: "Wall 1", exact: true })).toBeVisible();
+    await expect(w.line).toHaveText("13 studs at 2,700 · bottom plate 6.00 m · top plate 2 × 6.00 m · 9 noggins (1 row)");
+    await expect(w.notes).toHaveText(["Lintels, jacks and trimmers at D1 aren't counted."]);
+    // the parts' needs are ONE banner naming the parts ("Details: 3 to fix" counts the same 3), with one Setup; never
+    // "Walls: Studs: …" once per need
+    const problems = page.locator("[data-wall-problems]");
+    await expect(problems.getByRole("alert")).toHaveCount(1);
+    await expect(problems.getByRole("alert")).toContainText("Walls: 3 parts need setup (studs, plates and noggins).");
+    await expect(problems.getByRole("button", { name: "Set up Walls" })).toHaveCount(1);
+    await expect(problems).not.toContainText("Studs:");
+    // the live result by the wall fields reads the framing line, never the parts added up as "pieces"
+    await expect(page.locator("[data-wall-result]")).toContainText("· Walls: 13 studs at 2,700 · bottom plate 6.00 m · top plate 2 × 6.00 m · 9 noggins (1 row)");
+    await expect(page.locator("[data-wall-result]")).not.toContainText("pieces");
+    // the drawing: 13 full studs (the 4 beside D1 drawn like the rest), the 2 inside D1 removed
+    await expect(w.studs).toHaveCount(13);
+    await expect(w.removed).toHaveCount(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "no sideways scroll").toBe(true);
+    await shot(page, "wall-page-wall1-390x844");
+    // the item's lintels note isn't said again (for both walls) under More
+    await page.locator("[data-wall-more] > summary").click();
+    await expect(page.locator("[data-wall-more]")).toContainText("Setout aid");
+    await expect(page.locator("[data-wall-more]")).not.toContainText("D1, W1");
+    // … and never the Studs item's "base studs only; opening framing incomplete" (Walls says it in its one plain line)
+    await expect(page.locator("[data-wall-more]")).not.toContainText("opening framing incomplete");
+    await expect(page.locator("[data-wall-more]")).not.toContainText("base studs");
+    // an opening's sheet keeps its framing detail on a Walls wall (studEntry matches wall_framing)
+    await page.locator("[data-opening-row]").filter({ hasText: "D1" }).getByRole("button").click();
+    const detail = page.locator("[data-framing-detail]");
+    await expect(detail.getByRole("heading", { name: "Framing detail — Walls" })).toBeVisible();
+    // no detail on a Walls opening is not a fault: the sheet says what isn't counted, plainly (no "Base studs only")
+    await expect(detail.locator("[data-framing-state]")).toHaveAttribute("data-framing-state", "not-counted");
+    await expect(detail.locator("[data-framing-state]")).toHaveText("Lintels, jacks and trimmers at D1 aren't counted.");
+    await expect(detail).not.toContainText("Base studs only");
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await nextWall(page);
+    await expect(page.getByRole("heading", { name: "Wall 2", exact: true })).toBeVisible();
+    await expect(w.line).toHaveText("8 studs at 2,700 · bottom plate 4.00 m · top plate 2 × 4.00 m · 4 noggins (1 row)");
+    await expect(w.notes).toHaveText(["Lintels, jacks and trimmers at W1 aren't counted."]);
+    await expect(w.studs).toHaveCount(8);
+    await expect(w.removed).toHaveCount(2);
+    // 6. the 2,800 wall's own page shows its 2 rows
+    await nextWall(page);
+    await expect(page.getByRole("heading", { name: "Wall 3", exact: true })).toBeVisible();
+    await expect(w.line).toHaveText("6 studs at 2,800 · bottom plate 3.00 m · top plate 2 × 3.00 m · 10 noggins (2 rows)");
+    await expect(w.notes).toHaveCount(0);
+    // the banner's one Setup opens the Walls card, which lists the needs themselves
+    await page.locator("[data-wall-problems]").getByRole("button", { name: "Set up Walls" }).click();
+    await expectWallsCard(page);
+  });
+
+  test("the Walls card: needs and the lintels note at the top; Stud centres, Double top plate and its line; the closed fold edits each part (one Undo each, a pick never shows on another part); a 9,000 wall's page says its plates are LVL", async ({ page }) => {
+    await openMeasure(page, `${TIMBER}&takeoffSeed=walls`);
+    await setHeight(page, 2700);
+    await traceL(page);
+    await addOpening(page, "door", D1_ENDS, { heightMm: 2040 });
+    await addOpening(page, "window", W1_ENDS, { heightMm: 1200, sillMm: 900 });
+    await expect(wallsLine(page)).toHaveText(L_OPENINGS);
+    // the built-in parts can't be ordered yet: the Status fold says so
+    await panel(page).locator("summary", { hasText: "Status" }).click();
+    await expect(panel(page).locator("[data-statuses]")).toContainText("needs product setup");
+    await page.locator("[data-walls-details]").click();
+    await expectWallsCard(page);
+    // the needs, naming each part (the built-in plates and noggins rows carry no grade), then the notes, lintels first
+    await expect(card(page).locator("[data-needs] li")).toHaveText(['Studs: enter the treatment (or "untreated").', "Plates: enter the grade or species.", 'Plates: enter the treatment (or "untreated").',
+      "Noggins: enter the grade or species.", 'Noggins: enter the treatment (or "untreated").']);
+    await expect(card(page).locator("[data-walls-notes] li")).toHaveText(["Lintels, jacks and trimmers at D1, W1 aren't counted.", "Studs: the longest length isn't set. Confirm it before ordering."]);
+    await expect(card(page).getByLabel("Stud centres")).toHaveValue("600");
+    await expect(card(page).getByRole("checkbox", { name: "Double top plate" })).not.toBeChecked();
+    await expect(card(page).locator("[data-walls-card-line]")).toHaveText(L_OPENINGS);
+    // no Purpose chips, offsets, plies, spares or Save as company product
+    for (const label of ["Plies", "Start offset", "Spare %", "Spares"]) await expect(card(page).getByLabel(label)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /company product|Save as standard/i })).toHaveCount(0);
+    // Details shows the fold closed
+    expect(await isOpen(fold(page))).toBe(false);
+    await expect(part(page, "studs")).toBeHidden();
+    await saved(page);
+    await shot(page, "walls-card-390x844");
+    await fold(page).locator("summary").click();
+    expect(await isOpen(fold(page))).toBe(true);
+    await expect(fold(page).locator("legend")).toHaveText(["Studs", "Plates", "Long plates (over 6.0 m)", "Noggins"]);
+    const sizes = (k) => part(page, k).getByLabel("Size and grade");
+    await expect(sizes("studs")).toHaveValue("studs-90x45-mgp10");
+    await expect(sizes("plates")).toHaveValue("plates-90x45");
+    await expect(sizes("longPlates")).toHaveValue("longPlates-90x45-lvl");
+    await expect(sizes("noggins")).toHaveValue("noggins-90x35");
+    await expect(sizes("longPlates").locator("option:checked")).toHaveText("90 × 45 LVL");
+    const longest = (k) => part(page, k).getByLabel("Longest length");
+    expect(await Promise.all(["studs", "plates", "longPlates", "noggins"].map((k) => longest(k).inputValue()))).toEqual(["", "6000", "11000", "6000"]);
+    // a typed treatment: one change, one Undo step
+    await enter(part(page, "studs").getByLabel("Treatment (e.g. H3)"), "H2");
+    await expect.poll(async () => (await partsBrief(page)).studs[3]).toBe("H2");
+    await expect(card(page).locator("[data-needs]")).not.toContainText("Studs:");
+    await card(page).getByRole("button", { name: "Undo" }).click();
+    await expect.poll(async () => (await partsBrief(page)).studs[3]).toBe(null);
+    await expect(card(page).locator("[data-needs]")).toContainText('Studs: enter the treatment (or "untreated").');
+    await card(page).getByRole("button", { name: "Redo" }).click();
+    await expect.poll(async () => (await partsBrief(page)).studs[3]).toBe("H2");
+    // a pick on one part changes only that part, and its list shows the row picked (the others keep theirs)
+    await sizes("studs").selectOption({ label: "120 × 45 MGP10" });
+    await expect.poll(async () => (await partsBrief(page)).studs).toEqual([120, 45, "MGP10", "H2", null, null, null]);
+    await expect(sizes("studs")).toHaveValue("studs-120x45-mgp10");
+    await expect(sizes("plates")).toHaveValue("plates-90x45");
+    await card(page).getByRole("button", { name: "Undo" }).click();
+    await expect.poll(async () => (await partsBrief(page)).studs).toEqual([90, 45, "MGP10", "H2", null, null, null]);
+    await expect(sizes("studs")).toHaveValue("studs-90x45-mgp10");
+    // grade and treatment on plates and noggins: nothing left to fix
+    for (const k of ["plates", "noggins"]) {
+      await enter(part(page, k).getByLabel("Grade (e.g. MGP10)"), "MGP10");
+      await enter(part(page, k).getByLabel("Treatment (e.g. H3)"), "H2");
+    }
+    await expect(card(page).locator("[data-needs]")).toHaveCount(0);
+    await expect.poll(async () => partsBrief(page)).toEqual({ studs: [90, 45, "MGP10", "H2", null, null, null], plates: [90, 45, "MGP10", "H2", null, null, 6000],
+      longPlates: [90, 45, "LVL", null, null, null, 11000], noggins: [90, 35, "MGP10", "H2", null, null, 6000] });
+    // the noggins' longest length cleared: each noggin buys its own length, said in one plain note
+    await enter(longest("noggins"), "");
+    await expect(card(page).locator("[data-walls-notes]")).toContainText("Noggins: each is cut from its own 1,200 length. Set the noggins' longest length under Details to share lengths across walls.");
+    await card(page).getByRole("button", { name: "Undo" }).click();
+    await expect(longest("noggins")).toHaveValue("6000");
+    await expect(card(page).locator("[data-walls-notes]")).not.toContainText("Noggins:");
+    // Double top plate on the card: only the top plate changes
+    await card(page).getByRole("checkbox", { name: "Double top plate" }).check();
+    await expect(card(page).locator("[data-walls-card-line]")).toHaveText(L_DOUBLE);
+    // at 390 × 844 with the fold open: no sideways scroll, every control at least 44 px
+    const m = await page.evaluate(() => {
+      const small = [];
+      const el = document.querySelector('[data-setup="walls"]');
+      for (const c of el.querySelectorAll("button, input:not([type=checkbox]), select, summary, label[data-walls-card-double]")) {
+        const b = c.getBoundingClientRect();
+        if (b.width && b.height && b.height < 43.5) small.push(`${c.tagName} ${(c.textContent || c.getAttribute("aria-label") || "").trim().slice(0, 30)} ${b.height}`);
+      }
+      const sc = el.closest(".overflow-y-auto");
+      return { doc: document.documentElement.scrollWidth, sc: sc ? sc.scrollWidth - sc.clientWidth : 0, small };
+    });
+    expect(m.doc).toBeLessThanOrEqual(390);
+    expect(m.sc).toBeLessThanOrEqual(0);
+    expect(m.small).toEqual([]);
+    await saved(page);
+    await shot(page, "walls-card-fold-open-390x844");
+    // Close comes back to the plan: nothing to fix, the line as the card left it
+    const back = await page.evaluate(() => window.__takeoffViewerStats?.renders || 0);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await viewerReady(page, back);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
+    await expect(wallsLine(page)).toHaveText(L_DOUBLE);
+    await expect(doubleTop(page)).toBeChecked();
+    // round 3: a 9,000 wall (its own run). Its plates are one 90 × 45 LVL length each, so Long plates now need a treatment
+    await tapAt(page, at(2000, 7600));
+    await tapAt(page, at(11000, 7600), 2);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details: 1 to fix ›");
+    await saved(page);
+    await page.locator("[data-run-card]").getByRole("button", { name: "Review walls" }).click();
+    await nextWall(page);
+    await nextWall(page);
+    await expect(page.getByRole("heading", { name: "Wall 3", exact: true })).toBeVisible();
+    await expect(wallPage(page).notes).toHaveText(["Plates: 90 × 45 LVL (over 6.0 m)"]);
+    await expect(page.locator("[data-wall-problems]").getByRole("alert")).toHaveCount(1);
+    await expect(page.locator("[data-wall-problems]").getByRole("alert")).toContainText("Walls: 1 part needs setup (long plates).");
+    await expect(wallPage(page).line).toHaveText("16 studs at 2,700 · bottom plate 9.00 m · top plate 2 × 9.00 m · 15 noggins (1 row)");
+  });
+
+  test("screen 8: on walls-products the saved products fill every part (the noggins' longest length too): no needs, no share or longest-length note; Details shows the fold closed with each part's product", async ({ page }) => {
+    await addWalls(page, `${TIMBER}&takeoffSeed=walls-products`);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
+    // each part exactly as its product is saved, its longest length too (noggins 5,400, not the 6,000 default)
+    expect(await partsBrief(page)).toEqual({
+      studs: [90, 45, "MGP10", "H2", "Yard A", "ST-9045", 6000], plates: [90, 45, "MGP10", "H2", "Yard A", "PL-9045", 6000],
+      longPlates: [90, 45, "LVL", "H2", "Yard B", "LVL-9045", 11000], noggins: [90, 35, "MGP10", "H2", "Yard A", "NG-9035", 5400],
+    });
+    await setHeight(page, 2700);
+    await traceL(page);
+    await addOpening(page, "door", D1_ENDS, { heightMm: 2040 });
+    await addOpening(page, "window", W1_ENDS, { heightMm: 1200, sillMm: 900 });
+    await expect(wallsLine(page)).toHaveText(L_OPENINGS);
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
+    await panel(page).locator("summary", { hasText: "Status" }).click();
+    await expect(panel(page).locator("[data-statuses]")).not.toContainText("needs product setup");
+    await saved(page);
+    await page.locator("[data-walls-details]").click();
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).locator("[data-needs]")).toHaveCount(0);
+    // only the lintels note: no "missing product", no share note, no "longest length isn't set"
+    await expect(card(page).locator("[data-walls-notes] li")).toHaveText(["Lintels, jacks and trimmers at D1, W1 aren't counted."]);
+    expect(await isOpen(fold(page))).toBe(false);
+    await fold(page).locator("summary").click();
+    const ids = { studs: "pre-wf-studs", plates: "pre-wf-plates", longPlates: "pre-wf-lvl", noggins: "pre-wf-noggins" };
+    for (const [k, id] of Object.entries(ids)) await expect(part(page, k).getByLabel("Size and grade"), k).toHaveValue(id);
+    await expect(part(page, "longPlates").getByLabel("Size and grade").locator("option:checked")).toHaveText("LVL plates 90 × 45 — 90 × 45 · LVL · H2");
+    // the LVL product is offered for Long plates only, the pine plate for Plates only
+    await expect(part(page, "plates").locator('option[data-company-product="pre-wf-lvl"]')).toHaveCount(0);
+    await expect(part(page, "longPlates").locator('option[data-company-product="pre-wf-plates"]')).toHaveCount(0);
+    await expect(part(page, "noggins").getByLabel("Longest length")).toHaveValue("5400");
+    await expect(card(page).locator("[data-wall-part-not-stocked]")).toHaveCount(0);
+    await shot(page, "walls-products-card-390x844");
+  });
+
+  test("the Walls card's Needs are the parts' only (what Details › counts); why a wall isn't counted sits under its Walls line, as on the Line panel", async ({ page }) => {
+    await addWalls(page, `${TIMBER}&takeoffSeed=walls-products`);
+    // a wall with no Wall height: not counted, and Details › stays plain (nothing to fix on the parts)
+    await tapAt(page, A);
+    await tapAt(page, B, 2);
+    await expect(wallsLine(page)).toHaveText("Walls: Wall 1 not counted");
+    await expect(page.locator("[data-walls-details]")).toHaveText("Details ›");
+    await saved(page);
+    await page.locator("[data-walls-details]").click();
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).locator("[data-needs]")).toHaveCount(0);
+    await expect(card(page).locator("[data-walls-card-line]")).toHaveText("Walls: Wall 1 not counted");
+    await expect(card(page).locator("[data-walls-card-problems] li")).toHaveText(["Wall 1: enter the Wall height."]);
+  });
+
+  test("the fold: a saved product's not-stocked lengths show under its Longest length (so Long plates (over 5.7 m) reads true); Long plates read plain when no plate can be LVL; a 0 is refused at the field", async ({ page }) => {
+    await page.goto("/carpentry/cjb-1?reviewRole=admin");
+    await ready(page);
+    // a Walls item whose plates came from a product with 6,000 marked not stocked (seeded through the fake server's commit)
+    const spec = wallFramingDefaults([]);
+    const walls = { id: "mat-walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, profile: null, rules: { centresMm: 600, doubleTopPlate: false },
+      spec: { ...spec, components: { ...spec.components, plates: { ...spec.components.plates, stock: { maxMm: 6000, unavailableMm: [6000] } } } } };
+    expect((await commit(page, { materials: { upsert: [walls] } }, "hub028-s5-not-stocked")).status).toBe(200);
+    await page.evaluate((u) => { history.pushState({}, "", u); dispatchEvent(new PopStateEvent("popstate")); }, TIMBER);
+    await ready(page);
+    const row = page.locator("[data-material-row]").filter({ hasText: /^Walls/ });
+    const t = row.locator("button[aria-expanded]").first();
+    if ((await t.getAttribute("aria-expanded")) !== "true") await t.click();
+    await row.getByRole("button", { name: "Setup", exact: true }).click();
+    await expect(card(page)).toBeVisible();
+    await fold(page).locator("summary").click();
+    await expect(fold(page).locator("legend")).toHaveText(["Studs", "Plates", "Long plates (over 5.7 m)", "Noggins"]);
+    await expect(part(page, "plates").getByLabel("Longest length")).toHaveValue("6000");
+    await expect(part(page, "plates").locator("[data-wall-part-not-stocked]")).toHaveText("Not stocked: 6,000 mm");
+    await expect(card(page).locator("[data-wall-part-not-stocked]")).toHaveCount(1);
+    // the longest lengths carry no help text that could contradict the card's note ("Studs: … Confirm it before ordering.")
+    await expect(fold(page)).not.toContainText("Optional");
+    // Plates' longest past the Long plates' 11,000: no plate can be LVL, so no "over" figure; one Undo brings it back
+    await enter(part(page, "plates").getByLabel("Longest length"), 12000);
+    await expect(fold(page).locator("legend")).toHaveText(["Studs", "Plates", "Long plates", "Noggins"]);
+    await card(page).getByRole("button", { name: "Undo" }).click();
+    await expect(fold(page).locator("legend").nth(2)).toHaveText("Long plates (over 5.7 m)");
+    // a 0 (or a length the server can't keep) is refused at the field, with its reason there; the item keeps its values
+    await enter(part(page, "studs").getByLabel("Section depth"), 0);
+    await expect(part(page, "studs").getByRole("alert")).toHaveText("Enter a number greater than 0.");
+    await enter(part(page, "noggins").getByLabel("Longest length"), 0);
+    await expect(part(page, "noggins").getByRole("alert")).toHaveText("Enter a number greater than 0.");
+    await enter(part(page, "plates").getByLabel("Longest length"), 2000000);
+    await expect(part(page, "plates").getByRole("alert")).toHaveText("That's more than 1,000,000 mm — check the number.");
+    await saved(page);
+    const b = await partsBrief(page);
+    expect([b.studs[0], b.noggins[6], b.plates[6]]).toEqual([90, 6000, 6000]);
+    await expect(card(page).locator('[role="alert"]').filter({ hasText: "must be a positive number" })).toHaveCount(0);
   });
 });

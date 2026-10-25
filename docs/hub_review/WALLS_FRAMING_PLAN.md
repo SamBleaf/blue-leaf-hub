@@ -484,6 +484,17 @@ Each step can be tested on its own. Run `npm run -s test:takeoff` after every st
    - Each wall page gets its Walls line and its own notes (next to `:1705-1709`).
    - The mock normalises walls specs and gets seeds `walls`, `walls-products` and `walls-after-cladding`.
    - Test: `tc-hub028.spec.js` steps 7 to 13, `tc-walls`, `tc-catalogue`, then build.
+   - Built in step 5 (steps 9 to 13 came with step 4). The card's Needs are the parts' only (what "Details: n to fix"
+     counts); why a wall isn't counted sits under the card's Walls line, as on the Line panel. Its notes are the item's
+     plain notes, the lintels note first (then, for example, "Studs: the longest length isn't set …" or the noggins'
+     share note). Each part's Longest length has no help text; a saved product's "not stocked" lengths show under it,
+     read only. A wall page leads with "Walls: 13 studs at 2,700 · …" (the item's name, as a cladding's line does),
+     then its own notes; the item's lintels note isn't repeated under More, and an opening's sheet says "Lintels, jacks
+     and trimmers at D1 aren't counted." (never "base studs only"). The parts' needs are one banner on a wall page,
+     "Walls: 3 parts need setup (studs, plates and noggins)." with one Setup. "Long plates (over 6.0 m)" reads the
+     pine plates' longest stock length, the length above which a plate is one LVL length (6,000 not stocked → "over
+     5.7 m"); when no plate can be LVL (the Long plates' longest isn't past it) the row reads plain "Long plates". The
+     `walls-products` seed saves one company product per part (noggins with their own 5,400).
 6. **Real server, journey, SOPs and log.**
    - Add the `takeoff-api.test.mjs` reload case (needs the test database).
    - Run one real-stack journey once, in a local sandbox, before asking Sam to deploy.

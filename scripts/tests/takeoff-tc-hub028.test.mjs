@@ -15,6 +15,9 @@
 // Step 4, entry and plan (src/components/takeoff/measure/tools.js): Walls traces with Line only, usesWalls, the Walls
 // line (wallFramingTotals / wallFramingText) for both worked examples and the mixed run, "Details: n to fix" and the
 // Walls-only starting Wall height. The screens are in e2e/ui-review/tc-hub028.spec.js.
+// Step 5, the Walls card and wall pages (tools.js wallFramingNotes / wallLongPlateOverMm / wallPartText): each wall
+// page's own notes (its LVL long plates, its openings' lintels note), the "over 6.0 m" the calculation splits against,
+// and the Walls card's part writes (a built-in row, a company product, a typed field) as normaliser fixed points.
 //   node scripts/tests/takeoff-tc-hub028.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -31,13 +34,14 @@ import {
   CALCULATION_VERSION, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PRESETS, TIMBER_PURPOSES, WALLS_PURPOSE, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT,
   WALL_PARTS, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
   longPlateStockLengths, methodFor, methodReads, normaliseFamilySpec, onTimberGrid, orderLineState, orderStatus, productionMethods, stockIdentityKey, timberProductFill,
-  wallFramingDefaults, wallPartFill, wallPartProducts, WALL_STUDS_EACH_SIDE,
+  wallFramingDefaults, wallPartFill, wallPartProducts, WALL_STUDS_EACH_SIDE, applyTimberPreset, matchTimberChoice, timberPresetsFor,
 } from "../../shared/takeoff/index.js";
 import { JOB_GENERATED_LIMIT } from "../../shared/takeoff/engine/dispatch.js";
 import { TIMBER_ORDERING_POLICY } from "../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../shared/takeoff/products/seed.js";
 import { cleanMaterialContent } from "../../server/lib/takeoff/takeoffService.mjs";
-import { isWallsItem, lastWallHeight, lineStartHeight, toolsFor, usesWalls, wallFramingText, wallFramingTotals, wallPartsToFix, wallsNotCounted } from "../../src/components/takeoff/measure/tools.js";
+import { isWallsItem, lastWallHeight, lineStartHeight, toolsFor, usesWalls, wallFramingNotes, wallFramingText, wallFramingTotals, wallLongPlateOverMm, wallLongPlateOverText, wallPartText,
+  wallPartsNeedText, wallPartsToFix, wallsNotCounted } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); } }
@@ -1357,6 +1361,126 @@ t("starting Wall height: a Walls item starts at the last height of ITS OWN walls
   assert.equal(lineStartHeight(ms.slice(0, 1), cs.slice(0, 1), w), null, "a cladding wall at 2,745 never carries over: empty the first time");
   assert.equal(lineStartHeight(ms, cs.map((c) => (c.measurementId === "wf-2" ? { ...c, archived: true } : c)), w), 2700, "an archived assignment doesn't count");
   assert.equal(lineStartHeight([], [], null), null);
+});
+
+// ── step 5: the Walls card and the wall pages ─────────────────────────────────
+
+t("wall pages: each wall's own notes, its openings' lintels note (the item's names every wall's) and, round 3, its LVL plates", () => {
+  const c = ex(2700);
+  assert.ok(hasMsg(c, "opening_framing_not_counted", false, NOT_COUNTED), "the item's note names both walls' openings");
+  assert.deepEqual(wallFramingNotes(WR(c), "w1", READY()), ["Lintels, jacks and trimmers at D1 aren't counted."]);
+  assert.deepEqual(wallFramingNotes(WR(c), "w2", READY()), ["Lintels, jacks and trimmers at W1 aren't counted."]);
+  // a wall with no opening (or no detail missing) has no notes; neither has a wall that isn't worked out
+  const plain = wf([wm("w1", 6000, 2700, "Wall 1")]);
+  assert.deepEqual(wallFramingNotes(WR(plain), "w1", READY()), []);
+  assert.deepEqual(wallFramingNotes(WR(c), "nope", READY()), []);
+  assert.deepEqual(wallFramingNotes(null, "w1", READY()), []);
+  // an explicit framing detail on D1: Wall 1 no longer names it (W1 on Wall 2 still does)
+  const detail = { source: "explicit", aboveHead: { required: false },
+    members: [{ id: "L1", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 300, identity: { section: "190x45", grade: "LVL", treatment: "H2" }, stock: { maxMm: 6000 } }] };
+  const framed = wf([...EXAMPLE(2700).filter((m) => m.id !== "d1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0, detail)]);
+  assert.deepEqual([wallFramingNotes(WR(framed), "w1", READY()), wallFramingNotes(WR(framed), "w2", READY())], [[], ["Lintels, jacks and trimmers at W1 aren't counted."]]);
+  // round 3: a 9,000 wall's plates are LVL, so its page says so (the 4,000 wall's doesn't)
+  const long = wf([wm("w1", 9000, 2700, "Wall 1"), wm("w2", 4000, 2700, "Wall 2"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0)], { spec: LVL_READY() });
+  assert.deepEqual(wallFramingNotes(WR(long), "w1", LVL_READY()), ["Plates: 90 × 45 LVL H2 (over 6.0 m)", "Lintels, jacks and trimmers at D1 aren't counted."]);
+  assert.deepEqual(wallFramingNotes(WR(long), "w2", LVL_READY()), []);
+  const builtIn = wallFramingDefaults([]);
+  assert.deepEqual(wallFramingNotes(WR(wf([wm("w1", 9000, 2700, "Wall 1")], { spec: builtIn })), "w1", builtIn), ["Plates: 90 × 45 LVL (over 6.0 m)"], "the plan's wording, built-in Long plates");
+});
+
+t("Long plates 'over 6.0 m' is the longest pine plate the calculation buys: the plates' longest grid length less not-stocked ones (6,000 not stocked → 5.7 m)", () => {
+  const spec = (stock) => withPart(wallFramingDefaults([]), "plates", { stock });
+  assert.equal(wallLongPlateOverMm(wallFramingDefaults([])), 6000);
+  assert.equal(wallLongPlateOverText(wallFramingDefaults([])), "over 6.0 m");
+  assert.equal(wallLongPlateOverMm(spec({ maxMm: 6000, unavailableMm: [6000] })), 5700);
+  assert.equal(wallLongPlateOverMm(spec({ maxMm: 6100, unavailableMm: [] })), 6000, "an off-grid longest length buys the grid length under it");
+  assert.equal(wallLongPlateOverMm(spec({ maxMm: 5400, unavailableMm: [] })), 5400);
+  assert.equal(wallLongPlateOverMm(spec({ maxMm: null, unavailableMm: [] })), null, "no longest length: no plate is a long plate");
+  assert.equal(wallLongPlateOverText(spec({ maxMm: null, unavailableMm: [] })), "");
+  // the calculation agrees: with 6,000 not stocked a 5,800 plate is one LVL length, a 5,700 plate stays pine
+  const s = normaliseFamilySpec(withPart(LVL_READY(), "plates", { stock: { maxMm: 6000, unavailableMm: [6000] } }));
+  const longMm = (L) => wl(wf([wm("w", L, 2700, "Wall 1")], { spec: s }), "Wall 1").totals.longPlateMm;
+  assert.deepEqual([longMm(5800), longMm(5700)], [11600, 0]);
+  assert.deepEqual(wallFramingNotes(WR(wf([wm("w", 5800, 2700, "Wall 1")], { spec: s })), "w", s), ["Plates: 90 × 45 LVL H2 (over 5.7 m)"]);
+  // no plates longest length: the 9,000 wall's plates are not LVL and its page says nothing about them
+  const none = normaliseFamilySpec(withPart(LVL_READY(), "plates", { stock: { maxMm: null, unavailableMm: [] } }));
+  assert.equal(wl(wf([wm("w", 9000, 2700, "Wall 1")], { spec: none }), "Wall 1").totals.longPlateMm, 0);
+});
+
+t("Long plates read 'over X m' only when a plate can be LVL, as the calculation decides: the Long plates' longest must go past the pine limit", () => {
+  const spec = (plates, longPlates = {}) => withPart(withPart(LVL_READY(), "plates", { stock: plates }), "longPlates", { stock: { ...LVL_READY().components.longPlates.stock, ...longPlates } });
+  const longMm = (s, L) => wl(wf([wm("w", L, 2700, "Wall 1")], { spec: normaliseFamilySpec(s) }), "Wall 1").totals.longPlateMm;
+  // plates' longest 12,000 (past the Long plates' 11,000): no plate is ever LVL, so no "over 12.0 m"
+  const past = spec({ maxMm: 12000, unavailableMm: [] });
+  assert.deepEqual([wallLongPlateOverMm(past), wallLongPlateOverText(past), longMm(past, 9000)], [null, "", 0]);
+  // 11,100 (a pine grid length past 11,000): never LVL either, a 10,900 plate stays pine
+  const grid = spec({ maxMm: 11100, unavailableMm: [] });
+  assert.deepEqual([wallLongPlateOverMm(grid), longMm(grid, 10900)], [null, 0]);
+  // 11,000 (off the grid, so pine stops at 10,800): a 10,900 plate is one 11,000 LVL length, and the figure says so
+  const under = spec({ maxMm: 11000, unavailableMm: [] });
+  assert.deepEqual([wallLongPlateOverText(under), longMm(under, 10900), longMm(under, 10800)], ["over 10.8 m", 21800, 0]);
+  // Long plates' own longest lowered to the pine 6,000: no LVL either
+  const low = spec({ maxMm: 6000, unavailableMm: [] }, { maxMm: 6000 });
+  assert.deepEqual([wallLongPlateOverMm(low), longMm(low, 9000) > 0], [null, false]);
+  // whenever a wall page names LVL plates, the figure is there (the engine used them, so the condition holds)
+  assert.deepEqual(wallFramingNotes(WR(wf([wm("w", 10900, 2700, "Wall 1")], { spec: normaliseFamilySpec(under) })), "w", under), ["Plates: 90 × 45 LVL H2 (over 10.8 m)"]);
+});
+
+t("a wall page says a Walls item's parts that need setup in ONE line, the parts 'Details: n to fix' counts", () => {
+  const builtIn = wf(EXAMPLE(2700), { spec: wallFramingDefaults([]) });
+  assert.equal(wallPartsToFix(WR(builtIn)), 3);
+  assert.equal(wallPartsNeedText(WR(builtIn)), "3 parts need setup (studs, plates and noggins).");
+  assert.equal(wallPartsNeedText(WR(ex(2700))), "", "nothing to set up");
+  assert.equal(wallPartsNeedText(null), "");
+  // round 3: the built-in Long plates (no treatment) only once a plate uses them
+  const long = wf([wm("w1", 9000, 2700, "Wall 1")]);
+  assert.deepEqual([wallPartsToFix(WR(long)), wallPartsNeedText(WR(long))], [1, "1 part needs setup (long plates)."]);
+});
+
+t("a wall page names a part as the supplier reads it, each word once: '90 × 45 LVL', '90 × 45 LVL13 LVL H2-S', '90 × 35 MGP10 H2'", () => {
+  assert.equal(wallPartText(wallFramingDefaults([]).components.longPlates), "90 × 45 LVL");
+  assert.equal(wallPartText({ section: { depthMm: 90, widthMm: 45 }, grade: "LVL", species: "lvl", treatment: "H2" }), "90 × 45 LVL H2");
+  assert.equal(wallPartText({ section: { depthMm: 90, widthMm: 45 }, grade: "LVL13", species: "LVL", treatment: "H2-S" }), "90 × 45 LVL13 LVL H2-S");
+  assert.equal(wallPartText(READY().components.noggins), "90 × 35 MGP10 H2");
+  assert.equal(wallPartText({ section: { depthMm: null, widthMm: null } }), "section?");
+});
+
+t("the Walls card's part writes are normaliser fixed points: a built-in row, a company product (stock too) and a typed field, each changing only its part", () => {
+  const base = wallFramingDefaults([]);
+  // the card edits spec.components[part] as a timber spec of the part's purpose (Long plates are plates), then drops the purpose
+  const asPart = (spec, part, fn) => {
+    const purpose = part === "longPlates" ? "plates" : part;
+    const next = { ...fn({ ...spec.components[part], purpose }) };
+    delete next.purpose;
+    return { ...spec, components: { ...spec.components, [part]: next } };
+  };
+  const fixed = (spec) => assert.deepEqual(normaliseFamilySpec(spec), spec);
+  const others = (a, b, part) => assert.deepEqual(WALL_PARTS.filter((k) => k !== part).map((k) => a.components[k]), WALL_PARTS.filter((k) => k !== part).map((k) => b.components[k]));
+  // a built-in row: studs 120 × 45 MGP10 (section and grade), then the Long plates row (90 × 45 LVL)
+  const row = timberPresetsFor("studs").find((x) => x.id === "studs-120x45-mgp10");
+  const a = asPart(base, "studs", (p) => applyTimberPreset(p, row));
+  fixed(a); others(a, base, "studs");
+  assert.deepEqual(brief(a.components.studs), [120, 45, "MGP10", null, null]);
+  const lvlRow = { id: "longPlates-90x45-lvl", ...WALL_LONG_PLATE_DEFAULT };
+  const b = asPart(withPart(base, "longPlates", { section: { depthMm: 140, widthMm: 45 }, grade: "LVL13", productCode: "X", species: "LVL" }), "longPlates", (p) => applyTimberPreset(p, lvlRow));
+  fixed(b);
+  assert.deepEqual([brief(b.components.longPlates), b.components.longPlates.productCode, b.components.longPlates.species], [[90, 45, "LVL", null, 11000], null, null]);
+  // a company product: wallPartFill copies its identity AND its longest length / not-stocked lengths into that part only
+  const nog = product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 }, stock: { maxMm: 5400, unavailableMm: [4800] } });
+  const c = asPart(base, "noggins", (p) => wallPartFill(p, nog.spec, "noggins"));
+  fixed(c); others(c, base, "noggins");
+  assert.deepEqual([...brief(c.components.noggins), c.components.noggins.supplierName, c.components.noggins.stock.unavailableMm], [90, 35, "MGP10", "H2", 5400, "Yard A", [4800]]);
+  assert.equal(matchTimberChoice({ ...c.components.noggins, purpose: "noggins" }, timberPresetsFor("noggins"), wallPartProducts([nog], "noggins")), "p-nog", "the list then shows the product");
+  // a product with no longest length leaves the part's default (6,000 for plates), never none
+  const plate = product("p-plate", "plates");
+  assert.equal(asPart(base, "plates", (p) => wallPartFill(p, plate.spec, "plates")).components.plates.stock.maxMm, 6000);
+  // a typed treatment and a cleared longest length
+  const d = withPart(withPart(base, "plates", { treatment: "H2" }), "noggins", { stock: { ...base.components.noggins.stock, maxMm: null } });
+  fixed(d);
+  assert.deepEqual([d.components.plates.treatment, d.components.noggins.stock.maxMm], ["H2", null]);
+  // the Long plates part lists only LVL plate products, Plates only the others
+  const lvl = product("p-lvl", "plates", { grade: "LVL", treatment: "H2" });
+  assert.deepEqual([wallPartProducts([plate, lvl], "plates").map((x) => x.id), wallPartProducts([plate, lvl], "longPlates").map((x) => x.id)], [["p-plate"], ["p-lvl"]]);
 });
 
 console.log(`takeoff-tc-hub028: ${pass} passed, ${fail} failed`);

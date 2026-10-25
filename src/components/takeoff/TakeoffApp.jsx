@@ -28,7 +28,7 @@ import ProfileEditor from "./ProfileEditor.jsx";
 import { AluminiumSetup, CladdingSetup, TimberSetup, WallsSetup } from "./FamilySetup.jsx";
 import ScheduleScreen from "./ScheduleScreen.jsx";
 import WallsScreen from "./WallsScreen.jsx";
-import { isWallsItem, reviewWalls, usesWalls } from "./measure/tools.js";
+import { isWallsItem, reviewWalls, usesWalls, wallsNotCounted } from "./measure/tools.js";
 import AluminiumScreen from "./AluminiumScreen.jsx";
 import OrdersScreen from "./OrdersScreen.jsx";
 import PlanSetup from "./PlanSetup.jsx";
@@ -667,7 +667,10 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
             </div>
           )}
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
-            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : Setup === TimberSetup ? { presets } : {})}
+            {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null } : Setup === TimberSetup ? { presets }
+              // HUB 028: the Walls card's parts list the company timber products saved for each part; its Walls line names
+              // any wall the calculation leaves out, as the Line panel's does
+              : walls ? { presets, notCounted: wallsNotCounted(ws.computed?.materialResults?.[m.id], view.measurements, view.contributions, m.id) } : {})}
             onChange={(next) => upsertMaterial({ ...currentMat(m), name: next.name, spec: next.spec, rules: next.rules, methodKey: next.methodKey, methodVersion: next.methodVersion })} />
         </div>
       </FocusedWindow>
