@@ -70,7 +70,9 @@ export async function createExport(sb, ctx, orderRow, body, jobLabel) {
   const cover = await otherOrderCover(sb, orderRow.workspace_id, orderRow.id);
   // ordering MORE than is still needed (spares) must be chosen explicitly (R04b R7)
   const acknowledgeSurplus = body?.acknowledgeSurplus === true;
-  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION, cover, acknowledgeSurplus });
+  // HUB 029: a held item left off this order goes only with an explicit "Order without …"
+  const acknowledgeLeftOff = body?.acknowledgeLeftOff === true;
+  const { snapshot, problems } = buildExportSnapshot({ wsSnapshot, ...b, jobLabel, rendererVersion: RENDERER_VERSION, cover, acknowledgeSurplus, acknowledgeLeftOff });
   if (acknowledgeSurplus) snapshot.surplusAcknowledged = true;
   if (!isDraft && problems.length) {
     throw new TakeoffHttpError(400, `Not ready to order: ${problems.join(" ")}`, "NOT_READY");

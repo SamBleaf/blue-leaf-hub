@@ -193,6 +193,9 @@ function drawAppendix(doc, snap, opts) {
     y += h;
   };
   header(false);
+  // HUB 029: anything measured that was ordered WITHOUT (acknowledged at export) is said on the site copy
+  for (const x of snap.notIncluded || []) line(`Not on this order: ${x.materialName}${x.walls ? ` (${x.walls})` : ""}. ${x.reason}. Order it separately once that's fixed.`, { bold: true });
+  if ((snap.notIncluded || []).length) y += 6;
   let any = false;
   for (const al of a.aluminium || []) {
     any = true;

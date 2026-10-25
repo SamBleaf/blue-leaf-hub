@@ -22,6 +22,7 @@ import {
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { methodReads } from "../../../shared/takeoff/engine/dispatch.js";
+import { leftOffItems, leftOffProblem } from "../../../shared/takeoff/leftOff.js";
 import { gableInputProblem } from "../../../shared/takeoff/engine/wall.js";
 import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
 import { TakeoffHttpError } from "./takeoffErrors.mjs";
@@ -769,6 +770,29 @@ export async function listOrders(sb, wsId) {
 }
 
 /**
+ * HUB 029: one-tap offers for an order form, never applied without the tap (R04b R13): per section, the supplier of the
+ * newest order on ANY job that has one ("Use <supplier> (your last cladding order)"); and the site contact on the newest
+ * order this person created on any job ("Use my phone"). Read from takeoff_orders only — no new fact. Optional: a failed
+ * read gives no offers, never a failed screen.
+ */
+export async function orderHints(sb, actor) {
+  const out = { lastSupplierIds: {}, myLastContact: null };
+  try {
+    for (const cat of SECTION_VALUES) {
+      const r = await q(sb.from("takeoff_orders").select("supplier_id, status").eq("category", cat).order("created_at", { ascending: false }).limit(20));
+      out.lastSupplierIds[cat] = r.find((o) => o.supplier_id && o.status !== "cancelled")?.supplier_id || null;
+    }
+    if (actor?.userId || actor?.employeeId) {
+      const base = sb.from("takeoff_orders").select("order_ref, delivery").order("created_at", { ascending: false }).limit(20);
+      const rows = await q(actor.userId ? base.eq("created_by_user_id", actor.userId) : base.eq("created_by_employee_id", actor.employeeId));
+      const hit = rows.find((o) => o.delivery?.contactPhone);
+      if (hit) out.myLastContact = { orderRef: hit.order_ref, name: hit.delivery.contactName || null, phone: hit.delivery.contactPhone };
+    }
+  } catch { /* offers are optional */ }
+  return out;
+}
+
+/**
  * What OTHER orders already cover, per bucket (R04b R7/R8): placed allocations + lines of open orders that
  * already have an order-ready (sent-able) export but no placement recorded yet.
  * → Map bucketKey → { placed, exported, refs: [orderRef…] }
@@ -1050,7 +1074,7 @@ export async function discardDraft(sb, ctx, orderRow, body) {
  * Build the frozen supplier-order snapshot. Pure apart from the reads passed in.
  * Returns { snapshot, problems } — problems block an order-ready export (drafts allowed).
  */
-export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, company, jobLabel, rendererVersion, cover = null, acknowledgeSurplus = false }) {
+export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, company, jobLabel, rendererVersion, cover = null, acknowledgeSurplus = false, acknowledgeLeftOff = false }) {
   const computed = computeWorkspace(wsSnapshot);
   const byKey = new Map(computed.scheduleLines.map((l) => [l.bucketKey, l]));
   const mats = new Map(wsSnapshot.materials.map((m) => [m.id, m]));
@@ -1120,6 +1144,12 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     }
     g.lines.push({ bucketKey: sl.bucketKey, stale: st.stale, finishedLengthMm: sl.finishedLengthMm, quantity: l.quantity, handlingFlag: sl.handlingFlag, ceilingExceeded: sl.ceilingExceeded });
   }
+  // HUB 029: nothing measured is left off an order without a word. A measured item of this order's section that is held
+  // (a blocking problem, or every line it has is held), has no line on this order and nothing placed or exported for it
+  // is named, and the order needs one explicit "Order without …" before it can go (a deliberate subset of ready lines is
+  // never asked about). The snapshot records what was left off; the site appendix prints it.
+  const notIncluded = leftOffItems(wsSnapshot, computed, { category: order.category || null, lineMaterialIds: lines.map((l) => l.jobMaterialId), cover });
+  if (!acknowledgeLeftOff) for (const x of notIncluded) problems.push(leftOffProblem(x));
   // measurements of these materials that produced no pieces = unknown quantity → not ready (R04b R1)
   const specs = new Set([...groups.keys()]);
   for (const u of computed.unplaced || []) if (u.specKey && specs.has(u.specKey)) problems.push(`A measurement couldn't be turned into lengths (${(u.problems || []).map((p) => PROBLEM_TEXT[p] || p).join(" ")}) — fix or remove it.`);
@@ -1180,6 +1210,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     groups: groupList,
     items: itemList,
     appendix,
+    notIncluded,
+    ...(acknowledgeLeftOff && notIncluded.length ? { leftOffAcknowledged: true } : {}),
     totals: {
       byUnit: byUnitAll,
       pieces: groupList.reduce((a, g) => a + g.pieces, 0),

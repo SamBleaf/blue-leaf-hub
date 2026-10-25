@@ -1890,6 +1890,62 @@ await t("HUB 029 step 1: a traced wall on a re-scaled page is held with its clad
   assert.deepEqual(lines(compute(after.snapshot)), lines(after.computed), "the shared engine on the stored snapshot gives the server's lines");
 });
 
+await t("HUB 029 step 5: a measured cladding held by a wall with no height and left off the Timber and cladding order is named at export ('Order without …') and goes only with acknowledgeLeftOff, which freezes it in notIncluded and on the site appendix; an item with nothing measured adds nothing", async () => {
+  const { productGroups, specFromGroup } = await import("../../shared/takeoff/products/index.js");
+  const { methodFor } = await import("../../shared/takeoff/index.js");
+  const { BLUE_LEAF_JH_DEFAULTS: D } = await import("../../shared/takeoff/companyDefaults.js");
+  const spec = { ...specFromGroup(productGroups({ family: "cladding" }).find((g) => g.name === "Axon 400 smooth")), assemblyId: "axon-vertical", spareRate: 0 }, m = methodFor(spec);
+  const rules = { route: D.route, installConditions: { ...D.installConditions, "direct-or-cavity": D.route }, jointRows: { atMm: [], ...D.jointRule } };
+  const w = id(), held = id(), ready = id(), empty = id(), wa = id(), wb = id(), wc = id();
+  assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB029 s5" })).status, 200);
+  const rev = async () => (await S(`/workspaces/${w}`)).data.snapshot.workspace.revision;
+  const r1 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
+    materials: { upsert: [{ id: held, name: "Axon front", methodKey: m.key, methodVersion: m.version, spec, rules }, { id: ready, name: "Axon rear", methodKey: m.key, methodVersion: m.version, spec, rules },
+      { id: empty, name: "Axon spare", methodKey: m.key, methodVersion: m.version, spec, rules }] },
+    measurements: { upsert: [{ id: wa, kind: "wall", inputs: { kind: "rect", widthMm: 3000, heightMm: 2700, name: "Wall 1" } }, { id: wb, kind: "wall", inputs: { kind: "rect", widthMm: 420, name: "Wall 3" } },
+      { id: wc, kind: "wall", inputs: { kind: "rect", widthMm: 4000, heightMm: 2700, name: "Rear" } }] },
+    contributions: { upsert: [[wa, held], [wb, held], [wc, ready]].map(([mid, jm]) => ({ id: id(), measurementId: mid, jobMaterialId: jm, role: "wall" })) } } });
+  assert.equal(r1.status, 200, JSON.stringify(r1.data));
+  // the rear Axon's own (unheld) lines only — what New order now pre-fills
+  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.generic && !l.problems.length);
+  assert.ok(sched.length > 0 && sched.every((l) => !l.jobMaterialIds.includes(held) || l.jobMaterialIds.includes(ready)), JSON.stringify(sched.map((l) => l.jobMaterialIds)));
+  const oid = id();
+  const o = await SP(`/workspaces/${w}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier, delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400 000 000" } });
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity, jobMaterialId: ready })) } });
+  assert.equal(pr.status, 200, JSON.stringify(pr.data));
+  // the preview names it (with its walls and the reason), once; nothing else holds the order
+  const pv = await S(`/orders/${oid}/preview`);
+  const leftOff = pv.data.preview.problems.filter((p) => /^Order without /.test(p));
+  assert.equal(leftOff.length, 1, JSON.stringify(pv.data.preview.problems));
+  assert.equal(leftOff[0], "Order without Axon front (Walls 1, 3): Wall 3 has no Wall height.");
+  assert.deepEqual(pv.data.preview.problems.filter((p) => !/^Order without /.test(p)), []);
+  assert.deepEqual(pv.data.preview.snapshot.notIncluded.map((x) => [x.materialId, x.walls]), [[held, "Walls 1, 3"]], "the empty Axon spare adds nothing");
+  // refused without the tick, nothing frozen
+  const before = (await q("SELECT count(*)::int n FROM takeoff_exports WHERE order_id=$1", [oid])).rows[0].n;
+  const no = await SP(`/orders/${oid}/exports`, { isDraft: false, idempotencyKey: "hub029-s5-no", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await rev() });
+  assert.equal(no.status, 400, JSON.stringify(no.data));
+  assert.match(no.data.error, /Order without Axon front/);
+  assert.equal((await q("SELECT count(*)::int n FROM takeoff_exports WHERE order_id=$1", [oid])).rows[0].n, before);
+  // a draft PDF never needs it
+  const dr = await SP(`/orders/${oid}/exports`, { isDraft: true, idempotencyKey: "hub029-s5-draft", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await rev() });
+  assert.equal(dr.status, 200, JSON.stringify(dr.data));
+  // with the tick: frozen with notIncluded, and the site appendix says it isn't on this order
+  const yes = await SP(`/orders/${oid}/exports`, { isDraft: false, acknowledgeLeftOff: true, idempotencyKey: "hub029-s5-yes", expectedOrderRevision: pr.data.result.revision, expectedWorkspaceRevision: await rev() });
+  assert.equal(yes.status, 200, JSON.stringify(yes.data));
+  const snap = (await q("SELECT snapshot FROM takeoff_exports WHERE id=$1", [yes.data.export.exportId])).rows[0].snapshot;
+  assert.equal(snap.leftOffAcknowledged, true);
+  assert.deepEqual(snap.notIncluded.map((x) => [x.materialName, x.walls]), [["Axon front", "Walls 1, 3"]]);
+  assert.ok(!snap.items.some((g) => g.materialId === held));
+  const ap = await S(`/exports/${yes.data.export.exportId}/appendix`);
+  assert.equal(ap.status, 200);
+  assert.equal(ap.data.subarray(0, 4).toString(), "%PDF");
+  // the orders list offers this person's last phone and the section's last supplier (HUB 029 chips)
+  const hints = (await S(`/workspaces/${w}/orders`)).data.hints;
+  assert.equal(hints.lastSupplierIds.timber_cladding, supplier);
+  assert.equal(hints.myLastContact?.phone, "0400 000 000");
+});
+
 server.close();
 await pool.end();
 console.log(`takeoff-api: ${pass} passed, ${fail} failed`);

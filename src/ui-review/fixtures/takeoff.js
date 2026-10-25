@@ -43,7 +43,7 @@ import { reviewRole } from "../config.js";
 import {
   buildCalibration, verifyCalibration, segmentLengthMm, polylineLengthMm, computeWorkspace, orderStatus, starterProfile, mirrorProfile,
   normaliseFlashingRules, ITEM_STALE_TEXT, PROBLEM_TEXT, FLASHING_SPEC_DEFAULTS, orderLineState, describeFamilySpec, methodFor,
-  SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem,
+  SECTION_VALUES, SECTION_LABEL, materialSection, lineSection, flashingNeeds, refreshDraftLines, gableInputProblem, leftOffItems, leftOffProblem,
   TIMBER_GRID, WALLS_PURPOSE, WALL_FRAMING_RULES, methodReads, normaliseFamilySpec, wallFramingDefaults,
 } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/takeoff/products/index.js";
@@ -166,6 +166,10 @@ function seedCladdingWall3() {
   state.measurements.push(wall("cw-12", "Wall 12", { kind: "rect", widthMm: 3000, heightMm: 2700 }), wall("cw-13", "Wall 13", { kind: "rect", widthMm: 2400, heightMm: 2700 }));
   for (const [id] of a) state.contributions.push({ id: `cc-${id}`, measurementId: id, jobMaterialId: "mat-axon-a", role: "wall" });
   for (const id of ["cw-12", "cw-13"]) state.contributions.push({ id: `cc-${id}`, measurementId: id, jobMaterialId: "mat-axon-b", role: "wall" });
+  // the order form as the server checks it (required-by date, site phone, pickup branch) and the server's offers from
+  // other jobs (orderHints): the last Timber and cladding supplier and this person's last site phone
+  state.fullReadiness = true;
+  state.hints = { lastSupplierIds: { timber_cladding: "sup-2" }, myLastContact: { orderRef: "FO-000990", name: "Review site lead", phone: "0400 123 456" } };
 }
 
 /** HUB 030 (SYNTHETIC): a Support battens item with nothing entered on one 3,600 × 2,700 wall — the Blue Leaf default
@@ -484,7 +488,7 @@ function applyCommit(body) {
  * reads: readiness problems (incl. stale lines via orderLineState), flashing totals (pieces/LM), generic items with
  * totals BY UNIT (never added together) and the site appendix that travels in the same frozen snapshot.
  */
-function exportSnapshot(order) {
+function exportSnapshot(order, ack = {}) {
   const snap = snapshot();
   const computed = computeWorkspace(snap);
   const mats = new Map(snap.materials.map((m) => [m.id, m]));
@@ -493,7 +497,15 @@ function exportSnapshot(order) {
   const d = order.delivery || {};
   if (d.method !== "delivery" && d.method !== "pickup") problems.push("Choose delivery or pickup.");
   if (d.method === "delivery" && !d.address) problems.push("Enter the delivery address.");
+  if (state.fullReadiness) {   // as the server (takeoffService buildExportSnapshot) — only seeds that ask for it
+    if (d.method === "pickup" && !d.pickupBranch) problems.push("Enter the pickup branch.");
+    if (!d.requiredDate && !d.asap) problems.push("Enter the date it's required by (or choose As soon as possible).");
+    if (!d.contactPhone) problems.push("Enter a site contact phone number.");
+  }
   if (!order.lines.length) problems.push("Add at least one length to the order.");
+  // HUB 029: as the server — a held item left off this order needs "Order without …" (acknowledgeLeftOff)
+  const notIncluded = leftOffItems(snap, computed, { category: order.category || null, lineMaterialIds: order.lines.map((l) => l.jobMaterialId), cover: null });
+  if (!ack.leftOff) for (const x of notIncluded) problems.push(leftOffProblem(x));
   const items = new Map();
   let pieces = 0, totalMm = 0;
   for (const l of order.lines) {
@@ -540,7 +552,7 @@ function exportSnapshot(order) {
   return {
     problems: [...new Set(problems)],
     snapshot: { orderRef: order.orderRef, job: { label: "1 Example Street, Testville SA (Synthetic)" }, supplier: order.supplierId ? { id: "sup-1", name: "Fielders (review branch)" } : null,
-      items: itemList, appendix, totals: { pieces, totalLm: totalMm / 1000, byUnit }, sources: { workspaceRevision: state.revision } },
+      items: itemList, appendix, notIncluded, totals: { pieces, totalLm: totalMm / 1000, byUnit }, sources: { workspaceRevision: state.revision } },
   };
 }
 const previewOf = (order) => exportSnapshot(order);
@@ -700,7 +712,9 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
         for (const l of o.lines) { const c = cover.get(l.bucketKey) || { n: 0, refs: [] }; c.n += l.quantity; if (!c.refs.includes(o.orderRef)) c.refs.push(o.orderRef); cover.set(l.bucketKey, c); }
       }
       const orderStatusWithCover = status().map((x) => ({ ...x, onExportedOrders: cover.get(x.bucketKey)?.n || 0, exportedRefs: cover.get(x.bucketKey)?.refs || [] }));
-      return { ok: true, orders: state.orders.map(publicOrder), orderStatus: orderStatusWithCover, scheduleLines: computeWorkspace(snapshot()).scheduleLines, workspaceRevision: state.revision };
+      // HUB 029: as the server's orderHints (other jobs are a seed's `hints`)
+      const hints = { lastSupplierIds: {}, myLastContact: null, ...(state.hints || {}) };
+      return { ok: true, orders: state.orders.map(publicOrder), orderStatus: orderStatusWithCover, scheduleLines: computeWorkspace(snapshot()).scheduleLines, workspaceRevision: state.revision, hints };
     });
     // HUB 013 / HUB 020 (as the server's openWorkingOrder): the section's working draft — Flashings created or brought up
     // to date with the takeoff (shared refreshDraftLines rules); a draft whose supplier PDF went out is never changed
@@ -797,10 +811,11 @@ for (const base of ["/api/takeoff", "/api/worker/takeoff"]) {
     route("GET", `${base}/orders/:orderId/preview`, ({ params }) => ({ ok: true, preview: previewOf(state.orders.find((x) => x.id === params.orderId)) }));
     route("POST", `${base}/orders/:orderId/exports`, ({ params, bodyJson }) => {
       const o = state.orders.find((x) => x.id === params.orderId);
-      if (!bodyJson.isDraft && previewOf(o).problems.length) return fail(400, `Not ready to order: ${previewOf(o).problems.join(" ")}`, "NOT_READY");
+      const ack = { leftOff: bodyJson.acknowledgeLeftOff === true };
+      if (!bodyJson.isDraft && exportSnapshot(o, ack).problems.length) return fail(400, `Not ready to order: ${exportSnapshot(o, ack).problems.join(" ")}`, "NOT_READY");
       const e = { id: `exp-${o.id}-${o.exports.length + 1}`, orderId: o.id, exportNo: o.exports.length + 1, isDraft: !!bodyJson.isDraft, artifactStatus: "ready", createdAt: now() };
       o.exports.push(e);
-      state.frozen[e.id] = JSON.parse(JSON.stringify(exportSnapshot(o).snapshot)); // frozen: later edits never change it
+      state.frozen[e.id] = JSON.parse(JSON.stringify(exportSnapshot(o, ack).snapshot)); // frozen: later edits never change it
       return { ok: true, export: { exportId: e.id, exportNo: e.exportNo, artifactStatus: "ready", isDraft: e.isDraft } };
     });
     route("GET", `${base}/exports/:exportId/pdf`, () => fetch(exportUrl));

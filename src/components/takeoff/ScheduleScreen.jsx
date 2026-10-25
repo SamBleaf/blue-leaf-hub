@@ -66,7 +66,7 @@ function shownStatus(status, lines, blocked) {
 }
 
 /** Quantity / Installation / Ordering chips. Pass the material's purchase `lines` so Ordering is shown honestly. */
-export function StatusChips({ status: raw, lines, blocked = false }) {
+export function StatusChips({ status: raw, lines, blocked = false, installation = true }) {
   const status = shownStatus(raw, lines, blocked);
   if (!status) return null;
   const chip = (key, label, map, v) => {
@@ -76,7 +76,7 @@ export function StatusChips({ status: raw, lines, blocked = false }) {
   return (
     <div className="flex flex-wrap gap-1" aria-label="Statuses">
       {chip("quantity", "Quantity", QUANTITY, status.quantity)}
-      {chip("installation", "Installation", INSTALLATION, status.installation)}
+      {installation && chip("installation", "Installation", INSTALLATION, status.installation)}
       {chip("procurement", "Ordering", PROCUREMENT, status.procurement)}
     </div>
   );

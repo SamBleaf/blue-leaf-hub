@@ -219,6 +219,7 @@ test.describe("TC-R04 supplier order", () => {
   async function readyOrder(page) {
     await openOrders(page);
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
     const bat = orderGroup(page, "mat-bat");
     await bat.getByLabel(/Order quantity.*\(pieces\)/).fill("0");
@@ -231,6 +232,7 @@ test.describe("TC-R04 supplier order", () => {
     const errors = watchErrors(page);
     await openOrders(page);
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
     // unit-aware labels — never "mm length" wording for sheets / LM / bars
     const axon = orderGroup(page, "mat-axon");
@@ -366,6 +368,7 @@ test.describe("TC-R04 supplier order", () => {
     await expect(page.getByText("Placed externally")).toBeVisible();
     // next order: only the battens are still needed (everything else was placed)
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-001002/)).toBeVisible();
     await expect(orderGroup(page, "mat-bat").getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue("10");
     await expect(orderGroup(page, "mat-axon").getByLabel(/Order quantity.*\(sheets\)/)).toHaveValue("0");
@@ -406,6 +409,12 @@ async function rescalePage(page) {
   const cal = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1")).json()).snapshot.calibrations[0]);
   await serverEdit(page, { calibrations: { insert: [{ id: "cal-rev2", documentId: cal.documentId, pageIndex: cal.pageIndex, pageMeta: cal.pageMeta, basisRotation: 0, horizontal: cal.horizontal, vertical: cal.vertical }] } });
 }
+/** HUB 029: a new Timber and cladding order starts with no supplier when the job has none for it (never the flashing
+ *  supplier hint) — these runs choose Fielders, as before. */
+async function chooseSupplier(page) {
+  await expect(page.getByText(/Draft FO-/)).toBeVisible();
+  await page.locator("#ord-supplier").selectOption("sup-1");
+}
 function watchErrors(page) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -419,6 +428,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
   async function readyOrder(page) {
     await openOrders(page);
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
     const bat = orderGroup(page, "mat-bat");
     await bat.getByLabel(/Order quantity.*\(pieces\)/).fill("0");
@@ -491,6 +501,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     // after the export the same 8 rafters + 10 battens are still not on any order — still listed
     await expect(page.getByTestId("not-on-order")).toHaveText(/Still needed but not on this order:\s*Rafters 90 × 45 — 8 pieces\s*Cavity battens — 10 pieces/);
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await page.getByLabel("Choose draft order").selectOption({ label: "FO-001002" });
     await expect(page.getByText("Draft FO-001002")).toBeVisible();
     await expect(orderGroup(page, "mat-raf").getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue("8");   // 18 − 10 on the exported order
@@ -777,6 +788,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await page.getByRole("button", { name: "Back", exact: true }).tap();
     await page.getByRole("button", { name: /Review & export order/ }).tap();
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-/)).toBeVisible();
     // the job's material order (not the purchase-line order), in the Timber part then the Cladding part (HUB 007)
     await expect(page.locator("[data-order-group]")).toHaveCount(7);
@@ -817,6 +829,7 @@ test.describe("TC-R04 schedule + order — adversarial review regressions", () =
     await expect(page.getByText("Placed externally")).toBeVisible();
     // the next order defaults to what is still needed: battens (pieces) and fixings (boxes) only
     await page.getByRole("button", { name: "New order" }).tap();
+    await chooseSupplier(page);   // HUB 029: a Timber and cladding order no longer takes the flashing supplier
     await expect(page.getByText(/Draft FO-001002/)).toBeVisible();
     await expect(orderGroup(page, "mat-fix").getByLabel(/Order quantity.*\(boxes\)/)).toHaveValue("3");
     await expect(orderGroup(page, "mat-bat").getByLabel(/Order quantity.*\(pieces\)/)).toHaveValue("10");

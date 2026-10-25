@@ -74,6 +74,101 @@ test("HUB 029: Wall 3 with no height — every blocked line names it as a button
   expect(battens.every((l) => /^90 × 35 H3 pine batten — /.test(l.item.description))).toBe(true);
   expect(battens.some((l) => l.jobMaterialIds.includes("mat-axon-b"))).toBe(true);
   expect(JSON.stringify(c.scheduleLines)).not.toMatch(/405307|Cavity Batten/);
+  // Review order › opens a Timber and cladding draft with everything orderable on it; what is left is one card of
+  // chips that save at once (no Save order details): the supplier, As soon as possible, my phone; then Export
+  let taps = 0;
+  const tap = async (loc) => { await loc.click(); taps++; };
+  await tap(page.locator("[data-order-ready]").getByRole("button", { name: "Review order ›" }));
+  const card = page.locator('[data-before-order=""]');
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("[data-order-group]")).toHaveCount(2);   // both Axons, with their pooled battens
+  await expect(page.locator('[data-order-group] [data-status="installation"]')).toHaveCount(0);
+  await expect(card.locator("[data-fix-key]")).toHaveCount(0);
+  await expect(card.locator('[data-chip="supplier"]')).toHaveText("Use Other Steel Supplies (your last timber and cladding order)");
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${SHOTS}/orders-before-you-can-order-390x844.png` });
+  await tap(card.locator('[data-chip="supplier"]'));
+  await expect(page.locator("[data-order-msg]")).toHaveText("Saved on this order.");
+  await tap(card.locator('[data-chip="asap"]'));
+  await expect(card.locator('[data-chip="asap"]')).toHaveCount(0);
+  await tap(card.locator('[data-chip="my-phone"]'));
+  await expect(page.locator('[data-before-order="ready"]')).toContainText("Ready:");
+  await expect(page.getByRole("button", { name: "Save order details" })).toHaveCount(0);
+  const exp = page.getByRole("button", { name: "Export supplier PDF" });
+  await expect(exp).toBeEnabled();
+  await page.locator('[data-before-order="ready"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${SHOTS}/orders-ready-390x844.png` });
+  await tap(exp);
+  await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible();
+  // on top of the fix and Done above: Review order, three chips and Export — 7 taps from the blocked card to a supplier PDF
+  expect(taps).toBe(5);
+  const orders = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders);
+  const o = orders.find((x) => x.category === "timber_cladding");
+  expect([o.supplierId, o.delivery.asap, o.delivery.contactPhone]).toEqual(["sup-2", true, "0400 123 456"]);
+});
+
+test("HUB 029: with Wall 3 still empty, the other cladding orders alone only with one 'Order without …' tick (named on the export); the fix button on the order opens Wall 3 and Done comes back to the order", async ({ page }) => {
+  await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=cladding-wall3");
+  await ready(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await page.getByRole("button", { name: "New order" }).click();
+  const card = page.locator('[data-before-order=""]');
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  // only the second Axon's own sheets were pre-filled (the held lines are left off, never on the order blocked)
+  const orders = async () => page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.find((x) => x.category === "timber_cladding"));
+  const lines0 = (await orders()).lines;
+  expect(lines0.length).toBeGreaterThan(0);
+  expect(lines0.every((l) => l.jobMaterialId === "mat-axon-b")).toBe(true);
+  // the wall row is one button naming the item; its own problem lines aren't repeated as bullets (B33)
+  await expect(card.locator("[data-fix-key]")).toHaveCount(1);
+  await expect(card.locator("[data-fix-key]")).toContainText("Wall 3");
+  await expect(card.locator("li", { hasText: /^Axon 400 smooth: / })).toHaveCount(0);
+  for (const c of ["supplier", "asap", "my-phone"]) await card.locator(`[data-chip="${c}"]`).click();
+  const without = page.locator("[data-order-without]");
+  await expect(without).toContainText("Order without Axon 400 smooth (Walls 1, 3–6): Wall 3 has no Wall height");
+  const exp = page.getByRole("button", { name: "Export supplier PDF" });
+  await expect(exp).toBeDisabled();
+  await without.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${SHOTS}/orders-order-without-390x844.png` });
+  await without.locator("input").check();
+  await expect(page.locator('[data-before-order="ready"]')).toContainText("without Axon 400 smooth");
+  await expect(exp).toBeEnabled();
+  // the fix on the order: Wall 3 at Wall height, Done back on this order
+  await without.locator("input").uncheck();
+  await card.locator("[data-fix-key]").click();
+  await expect(page.getByLabel("Wall height")).toBeFocused();
+  await page.getByLabel("Wall height").fill("3600");
+  await page.getByLabel("Wall height").press("Enter");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Timber and cladding orders" })).toBeVisible();
+  // nothing is held now: the first Axon is one tap away (Add all … saves), its pooled lines are brought up to date
+  await expect(page.locator("[data-order-without]")).toHaveCount(0);
+  const update = page.locator("[data-update-all]");
+  if (await update.isVisible().catch(() => false)) await update.click();
+  await page.locator("[data-add-needed]").click();
+  await expect(page.locator("[data-order-msg]")).toHaveText(/^Added \d+ lines? — saved\.$/);
+  await expect(page.locator('[data-before-order="ready"]')).toBeVisible();
+  await expect(exp).toBeEnabled();
+  const lines1 = (await orders()).lines;
+  expect(lines1.some((l) => l.jobMaterialId === "mat-axon-a")).toBe(true);
+});
+
+test("HUB 029: exporting with 'Order without …' freezes the left-off item and the mock refuses it without the tick, as the server", async ({ page }) => {
+  await page.goto("/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding&takeoffSeed=cladding-wall3");
+  await ready(page);
+  await page.getByRole("button", { name: /Review & export order/ }).click();
+  await page.getByRole("button", { name: "New order" }).click();
+  const card = page.locator('[data-before-order=""]');
+  for (const c of ["supplier", "asap", "my-phone"]) await card.locator(`[data-chip="${c}"]`).click();
+  await expect(page.locator("[data-order-without]")).toBeVisible();
+  const o = await page.evaluate(async () => (await (await fetch("/api/takeoff/workspaces/ws-1/orders")).json()).orders.find((x) => x.category === "timber_cladding"));
+  const post = (body) => page.evaluate(async ([id, b]) => { const r = await fetch(`/api/takeoff/orders/${id}/exports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); return { status: r.status, body: await r.json() }; }, [o.id, body]);
+  const no = await post({ isDraft: false, idempotencyKey: "x-hub029-no", expectedOrderRevision: o.revision });
+  expect(no.status).toBe(400);
+  expect(no.body.error).toMatch(/Order without Axon 400 smooth/);
+  await page.locator("[data-order-without] input").check();
+  await page.getByRole("button", { name: "Export supplier PDF" }).click();
+  await expect(page.getByText(/is frozen\. Nothing has been sent\./)).toBeVisible();
 });
 
 test("HUB 029: the second cladding's card shows the same Wall 3 row (its pooled lines are held by it) and the tap opens that wall under the first cladding", async ({ page }) => {

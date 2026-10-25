@@ -244,6 +244,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
   const [openRow, setOpenRow] = useState(null); // material row whose actions are showing ("" = all closed)
   const [orderFocus, setOrderFocus] = useState(null); // HUB 010: { orderId, bucketKey } to come back to after a fix
   const [wallFocus, setWallFocus] = useState(null);   // HUB 029: { id, field } the wall a fix row opened, and its field
+  const [ordersAutoStart, setOrdersAutoStart] = useState(false); // HUB 029: Review order › opens a Timber and cladding draft
   const [fixReturn, setFixReturn] = useState(null);   // HUB 029: { editing, win } a fix row was tapped from (Done comes back)
   useEffect(() => { if (win === "overview") setOrderFocus(null); }, [win]);
   // HUB 029: a fix row that opened a card scrolls to the field it named (opening a fold or Edit when it is hidden)
@@ -744,7 +745,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
           )}
           <FixContext.Provider value={{ materialId: m.id, rows: ws.computed ? fixesFor(ws.computed, view, { materialId: m.id }) : [],
             open: (row) => openFix(row, { editing: { material: m, stage: "family" }, win: setupFrom || "overview" }),
-            reviewOrder: () => { setEditing(null); setSetupFrom(null); setWin("orders"); } }}>
+            reviewOrder: () => { setEditing(null); setSetupFrom(null); setOrdersAutoStart(true); setWin("orders"); } }}>
           <Setup key={m.id} value={m} result={ws.computed?.materialResults?.[m.id]} lines={linesFor(m.id)}
             {...(Setup === CladdingSetup ? { presets, onSaveCompanyDefault: caps.saveCompanyDefaults && api.saveCompanyDefault ? saveCompanyDefault : null,
               hasWalls: view.contributions.some((c) => c.jobMaterialId === m.id && !c.archived && view.measurements.some((x) => x.id === c.measurementId && x.kind === "wall" && !x.archived)) } : Setup === TimberSetup ? { presets }
@@ -851,7 +852,7 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
         setOpenWallTab(null); setOpenWall(id);
       }}
       onTrace={docId ? () => setWin("measure") : null} onSetup={(m) => { setSetupFrom("walls"); setEditing({ material: m, stage: "family" }); }} onClose={() => { setOpenWall(null); setWin("overview"); }}
-      onReviewOrder={() => { setOpenWall(null); setOpenWallTab(null); setWin("orders"); }} orderReady={orderReady} />;
+      onReviewOrder={() => { setOpenWall(null); setOpenWallTab(null); setOrdersAutoStart(true); setWin("orders"); }} orderReady={orderReady} />;
   }
   if (win === "aluminium") {
     return <AluminiumScreen ws={ws} materialId={activeMaterial} onSetup={(m) => { setSetupFrom("aluminium"); setEditing({ material: m, stage: "family" }); }}
@@ -926,8 +927,11 @@ function WorkspaceView({ api, wsId, job, section, onSection, onBack, onExternalV
     return <FocusedWindow title="Review with new scale" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><RescaleReview ws={ws} onDone={() => setWin("overview")} /></div></FocusedWindow>;
   }
   if (win === "orders") {
-    return <FocusedWindow title="Orders" onClose={() => setWin("overview")} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} section={section} jobAddress={ws.server?.jobAddress}
+    return <FocusedWindow title="Orders" onClose={() => { setOrderFocus(null); setOrdersAutoStart(false); setWin("overview"); }} closeLabel="Back"><div className="min-h-0 flex-1 overflow-y-auto p-3"><OrdersScreen api={api} ws={ws} section={section} jobAddress={ws.server?.jobAddress}
       onFix={fixFromOrder} focus={orderFocus} onFocusDone={() => setOrderFocus(null)}
+      // HUB 029: a fix row on the order opens its fix; the card, the wall (Done) and the plan come back to the order
+      onFixRow={(row) => { if (row.target?.kind === "card") setSetupFrom("orders"); if (row.target?.kind === "measure") setOrderFocus((f) => f || { orderId: null }); openFix(row, { win: "orders" }); }}
+      autoStart={ordersAutoStart} onAutoStarted={() => setOrdersAutoStart(false)}
       deviceDrafts={draftCards.map((c) => ({ name: c.name || "A new flashing", invalid: c.reason === "invalid" ? 1 : 0 }))} /></div></FocusedWindow>;
   }
 

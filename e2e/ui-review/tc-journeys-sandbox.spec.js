@@ -693,6 +693,11 @@ test("TC-R04 real-stack journeys", async ({ page, isMobile }, info) => {
     if (axonId) await expect(page.locator('[data-order-part="cladding"]').locator(`[data-order-group="${axonId}"]`).getByLabel(/Order quantity.*\(sheets\)/)).toHaveValue("4");
     if (aluId) await expect(og(aluId).getByLabel(/Order quantity.*\(bars\)/)).toHaveValue("1");
     await expect(page.getByText("Lengths on this order")).toHaveCount(0);   // no flashing line crosses onto this order
+    // HUB 029: a first Timber and cladding order on a job starts with no supplier (never the flashing supplier hint) —
+    // the chip offers the last one used on any job; on a fresh sandbox there is none, so it is chosen from the list
+    await expect(page.locator("#ord-supplier")).toHaveValue("");
+    const firstSupplier = await page.locator("#ord-supplier option").nth(1).getAttribute("value");
+    await page.locator("#ord-supplier").selectOption(firstSupplier);
     await deliveryDetails();
     await shot("order-review", `Timber and cladding order: Timber and Cladding parts, every line defaults to what is still needed; ${isMobile ? "pick up (branch, ASAP)" : "deliver (address, required-by date)"}, site contact + phone`);
     const ready = await saveUntilReady("J5");
