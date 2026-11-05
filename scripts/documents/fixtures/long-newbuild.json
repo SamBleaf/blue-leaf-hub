@@ -1,6 +1,6 @@
 {
   "_description": "Edge-case fixture: large new build, long client name + address, 20 selection rows across all groups, every disposition state (TBC / N/A / Excluded / By Others / Existing to Remain / Undecided), long product descriptions — exercises 2+ page schedule, repeating header and footer clearance.",
-  "meta": { "ref": "0608", "revision": "1", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
+  "meta": { "ref": "0608", "revision": "1", "preparedDate": "2026-11-05", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
   "project": {
     "clientName": "Dr Alexandra Featherstone-Montgomery & Mr Christopher Featherstone-Montgomery",
     "clientSalutation": "Alexandra and Christopher",
@@ -52,8 +52,15 @@
     ]
   },
   "architectBrief": {
+    "actions": [
+      "Provide the outstanding BAL (bushfire) assessment — it governs cladding, glazing and decking selections.",
+      "Coordinate basement waterproofing and drainage with the structural and civil packages (ST-01).",
+      "Confirm the pool position against the Hills Face Zone building envelope (PL-01).",
+      "Confirm the certification pathway (private certifier vs council) before working drawings.",
+      "Reconcile the BAL rating consistently across windows, cladding and decking before finalising selections."
+    ],
     "purposeParas": [
-      "Issued to the design team to progress developed documentation for a new two-storey home with basement, pool and studio on a Hills Face Zone allotment. Latest basis: Concept Set C-04 Rev B. Confirmed requirements and client preferences are separated below; coordination and outstanding decisions are listed for action."
+      "Issued to the design team to progress developed documentation for a new two-storey home with basement, pool and studio on a Hills Face Zone allotment. Latest basis: Concept Set C-04 Rev B. Confirmed client requirements and indicative preferences are separated below; the coordination schedule lists each item's status and the action required."
     ],
     "confirmedReqs": [
       "Two-storey dwelling with partial basement and integrated double garage, per Concept Set C-04 Rev B.",
@@ -66,12 +73,12 @@
       "Lap pool with travertine-look surround; studio serviced for future fit-out."
     ],
     "scheduleItems": [
-      { "itemId": "EX-01", "location": "External walls (general)", "requirement": "Through-coloured acrylic render system over blueboard", "status": "Preliminary", "action": "Confirm system + control joints with engineer", "dwgRef": "A-20" },
-      { "itemId": "EX-02", "location": "External walls (feature)", "requirement": "Spotted-gum vertical cladding to entry and upper-level box", "status": "Preliminary", "action": "Confirm fixing, coating and BAL compliance", "dwgRef": "A-21" },
-      { "itemId": "WN-01", "location": "North living", "requirement": "BAL-rated slimline glazing, dark frames", "status": "Preliminary", "action": "Confirm BAL rating from assessor; size for passive solar", "dwgRef": "A-30" },
-      { "itemId": "ST-01", "location": "Basement", "requirement": "Reinforced concrete retaining to cellar/store", "status": "Confirmed", "action": "Engineer to design + certify; coordinate waterproofing", "dwgRef": "S-01" },
-      { "itemId": "PL-01", "location": "Rear yard", "requirement": "Lap pool, concrete, travertine-look surround", "status": "Preliminary", "action": "Confirm position vs Hills Face Zone envelope", "dwgRef": "A-90" },
-      { "itemId": "RF-01", "location": "Main roof", "requirement": "Dark low-sheen standing-seam metal", "status": "Preliminary", "action": "Confirm falls, valleys and overflow provisions", "dwgRef": "A-40" }
+      { "itemId": "EX-01", "location": "External walls (general)", "requirement": "Through-coloured acrylic render system over blueboard", "status": "Proposed", "action": "Confirm system + control joints with engineer", "dwgRef": "A-20" },
+      { "itemId": "EX-02", "location": "External walls (feature)", "requirement": "Spotted-gum vertical cladding to entry and upper-level box", "status": "Proposed", "action": "Confirm fixing, coating and BAL compliance", "dwgRef": "A-21" },
+      { "itemId": "WN-01", "location": "North living", "requirement": "BAL-rated slimline glazing, dark frames", "status": "To verify", "action": "Confirm BAL rating from assessor; then size for passive solar", "dwgRef": "A-30" },
+      { "itemId": "ST-01", "location": "Basement", "requirement": "Reinforced concrete retaining to cellar/store", "status": "To verify", "action": "Engineer to design + certify; coordinate waterproofing", "dwgRef": "S-01" },
+      { "itemId": "PL-01", "location": "Rear yard", "requirement": "Lap pool, concrete, travertine-look surround", "status": "Proposed", "action": "Confirm position vs Hills Face Zone envelope", "dwgRef": "A-90" },
+      { "itemId": "RF-01", "location": "Main roof", "requirement": "Dark low-sheen standing-seam metal", "status": "Proposed", "action": "Confirm falls, valleys and overflow provisions", "dwgRef": "A-40" }
     ],
     "coordination": [
       "Coordinate basement waterproofing and drainage with the structural and civil packages.",

@@ -1,6 +1,6 @@
 {
   "_description": "Typical fixture: ground-floor renovation + two-storey rear extension, construction-management overlay. De-identified fictional data.",
-  "meta": { "ref": "0417", "revision": "1", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
+  "meta": { "ref": "0417", "revision": "1", "preparedDate": "2026-11-05", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
   "project": {
     "clientName": "Jordan & Mia Whitcombe",
     "clientSalutation": "Jordan and Mia",
@@ -55,8 +55,14 @@
     ]
   },
   "architectBrief": {
+    "actions": [
+      "Confirm the certification pathway (building consent route) before working drawings proceed.",
+      "Size the north living glazing for passive solar and design the eaves / shading to suit (WN-01).",
+      "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).",
+      "Confirm underfloor-heating inclusion to the ensuite so it can be coordinated with the slab and services."
+    ],
     "purposeParas": [
-      "Issued to Harper Reece Architecture (Alex Harper) to progress the developed design of the rear extension and ground-floor renovation. Latest basis: Concept Set C-02, issued 28 Oct 2026. This brief consolidates confirmed requirements and the client's current preferences, and lists items requiring design coordination."
+      "Issued to Harper Reece Architecture (Alex Harper) to progress the developed design of the rear extension and ground-floor renovation. Latest basis: Concept Set C-02, issued 28 Oct 2026. This brief separates confirmed client requirements from indicative preferences, and lists the items needing design coordination."
     ],
     "confirmedReqs": [
       "Two-storey rear extension: open-plan living at ground, main suite above, as per Concept Set C-02.",
@@ -69,11 +75,11 @@
       "Freestanding bath to main ensuite; butler's pantry to kitchen."
     ],
     "scheduleItems": [
-      { "itemId": "EX-01", "location": "External walls", "requirement": "Fibre-cement horizontal cladding (ext.)", "status": "Preliminary", "action": "Confirm profile + junction details", "dwgRef": "A-21" },
-      { "itemId": "EX-02", "location": "Entry", "requirement": "Timber-look batten feature screen", "status": "Preliminary", "action": "Detail fixing + spacing", "dwgRef": "A-21" },
-      { "itemId": "WN-01", "location": "Living (north)", "requirement": "Slimline-framed glazing, dark finish", "status": "Confirmed", "action": "Size for passive solar + shading", "dwgRef": "A-30" },
-      { "itemId": "ST-01", "location": "Extension frame", "requirement": "Steel beam over living opening", "status": "Confirmed", "action": "Engineer to size + certify", "dwgRef": "S-02" },
-      { "itemId": "RF-01", "location": "Extension roof", "requirement": "Skillion to rear, concealed gutters", "status": "Preliminary", "action": "Confirm falls + overflow", "dwgRef": "A-40" }
+      { "itemId": "EX-01", "location": "External walls", "requirement": "Fibre-cement horizontal cladding (ext.)", "status": "Proposed", "action": "Confirm profile + junction details", "dwgRef": "A-21" },
+      { "itemId": "EX-02", "location": "Entry", "requirement": "Timber-look batten feature screen", "status": "Proposed", "action": "Detail fixing + spacing", "dwgRef": "A-21" },
+      { "itemId": "WN-01", "location": "Living (north)", "requirement": "Slimline-framed glazing, dark finish", "status": "Client-approved", "action": "Size for passive solar + design shading", "dwgRef": "A-30" },
+      { "itemId": "ST-01", "location": "Extension frame", "requirement": "Steel beam over living opening", "status": "To verify", "action": "Engineer to size + certify", "dwgRef": "S-02" },
+      { "itemId": "RF-01", "location": "Extension roof", "requirement": "Skillion to rear, concealed gutters", "status": "Proposed", "action": "Confirm falls + overflow", "dwgRef": "A-40" }
     ],
     "coordination": [
       "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).",

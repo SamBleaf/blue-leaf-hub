@@ -1,4 +1,4 @@
-// documents-r01.test.mjs — R01 Document Engine Proof acceptance tests (no DB, no network).
+// documents-r01.test.mjs — Document Engine Proof acceptance tests (no DB, no network).
 // Run: node scripts/tests/documents-r01.test.mjs
 import fs from "fs";
 import path from "path";
@@ -6,13 +6,14 @@ import { fileURLToPath } from "url";
 import { renderDocxTemplate } from "../../server/lib/docTemplates.mjs";
 import {
   buildClientBriefPayload, buildArchitectBriefPayload, buildSelectionsSchedulePayload,
-  validateFixture, SELECTION_STATUSES, DOC_DEFS,
+  validateFixture, SELECTION_STATUSES, ARCHITECT_ITEM_STATUSES, DOC_DEFS,
 } from "../../server/lib/documents/documentPayloads.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "../..");
 const reno = JSON.parse(fs.readFileSync(path.join(__dirname, "../documents/fixtures/reno-extension.json"), "utf8"));
 const long = JSON.parse(fs.readFileSync(path.join(__dirname, "../documents/fixtures/long-newbuild.json"), "utf8"));
+const issuedReno = { ...reno, meta: { ...reno.meta, status: "Issued", issuedDate: "2026-11-06" } };
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); } };
@@ -22,48 +23,55 @@ const cb = buildClientBriefPayload(reno);
 ok("T1 client brief: 3 scope-in + 2 scope-out + 2 summary paras + 3 preference groups",
   cb.SCOPE_IN.length === 3 && cb.SCOPE_OUT.length === 2 && cb.SUMMARY_PARAS.length === 2 && cb.PREFERENCE_GROUPS.length === 3);
 
-// 2. Architect-brief schedule maps every item with all six columns.
+// 2. Architect-brief: actions moved up; schedule maps every item with the coordination status vocabulary.
 const ab = buildArchitectBriefPayload(reno);
-ok("T2 architect brief: 5 schedule items, each with ITEM_ID+STATUS+DWG_REF",
-  ab.SCHEDULE_ITEMS.length === 5 && ab.SCHEDULE_ITEMS.every((r) => r.ITEM_ID && r.STATUS && r.DWG_REF));
+ok("T2 architect brief: 4 actions; 5 schedule items; every status in the coordination vocabulary",
+  ab.ACTIONS.length === 4 && ab.SCHEDULE_ITEMS.length === 5 &&
+  ab.SCHEDULE_ITEMS.every((r) => ARCHITECT_ITEM_STATUSES.includes(r.STATUS)));
 
-// 3. Selections payload is group-sorted, composes CATEGORY, and defaults blank qty to em dash.
+// 3. Selections payload is grouped (not a flat list), group-ordered, 22 items total.
 const ss = buildSelectionsSchedulePayload(long);
-const groups = ss.SCHEDULE_ROWS.map((r) => r.CATEGORY.split(" / ")[0]);
-const groupOrder = ["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"];
-const sortedOk = groups.every((g, i) => i === 0 || groupOrder.indexOf(g) >= groupOrder.indexOf(groups[i - 1]));
-ok("T3 selections: 22 rows, group-sorted, CATEGORY composed, qty defaults to em dash",
-  ss.SCHEDULE_ROWS.length === 22 && sortedOk && ss.SCHEDULE_ROWS.every((r) => r.QTY && r.STATUS));
+const order = ["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"];
+const grpOk = ss.GROUPS.every((g, i) => i === 0 || order.indexOf(g.GROUP_NAME) >= order.indexOf(ss.GROUPS[i - 1].GROUP_NAME));
+const total = ss.GROUPS.reduce((n, g) => n + g.ITEMS.length, 0);
+ok("T3 selections: grouped + group-ordered; 22 items total; blank qty defaults to em dash",
+  ss.GROUPS.length === 6 && grpOk && total === 22 && ss.GROUPS.every((g) => g.ITEMS.every((r) => r.QTY && r.STATUS)));
 
-// 4. Good fixtures are issue-ready.
-ok("T4 validation: both fixtures pass in issue mode", validateFixture(reno, { mode: "issue" }).ok && validateFixture(long, { mode: "issue" }).ok);
+// 4. A properly ISSUED document with a logo validates in issue mode.
+ok("T4 validation: an Issued fixture (logo present) passes issue mode", validateFixture(issuedReno, { mode: "issue", logoPresent: true }).ok === true);
 
-// 5. Missing client name BLOCKS issue.
-const noClient = JSON.parse(JSON.stringify(reno)); noClient.project.clientName = "";
-ok("T5 validation: missing client name blocks issue", validateFixture(noClient, { mode: "issue" }).ok === false);
+// 5. A Draft/specimen is NOT issue-ready (issue control), but still renders in draft mode.
+const draftCheck = validateFixture(reno, { mode: "issue" });
+ok("T5 issue control: a Draft/specimen is blocked from issue but valid as a draft",
+  draftCheck.ok === false && draftCheck.errors.some((e) => /not marked "Issued"/.test(e)) && validateFixture(reno, { mode: "draft" }).ok === true);
 
-// 6. Placeholder / TODO text BLOCKS issue (but only warns in draft).
-const placeholder = JSON.parse(JSON.stringify(reno)); placeholder.clientBrief.summaryParas[0] = "TODO: write the real summary {{CLIENT}}";
-const issueCheck = validateFixture(placeholder, { mode: "issue" });
-ok("T6 validation: placeholder text blocks issue, warns in draft",
-  issueCheck.ok === false && issueCheck.errors.length >= 1 && validateFixture(placeholder, { mode: "draft" }).ok === true);
+// 6. Missing client name blocks issue.
+const noClient = JSON.parse(JSON.stringify(issuedReno)); noClient.project.clientName = "";
+ok("T6 validation: missing client name blocks issue", validateFixture(noClient, { mode: "issue" }).ok === false);
 
-// 7. A fabricated $0 money value BLOCKS issue.
-const zeroMoney = JSON.parse(JSON.stringify(reno)); zeroMoney.clientBrief.decisions.push("Fixed price is $0.00 for the whole build");
-ok("T7 validation: $0 money value blocks issue", validateFixture(zeroMoney, { mode: "issue" }).ok === false);
+// 7. Placeholder / TODO text blocks issue (and warns in draft); a fabricated $0 blocks issue.
+const placeholder = JSON.parse(JSON.stringify(issuedReno)); placeholder.clientBrief.summaryParas[0] = "TODO: real summary {{CLIENT}}";
+const zeroMoney = JSON.parse(JSON.stringify(issuedReno)); zeroMoney.clientBrief.decisions.push("Fixed price is $0.00 for the whole build");
+ok("T7 validation: placeholder text & $0 money both block issue",
+  validateFixture(placeholder, { mode: "issue" }).ok === false && validateFixture(placeholder, { mode: "draft" }).ok === true &&
+  validateFixture(zeroMoney, { mode: "issue" }).ok === false);
 
-// 8. Unknown selection status BLOCKS issue; the special non-decision states are allowed.
-const badStatus = JSON.parse(JSON.stringify(long)); badStatus.selections[0].status = "Maybe-ish";
-ok("T8 validation: unknown status blocks; By Others / N/A / Excluded / Existing to Remain allowed",
-  validateFixture(badStatus, { mode: "issue" }).ok === false &&
-  ["By Others", "N/A", "Excluded", "Existing to Remain", "Undecided"].every((s) => SELECTION_STATUSES.includes(s)));
+// 8. Status vocabularies enforced: unknown selection status blocks; non-decision states allowed; architect status vocabulary enforced.
+const badSel = JSON.parse(JSON.stringify(issuedReno)); badSel.selections = [{ group: "External", itemId: "X", category: "c", product: "p", finish: "f", status: "Maybe-ish", responsibility: "BLB" }];
+const badArch = JSON.parse(JSON.stringify(issuedReno)); badArch.architectBrief.scheduleItems[0].status = "Confirmed";
+ok("T8 validation: unknown selection status blocks; special states allowed; architect 'Confirmed' rejected (intent≠verification)",
+  validateFixture(badSel, { mode: "issue" }).ok === false &&
+  ["By Others", "N/A", "Excluded", "Existing to Remain", "Undecided"].every((s) => SELECTION_STATUSES.includes(s)) &&
+  validateFixture(badArch, { mode: "issue" }).ok === false);
 
-// 9. Rendering is DETERMINISTIC — the same (template, payload) yields byte-identical output.
-//    This underpins the immutable-issue model: a re-render of an issued revision reproduces the exact bytes.
+// 9. Missing approved logo blocks issue (Tab 17 identity blocker).
+ok("T9 issue control: missing logo blocks issue", validateFixture(issuedReno, { mode: "issue", logoPresent: false }).ok === false);
+
+// 10. Rendering is DETERMINISTIC — same (template, payload) → byte-identical output (immutable-issue reproducibility).
 const tpl = fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_brief.templateFile));
 const r1 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
 const r2 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
-ok("T9 render is deterministic (issued-snapshot reproducibility)", Buffer.compare(r1, r2) === 0 && r1.length > 5000);
+ok("T10 render is deterministic (issued-snapshot reproducibility)", Buffer.compare(r1, r2) === 0 && r1.length > 5000);
 
-console.log(`\nR01 document tests: ${pass} passed, ${fail} failed`);
+console.log(`\nR01/R02 document tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
