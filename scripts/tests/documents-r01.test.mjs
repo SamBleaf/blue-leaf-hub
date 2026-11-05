@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { renderDocxTemplate } from "../../server/lib/docTemplates.mjs";
 import {
-  buildClientBriefPayload, buildArchitectBriefPayload, buildSelectionsSchedulePayload,
+  buildClientBriefPayload, buildArchitectBriefPayload, buildSelectionsSchedulePayload, buildClientPresentationPayload,
   validateFixture, SELECTION_STATUSES, ARCHITECT_ITEM_STATUSES, DOC_DEFS,
 } from "../../server/lib/documents/documentPayloads.mjs";
 
@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "../..");
 const reno = JSON.parse(fs.readFileSync(path.join(__dirname, "../documents/fixtures/reno-extension.json"), "utf8"));
 const long = JSON.parse(fs.readFileSync(path.join(__dirname, "../documents/fixtures/long-newbuild.json"), "utf8"));
+const short = JSON.parse(fs.readFileSync(path.join(__dirname, "../documents/fixtures/short-powderroom.json"), "utf8"));
 const issuedReno = { ...reno, meta: { ...reno.meta, status: "Issued", issuedDate: "2026-11-06" } };
 
 let pass = 0, fail = 0;
@@ -76,5 +77,33 @@ const r1 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
 const r2 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
 ok("T10 render is deterministic (issued-snapshot reproducibility)", Buffer.compare(r1, r2) === 0 && r1.length > 5000);
 
-console.log(`\nR01/R02 document tests: ${pass} passed, ${fail} failed`);
+// 11. Client Selections Presentation (editorial): built from the SAME selections, grouped into client
+//     areas, with a decisions list; palette tiles are data-driven and gracefully absent when unprovided.
+const cp = buildClientPresentationPayload(long);
+const cpItems = cp.AREAS.flatMap((a) => a.ITEMS);
+const cpShort = buildClientPresentationPayload(short); // no clientPresentation block in fixture
+ok("T11 client presentation: same selections regrouped into client areas; decisions filtered; palette optional",
+  cp.AREAS.length >= 3 && cpItems.length === long.selections.length && cp.AREAS.every((a, i) => a.AREA_NUM === String(i + 1).padStart(2, "0")) &&
+  cp.HAS_PALETTE.length === 1 && cp.TILE1_AREA === "Exterior" && cp.DECISIONS.every((d) => d.REF_ID && d.ITEM && ["TBC", "Hold", "Design", "Undecided", "Preliminary"].includes(d.STATUS)) &&
+  cpShort.HAS_PALETTE.length === 0 && cpShort.AREAS.length >= 1);
+
+// 12. Deliberate pagination flags (no fabricated geometry — just content-size signals the template reads).
+const abReno = buildArchitectBriefPayload(reno), abLong = buildArchitectBriefPayload(long), abShort = buildArchitectBriefPayload(short);
+const cbReno = buildClientBriefPayload(reno), cbShort = buildClientBriefPayload(short);
+ok("T12 pagination: short/medium architect stay one page; long breaks + shows references; client brief breaks only when it carries the process path",
+  abShort.ARCH_BREAK === false && abReno.ARCH_BREAK === false && abLong.ARCH_BREAK === true &&
+  abLong.HAS_REFS.length === 1 && abReno.HAS_REFS.length === 0 &&
+  cbReno.CB_BREAK === true && cbReno.HAS_PROCESS.length === 1 && cbReno.PROC1_LABEL === "Concept" &&
+  cbShort.CB_BREAK === false && cbShort.HAS_PROCESS.length === 0 && cbShort.ASSUMPTIONS.length === short.clientBrief.assumptions.length);
+
+// 13. All FOUR templates render from one fixture via the canonical engine (no second engine, no image module).
+let rendered = 0;
+for (const def of Object.values(DOC_DEFS)) {
+  const tpl = fs.readFileSync(path.join(REPO, "public/templates", def.templateFile));
+  const out = renderDocxTemplate(tpl, def.build(reno));
+  if (out && out.length > 5000) rendered++;
+}
+ok("T13 all four documents render through the existing renderDocxTemplate", rendered === 4 && Object.keys(DOC_DEFS).length === 4);
+
+console.log(`\nR01–R04 document tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

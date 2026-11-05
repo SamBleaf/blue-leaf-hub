@@ -57,6 +57,13 @@
     ],
     "nextStepsParas": [
       "The next paid step is the Pre-Construction / Developed Design & Specification agreement (PTSA). From that point Blue Leaf develops the design with the consultants, locks the specifications and selections, and produces developed pricing — the point at which this preliminary brief becomes a detailed, costed scope."
+    ],
+    "processSteps": [
+      { "num": "01", "label": "Concept", "note": "Direction agreed" },
+      { "num": "02", "label": "PTSA", "note": "Scope accepted" },
+      { "num": "03", "label": "Design", "note": "Consultant input" },
+      { "num": "04", "label": "Pricing", "note": "Tender / review" },
+      { "num": "05", "label": "Contract", "note": "Ready to build" }
     ]
   },
   "architectBrief": {
@@ -112,5 +119,16 @@
     { "group": "Services & Fixtures", "itemId": "SF-01", "category": "Ensuite", "product": "Underfloor heating", "finish": "Electric, zoned", "qty": "1", "status": "TBC", "responsibility": "BLB" },
     { "group": "Services & Fixtures", "itemId": "SF-02", "category": "Living", "product": "Reverse-cycle A/C", "finish": "Ducted, zoned", "qty": "1", "status": "Proposed", "responsibility": "BLB" },
     { "group": "External Works", "itemId": "XW-01", "category": "Alfresco", "product": "Covered alfresco apron", "finish": "Concrete, broom finish", "qty": "~24 m²", "status": "Proposed", "responsibility": "BLB" }
-  ]
+  ],
+  "clientPresentation": {
+    "approachParas": [
+      "A warm, durable home developed from a restrained, consistent palette: a low-maintenance exterior, honest interior materials and a few considered feature moments. These pages summarise the current direction in a format that is easy to review — supplier schedules and architectural drawings remain the technical reference."
+    ],
+    "palette": [
+      { "area": "Exterior", "name": "Fibre-cement + timber", "note": "Horizontal cladding, battened entry feature." },
+      { "area": "Glazing", "name": "Dark slimline frames", "note": "Generous glazing to the north living zone." },
+      { "area": "Floors", "name": "Engineered oak", "note": "Blackbutt tone through the living areas." },
+      { "area": "Joinery", "name": "Stone-look + matte", "note": "Island bench and butler's pantry." }
+    ]
+  }
 }

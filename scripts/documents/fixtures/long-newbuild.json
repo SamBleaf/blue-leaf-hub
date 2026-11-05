@@ -54,6 +54,13 @@
     ],
     "nextStepsParas": [
       "Blue Leaf will complete the developed design and specification with the consultant team, confirm engineering and certification, and issue a developed cost plan and tender package ahead of the fixed-price building contract."
+    ],
+    "processSteps": [
+      { "num": "01", "label": "Concept", "note": "Direction agreed" },
+      { "num": "02", "label": "PTSA", "note": "Scope accepted" },
+      { "num": "03", "label": "Design", "note": "Consultant input" },
+      { "num": "04", "label": "Pricing", "note": "Tender / review" },
+      { "num": "05", "label": "Contract", "note": "Ready to build" }
     ]
   },
   "architectBrief": {
@@ -124,5 +131,17 @@
     { "group": "External Works", "itemId": "XW-01", "category": "Pool", "product": "Lap pool + travertine-look surround + equipment enclosure", "finish": "Concrete shell; mid-grey interior", "qty": "1", "status": "Proposed", "responsibility": "BLB / A-90" },
     { "group": "External Works", "itemId": "XW-02", "category": "Driveway", "product": "Exposed-aggregate concrete driveway + crossover", "finish": "Charcoal aggregate", "qty": "~110 m²", "status": "Proposed", "responsibility": "BLB" },
     { "group": "External Works", "itemId": "XW-03", "category": "Studio", "product": "Detached studio — base build, serviced for future fit-out", "finish": "Shell + services; fit-out by others later", "qty": "1", "status": "By Others", "responsibility": "Client (future)" }
-  ]
+  ],
+  "clientPresentation": {
+    "approachParas": [
+      "A calm, confident new home built on a consistent material language — a restrained masonry-and-metal exterior, warm honest interiors and a small number of considered feature elements. This presentation groups the current selections for easy review; the technical selection register and the architectural drawings remain the definitive source.",
+      "Items shown here reflect the direction developed to date. Where an item is still being reviewed it is marked accordingly, and the decisions list at the end sets out what remains to be confirmed."
+    ],
+    "palette": [
+      { "area": "Exterior", "name": "Masonry + standing seam", "note": "Face brick base, metal upper form." },
+      { "area": "Glazing", "name": "Thermally-broken black", "note": "Large north glazing, screened to suit." },
+      { "area": "Floors", "name": "Oak + large-format stone", "note": "Timber to living, stone to wet areas." },
+      { "area": "Joinery", "name": "Veneer + stone tops", "note": "Kitchen, scullery and robes." }
+    ]
+  }
 }

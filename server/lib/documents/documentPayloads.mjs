@@ -50,8 +50,6 @@ export function buildClientBriefPayload(fx) {
   const intn = (i, k) => (b.intentions && b.intentions[i] ? b.intentions[i][k] : "");
   return {
     ...c,
-    PHOTO_CAPTION: "Project photograph",
-    PHOTO_NOTE: "Approved Blue Leaf project photograph to be placed here — illustrative only, not the project site.",
     META_ROWS: metaRows([["Prepared for", p.clientName], ["Site", p.siteAddress], ["Design basis", p.drawingBasis], ["Document status", c._statusValue]]),
     SUMMARY_PARAS: paras(b.summaryParas),
     INT1_NUM: "01", INT1_LABEL: intn(0, "label"), INT1_TEXT: intn(0, "text"),
@@ -62,7 +60,23 @@ export function buildClientBriefPayload(fx) {
     PREFERENCE_GROUPS: (b.preferenceGroups || []).map((g) => ({ GROUP_NAME: g.name, ITEMS: items(g.items) })),
     QUESTIONS: (b.questions || []).map((q) => ({ REF_ID: q.id || "", ACTION: q.action || "", OWNER: q.owner || "—", STATUS: q.status || "OPEN" })),
     NEXT_STEPS_PARAS: paras(b.nextStepsParas),
+    // Composed closing page (Tab 17 #2): Blue Leaf process path + working assumptions + a status anchor.
+    // A full brief (one that carries the process path) breaks before the questions so page 1 ends on the
+    // design narrative and page 2 reads as one composed block; a short brief stays a single page.
+    CB_BREAK: !!(b.processSteps && b.processSteps.length),
+    HAS_PROCESS: (b.processSteps && b.processSteps.length) ? [{}] : [],
+    ...procFields(b.processSteps),
+    ASSUMPTIONS: items(b.assumptions),
+    CLOSE_LABEL: "Document status · preliminary",
+    CLOSE_BODY: "Prepared for discussion at concept stage. This is a design brief, not a fixed-price quotation: products, quantities and allowances are indicative and are developed and confirmed during pre-construction. No client signature is required.",
   };
+}
+
+/** Pad the Blue Leaf process path to five fixed stage slots for the client-brief band. */
+function procFields(steps) {
+  const out = {};
+  for (let i = 0; i < 5; i++) { const s = (steps || [])[i] || {}; out[`PROC${i + 1}_NUM`] = s.num || ""; out[`PROC${i + 1}_LABEL`] = s.label || ""; out[`PROC${i + 1}_NOTE`] = s.note || ""; }
+  return out;
 }
 
 const archGroup = (id) => (/^(EX|WN|ST|RF|PL)/.test(id) ? "Envelope & structure" : "Internal & services");
@@ -89,6 +103,68 @@ export function buildArchitectBriefPayload(fx) {
     CONFIRMED_REQS: (a.confirmedReqs || []).map((t, i) => ({ REF_ID: `REQ-${String(i + 1).padStart(2, "0")}`, REF_TEXT: String(t || "") })),
     PREFERENCES: paras([a.clientPrefs && a.clientPrefs.length ? `Client preferences requiring development: ${a.clientPrefs.map((s) => String(s).replace(/\.\s*$/, "")).join("; ")}. These preferences are not final product or technical approvals.` : ""]),
     GROUPS,
+    ...(() => {
+      // Deliberate pagination (Tab 17 #1): a short/medium brief stays one tight page; a long brief moves
+      // the Design register to its own page and fills that page with the referenced-documents list, so
+      // page 2 is a composed reference page — never a split table or a sliver.
+      const total = (a.actions || []).length + (a.confirmedReqs || []).length + (a.scheduleItems || []).length;
+      const brk = total >= 13;
+      return { ARCH_BREAK: brk, HAS_REFS: (brk && (a.references || []).length) ? [{}] : [], REFERENCES: items(a.references) };
+    })(),
+  };
+}
+
+// ── 03 Client Selections Presentation (editorial, client-facing) ──────────────
+// Built from the SAME fx.selections as the Technical register — grouped into client-friendly areas,
+// shown as cards, with a plain-language status key. No fabricated colours or products.
+const PRESENT_AREAS = [
+  { name: "Exterior selections", groups: ["External", "External Works"] },
+  { name: "Interior selections", groups: ["Internal Finishes"] },
+  { name: "Joinery & kitchen", groups: ["Joinery"] },
+  { name: "Bathrooms & wet areas", groups: ["Wet Areas"] },
+  { name: "Services & comfort", groups: ["Services & Fixtures"] },
+];
+const AREA_TAGLINE = "Agreed in principle for review — supplier schedules and drawings remain the technical reference.";
+const NEEDS_DECISION = new Set(["TBC", "Hold", "Design", "Undecided", "Preliminary"]);
+
+export function buildClientPresentationPayload(fx) {
+  const p = fx.project, cp = fx.clientPresentation || {};
+  const c = chrome(fx, { prefix: "SFS", breadcrumb: "Client Selections  /  Design Study",
+    sectionLabel: "Client selections  /  Design development", title: "Materials & finishes",
+    tagline: "A considered palette, with every decision traceable." });
+  const byGroup = new Map();
+  for (const r of fx.selections || []) { if (!byGroup.has(r.group)) byGroup.set(r.group, []); byGroup.get(r.group).push(r); }
+  let n = 0;
+  const AREAS = PRESENT_AREAS.map((a) => {
+    const rows = a.groups.flatMap((g) => byGroup.get(g) || []);
+    if (!rows.length) return null;
+    n += 1;
+    return {
+      AREA_NUM: String(n).padStart(2, "0"), AREA_NAME: a.name, AREA_TAGLINE,
+      ITEMS: rows.map((r) => ({
+        REF_ID: r.itemId || "", CAT: r.category || "", NAME: r.product || "",
+        DESC: r.finish || "", STATUS: r.status || "TBC", SOURCE: r.responsibility || "",
+      })),
+    };
+  }).filter(Boolean);
+  const DECISIONS = (fx.selections || []).filter((r) => NEEDS_DECISION.has(r.status)).map((r) => ({
+    REF_ID: r.itemId || "", ITEM: [r.category, r.product].filter(Boolean).join(" — "), OWNER: r.responsibility || "—", STATUS: r.status || "TBC",
+  }));
+  const palette = (cp.palette || []).slice(0, 4);
+  const tiles = {};
+  for (let i = 0; i < 4; i++) { const t = palette[i] || {}; tiles[`TILE${i + 1}_AREA`] = t.area || ""; tiles[`TILE${i + 1}_NAME`] = t.name || ""; tiles[`TILE${i + 1}_NOTE`] = t.note || ""; }
+  return {
+    ...c,
+    SUBLINE: [p.projectDescription, p.siteAddress].filter(Boolean).join("   /   "),
+    APPROACH_PARAS: paras(cp.approachParas && cp.approachParas.length ? cp.approachParas
+      : ["The intention is a warm, durable home developed from a restrained, consistent palette. These pages summarise the current selections in a format that is easy to review; supplier schedules and architectural drawings remain the technical reference."]),
+    HAS_PALETTE: palette.length ? [{}] : [],
+    ...tiles,
+    READ_LABEL: "Reading this schedule",
+    READ_BODY: "Preferred means the look is agreed in principle, not the exact product. Proposed means a specific option is being reviewed. Client-approved requires documented acceptance. Nothing in this document authorises procurement.",
+    AREAS,
+    HAS_DECISIONS: DECISIONS.length ? [{}] : [],
+    DECISIONS,
   };
 }
 
@@ -114,6 +190,7 @@ export function buildSelectionsSchedulePayload(fx) {
 export const DOC_DEFS = {
   client_brief: { templateFile: "blb-client-brief-template.docx", build: buildClientBriefPayload, label: "Client Project Brief" },
   architect_brief: { templateFile: "blb-architect-brief-template.docx", build: buildArchitectBriefPayload, label: "Architect Design Brief" },
+  client_presentation: { templateFile: "blb-client-presentation-template.docx", build: buildClientPresentationPayload, label: "Client Selections Presentation" },
   selections_schedule: { templateFile: "blb-selections-schedule-template.docx", build: buildSelectionsSchedulePayload, label: "Technical Selection Register" },
 };
 
