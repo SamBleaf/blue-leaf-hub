@@ -1,0 +1,116 @@
+{
+  "_description": "Edge-case fixture: large new build, long client name + address, 20 selection rows across all groups, every disposition state (TBC / N/A / Excluded / By Others / Existing to Remain / Undecided), long product descriptions — exercises 2+ page schedule, repeating header and footer clearance.",
+  "meta": { "ref": "0608", "revision": "1", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
+  "project": {
+    "clientName": "Dr Alexandra Featherstone-Montgomery & Mr Christopher Featherstone-Montgomery",
+    "clientSalutation": "Alexandra and Christopher",
+    "projectDescription": "New two-storey architectural home with basement cellar, lap pool and detached studio",
+    "siteAddress": "Lot 212, 48 Woodcutters Ridge Road, Aldgate SA 5154 (Adelaide Hills Face Zone)",
+    "deliveryModel": "Design & Build (fixed-price contract to follow pre-construction)",
+    "drawingBasis": "Concept Set C-04 Rev B, issued 31 Oct 2026",
+    "architect": "Harper Reece Architecture (Alex Harper)",
+    "preparedBy": "Blue Leaf Building",
+    "stageLabel": "Pre-construction"
+  },
+  "clientBrief": {
+    "summaryParas": [
+      "A new two-storey family home on a sloping Adelaide Hills Face Zone allotment, designed to sit low in the landscape with a restrained, durable material palette and strong indoor–outdoor connection to the north. The clients value natural light, acoustic calm and low ongoing maintenance.",
+      "This brief records the direction confirmed through concept and early pre-construction so detailed design and documentation can proceed from a single shared source."
+    ],
+    "scopeIn": [
+      "New two-storey dwelling with partial basement (cellar + store) and integrated double garage.",
+      "Lap pool with travertine-look surround and equipment enclosure.",
+      "Detached studio / home office to the rear, serviced for future use.",
+      "Full landscape and driveway within the approved building envelope."
+    ],
+    "scopeOut": [
+      "Solar battery system — priced separately as an option.",
+      "Furniture, loose fittings and window furnishings beyond the fixed scope.",
+      "Any works outside the approved Hills Face Zone building envelope."
+    ],
+    "preferenceGroups": [
+      { "name": "External", "items": [
+        "Combination of through-coloured render and vertical spotted-gum cladding, low-sheen dark metal roof.",
+        "Bushfire-compliant (BAL-rated) windows and doors; the final BAL rating is to be confirmed with the energy/bushfire assessor."
+      ] },
+      { "name": "Internal", "items": [
+        "Large-format porcelain to entry and wet areas; engineered timber to living and bedrooms.",
+        "Honed stone benchtops; integrated joinery with minimal hardware."
+      ] }
+    ],
+    "assumptions": [
+      "Geotechnical and bushfire assessments to be completed in pre-construction and may adjust footings and envelope detailing.",
+      "Allowances shown anywhere in supporting documents are indicative only and are superseded by the developed cost plan."
+    ],
+    "decisions": [
+      "Confirm basement extent against the developed cost plan.",
+      "Confirm pool position and its interface with the Hills Face Zone envelope.",
+      "Confirm the structural and bushfire certification pathway before working drawings."
+    ],
+    "nextStepsParas": [
+      "Blue Leaf will complete the developed design and specification with the consultant team, confirm engineering and certification, and issue a developed cost plan and tender package ahead of the fixed-price building contract."
+    ]
+  },
+  "architectBrief": {
+    "purposeParas": [
+      "Issued to the design team to progress developed documentation for a new two-storey home with basement, pool and studio on a Hills Face Zone allotment. Latest basis: Concept Set C-04 Rev B. Confirmed requirements and client preferences are separated below; coordination and outstanding decisions are listed for action."
+    ],
+    "confirmedReqs": [
+      "Two-storey dwelling with partial basement and integrated double garage, per Concept Set C-04 Rev B.",
+      "North-facing primary living with deep eaves; home to sit below the ridgeline sightline.",
+      "BAL-rated external envelope; final rating from the bushfire assessment to govern detailing."
+    ],
+    "clientPrefs": [
+      "Through-coloured render with spotted-gum cladding accents; dark low-sheen metal roof.",
+      "Large-format porcelain to wet areas; engineered timber elsewhere; honed stone benchtops.",
+      "Lap pool with travertine-look surround; studio serviced for future fit-out."
+    ],
+    "scheduleItems": [
+      { "itemId": "EX-01", "location": "External walls (general)", "requirement": "Through-coloured acrylic render system over blueboard", "status": "Preliminary", "action": "Confirm system + control joints with engineer", "dwgRef": "A-20" },
+      { "itemId": "EX-02", "location": "External walls (feature)", "requirement": "Spotted-gum vertical cladding to entry and upper-level box", "status": "Preliminary", "action": "Confirm fixing, coating and BAL compliance", "dwgRef": "A-21" },
+      { "itemId": "WN-01", "location": "North living", "requirement": "BAL-rated slimline glazing, dark frames", "status": "Preliminary", "action": "Confirm BAL rating from assessor; size for passive solar", "dwgRef": "A-30" },
+      { "itemId": "ST-01", "location": "Basement", "requirement": "Reinforced concrete retaining to cellar/store", "status": "Confirmed", "action": "Engineer to design + certify; coordinate waterproofing", "dwgRef": "S-01" },
+      { "itemId": "PL-01", "location": "Rear yard", "requirement": "Lap pool, concrete, travertine-look surround", "status": "Preliminary", "action": "Confirm position vs Hills Face Zone envelope", "dwgRef": "A-90" },
+      { "itemId": "RF-01", "location": "Main roof", "requirement": "Dark low-sheen standing-seam metal", "status": "Preliminary", "action": "Confirm falls, valleys and overflow provisions", "dwgRef": "A-40" }
+    ],
+    "coordination": [
+      "Coordinate basement waterproofing and drainage with the structural and civil packages.",
+      "Reconcile BAL rating across windows, cladding and decking before finalising selections.",
+      "Confirm pool and studio service runs with the hydraulic and electrical consultants."
+    ],
+    "outstanding": [
+      "Bushfire (BAL) assessment outstanding — governs multiple external selections.",
+      "Geotechnical report outstanding — may adjust footing and basement design.",
+      "Certification pathway (private certifier vs council) to be confirmed."
+    ],
+    "references": [
+      "Concept Set C-04 Rev B (31 Oct 2026).",
+      "BLB-BRIEF-0608 Rev 1 — Preliminary Client Project Brief.",
+      "Feature survey FS-21 (received); contour and tree survey."
+    ]
+  },
+  "selections": [
+    { "group": "External", "itemId": "EX-01", "category": "Walls (general)", "product": "Through-coloured acrylic render system over blueboard substrate", "finish": "Fine texture, mid-grey", "qty": "—", "status": "Proposed", "responsibility": "BLB / A-20" },
+    { "group": "External", "itemId": "EX-02", "category": "Walls (feature)", "product": "Spotted-gum vertical cladding, select grade", "finish": "66x19 shiplap, exterior decking oil", "qty": "~48 m²", "status": "TBC", "responsibility": "Designer" },
+    { "group": "External", "itemId": "EX-03", "category": "Roof", "product": "Standing-seam steel roofing, concealed fix", "finish": "Matt dark bronze", "qty": "—", "status": "Proposed", "responsibility": "BLB / A-40" },
+    { "group": "External", "itemId": "EX-04", "category": "Windows & doors", "product": "BAL-rated slimline aluminium suite", "finish": "Matte black; glazing per energy report", "qty": "—", "status": "Undecided", "responsibility": "BLB / Rylock" },
+    { "group": "External", "itemId": "EX-05", "category": "Boundary fencing", "product": "Existing stone boundary wall to Woodcutters Ridge Road", "finish": "Retained as existing", "qty": "1", "status": "Existing to Remain", "responsibility": "Client" },
+    { "group": "Internal Finishes", "itemId": "IN-01", "category": "Living / Dining / Kitchen", "product": "Engineered European oak flooring, wide board", "finish": "Natural matte, 220mm", "qty": "~140 m²", "status": "Client-approved", "responsibility": "Client" },
+    { "group": "Internal Finishes", "itemId": "IN-02", "category": "Entry & wet areas", "product": "Large-format porcelain tile", "finish": "Honed stone-look, 1200x600", "qty": "~70 m²", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Internal Finishes", "itemId": "IN-03", "category": "Walls (general)", "product": "Low-sheen acrylic wall paint", "finish": "Warm white", "qty": "—", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Internal Finishes", "itemId": "IN-04", "category": "Feature wall (living)", "product": "Stacked stone feature (client-supplied)", "finish": "By Others — client to supply", "qty": "1", "status": "By Others", "responsibility": "Client" },
+    { "group": "Joinery", "itemId": "JY-01", "category": "Kitchen", "product": "Island, rear bench and full-height pantry joinery", "finish": "Honed stone top; matte 2-pac doors", "qty": "1", "status": "Proposed", "responsibility": "Designer / BLB" },
+    { "group": "Joinery", "itemId": "JY-02", "category": "Butler's pantry", "product": "Secondary bench + open shelving", "finish": "Timber-veneer shelving", "qty": "1", "status": "TBC", "responsibility": "Designer" },
+    { "group": "Joinery", "itemId": "JY-03", "category": "Main robe", "product": "Walk-in robe fit-out", "finish": "Melamine carcass, veneer fronts", "qty": "1", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Wet Areas", "itemId": "WA-01", "category": "Main ensuite", "product": "Freestanding bath", "finish": "Matte white, 1800mm", "qty": "1", "status": "Client-approved", "responsibility": "Client" },
+    { "group": "Wet Areas", "itemId": "WA-02", "category": "Main ensuite", "product": "Tapware & mixers suite", "finish": "Brushed brass (PVD)", "qty": "set", "status": "TBC", "responsibility": "Routleys" },
+    { "group": "Wet Areas", "itemId": "WA-03", "category": "Powder room", "product": "Wall-hung basin + mirror cabinet", "finish": "Stone top; integrated light", "qty": "1", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Wet Areas", "itemId": "WA-04", "category": "Bathrooms (x2)", "product": "Steam / spa function", "finish": "Not applicable to this project", "qty": "—", "status": "N/A", "responsibility": "—" },
+    { "group": "Services & Fixtures", "itemId": "SF-01", "category": "Whole home", "product": "Ducted reverse-cycle air conditioning, zoned", "finish": "Concealed ducts; linear bar grilles", "qty": "1", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Services & Fixtures", "itemId": "SF-02", "category": "Living / entry", "product": "Lighting & electrical — feature and general", "finish": "Per lighting plan (to be issued)", "qty": "—", "status": "TBC", "responsibility": "TLI" },
+    { "group": "Services & Fixtures", "itemId": "SF-03", "category": "Roof", "product": "Solar PV + battery storage", "finish": "Excluded from fixed scope — priced as option", "qty": "—", "status": "Excluded", "responsibility": "Client" },
+    { "group": "External Works", "itemId": "XW-01", "category": "Pool", "product": "Lap pool + travertine-look surround + equipment enclosure", "finish": "Concrete shell; mid-grey interior", "qty": "1", "status": "Proposed", "responsibility": "BLB / A-90" },
+    { "group": "External Works", "itemId": "XW-02", "category": "Driveway", "product": "Exposed-aggregate concrete driveway + crossover", "finish": "Charcoal aggregate", "qty": "~110 m²", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "External Works", "itemId": "XW-03", "category": "Studio", "product": "Detached studio — base build, serviced for future fit-out", "finish": "Shell + services; fit-out by others later", "qty": "1", "status": "By Others", "responsibility": "Client (future)" }
+  ]
+}
