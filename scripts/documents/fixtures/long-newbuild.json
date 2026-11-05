@@ -13,6 +13,11 @@
     "stageLabel": "Pre-construction"
   },
   "clientBrief": {
+    "intentions": [
+      { "label": "Sit low", "text": "Settle the home into the Hills Face landscape with a restrained palette." },
+      { "label": "Bring in light", "text": "Prioritise northern light, acoustic calm and indoor–outdoor flow." },
+      { "label": "Build to last", "text": "Durable, low-maintenance materials and bushfire-ready detailing." }
+    ],
     "summaryParas": [
       "A new two-storey family home on a sloping Adelaide Hills Face Zone allotment, designed to sit low in the landscape with a restrained, durable material palette and strong indoor–outdoor connection to the north. The clients value natural light, acoustic calm and low ongoing maintenance.",
       "This brief records the direction confirmed through concept and early pre-construction so detailed design and documentation can proceed from a single shared source."
@@ -42,10 +47,10 @@
       "Geotechnical and bushfire assessments to be completed in pre-construction and may adjust footings and envelope detailing.",
       "Allowances shown anywhere in supporting documents are indicative only and are superseded by the developed cost plan."
     ],
-    "decisions": [
-      "Confirm basement extent against the developed cost plan.",
-      "Confirm pool position and its interface with the Hills Face Zone envelope.",
-      "Confirm the structural and bushfire certification pathway before working drawings."
+    "questions": [
+      { "id": "A01", "action": "Confirm basement extent against the developed cost plan.", "owner": "Blue Leaf", "status": "OPEN" },
+      { "id": "A02", "action": "Confirm pool position and its interface with the Hills Face Zone envelope.", "owner": "Architect", "status": "OPEN" },
+      { "id": "A03", "action": "Confirm the structural and bushfire certification pathway before working drawings.", "owner": "Client", "status": "OPEN" }
     ],
     "nextStepsParas": [
       "Blue Leaf will complete the developed design and specification with the consultant team, confirm engineering and certification, and issue a developed cost plan and tender package ahead of the fixed-price building contract."
@@ -53,11 +58,11 @@
   },
   "architectBrief": {
     "actions": [
-      "Provide the outstanding BAL (bushfire) assessment — it governs cladding, glazing and decking selections.",
-      "Coordinate basement waterproofing and drainage with the structural and civil packages (ST-01).",
-      "Confirm the pool position against the Hills Face Zone building envelope (PL-01).",
-      "Confirm the certification pathway (private certifier vs council) before working drawings.",
-      "Reconcile the BAL rating consistently across windows, cladding and decking before finalising selections."
+      { "id": "A01", "action": "Provide the outstanding BAL (bushfire) assessment — it governs cladding, glazing and decking selections.", "owner": "Energy / Bushfire", "status": "OPEN" },
+      { "id": "A02", "action": "Coordinate basement waterproofing and drainage with the structural and civil packages (ST-01).", "owner": "Engineer", "status": "OPEN" },
+      { "id": "A03", "action": "Confirm the pool position against the Hills Face Zone building envelope (PL-01).", "owner": "Architect", "status": "OPEN" },
+      { "id": "A04", "action": "Confirm the certification pathway (private certifier vs council) before working drawings.", "owner": "Blue Leaf", "status": "OPEN" },
+      { "id": "A05", "action": "Reconcile the BAL rating consistently across windows, cladding and decking before finalising selections.", "owner": "Architect", "status": "OPEN" }
     ],
     "purposeParas": [
       "Issued to the design team to progress developed documentation for a new two-storey home with basement, pool and studio on a Hills Face Zone allotment. Latest basis: Concept Set C-04 Rev B. Confirmed client requirements and indicative preferences are separated below; the coordination schedule lists each item's status and the action required."

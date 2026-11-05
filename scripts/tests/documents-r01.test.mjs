@@ -18,16 +18,19 @@ const issuedReno = { ...reno, meta: { ...reno.meta, status: "Issued", issuedDate
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); } };
 
-// 1. Client-brief payload maps the fixture's lists 1:1 (no concatenation/loss).
+// 1. Client-brief payload maps lists 1:1 (no loss) + intention band + questions table.
 const cb = buildClientBriefPayload(reno);
-ok("T1 client brief: 3 scope-in + 2 scope-out + 2 summary paras + 3 preference groups",
-  cb.SCOPE_IN.length === 3 && cb.SCOPE_OUT.length === 2 && cb.SUMMARY_PARAS.length === 2 && cb.PREFERENCE_GROUPS.length === 3);
+ok("T1 client brief: scope/summary/preferences + 3 intentions + questions table",
+  cb.SCOPE_IN.length === 3 && cb.SCOPE_OUT.length === 2 && cb.SUMMARY_PARAS.length === 2 && cb.PREFERENCE_GROUPS.length === 3 &&
+  cb.INT1_LABEL === "Connect" && cb.INT3_LABEL === "Perform" && cb.QUESTIONS.length === 3 && cb.QUESTIONS.every((q) => q.REF_ID && q.STATUS));
 
-// 2. Architect-brief: actions moved up; schedule maps every item with the coordination status vocabulary.
+// 2. Architect-brief: actions (ID/owner/status), REQ reference list, and a grouped design register with the coordination vocabulary.
 const ab = buildArchitectBriefPayload(reno);
-ok("T2 architect brief: 4 actions; 5 schedule items; every status in the coordination vocabulary",
-  ab.ACTIONS.length === 4 && ab.SCHEDULE_ITEMS.length === 5 &&
-  ab.SCHEDULE_ITEMS.every((r) => ARCHITECT_ITEM_STATUSES.includes(r.STATUS)));
+const regItems = ab.GROUPS.flatMap((g) => g.ITEMS);
+ok("T2 architect brief: actions w/ owner+status; REQ-xx list; grouped design register w/ coordination statuses",
+  ab.ACTIONS.length === 4 && ab.ACTIONS.every((a) => a.REF_ID && a.OWNER && a.STATUS) &&
+  ab.CONFIRMED_REQS.every((r) => /^REQ-\d\d$/.test(r.REF_ID)) &&
+  ab.GROUPS.length >= 1 && regItems.length === 5 && regItems.every((r) => ARCHITECT_ITEM_STATUSES.includes(r.STATUS)));
 
 // 3. Selections payload is grouped (not a flat list), group-ordered, 22 items total.
 const ss = buildSelectionsSchedulePayload(long);
@@ -51,7 +54,7 @@ ok("T6 validation: missing client name blocks issue", validateFixture(noClient, 
 
 // 7. Placeholder / TODO text blocks issue (and warns in draft); a fabricated $0 blocks issue.
 const placeholder = JSON.parse(JSON.stringify(issuedReno)); placeholder.clientBrief.summaryParas[0] = "TODO: real summary {{CLIENT}}";
-const zeroMoney = JSON.parse(JSON.stringify(issuedReno)); zeroMoney.clientBrief.decisions.push("Fixed price is $0.00 for the whole build");
+const zeroMoney = JSON.parse(JSON.stringify(issuedReno)); zeroMoney.clientBrief.summaryParas.push("Fixed price is $0.00 for the whole build");
 ok("T7 validation: placeholder text & $0 money both block issue",
   validateFixture(placeholder, { mode: "issue" }).ok === false && validateFixture(placeholder, { mode: "draft" }).ok === true &&
   validateFixture(zeroMoney, { mode: "issue" }).ok === false);

@@ -13,6 +13,11 @@
     "stageLabel": "Concept stage"
   },
   "clientBrief": {
+    "intentions": [
+      { "label": "Connect", "text": "Bring family living and outdoor entertaining together." },
+      { "label": "Simplify", "text": "Create practical circulation, storage and everyday use." },
+      { "label": "Perform", "text": "Plan comfort, glazing and moisture details early." }
+    ],
     "summaryParas": [
       "Jordan and Mia want to open up the dark, compartmentalised ground floor of their 1970s Stirling home and add a light-filled, two-storey rear extension for family living and a new main suite above. The brief is a warm, durable, low-maintenance home that sits quietly in its bushland setting and is comfortable year-round.",
       "This brief captures the direction agreed at the Concept Presentation so everyone — client, designer and Blue Leaf — is working from one shared understanding before detailed design begins."
@@ -45,10 +50,10 @@
       "Existing roof structure over the retained portion is assumed sound; subject to inspection.",
       "Council and development-approval costs are excluded from the concept estimate."
     ],
-    "decisions": [
-      "Confirm the extension footprint against the concept estimate band before detailed design proceeds.",
-      "Confirm the designer engagement and the certification pathway (building consent route).",
-      "Confirm priority inclusions vs. deferred scope so the design is costed to budget."
+    "questions": [
+      { "id": "A01", "action": "Confirm the extension footprint against the concept estimate band before detailed design proceeds.", "owner": "Blue Leaf", "status": "OPEN" },
+      { "id": "A02", "action": "Confirm the designer engagement and the certification pathway (building consent route).", "owner": "Client", "status": "OPEN" },
+      { "id": "A03", "action": "Confirm priority inclusions vs. deferred scope so the design is costed to budget.", "owner": "Client", "status": "OPEN" }
     ],
     "nextStepsParas": [
       "The next paid step is the Pre-Construction / Developed Design & Specification agreement (PTSA). From that point Blue Leaf develops the design with the consultants, locks the specifications and selections, and produces developed pricing — the point at which this preliminary brief becomes a detailed, costed scope."
@@ -56,10 +61,10 @@
   },
   "architectBrief": {
     "actions": [
-      "Confirm the certification pathway (building consent route) before working drawings proceed.",
-      "Size the north living glazing for passive solar and design the eaves / shading to suit (WN-01).",
-      "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).",
-      "Confirm underfloor-heating inclusion to the ensuite so it can be coordinated with the slab and services."
+      { "id": "A01", "action": "Confirm the certification pathway (building consent route) before working drawings proceed.", "owner": "Architect", "status": "OPEN" },
+      { "id": "A02", "action": "Size the north living glazing for passive solar and design the eaves / shading to suit (WN-01).", "owner": "Architect / Energy", "status": "OPEN" },
+      { "id": "A03", "action": "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).", "owner": "Architect", "status": "OPEN" },
+      { "id": "A04", "action": "Confirm underfloor-heating inclusion to the ensuite so it can be coordinated with the slab and services.", "owner": "Blue Leaf", "status": "OPEN" }
     ],
     "purposeParas": [
       "Issued to Harper Reece Architecture (Alex Harper) to progress the developed design of the rear extension and ground-floor renovation. Latest basis: Concept Set C-02, issued 28 Oct 2026. This brief separates confirmed client requirements from indicative preferences, and lists the items needing design coordination."

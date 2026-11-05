@@ -1,205 +1,165 @@
-// Authors the R02 redesign of the three docxtemplater TEMPLATES (brand v2, per register Tab 17).
-// Design-time tool only; RUNTIME engine stays docTemplates.renderDocxTemplate. Output: public/templates/*.docx
+// Authors the R03 redesign — matches the Blue Leaf document mock-ups (register Tab 17 refs + owner-approved
+// design studies). Design-time tool only; RUNTIME engine stays docTemplates.renderDocxTemplate.
 import fs from "fs";
 import {
-  Document, Packer, Paragraph, TextRun, ImageRun, Table, TableRow, TableCell,
-  WidthType, BorderStyle, ShadingType, Footer, PageNumber, Tab, TabStopType, AlignmentType, PageOrientation, VerticalAlign,
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  WidthType, BorderStyle, ShadingType, Footer, PageNumber, Tab, TabStopType, AlignmentType, VerticalAlign,
 } from "docx";
 
 const REPO = "/Users/samuelmorris/Desktop/blue-leaf-hub.nosync";
 const OUT = `${REPO}/public/templates`;
 fs.mkdirSync(OUT, { recursive: true });
-const LOGO = fs.readFileSync(`${REPO}/public/brand/logo-black.png`); // 3320x1512 official wordmark
 
-// ── Brand tokens v2 (Tab 17) ──────────────────────────────────────────────
+// ── Brand tokens (sampled from the approved mock-up .docx) ──────────────────
 const FONT = "Lato";
-const BLUE = "006C9B", INK = "26323A", MUTE = "5A6B73", PALE = "F3F5F6", BAND = "E7ECEF", HAIR = "D7DCDF", WHITE = "FFFFFF";
-const SZ = { title: 50, h1: 25, body: 21, sched: 18, meta: 17, small: 16 }; // half-points: 25/12.5/10.5/9/8.5/8
-const MARGIN = { top: 620, bottom: 620, left: 1077, right: 1077 }; // sides 19mm; top/bottom ~11mm
-const PORT_CW = 11906 - MARGIN.left - MARGIN.right;   // 9752
-const LAND_CW = 16838 - MARGIN.left - MARGIN.right;   // 14684
+const NAVY = "142B39", BLUE = "006C9B", INK = "24343D", GREY = "62737D", BAND = "E9F0F3", SURF = "F3F6F6", HAIR = "D7DCDF", WHITE = "FFFFFF";
+const SZ = { wm: 24, wmSub: 16, crumb: 16, label: 17, title: 64, tag: 24, mLbl: 15, mVal: 21, hNum: 17, h1: 30, body: 21, tbl: 17, small: 15 };
+const MARGIN = { top: 820, bottom: 760, left: 1077, right: 1077 };
+const CW = 11906 - MARGIN.left - MARGIN.right; // 9752
 
-const run = (t, o = {}) => new TextRun({ text: t, font: FONT, size: o.size || SZ.body, color: o.color || INK, bold: !!o.bold, italics: !!o.italics, allCaps: !!o.caps });
-const P = (children, o = {}) => new Paragraph({
-  children: Array.isArray(children) ? children : [children],
-  spacing: { before: o.before ?? 0, after: o.after ?? 50, line: o.line ?? 230 },
-  alignment: o.align, keepNext: o.keepNext, keepLines: o.keepLines !== false, widowControl: true, border: o.border, shading: o.shading,
-});
+const run = (t, o = {}) => new TextRun({ text: t, font: FONT, size: o.size || SZ.body, color: o.color || INK, bold: !!o.bold, italics: !!o.italics, allCaps: !!o.caps, characterSpacing: o.spacing });
+const P = (children, o = {}) => new Paragraph({ children: Array.isArray(children) ? children : [children],
+  spacing: { before: o.before ?? 0, after: o.after ?? 70, line: o.line ?? 252 }, alignment: o.align, keepNext: o.keepNext, keepLines: o.keepLines !== false, widowControl: true, border: o.border, shading: o.shading, indent: o.indent });
 const nb = () => ({ style: BorderStyle.NONE, size: 0, color: WHITE });
-const hair = (c = HAIR, sz = 2) => ({ style: BorderStyle.SINGLE, size: sz, color: c });
+const line = (c = HAIR, sz = 2) => ({ style: BorderStyle.SINGLE, size: sz, color: c });
 const noBorders = () => ({ top: nb(), bottom: nb(), left: nb(), right: nb(), insideHorizontal: nb(), insideVertical: nb() });
-// Calm table: horizontal hairlines only, no vertical grid, light outer frame.
-const calmBorders = () => ({ top: hair(HAIR), bottom: hair(HAIR), left: nb(), right: nb(), insideHorizontal: hair("E4E8EA"), insideVertical: nb() });
 
 function cell(children, w, o = {}) {
-  return new TableCell({
-    width: { size: w, type: WidthType.DXA },
+  return new TableCell({ width: { size: w, type: WidthType.DXA },
     shading: o.fill ? { type: ShadingType.CLEAR, fill: o.fill, color: "auto" } : undefined,
-    margins: { top: o.pad ?? 70, bottom: o.pad ?? 70, left: 110, right: 110 },
-    verticalAlign: VerticalAlign.CENTER,
-    columnSpan: o.span,
-    borders: o.topRule ? { top: hair(BLUE, 6) } : undefined,
-    children: Array.isArray(children) ? children : [children],
-  });
+    margins: { top: o.pad ?? 54, bottom: o.pad ?? 54, left: o.px ?? 120, right: o.px ?? 120 },
+    verticalAlign: o.va || VerticalAlign.CENTER, columnSpan: o.span, borders: o.borders,
+    children: Array.isArray(children) ? children : [children] });
 }
 
-// Header: logo (left) + issue strip (right) in a borderless 2-col table — compact, never a quarter page.
-function headerBlock(cw) {
-  const logoPara = new Paragraph({ spacing: { after: 0 }, children: [ new ImageRun({ type: "png", data: LOGO, transformation: { width: 139, height: 63 } }) ] });
-  const strip = new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 240 },
-    children: [ run("{ISSUE_LINE_1}", { size: SZ.meta, color: MUTE }) ] });
-  const strip2 = new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 20, after: 0, line: 240 },
-    children: [ run("{ISSUE_LINE_2}", { size: SZ.meta, color: MUTE }) ] });
-  const tbl = new Table({ width: { size: cw, type: WidthType.DXA }, columnWidths: [Math.round(cw * 0.5), Math.round(cw * 0.5)], borders: noBorders(),
-    rows: [ new TableRow({ children: [
-      new TableCell({ width: { size: Math.round(cw * 0.5), type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, verticalAlign: VerticalAlign.CENTER, children: [logoPara] }),
-      new TableCell({ width: { size: Math.round(cw * 0.5), type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, verticalAlign: VerticalAlign.CENTER, children: [strip, strip2] }),
-    ] }) ] });
-  return [ tbl, new Paragraph({ spacing: { before: 56, after: 0 }, border: { bottom: hair(BLUE, 8) }, children: [ run("", { size: 2 }) ] }) ];
+function header() {
+  const left = new TableCell({ width: { size: Math.round(CW * 0.5), type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, verticalAlign: VerticalAlign.BOTTOM,
+    children: [ new Paragraph({ spacing: { after: 0 }, children: [ run("BLUE LEAF", { size: SZ.wm, bold: true, color: BLUE }), run("  BUILDING", { size: SZ.wmSub, bold: true, color: GREY, caps: true, spacing: 30 }) ] }) ] });
+  const right = new TableCell({ width: { size: Math.round(CW * 0.5), type: WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, verticalAlign: VerticalAlign.BOTTOM,
+    children: [ new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0 }, children: [ run("{BREADCRUMB}", { size: SZ.crumb, color: GREY, caps: true, spacing: 20 }) ] }) ] });
+  const tbl = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [Math.round(CW * 0.5), Math.round(CW * 0.5)], borders: noBorders(), rows: [ new TableRow({ children: [left, right] }) ] });
+  return [ tbl, new Paragraph({ spacing: { before: 44, after: 0 }, border: { bottom: line(BLUE, 10) }, children: [ run("", { size: 2 }) ] }) ];
 }
 function titleBlock() {
   return [
-    new Paragraph({ spacing: { before: 64, after: 14 }, children: [ run("{DOC_TITLE}", { size: SZ.title, bold: true, color: INK }) ] }),
-    P(run("{SUBLINE}", { size: SZ.body, color: MUTE }), { after: 30 }),
-    // single, restrained issue-status note (not a heavy grey box)
-    new Paragraph({ spacing: { before: 20, after: 80 }, children: [ run("{ISSUE_NOTE}", { size: SZ.meta, color: MUTE, italics: true }) ] }),
+    P(run("{SECTION_LABEL}", { size: SZ.label, bold: true, color: BLUE, caps: true, spacing: 20 }), { before: 150, after: 40 }),
+    new Paragraph({ spacing: { before: 0, after: 8 }, children: [ run("{DOC_TITLE}", { size: SZ.title, bold: true, color: NAVY }) ] }),
+    P(run("{TAGLINE}", { size: SZ.tag, color: GREY }), { after: 120 }),
   ];
 }
-// Section heading: INK bold with a small blue square accent; no underline rule.
-function h1(text) {
-  return new Paragraph({ spacing: { before: 78, after: 34 }, keepNext: true, keepLines: true,
-    children: [ run("▪  ", { color: BLUE, bold: true, size: SZ.h1 }), run(text, { color: INK, bold: true, size: SZ.h1 }) ] });
+function metaGrid() {
+  const half = Math.round(CW / 2);
+  const mkCell = (lTag, vTag, openTag, closeTag) => cell([
+    P([ openTag ? run(openTag, { size: SZ.mLbl }) : run("", { size: SZ.mLbl }), run(`{${lTag}}`, { size: SZ.mLbl, color: GREY, caps: true, spacing: 16 }) ], { after: 10, line: 200 }),
+    P([ run(`{${vTag}}`, { size: SZ.mVal, color: INK }), closeTag ? run(closeTag, { size: SZ.mVal }) : run("", { size: 2 }) ], { after: 0, line: 220 }),
+  ], half, { pad: 40, px: 0, borders: { bottom: line(HAIR, 2), top: nb(), left: nb(), right: nb() }, va: VerticalAlign.TOP });
+  const row = new TableRow({ children: [ mkCell("LA", "VA", "{#META_ROWS}", null), mkCell("LB", "VB", null, "{/META_ROWS}") ] });
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [half, CW - half], borders: noBorders(), rows: [row] });
 }
-const subLabel = (t) => new Paragraph({ spacing: { before: 22, after: 12 }, keepNext: true, children: [ run(t, { bold: true, color: INK, size: SZ.body }) ] });
-const tagPara = (t) => new Paragraph({ spacing: { after: 0, line: 220 }, children: [ run(`{${t}}`, { size: 2 }) ] });
+function h1(num, text) {
+  return new Paragraph({ spacing: { before: 180, after: 60 }, keepNext: true, keepLines: true, border: { bottom: line(HAIR, 3) },
+    children: [ run(num + "  ", { size: SZ.hNum, bold: true, color: BLUE }), run(text, { size: SZ.h1, bold: true, color: NAVY }) ] });
+}
+const tagPara = (t) => new Paragraph({ spacing: { after: 0, line: 200 }, children: [ run(`{${t}}`, { size: 2 }) ] });
 function bulletLoop(tag, o = {}) {
-  return [ tagPara(`#${tag}`),
-    new Paragraph({ bullet: { level: 0 }, spacing: { after: 30, line: 234 }, keepLines: true, children: [ run("{ITEM_TEXT}", { size: o.size || SZ.body }) ] }),
-    tagPara(`/${tag}`) ];
+  return [ tagPara(`#${tag}`), new Paragraph({ bullet: { level: 0 }, spacing: { after: 36, line: 248 }, keepLines: true, children: [ run("{ITEM_TEXT}", { size: o.size || SZ.body }) ] }), tagPara(`/${tag}`) ];
 }
 function paraLoop(tag, field) { return [ tagPara(`#${tag}`), P(run(`{${field}}`)), tagPara(`/${tag}`) ]; }
-
-// Compact 2-col meta strip (label/value) as a borderless loop table — used only where a small grid earns its place.
-function metaStrip(cw) {
-  const lw = Math.round(cw * 0.26);
-  const row = new TableRow({ children: [
-    cell([ P([run("{#META_ROWS}", { size: SZ.meta }), run("{LABEL}", { size: SZ.meta, bold: true, color: MUTE })], { after: 0 }) ], lw, { pad: 24 }),
-    cell([ P([run("{VALUE}", { size: SZ.meta, color: INK }), run("{/META_ROWS}", { size: SZ.meta })], { after: 0 }) ], cw - lw, { pad: 24 }),
-  ] });
-  return new Table({ width: { size: cw, type: WidthType.DXA }, columnWidths: [lw, cw - lw], borders: noBorders(), rows: [row] });
+function refLoop(tag) {
+  return [ tagPara(`#${tag}`), new Paragraph({ spacing: { after: 44, line: 248 }, keepLines: true, indent: { left: 120 },
+    children: [ run("{REF_ID}", { size: SZ.body, bold: true, color: BLUE }), run("   ", { size: SZ.body }), run("{REF_TEXT}", { size: SZ.body, color: INK }) ] }), tagPara(`/${tag}`) ];
 }
-
-// A calm flat loop table (header repeats; rows don't split).
-function loopTable(cw, headers, widths, loopTag, fields, { headerPad = 70 } = {}) {
+function callout(labelTag, bodyTag) {
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [CW], borders: noBorders(),
+    rows: [ new TableRow({ children: [ new TableCell({ width: { size: CW, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: BAND, color: "auto" },
+      borders: { left: { style: BorderStyle.SINGLE, size: 20, color: BLUE }, top: nb(), bottom: nb(), right: nb() }, margins: { top: 90, bottom: 90, left: 150, right: 150 },
+      children: [ P(run(`{${labelTag}}`, { size: SZ.label, bold: true, color: BLUE, caps: true, spacing: 16 }), { after: 30 }), P(run(`{${bodyTag}}`, { size: SZ.body, color: INK }), { after: 0 }) ] }) ] }) ] });
+}
+function intentionBand() {
+  const w = Math.round(CW / 3);
+  const mk = (n) => cell([ P(run(`{INT${n}_NUM}`, { size: SZ.body, bold: true, color: BLUE }), { after: 20 }),
+    P(run(`{INT${n}_LABEL}`, { size: SZ.body, bold: true, color: NAVY, caps: true, spacing: 16 }), { after: 24 }),
+    P(run(`{INT${n}_TEXT}`, { size: SZ.small, color: GREY }), { after: 0 }) ], w, { pad: 70, fill: SURF, va: VerticalAlign.TOP });
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [w, w, CW - 2 * w], borders: { top: line(BLUE, 10), bottom: nb(), left: nb(), right: nb(), insideHorizontal: nb(), insideVertical: nb() },
+    rows: [ new TableRow({ children: [mk(1), mk(2), mk(3)] }) ] });
+}
+function photoPlaceholder() {
+  return [ new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [CW], borders: { top: line(HAIR, 2), bottom: line(HAIR, 2), left: line(HAIR, 2), right: line(HAIR, 2), insideHorizontal: nb(), insideVertical: nb() },
+    rows: [ new TableRow({ height: { value: 2500, rule: "atLeast" }, children: [ new TableCell({ width: { size: CW, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: SURF, color: "auto" }, verticalAlign: VerticalAlign.CENTER,
+      children: [ new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 0 }, children: [ run("{PHOTO_CAPTION}", { size: SZ.small, color: GREY, caps: true, spacing: 20 }) ] }) ] }) ] }) ] }),
+    P(run("{PHOTO_NOTE}", { size: SZ.small, color: GREY, italics: true }), { before: 20, after: 60 }) ];
+}
+function darkTable(headers, widths, { grouped = false, groupTag = "GROUPS", itemTag = "ITEMS", fields, idCol = true }) {
   const headerRow = new TableRow({ tableHeader: true, cantSplit: true,
-    children: headers.map((h, i) => cell(P(run(h, { size: SZ.sched, bold: true, color: INK }), { after: 0 }), widths[i], { fill: PALE, pad: headerPad, topRule: true })) });
+    children: headers.map((h, i) => cell(P(run(h, { size: SZ.tbl, bold: true, color: WHITE, caps: true, spacing: 14 }), { after: 0 }), widths[i], { fill: NAVY, pad: 64 })) });
+  const rows = [headerRow];
+  if (grouped) {
+    rows.push(new TableRow({ cantSplit: true, children: [ cell(P([ run(`{#${groupTag}}`, { size: SZ.tbl }), run("{GROUP_NAME}", { size: SZ.tbl, bold: true, color: BLUE, caps: true, spacing: 16 }) ], { after: 0 }), CW, { fill: BAND, span: headers.length, pad: 46 }) ] }));
+  }
+  const loop = grouped ? itemTag : groupTag;
   const dataRow = new TableRow({ cantSplit: true, children: fields.map((f, i) => {
     const kids = [];
-    if (i === 0) kids.push(run(`{#${loopTag}}`, { size: SZ.sched }));
-    kids.push(run(`{${f}}`, { size: SZ.sched, bold: i === 0, color: i === 0 ? INK : INK }));
-    if (i === fields.length - 1) kids.push(run(`{/${loopTag}}`, { size: SZ.sched }));
-    return cell(P(kids, { after: 0, line: 248 }), widths[i]);
+    if (i === 0) kids.push(run(`{#${loop}}`, { size: SZ.tbl }));
+    kids.push(run(`{${f}}`, { size: SZ.tbl, bold: i === 0 && idCol, color: i === 0 && idCol ? BLUE : INK }));
+    if (i === fields.length - 1) { kids.push(run(`{/${loop}}`, { size: SZ.tbl })); if (grouped) kids.push(run(`{/${groupTag}}`, { size: SZ.tbl })); }
+    return cell(P(kids, { after: 0, line: 240 }), widths[i], { va: VerticalAlign.TOP });
   }) });
-  return new Table({ width: { size: cw, type: WidthType.DXA }, columnWidths: widths, borders: calmBorders(), rows: [headerRow, dataRow] });
+  rows.push(dataRow);
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: widths,
+    borders: { top: nb(), bottom: line(HAIR), left: nb(), right: nb(), insideHorizontal: line("E6EAEC"), insideVertical: nb() }, rows });
 }
-
 function footer() {
-  const cw = PORT_CW; // footer tabs tuned for portrait; landscape footer re-tuned in makeDoc
-  return new Footer({ children: [ new Paragraph({
-    tabStops: [ { type: TabStopType.CENTER, position: cw / 2 }, { type: TabStopType.RIGHT, position: cw } ],
-    border: { top: hair(HAIR, 3) }, spacing: { before: 40 },
-    children: [
-      run("{FOOTER_LEFT}", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ new Tab() ] }),
-      run("{FOOTER_MID}", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ new Tab() ] }),
-      run("Page ", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ PageNumber.CURRENT ], font: FONT, size: SZ.small, color: MUTE }),
-      run(" of ", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ PageNumber.TOTAL_PAGES ], font: FONT, size: SZ.small, color: MUTE }),
-    ],
-  }) ] });
+  return new Footer({ children: [ new Paragraph({ tabStops: [ { type: TabStopType.CENTER, position: CW / 2 }, { type: TabStopType.RIGHT, position: CW } ], border: { top: line(HAIR, 3) }, spacing: { before: 40 },
+    children: [ run("BLUE LEAF BUILDING", { size: SZ.small, color: GREY, caps: true, spacing: 14 }), new TextRun({ children: [ new Tab() ] }), run("{FOOTER_MID}", { size: SZ.small, color: GREY }),
+      new TextRun({ children: [ new Tab() ] }), run("PAGE ", { size: SZ.small, color: GREY, caps: true, spacing: 10 }), new TextRun({ children: [ PageNumber.CURRENT ], font: FONT, size: SZ.small, color: GREY }), run(" / ", { size: SZ.small, color: GREY }), new TextRun({ children: [ PageNumber.TOTAL_PAGES ], font: FONT, size: SZ.small, color: GREY }) ] }) ] });
 }
-function landscapeFooter() {
-  const cw = LAND_CW;
-  return new Footer({ children: [ new Paragraph({
-    tabStops: [ { type: TabStopType.CENTER, position: cw / 2 }, { type: TabStopType.RIGHT, position: cw } ],
-    border: { top: hair(HAIR, 3) }, spacing: { before: 40 },
-    children: [
-      run("{FOOTER_LEFT}", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ new Tab() ] }),
-      run("{FOOTER_MID}", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ new Tab() ] }),
-      run("Page ", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ PageNumber.CURRENT ], font: FONT, size: SZ.small, color: MUTE }),
-      run(" of ", { size: SZ.small, color: MUTE }),
-      new TextRun({ children: [ PageNumber.TOTAL_PAGES ], font: FONT, size: SZ.small, color: MUTE }),
-    ],
-  }) ] });
-}
-function makeDoc(children, { landscape = false } = {}) {
-  const page = landscape
-    ? { size: { orientation: PageOrientation.LANDSCAPE }, margin: MARGIN }
-    : { margin: MARGIN };
-  return new Document({ creator: "Blue Leaf Building",
-    styles: { default: { document: { run: { font: FONT, size: SZ.body, color: INK } } } },
-    sections: [ { properties: { page }, footers: { default: landscape ? landscapeFooter() : footer() }, children } ] });
+function makeDoc(children) {
+  return new Document({ creator: "Blue Leaf Building", styles: { default: { document: { run: { font: FONT, size: SZ.body, color: INK } } } },
+    sections: [ { properties: { page: { margin: MARGIN } }, footers: { default: footer() }, children } ] });
 }
 
-// ════════ CLIENT BRIEF (editorial) ════════
+// ════════ 01 CLIENT PROJECT BRIEF ════════
 const clientBrief = makeDoc([
-  ...headerBlock(PORT_CW), ...titleBlock(),
-  h1("Project summary"), ...paraLoop("SUMMARY_PARAS", "PARA_TEXT"),
-  h1("Scope"), subLabel("Included"), ...bulletLoop("SCOPE_IN"),
-  subLabel("Not included / deferred"), ...bulletLoop("SCOPE_OUT"),
-  h1("Design direction"),
+  ...header(), ...titleBlock(), ...photoPlaceholder(), metaGrid(),
+  h1("00", "The project in one minute"), ...paraLoop("SUMMARY_PARAS", "PARA_TEXT"),
+  intentionBand(),
+  h1("01", "Scope & boundaries"),
+  P(run("Included", { bold: true, color: INK }), { before: 40, after: 16, keepNext: true }), ...bulletLoop("SCOPE_IN"),
+  P(run("Not in the current scope", { bold: true, color: INK }), { before: 30, after: 16, keepNext: true }), ...bulletLoop("SCOPE_OUT"),
+  h1("02", "Design direction"),
   tagPara("#PREFERENCE_GROUPS"),
-  new Paragraph({ spacing: { before: 80, after: 24 }, keepNext: true, children: [ run("{GROUP_NAME}", { bold: true, color: BLUE, size: SZ.body }) ] }),
+  P(run("{GROUP_NAME}", { bold: true, color: BLUE, caps: true, spacing: 14, size: SZ.small }), { before: 40, after: 18, keepNext: true }),
   ...bulletLoop("ITEMS"),
   tagPara("/PREFERENCE_GROUPS"),
-  h1("Assumptions & things to confirm"),
-  subLabel("Working assumptions"), ...bulletLoop("ASSUMPTIONS"),
-  subLabel("To confirm before detailed design"), ...bulletLoop("DECISIONS"),
-  h1("What happens next"), ...paraLoop("NEXT_STEPS_PARAS", "PARA_TEXT"),
+  h1("03", "Key questions to resolve"),
+  darkTable(["ID", "Required action", "Owner", "Status"], [760, 5500, 1900, 1592], { fields: ["REF_ID", "ACTION", "OWNER", "STATUS"], groupTag: "QUESTIONS" }),
+  h1("04", "What happens next"), ...paraLoop("NEXT_STEPS_PARAS", "PARA_TEXT"),
 ]);
 
-// ════════ ARCHITECT BRIEF (coordination-first) ════════
+// ════════ 02 ARCHITECT DESIGN BRIEF ════════
 const architectBrief = makeDoc([
-  ...headerBlock(PORT_CW), ...titleBlock(),
-  metaStrip(PORT_CW),
-  h1("Actions requiring architect attention"), ...bulletLoop("ACTIONS"),
-  h1("Purpose & current design basis"), ...paraLoop("PURPOSE_PARAS", "PARA_TEXT"),
-  h1("Requirements & preferences"),
-  subLabel("Confirmed client requirements"), ...bulletLoop("CONFIRMED_REQS"),
-  subLabel("Indicative client preferences (not instructions)"), ...bulletLoop("CLIENT_PREFS"),
-  h1("Coordination schedule"),
-  loopTable(PORT_CW, ["Item", "Location", "Requirement / selection", "Status", "Action", "Dwg"],
-    [1000, 1480, 3200, 1420, 1800, 852], "SCHEDULE_ITEMS",
-    ["ITEM_ID", "LOCATION", "REQUIREMENT", "STATUS", "ACTION", "DWG_REF"]),
-  P(run("Status key — Client-approved: client intent confirmed. Proposed: design solution to develop. To verify: technical check / consultant sign-off outstanding (not yet approved).", { size: SZ.small, color: MUTE, italics: true }), { before: 70 }),
-  h1("Referenced documents"), ...bulletLoop("REFERENCES"),
+  ...header(), ...titleBlock(), metaGrid(),
+  callout("CALLOUT_LABEL", "CALLOUT_BODY"),
+  h1("01", "Priority coordination actions"), ...paraLoop("ACTIONS_INTRO", "PARA_TEXT"),
+  darkTable(["ID", "Required action", "Owner", "Status"], [760, 5500, 1900, 1592], { fields: ["REF_ID", "ACTION", "OWNER", "STATUS"], groupTag: "ACTIONS" }),
+  h1("02", "Confirmed project requirements"), ...refLoop("CONFIRMED_REQS"),
+  h1("03", "Indicative preferences"), ...paraLoop("PREFERENCES", "PARA_TEXT"),
+  h1("04", "Design register"),
+  darkTable(["ID", "Location", "Current direction", "Status", "Required response", "Dwg"],
+    [880, 1400, 2500, 1240, 2080, 1652], { grouped: true, fields: ["REF_ID", "LOCATION", "DIRECTION", "STATUS", "RESPONSE", "DWG"] }),
 ]);
 
-// ════════ SELECTIONS & FINISHES SCHEDULE (reference-first, LANDSCAPE, grouped) ════════
-const selectionsSchedule = makeDoc([
-  ...headerBlock(LAND_CW), ...titleBlock(),
-  // grouped: per-group title (keepNext) + its own calm table (header repeats, rows cantSplit)
-  tagPara("#GROUPS"),
-  new Paragraph({ spacing: { before: 160, after: 50 }, keepNext: true, children: [ run("{GROUP_NAME}", { bold: true, color: BLUE, size: SZ.body, caps: true }) ] }),
-  loopTable(LAND_CW, ["Item", "Location / Room", "Product / Description", "Finish / Dimensions", "Qty", "Status", "Source / Ref"],
-    [900, 2100, 4200, 3200, 900, 1700, 1684], "ITEMS",
-    ["ITEM_ID", "CATEGORY", "PRODUCT", "FINISH", "QTY", "STATUS", "RESPONSIBILITY"]),
-  tagPara("/GROUPS"),
-  P(run("{FOOTER_NOTE}", { size: SZ.small, color: MUTE, italics: true }), { before: 120 }),
-], { landscape: true });
+// ════════ 04 TECHNICAL SELECTIONS SCHEDULE ════════
+const technicalSchedule = makeDoc([
+  ...header(), ...titleBlock(), metaGrid(),
+  darkTable(["ID", "Room / area", "Selection / description", "Finish / size", "Qty", "Status", "Source / review"],
+    [880, 1300, 2360, 1800, 680, 1040, 1692], { grouped: true, fields: ["REF_ID", "ROOM", "SELECTION", "FINISH", "QTY", "STATUS", "SOURCE"] }),
+  P(run("{FOOTER_NOTE}", { size: SZ.small, color: GREY, italics: true }), { before: 100 }),
+]);
 
 const jobs = [
   ["blb-client-brief-template.docx", clientBrief],
   ["blb-architect-brief-template.docx", architectBrief],
-  ["blb-selections-schedule-template.docx", selectionsSchedule],
+  ["blb-selections-schedule-template.docx", technicalSchedule],
 ];
-for (const [name, doc] of jobs) {
-  const buf = await Packer.toBuffer(doc);
-  fs.writeFileSync(`${OUT}/${name}`, buf);
-  console.log("wrote template", name, buf.length, "bytes");
-}
+for (const [name, doc] of jobs) { const buf = await Packer.toBuffer(doc); fs.writeFileSync(`${OUT}/${name}`, buf); console.log("wrote template", name, buf.length, "bytes"); }
