@@ -9,10 +9,10 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../../../lib/apiFetch.js";
 import { CONCEPT_DESIGN_STATUS, CONCEPT_DESIGN_STEPS } from "../../../lib/constants.js";
 import MeetingScheduler from "./MeetingScheduler.jsx";
+import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
 
 export default function ConceptStage({ lead, patch, reload }) {
   const [invoices, setInvoices] = useState([]);
-  const [rows, setRows] = useState(Array.isArray(lead.selections_schedule) ? lead.selections_schedule : []);
   const [busy, setBusy] = useState(false);
 
   const loadInvoices = useCallback(async () => {
@@ -35,11 +35,6 @@ export default function ConceptStage({ lead, patch, reload }) {
   // Forward-only: clicking a step sets it; clicking the already-active step is a no-op
   // (never silently clears the design status). Correcting a mis-click = click an earlier step.
   function setStatus(s) { if (status !== s) patch({ concept_design_status: s }); }
-
-  function saveRows(next) { setRows(next); patch({ selections_schedule: next }); }
-  const addRow = () => saveRows([...rows, { area: "", item: "", notes: "" }]);
-  const editRow = (i, k, v) => saveRows(rows.map((r, ix) => (ix === i ? { ...r, [k]: v } : r)));
-  const delRow = (i) => saveRows(rows.filter((_, ix) => ix !== i));
 
   // Concept client emails (brief-questions + interim) — preview then send.
   const [preview, setPreview] = useState(null); // { subject, text, which }
@@ -118,27 +113,8 @@ export default function ConceptStage({ lead, patch, reload }) {
         {emailMsg && <p className={`mt-2 text-xs ${emailMsg.type === "error" ? "text-red-600" : "text-green-600"}`}>{emailMsg.text}</p>}
       </div>
 
-      {/* Finishes schedule v1 */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="section-label">Finishes schedule</h3>
-          <button type="button" onClick={addRow} className="text-xs font-semibold text-primary hover:underline">+ Add row</button>
-        </div>
-        {rows.length === 0 ? (
-          <p className="text-xs text-muted">Start the finishes schedule — it carries through to Consultants + the proposal.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {rows.map((r, i) => (
-              <div key={i} className="flex gap-1.5">
-                <input value={r.area || ""} onChange={(e) => editRow(i, "area", e.target.value)} placeholder="Area" className="w-28 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <input value={r.item || ""} onChange={(e) => editRow(i, "item", e.target.value)} placeholder="Item / finish" className="flex-1 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <input value={r.notes || ""} onChange={(e) => editRow(i, "notes", e.target.value)} placeholder="Notes" className="flex-1 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <button type="button" onClick={() => delRow(i)} className="px-1.5 text-xs text-red-500 hover:text-red-700">×</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Project brief & register — the room-by-room staff workshop (carries to Consultants + proposal) */}
+      <RegisterWorkshop lead={lead} patch={patch} stage="winning_offer" />
 
       {/* Meetings */}
       <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={reload} />
