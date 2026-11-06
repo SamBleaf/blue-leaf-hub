@@ -168,11 +168,20 @@ async function syncProjectMilestones(sb, projectId, today) {
 async function syncProjectSelectionsOverdue(sb, projectId, today) {
   // A selection is overdue if its order_by_date (preferred) or due_date has passed
   // and the client still has not chosen.
-  const { data: sels } = await sb
-    .from("client_selections")
-    .select("id, status, due_date, order_by_date")
-    .eq("project_id", projectId)
-    .in("status", ["not_started", "awaiting_client"]);
+  // Only sweep selections the office has issued — never mutate a register-promoted staged row
+  // (client_visible=false), or the client's first view of it on issue would read "overdue" for a
+  // deadline they were never shown (mig 212). Tolerates a pre-212 DB via the 42703 fallback.
+  const buildSweep = (withVisible) => {
+    let q = sb
+      .from("client_selections")
+      .select("id, status, due_date, order_by_date")
+      .eq("project_id", projectId)
+      .in("status", ["not_started", "awaiting_client"]);
+    if (withVisible) q = q.eq("client_visible", true);
+    return q;
+  };
+  let { data: sels, error: sweepErr } = await buildSweep(true);
+  if (sweepErr?.code === "42703") ({ data: sels } = await buildSweep(false));
 
   let flagged = 0;
   for (const s of sels || []) {

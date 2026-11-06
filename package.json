@@ -87,6 +87,8 @@
     "test:cleanup-matchers": "node scripts/test-cleanup-matchers.mjs",
     "test:smtp": "node scripts/smtp-verify.mjs",
     "test:register-r02": "node scripts/tests/master-register-r02.test.mjs",
+    "test:register-promotion": "node scripts/tests/register-promotion.test.mjs",
+    "test:register-212-db": "node scripts/tests/register-migration-212.test.mjs",
     "upload:branding": "node scripts/upload-branding.mjs",
     "auth:gmail": "node scripts/gmail-auth.mjs",
     "auth:dropbox": "node scripts/dropbox-auth.mjs",

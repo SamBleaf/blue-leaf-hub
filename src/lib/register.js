@@ -247,6 +247,19 @@ export function genId() {
 
 function nowIso() { try { return new Date().toISOString(); } catch { return ""; } }
 
+/**
+ * Deterministic id for a legacy {area,item[,supplier],notes} row. Legacy rows carry no persisted id,
+ * so a random id would differ on every read — breaking idempotent promotion (each run would insert a
+ * fresh client_selections row for the same finishes entry). A content hash keeps it stable across
+ * reads and across a later edit→save (writeRegister then persists it as a proper item with this id).
+ */
+function legacyId(row) {
+  const basis = [row?.area, row?.item, row?.supplier, row?.notes].map((x) => (x == null ? "" : String(x))).join("\u0001");
+  let h = 5381;
+  for (let i = 0; i < basis.length; i++) h = ((h << 5) + h + basis.charCodeAt(i)) >>> 0; // djb2
+  return "ri_legacy_" + h.toString(36);
+}
+
 /** A fresh register item. Only id/kind are required; everything else is optional. */
 export function makeItem(partial = {}) {
   return {
@@ -319,6 +332,7 @@ export function readRegister(lead) {
     // {area,item,supplier,notes} — adopt non-destructively. Fold every populated extra field into the
     // description so NOTHING is lost (supplier was the only extra the F&F editor captured).
     items.push(makeItem({
+      id: legacyId(row),
       itemKind: "selection",
       category: "notes",
       room: typeof row.area === "string" ? row.area : "",

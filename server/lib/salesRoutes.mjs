@@ -25,6 +25,7 @@ import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mj
 import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
 import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
+import { promoteRegisterToProject } from "./registerPromotion.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -511,6 +512,12 @@ export async function finalizeWonJob(sb, lead) {
     //    turns the SAME row into the live project — the portal, comms + client login all carry over.
     try { await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true); }
     catch { /* pre-migration-199 — column absent, non-fatal */ }
+
+    // 4.5 Master Register → project: stage the room-by-room brief into the canonical stores (mig 212).
+    //     Selections land in client_selections as client_visible=false (hidden — no client action, no
+    //     notification); scope/works records land in room_scope_items. Idempotent + best-effort.
+    try { await promoteRegisterToProject(sb, { leadId: lead.id }); }
+    catch (e) { console.warn("[finalize-won] register promotion:", e?.message || e); }
 
     // 5. Handover: carry consultant correspondence (files consultants emailed in, filed per-consultant
     //    under the client folder) into the job folder → CONSULTANTS/<Consultant>/. Best-effort.
@@ -1117,6 +1124,9 @@ export function registerSalesRoutes(app) {
         await sb.from("projects").update({ portal_v2_enabled: true }).eq("id", existing.id);
         existing = { ...existing, portal_v2_enabled: true };
       }
+      // Stage the Master Register into the project (idempotent; picks up items added since last time).
+      try { await promoteRegisterToProject(sb, { leadId: lead.id, projectId: existing.id }); }
+      catch (e) { console.warn("[preconstruction-portal] register promotion:", e?.message || e); }
       return ok(res, { project: rowToCamel(existing), created: false });
     }
 
@@ -1129,6 +1139,9 @@ export function registerSalesRoutes(app) {
       return err(res, 400, translateDbError(cErr));
     }
     try { await sb.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: "Pre-construction client portal set up" }); } catch { /* best-effort */ }
+    // Stage the Master Register (selections hidden, scope → room_scope_items). Idempotent + best-effort.
+    try { await promoteRegisterToProject(sb, { leadId: lead.id, projectId: created.id }); }
+    catch (e) { console.warn("[preconstruction-portal] register promotion:", e?.message || e); }
     ok(res, { project: rowToCamel(created), created: true });
   });
 

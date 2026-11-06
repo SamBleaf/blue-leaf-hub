@@ -290,15 +290,21 @@ export function registerPortalV2Routes(app) {
         .order("taken_at", { ascending: false })
         .limit(8);
 
-      // Coming up — next 3 selections by due date (NOT internal_notes).
-      const { data: comingUp } = await sb
-        .from("client_selections")
-        .select("id, item_name, category, due_date, status")
-        .eq("project_id", projectId)
-        .in("status", ["not_started", "awaiting_client"])
-        .gte("due_date", today)
-        .order("due_date", { ascending: true })
-        .limit(3);
+      // Coming up — next 3 selections by due date (NOT internal_notes). Honour client_visible so a
+      // register-promoted staged row (client_visible=false) with a due date can't surface here (mig
+      // 212). Tolerates a pre-212 DB via the 42703 fallback, like the Selections board.
+      const buildComingUp = (withVisible) => {
+        let q = sb
+          .from("client_selections")
+          .select("id, item_name, category, due_date, status")
+          .eq("project_id", projectId)
+          .in("status", ["not_started", "awaiting_client"])
+          .gte("due_date", today);
+        if (withVisible) q = q.eq("client_visible", true);
+        return q.order("due_date", { ascending: true }).limit(3);
+      };
+      let { data: comingUp, error: comingUpErr } = await buildComingUp(true);
+      if (comingUpErr?.code === "42703") ({ data: comingUp } = await buildComingUp(false));
 
       // Unread message count (messages from builder not yet read).
       const { count: unreadMessages } = await sb
@@ -638,13 +644,20 @@ export function registerPortalV2Routes(app) {
       const projectId = req.portalSession.projectId;
       const category = req.query.category ? String(req.query.category) : null;
 
-      let q = sb
-        .from("client_selections")
-        .select(CLIENT_SELECTION_FIELDS)
-        .eq("project_id", projectId)
-        .order("sort_order", { ascending: true });
-      if (category && category !== "all") q = q.eq("category", category);
-      const { data: selections } = await q;
+      // client_visible gate (migration 212): staged rows promoted from the Master Register are
+      // hidden until the office issues them. Tolerates a pre-212 DB — on undefined_column we fall
+      // back to the legacy all-rows behaviour (every pre-212 row is effectively visible).
+      const buildSelQuery = (withVisible) => {
+        let q = sb
+          .from("client_selections")
+          .select(CLIENT_SELECTION_FIELDS)
+          .eq("project_id", projectId);
+        if (withVisible) q = q.eq("client_visible", true);
+        if (category && category !== "all") q = q.eq("category", category);
+        return q.order("sort_order", { ascending: true });
+      };
+      let { data: selections, error: selErr } = await buildSelQuery(true);
+      if (selErr?.code === "42703") ({ data: selections } = await buildSelQuery(false));
 
       const out = [];
       for (const s of selections || []) {
@@ -675,12 +688,20 @@ export function registerPortalV2Routes(app) {
         const clientNotes = req.body?.notes ? String(req.body.notes) : null;
         if (!optionId) return err(res, 400, "optionId required");
 
-        const { data: selection } = await sb
-          .from("client_selections")
-          .select("id, project_id, item_name, allowance_amount, status")
-          .eq("id", selectionId)
-          .eq("project_id", projectId)
-          .maybeSingle();
+        // Gate on client_visible so a client can only act on a selection the office has issued — a
+        // staged register-promoted row (client_visible=false) must not be writable even if its id is
+        // known (mig 212). Mirrors the read path; tolerates a pre-212 DB via the 42703 fallback.
+        const buildSelLookup = (withVisible) => {
+          let q = sb
+            .from("client_selections")
+            .select("id, project_id, item_name, allowance_amount, status")
+            .eq("id", selectionId)
+            .eq("project_id", projectId);
+          if (withVisible) q = q.eq("client_visible", true);
+          return q.maybeSingle();
+        };
+        let { data: selection, error: selLookupErr } = await buildSelLookup(true);
+        if (selLookupErr?.code === "42703") ({ data: selection } = await buildSelLookup(false));
         if (!selection) return err(res, 404, "Selection not found");
         // Terminal-status guard: once a selection is approved/ordered/installed it is
         // locked — the client must contact Blue Leaf to change it (avoids a client
