@@ -13,6 +13,18 @@ dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env")
 const SB_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SVC = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// SAFETY GUARD (release review): this seeds auth users — including an admin-role account ("E2E Director")
+// for which auth_is_staff() returns true — with a shared password. It must NEVER run against production.
+// Allow only a loopback sandbox gateway; a non-local target requires an explicit, deliberate opt-in.
+const E2E_HOST = (() => { try { return new URL(SB_URL || "").hostname.replace(/^\[|\]$/g, ""); } catch { return ""; } })();
+const E2E_IS_LOCAL = ["localhost", "127.0.0.1", "::1"].includes(E2E_HOST) || E2E_HOST.endsWith(".localhost");
+if (SB_URL && !E2E_IS_LOCAL && process.env.E2E_USERS_ALLOW_NONLOCAL !== "1") {
+  console.error(`Refusing to seed E2E users against non-local Supabase host "${E2E_HOST}".`);
+  console.error(`This creates admin/supervisor/employee accounts with a shared password and must never touch production.`);
+  console.error(`If and only if this is a DEDICATED throwaway test project, re-run with E2E_USERS_ALLOW_NONLOCAL=1.`);
+  process.exit(2);
+}
+
 const PASSWORD = "BlueLeaf-E2E-2026!";
 const USERS = [
   { key: "admin", email: "e2e-admin@blueleafbuilding.test", fullName: "E2E Director", role: "admin" },

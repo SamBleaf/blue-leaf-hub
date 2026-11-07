@@ -7,8 +7,10 @@
 -- Nothing in this repo can reach production (no committed credentials) — this script is for a human to
 -- run with production access. Do NOT apply 212 / 213 / 214 until every expectation below is met.
 --
--- VALIDATED 2026-11-07 against the fully-applied sandbox reference DB (104+212+213+214): every block
--- below returned the "EXPECT" result shown. Compare production's output to these.
+-- VALIDATED 2026-11-07 against the fully-applied sandbox reference DB (104+212+213+214). Because the sandbox
+-- has everything applied, it returned each block's "After applying" expectation (§1 has_212/213 = t, §2b ZERO
+-- rows, functions f|f|f|t). The *primary* EXPECT lines below describe what PRODUCTION should show BEFORE
+-- applying 212/213/214; the "After applying" clauses are what the sandbox confirmed. Compare accordingly.
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 
 \echo ===== §1 DEPENDENCY PRESENCE — all seven columns must be  t  =====
@@ -16,11 +18,11 @@
 -- fail-closed) and 214 will also raise. Apply migration 104 first. has_103/188/199/200/212 gate 212/213 too.
 SELECT to_regclass('public.client_selections') IS NOT NULL                                           AS has_103_client_selections,
        to_regprocedure('public.auth_is_staff()') IS NOT NULL                                         AS has_104_auth_is_staff,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='leads'    AND column_name='selections_schedule') AS has_188_selections_schedule,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='projects' AND column_name='is_preconstruction')  AS has_199_is_preconstruction,
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads'    AND column_name='selections_schedule') AS has_188_selections_schedule,
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='projects' AND column_name='is_preconstruction')  AS has_199_is_preconstruction,
        to_regclass('public.internal_categories') IS NOT NULL                                         AS has_200_internal_categories,
        to_regclass('public.room_scope_items') IS NOT NULL                                            AS has_212_room_scope_items,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='projects' AND column_name='register_meta')       AS has_213_register_meta;
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='projects' AND column_name='register_meta')       AS has_213_register_meta;
 -- EXPECT on prod BEFORE this release: has_103=t has_104=t has_188=t has_199=t has_200=t, and
 --        has_212=f has_213=f  (212/213 not yet applied). After applying 212+213 they become t.
 
@@ -47,13 +49,15 @@ JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = p.schemaname
 WHERE p.schemaname='public' AND c.relrowsecurity AND p.permissive='PERMISSIVE'
   AND (p.roles @> ARRAY['authenticated']::name[] OR p.roles @> ARRAY['public']::name[])
   AND COALESCE(p.qual, p.with_check, '') !~* 'auth_is_staff'
-  AND COALESCE(p.qual, '') !~* 'auth\.uid\(\)\s*=\s*[a-z_]'
+  -- exclude legitimate owner-scoped "read your own row" policies in EITHER operand order
+  AND COALESCE(p.qual, '') !~* '(auth\.uid\(\)\s*=\s*[a-z_.]+|[a-z_.]+\s*=\s*auth\.uid\(\))'
   AND NOT EXISTS (SELECT 1 FROM pg_policies r WHERE r.schemaname='public' AND r.tablename=p.tablename AND r.permissive='RESTRICTIVE')
 ORDER BY 1;
 -- EXPECT on prod BEFORE 214: exactly one row — internal_categories | auth_users | true  (the gap 214 closes).
 --        After 214: ZERO rows.
 -- Any OTHER table that appears is a pre-existing exposure OUTSIDE the register's scope — report it, do not
--- fix it as part of this release.
+-- fix it as part of this release. (An owner-scoped policy written `col = auth.uid()` is now excluded in either
+-- order; if an unexpected table still appears, read its predicate before treating it as a regression.)
 
 \echo
 \echo ===== §6 DOCUMENT_TYPE PREFLIGHT — existing values outside the new 213 CHECK list (expect ZERO rows) =====

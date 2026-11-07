@@ -335,6 +335,7 @@ $$;
 -- The ONE writer of register data on a project (JS service: server/lib/registerStore.mjs).
 --
 -- p_ops is an array of operations computed by the service:
+--   {op:'meta_init', meta}                                  (promote-only) seed the initial register_meta exactly once
 --   {op:'meta_set',  meta, base_rev}                       replace register_meta (rev-checked; room renames propagate)
 --   {op:'sel_insert'|'scope_insert', item_id, row}           create (promote mode: ON CONFLICT DO NOTHING)
 --   {op:'sel_update'|'scope_update', item_id, row_id, base_version, row}

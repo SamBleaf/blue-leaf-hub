@@ -313,11 +313,18 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     const stamp = `${issuedDate}-${docType.replace(/_/g, "-")}-P${String(revision).padStart(2, "0")}-${randomBytes(3).toString("hex")}`;
     const pdfPath = `leads/${leadId}/register/${docType}/${stamp}.pdf`;
     const docxPath = `leads/${leadId}/register/${docType}/${stamp}.docx`;
-    const up1 = await sb.storage.from(BUCKET).upload(pdfPath, out.pdf, { contentType: PDF_MIME, upsert: false });
+    // A thrown rejection (network/timeout under undici) is normalised to the same {error} shape the
+    // supabase-js client returns, so the cleanup/error-handling below runs on a throw too, not just on a
+    // returned error — "nothing was issued" stays true whether the backend returns or throws.
+    let up1;
+    try { up1 = await sb.storage.from(BUCKET).upload(pdfPath, out.pdf, { contentType: PDF_MIME, upsert: false }); }
+    catch (e) { up1 = { error: { message: e?.message || "PDF upload threw", thrown: true } }; }
     if (up1.error) throw new DocumentError(502, "Could not store the issued PDF.", "STORAGE");
     // Tab 25 issue 5: both files must store, or neither — a half-stored issue (PDF without its DOCX
     // export) would 502 on the controlled-export download. Check the DOCX upload and roll back the PDF.
-    const up2 = await sb.storage.from(BUCKET).upload(docxPath, out.docx, { contentType: DOCX_MIME, upsert: false });
+    let up2;
+    try { up2 = await sb.storage.from(BUCKET).upload(docxPath, out.docx, { contentType: DOCX_MIME, upsert: false }); }
+    catch (e) { up2 = { error: { message: e?.message || "DOCX upload threw", thrown: true } }; }
     if (up2.error) {
       await sb.storage.from(BUCKET).remove([pdfPath]).catch(() => {});
       throw new DocumentError(502, "Could not store the issued document (DOCX export).", "STORAGE");
@@ -326,7 +333,8 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     const label = REGISTER_DOC_TYPES[docType].label;
     const filename = `${label} — ${fx.project.clientName} — P${String(revision).padStart(2, "0")}.pdf`.replace(/[\\/]/g, "-");
     const versions = Object.fromEntries(register.items.map((i) => [i.id, i.sync?.version || i.updatedAt]));
-    const { data, error } = await sb.rpc("register_issue_document", {
+    let data, error;
+    try { ({ data, error } = await sb.rpc("register_issue_document", {
       p_lead_id: leadId, p_document_type: docType, p_expected_version: revision,
       p_row: {
         filename, file_size: out.pdf.length, mime_type: PDF_MIME, storage_path: pdfPath, uploaded_by: actor?.email || actor?.name || "register",
@@ -337,7 +345,7 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
         issued_by: actor?.id || null, issued_by_name: actor?.name || null, recipient_name: clean(recipientName), recipient_email: clean(recipientEmail) || null,
         audience: REGISTER_DOC_TYPES[docType].audience, job_id: lead.job_id || null, project_id: loaded.projectId || null,
       },
-    });
+    })); } catch (e) { data = null; error = { message: e?.message || "register_issue_document threw", thrown: true }; }
     if (error) {
       // The DB record was not written — remove the orphaned storage objects so "nothing was issued" is
       // literally true (no unreferenced PDF/DOCX left behind). Tab 25 issue 5.

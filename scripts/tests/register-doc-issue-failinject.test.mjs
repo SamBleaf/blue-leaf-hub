@@ -9,7 +9,11 @@
  *   1. hard RPC error            → both objects removed, DocumentError(400, ISSUE)
  *   2. ok:false version_conflict → each attempt's objects removed, retry, finally DocumentError(409, VERSION); no leak
  *   3. ok:false other reason     → both objects removed, DocumentError(409, ISSUE) carrying the reason
- *   4. DOCX upload fails         → the already-stored PDF is rolled back, DocumentError(502, STORAGE)  [half-store guard]
+ *   4. DOCX upload fails (returned error) → the already-stored PDF is rolled back, DocumentError(502, STORAGE)  [half-store guard]
+ *   5. RPC REJECTS (throws, not a returned error) → both objects removed, DocumentError(400, ISSUE)  [throw path cleans up too]
+ *   6. RPC returns 42883 (function missing) → both objects removed, DocumentError(503, SCHEMA)
+ *   7. first upload (PDF) fails → DocumentError(502, STORAGE), nothing stored, no cleanup call
+ *   8. DOCX upload REJECTS (throws) → the already-stored PDF is rolled back, DocumentError(502, STORAGE)
  * Run: npm run test:register-doc-failinject
  */
 import { readFileSync } from "node:fs";
@@ -44,22 +48,37 @@ async function api(tok, method, path, body) {
   return { ok: r.ok, status: r.status, body: b };
 }
 async function catchErr(fn) { try { return { threw: false, value: await fn() }; } catch (e) { return { threw: true, e }; } }
-async function objectGone(path) { const { error } = await svc.storage.from(BUCKET).createSignedUrl(path, 30); return !!error; }
+// Confirm an object is really gone by LISTING its folder (unambiguous) — and throw loudly if the listing
+// itself fails, so a degraded storage backend can never be mis-read as "deleted" (false green).
+async function objectGone(path) {
+  const i = path.lastIndexOf("/");
+  const dir = path.slice(0, i), name = path.slice(i + 1);
+  const { data, error } = await svc.storage.from(BUCKET).list(dir, { limit: 1000, search: name });
+  if (error) throw new Error(`storage list failed (cannot confirm deletion of ${name}): ${error.message}`);
+  return !(data || []).some((o) => o.name === name);
+}
 
 // Wrap the real service client: record every upload/remove, delegate all table + storage ops to the real
 // sandbox, and let the caller force the register_issue_document RPC outcome (or fail the Nth upload).
-function wrap(real, { rpcFault = null, failUploadNo = 0 } = {}) {
+function wrap(real, { rpcFault = null, rpcThrow = false, failUploadNo = 0, throwUploadNo = 0 } = {}) {
   const uploads = [], removes = []; let nUpload = 0;
   const client = {
     auth: real.auth,
     from: (...a) => real.from(...a),
-    rpc: async (name, args) => (name === "register_issue_document" && rpcFault) ? rpcFault(args) : real.rpc(name, args),
+    rpc: async (name, args) => {
+      if (name === "register_issue_document") {
+        if (rpcThrow) throw new Error("injected: register_issue_document rejected (network/timeout)");
+        if (rpcFault) return rpcFault(args);
+      }
+      return real.rpc(name, args);
+    },
     storage: {
       from: (b) => {
         const bk = real.storage.from(b);
         return {
           upload: async (path, data, opts) => {
             nUpload += 1; uploads.push(path);
+            if (throwUploadNo && nUpload === throwUploadNo) throw new Error("injected: storage upload rejected (network/timeout)");
             if (failUploadNo && nUpload === failUploadNo) return { data: null, error: { message: "injected upload failure", statusCode: "507" } };
             return bk.upload(path, data, opts);
           },
@@ -165,6 +184,38 @@ async function main() {
     ok("case4: DOCX upload failure → DocumentError(502, STORAGE)", r.threw && r.e instanceof DocumentError && r.e.status === 502 && r.e.code === "STORAGE", r.threw ? `status=${r.e.status} code=${r.e.code}` : "did not throw");
     ok("case4: only the already-stored PDF is rolled back (remove([pdf]) — no half-stored issue)", w.removes.length === 1 && sameList(w.removes[0], [w.uploads[0]]), JSON.stringify(w.removes));
     ok("case4: the PDF is gone from storage", await objectGone(w.uploads[0]));
+  }
+
+  // ── Case 5: RPC REJECTS (throws, not a returned error) after both uploads → still cleaned up ──
+  {
+    const w = wrap(svc, { rpcThrow: true });
+    const r = await catchErr(() => issueDocument(w.client, leadId, "client_brief", issueArgs));
+    ok("case5: a THROWN rpc rejection → DocumentError(400, ISSUE), not a raw error", r.threw && r.e instanceof DocumentError && r.e.status === 400 && r.e.code === "ISSUE", r.threw ? `status=${r.e?.status} code=${r.e?.code} name=${r.e?.constructor?.name}` : "did not throw");
+    ok("case5: throw path still removed BOTH orphans (nothing issued)", w.removes.length === 1 && sameList(w.removes[0], [w.uploads[0], w.uploads[1]]) && (await objectGone(w.uploads[0])) && (await objectGone(w.uploads[1])), JSON.stringify(w.removes));
+  }
+
+  // ── Case 6: RPC returns the migration-missing error (42883) → SCHEMA 503, both removed ────────
+  {
+    const w = wrap(svc, { rpcFault: () => ({ data: null, error: { code: "42883", message: "function register_issue_document does not exist" } }) });
+    const r = await catchErr(() => issueDocument(w.client, leadId, "client_brief", issueArgs));
+    ok("case6: 42883 (function missing) → DocumentError(503, SCHEMA)", r.threw && r.e instanceof DocumentError && r.e.status === 503 && r.e.code === "SCHEMA", r.threw ? `status=${r.e?.status} code=${r.e?.code}` : "did not throw");
+    ok("case6: both orphan objects removed and gone", w.removes.length === 1 && sameList(w.removes[0], [w.uploads[0], w.uploads[1]]) && (await objectGone(w.uploads[0])) && (await objectGone(w.uploads[1])), JSON.stringify(w.removes));
+  }
+
+  // ── Case 7: the FIRST upload (PDF) fails → 502 STORAGE, nothing stored, nothing to clean ──────
+  {
+    const w = wrap(svc, { failUploadNo: 1 });
+    const r = await catchErr(() => issueDocument(w.client, leadId, "client_brief", issueArgs));
+    ok("case7: PDF upload failure → DocumentError(502, STORAGE)", r.threw && r.e instanceof DocumentError && r.e.status === 502 && r.e.code === "STORAGE", r.threw ? `status=${r.e?.status} code=${r.e?.code}` : "did not throw");
+    ok("case7: nothing stored → no cleanup call at all (removes.length 0)", w.removes.length === 0, JSON.stringify(w.removes));
+  }
+
+  // ── Case 8: DOCX upload REJECTS (throws) after the PDF stored → PDF rolled back ───────────────
+  {
+    const w = wrap(svc, { throwUploadNo: 2 });
+    const r = await catchErr(() => issueDocument(w.client, leadId, "client_brief", issueArgs));
+    ok("case8: a THROWN DOCX upload rejection → DocumentError(502, STORAGE)", r.threw && r.e instanceof DocumentError && r.e.status === 502 && r.e.code === "STORAGE", r.threw ? `status=${r.e?.status} code=${r.e?.code}` : "did not throw");
+    ok("case8: the already-stored PDF is rolled back (remove([pdf]) only) and gone", w.removes.length === 1 && sameList(w.removes[0], [w.uploads[0]]) && (await objectGone(w.uploads[0])), JSON.stringify(w.removes));
   }
 
   await cleanup(leadId);

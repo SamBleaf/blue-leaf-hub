@@ -55,7 +55,9 @@ CREATE INDEX IF NOT EXISTS idx_csel_source_lead ON public.client_selections (sou
 
 
 -- ─── B. Internal-only room scope / works register ───────────────────────────────────────────────
--- The non-selection half of the Master Register. INTERNAL: the client portal never reads this table.
+-- The non-selection half of the Master Register. INTERNAL to Blue Leaf: the client portal APPLICATION code
+-- never reads this table — but direct PostgREST access by a client JWT is only prevented by the RESTRICTIVE
+-- deny_clients policy migration 213 (section B, D-020) adds; the permissive policy in section C below does NOT.
 -- One row per promoted scope/works item (and per selection settled as excluded / by-others / N-A).
 CREATE TABLE IF NOT EXISTS public.room_scope_items (
   id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -90,9 +92,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS room_scope_items_register_item_uq
 
 
 -- ─── C. Row Level Security ──────────────────────────────────────────────────────────────────────
--- Mirrors migration 103: all API access is via the service-role key (bypasses RLS); this policy is a
--- safety net for internal authenticated users. room_scope_items is internal — no client policy, and
--- the portal routes never query it.
+-- Mirrors migration 103: all Hub API access is via the service-role key (bypasses RLS). WARNING: the
+-- auth_internal policy below is PERMISSIVE + USING(true) — on its own it lets ANY authenticated principal,
+-- INCLUDING a portal client JWT, read/write this table directly via PostgREST. The service-role API and the
+-- fact that portal routes never query it are NOT what keeps clients out. Migration 213 (section B, D-020)
+-- adds the RESTRICTIVE staff-only deny_clients policy that actually closes this (fail-closed on apply);
+-- until 213 is applied, room_scope_items is client-readable.
 ALTER TABLE public.room_scope_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "auth_internal" ON public.room_scope_items;
 CREATE POLICY "auth_internal" ON public.room_scope_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
