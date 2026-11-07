@@ -20,6 +20,10 @@ import {
   loadRegister, saveRegister, promoteRegisterToProject, portalAction, itemHistory, RegisterError,
 } from "./registerStore.mjs";
 import { loadRegisterContext, setDeliveryModel } from "./registerContext.mjs";
+import {
+  previewDocument, issueDocument, listDocuments, documentUrl, supplierPack, addSourceDocument, updateSourceDocument,
+} from "./registerDocuments.mjs";
+import { tenderSummary, latestBaseline, recordBaseline } from "./registerHandover.mjs";
 
 async function actorFor(sb, caller) {
   if (!caller) return null;
@@ -110,6 +114,97 @@ export function registerRegisterRoutes(app) {
       const out = await portalAction(sb, req.params.leadId, req.params.action, Array.isArray(items) ? items : [], { actor, note });
       ok(res, { register: out.register, mode: "project" });
     } catch (e) { sendRegisterError(res, e, "Could not update the client portal."); }
+  });
+
+  // ── Documents (D1–D3): draft preview, immutable issue, history, retrieval ────────────────────────
+  app.get(`${base}/documents`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { documents: await listDocuments(sb, req.params.leadId) }); }
+    catch (e) { sendRegisterError(res, e, "Could not list documents."); }
+  });
+
+  app.post(`${base}/documents/:docType/preview`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      const out = await previewDocument(sb, req.params.leadId, req.params.docType, { layout: req.body?.layout, recipientName: req.body?.recipientName, actor });
+      ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision });
+    } catch (e) { sendRegisterError(res, e, "Could not render the draft."); }
+  });
+
+  app.post(`${base}/documents/:docType/issue`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      const b = req.body || {};
+      const out = await issueDocument(sb, req.params.leadId, req.params.docType, { recipientName: b.recipientName, recipientEmail: b.recipientEmail, layout: b.layout, actor });
+      ok(res, { document: out.document, supersededId: out.supersededId, checks: out.checks });
+    } catch (e) {
+      if (e?.code === "PREFLIGHT") return res.status(422).json({ ok: false, error: e.message, code: e.code, checks: e.checks });
+      sendRegisterError(res, e, "Could not issue the document.");
+    }
+  });
+
+  app.get(`${base}/documents/:docId/url`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { url: await documentUrl(sb, req.params.leadId, req.params.docId, { export: req.query.export === "docx" }) }); }
+    catch (e) { sendRegisterError(res, e, "Could not open the document."); }
+  });
+
+  app.get(`${base}/packs/:discipline`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      const out = await supplierPack(sb, req.params.leadId, req.params.discipline, { actor });
+      ok(res, { pdf: out.pdf.toString("base64"), count: out.count });
+    } catch (e) { sendRegisterError(res, e, "Could not build the coordination pack."); }
+  });
+
+  // ── Received consultant / supplier documents (original kept intact; manual reconciliation) ──────
+  app.post(`${base}/sources`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      ok(res, { document: await addSourceDocument(sb, req.params.leadId, req.body || {}, { actor }) });
+    } catch (e) { sendRegisterError(res, e, "Could not add the document."); }
+  });
+
+  app.patch(`${base}/sources/:docId`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { document: await updateSourceDocument(sb, req.params.leadId, req.params.docId, req.body || {}) }); }
+    catch (e) { sendRegisterError(res, e, "Could not update the document."); }
+  });
+
+  // ── Tender linkage + contract baseline / handover ───────────────────────────────────────────────
+  app.get(`${base}/tender`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { tender: await tenderSummary(sb, req.params.leadId, { actor: await actorFor(sb, req.caller) }) }); }
+    catch (e) { sendRegisterError(res, e, "Could not build the tender view."); }
+  });
+
+  app.get(`${base}/baseline`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { baseline: await latestBaseline(sb, req.params.leadId) }); }
+    catch (e) { sendRegisterError(res, e, "Could not read the baseline."); }
+  });
+
+  app.post(`${base}/baseline`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      const out = await recordBaseline(sb, req.params.leadId, { actor, note: req.body?.note });
+      ok(res, { baseline: out.baseline, counts: out.counts });
+    } catch (e) { sendRegisterError(res, e, "Could not record the contract baseline."); }
   });
 
   app.get(`${base}/history`, requireAuth, async (req, res) => {

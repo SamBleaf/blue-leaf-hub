@@ -437,6 +437,7 @@ async function callApply(sb, target, ops, actor) {
     p_project_id: target.project.id, p_lead_id: target.lead.id, p_ops: ops, p_actor: actorJson(actor), p_mode: "edit",
   });
   if (error) {
+    console.warn("[register] register_apply failed (nothing written):", error.code || "", error.message || error);
     if (error.code === "42883" || error.code === "PGRST202") throw new RegisterError(503, "Apply migration 213 first (Master Register R03).", "SCHEMA");
     if (/REGISTER_CONFLICT/.test(error.message || "")) throw new RegisterError(409, "Another change landed at the same moment — please retry.", "CONFLICT", { conflicts: [] });
     throw new RegisterError(400, "Could not save the register — nothing was changed.", "APPLY", { detail: error.message });
@@ -458,6 +459,7 @@ const REASON_TEXT = {
   evidence_required: "needs approval evidence (who, when, how) to be marked client-approved",
   technical_evidence_required: "needs a drawing / consultant reference to be marked verified",
   not_in_review: "has no client choice waiting for review",
+  reapproval_required: "changed after client approval — step it back to Proposed or record the client's re-approval",
   meta_stale: "room list was changed elsewhere",
 };
 function conflictMessage(conflicts) {

@@ -99,7 +99,7 @@ const ids = (qs) => qs.map((q) => q.id);
   const reg = { meta: emptyMeta({ rooms: [room] }), items: [def] };
   ok("defaults: R-005 floor prompt inherits the W-017 whole-house default", questionById("R-005").inherits === "W-017" && defaultItemFor(reg, "W-017")?.id === def.id);
   ok("legacy: R02 prompt keys resolve to Tab 21 IDs (k_bench→K-005, wh_flooring→W-017)", resolvePromptId("k_bench") === "K-005" && resolvePromptId("wh_flooring") === "W-017" && resolvePromptId("K-005") === "K-005");
-  ok("refs: an item's document reference is stable across renames and reads", refCode(def) === refCode(makeItem({ ...def, description: "changed" })) && /^W-017·[0-9A-Z]{4}$/.test(refCode(def)));
+  ok("refs: an item's document reference is stable across renames and reads", refCode(def) === refCode(makeItem({ ...def, description: "changed" })) && /^W017-[0-9A-Z]{3}$/.test(refCode(def)));
   const round = readRegister({ selections_schedule: writeRegister({ meta: reg.meta, items: [makeItem({ ...def, quantity: 42.5, unit: "m²", supplyBy: "trade", technicalStatus: "not_required", pricingStatus: "allowance_or_estimate", pricingRef: "PC-3", sync: { version: "x" } })] }) });
   const it = round.items[0];
   ok("round trip: quantity/unit/supply/pricing survive the lead scratchpad; server sync is never persisted",

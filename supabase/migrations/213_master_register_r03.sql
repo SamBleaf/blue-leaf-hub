@@ -364,6 +364,7 @@ DECLARE
   v_changed     boolean;
   v_was_approved boolean;
   v_was_verified boolean;
+  v_prod_changed boolean;
 BEGIN
   IF p_mode NOT IN ('edit', 'promote') THEN RAISE EXCEPTION 'register_apply: bad mode %', p_mode; END IF;
   IF jsonb_typeof(COALESCE(p_ops, '[]'::jsonb)) <> 'array' THEN RAISE EXCEPTION 'register_apply: p_ops must be an array'; END IF;
@@ -373,9 +374,11 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'register_apply: project % not found', p_project_id; END IF;
   v_post := NOT v_proj.is_pre;
 
-  -- A real staff user id or NULL (FK to auth.users) — never a dangling id.
+  -- A real staff user id or NULL (FK to auth.users) — never a dangling id. Checked against the staff
+  -- profile (one row per auth user) because an invoker function can't read auth.users; the FK itself is
+  -- enforced by Postgres regardless of the caller's privileges.
   IF COALESCE(p_actor ->> 'id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-    SELECT u.id INTO v_actor_id FROM auth.users u WHERE u.id = (p_actor ->> 'id')::uuid;
+    SELECT up.id INTO v_actor_id FROM public.user_profiles up WHERE up.id = (p_actor ->> 'id')::uuid;
   END IF;
 
   IF p_mode = 'promote' AND v_proj.register_meta IS NOT NULL THEN
@@ -475,6 +478,18 @@ BEGIN
           OR (v_was_approved AND v_row ->> 'certainty' IS DISTINCT FROM 'client_approved');
         IF v_locked AND v_changed THEN
           v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'post_contract_locked');
+        END IF;
+        -- An approval covers a specific product: changing it while keeping "client_approved" needs a NEW
+        -- approval (fresh evidence) — otherwise the item must step back to proposed (Tab 18 §7).
+        v_prod_changed :=
+             NULLIF(v_row ->> 'selected_product', '')    IS DISTINCT FROM NULLIF(v_sel.selected_product, '')
+          OR NULLIF(v_row ->> 'selected_model_code', '') IS DISTINCT FROM NULLIF(v_sel.selected_model_code, '')
+          OR NULLIF(v_row ->> 'selected_supplier', '')   IS DISTINCT FROM NULLIF(v_sel.selected_supplier, '')
+          OR NULLIF(v_row ->> 'finish', '')              IS DISTINCT FROM NULLIF(v_sel.finish, '')
+          OR NULLIF(v_row ->> 'manufacturer', '')        IS DISTINCT FROM NULLIF(v_sel.manufacturer, '');
+        IF NOT v_locked AND v_was_approved AND v_prod_changed AND v_row ->> 'certainty' = 'client_approved'
+           AND (v_ev IS NULL OR v_ev IS NOT DISTINCT FROM v_sel.approval_evidence OR COALESCE(v_ev ->> 'method', '') = 'board') THEN
+          v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'reapproval_required');
         END IF;
       ELSIF v_kind = 'sel_withdraw' THEN
         IF v_was_approved THEN

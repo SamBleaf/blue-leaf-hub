@@ -8,7 +8,7 @@
 
 export const SELECTION_STATUSES = [
   "Client-approved", "Confirmed", "Proposed", "Preferred", "Preliminary", "TBC",
-  "N/A", "Excluded", "By Others", "Existing to Remain", "Undecided", "Hold", "Design", "Retain",
+  "N/A", "Excluded", "By Others", "Existing to Remain", "Undecided", "Hold", "Design", "Retain", "Deferred",
 ];
 /** Architect design-register status vocabulary (Tab 17 #9): intent vs technical verification. */
 export const ARCHITECT_ITEM_STATUSES = ["Client-approved", "Proposed", "To verify"];
@@ -45,7 +45,7 @@ function chrome(fx, { prefix, breadcrumb, sectionLabel, title, tagline }) {
 export function buildClientBriefPayload(fx) {
   const b = fx.clientBrief || {}, p = fx.project;
   const c = chrome(fx, { prefix: "PBR", breadcrumb: "Client Project Brief  /  Design Study",
-    sectionLabel: "Concept presentation  ·  Renovation + extension", title: "Project brief",
+    sectionLabel: p.sectionLabel || "Concept presentation  ·  Renovation + extension", title: "Project brief",
     tagline: "A clear foundation for the next phase of your home." });
   const intn = (i, k) => (b.intentions && b.intentions[i] ? b.intentions[i][k] : "");
   return {
@@ -79,7 +79,8 @@ function procFields(steps) {
   return out;
 }
 
-const archGroup = (id) => (/^(EX|WN|ST|RF|PL)/.test(id) ? "Envelope & structure" : "Internal & services");
+// Design-register grouping: an explicit row group (live register data) wins; fixtures fall back to ID prefixes.
+const archGroup = (id, group) => group || (/^(EX|WN|ST|RF|PL)/.test(id) ? "Envelope & structure" : "Internal & services");
 
 /** 02 — Architect Design Brief (coordination-first). */
 export function buildArchitectBriefPayload(fx) {
@@ -89,7 +90,7 @@ export function buildArchitectBriefPayload(fx) {
     tagline: "Requirements, decisions and actions to progress the next drawing issue." });
   // design register, grouped by element
   const byGroup = new Map();
-  for (const r of a.scheduleItems || []) { const g = archGroup(r.itemId || ""); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(r); }
+  for (const r of a.scheduleItems || []) { const g = archGroup(r.itemId || "", r.group); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(r); }
   const GROUPS = ["Envelope & structure", "Internal & services"].filter((g) => byGroup.has(g)).map((g) => ({
     GROUP_NAME: g, ITEMS: byGroup.get(g).map((r) => ({ REF_ID: r.itemId || "", LOCATION: r.location || "", DIRECTION: r.requirement || "", STATUS: r.status || "", RESPONSE: r.action || "", DWG: r.dwgRef || "" })),
   }));

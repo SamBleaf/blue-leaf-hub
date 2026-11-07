@@ -7,7 +7,7 @@ import {
   makeRoom, ROOM_TYPES, ROOM_SCOPES, DELIVERY_MODELS, PROJECT_TYPE_LABELS, isRenovationProject, promptsFor,
   questionById, resolvePromptId,
 } from "../../../../lib/register.js";
-import { PROJECT_TYPES } from "../../../../lib/salesPipeline.js";
+import { PROJECT_TYPES, STAGES } from "../../../../lib/salesPipeline.js";
 import { Chip, Field, Section, Select } from "./ui.jsx";
 import PromptRow from "./PromptRow.jsx";
 
@@ -88,7 +88,7 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
                   </select>
                 )}
               </Fact>
-              <Fact label="Stage" value={context.stage} />
+              <Fact label="Stage" value={STAGES.find((s) => s.id === context.stage)?.label || context.stage} />
               <Fact label="Budget direction" id="P-004" value={context.budget.min || context.budget.max ? `${money(context.budget.min) || "?"} – ${money(context.budget.max) || "?"}` : money(context.budget.estimatedValue)} />
               <Fact label="Desired start" id="P-004" value={context.budget.desiredStart} />
               <Fact label="PTSA / contract" value={[context.commercial.ptsaStatus && `PTSA ${context.commercial.ptsaStatus}`, context.commercial.contractStatus && `Contract ${context.commercial.contractStatus}`].filter(Boolean).join(" · ")} />

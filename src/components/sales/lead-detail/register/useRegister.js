@@ -21,6 +21,7 @@ const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "syn
 const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
 const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet"];
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
 
 const GUARD_REASONS = {
   issued_locked: "is on the client portal — withdraw it before deleting or re-classifying",
@@ -29,6 +30,7 @@ const GUARD_REASONS = {
   evidence_required: "needs approval evidence before it can be marked client-approved",
   technical_evidence_required: "needs a technical reference before it can be marked verified",
   not_in_review: "has no client choice waiting for review",
+  reapproval_required: "changed after client approval — it needs the client's re-confirmation",
 };
 
 /** Three-way merge of one item. Returns { item, conflicts: [field] }. */
@@ -70,7 +72,7 @@ function mergeMeta(base, mine, theirs) {
   return emptyMeta({ ...out, rev: theirs.rev });
 }
 
-export function useRegister(leadId) {
+export function useRegister(leadId, { enabled = true } = {}) {
   const [status, setStatus] = useState({ loading: true, error: null });
   const [info, setInfo] = useState({ mode: null, projectId: null, isPreconstruction: true, promotion: null, pendingPromotion: false, schemaReady: true });
   const [reg, setReg] = useState(null);
@@ -113,7 +115,9 @@ export function useRegister(leadId) {
     return r.data;
   }, [leadId, adopt]);
 
-  useEffect(() => { mounted.current = true; load(); return () => { mounted.current = false; clearTimeout(timer.current); }; }, [load]);
+  // Load only when the register is actually on screen (the lead page renders its panels in both the desktop
+  // and the CSS-hidden mobile layout — the hidden copy must not hold a second, stale register).
+  useEffect(() => { mounted.current = true; if (enabled) load(); return () => { mounted.current = false; clearTimeout(timer.current); }; }, [load, enabled]);
 
   const schedule = useCallback(() => {
     clearTimeout(timer.current);
@@ -131,7 +135,16 @@ export function useRegister(leadId) {
 
   const updateItem = useCallback((id, partial) => {
     const cur = regRef.current; if (!cur) return;
-    commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...partial, sync: i.sync }) : i)) }, [id]);
+    const item = cur.items.find((i) => i.id === id);
+    let next = partial;
+    // An approval covers a specific product: changing it returns the item to Proposed until the client
+    // re-confirms (the server refuses to keep "client-approved" on a changed product without new evidence).
+    if (item && item.itemKind === "selection" && item.certainty === "client_approved" && !("certainty" in partial)
+        && PRODUCT_FIELDS.some((f) => f in partial && !same(partial[f], item[f]))) {
+      next = { ...partial, certainty: "proposed", evidence: null };
+      setNotices((n) => [`“${item.description || "Selection"}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
+    }
+    commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...next, sync: i.sync }) : i)) }, [id]);
   }, [commit]);
   const addItem = useCallback((item) => {
     const cur = regRef.current; if (!cur) return null;

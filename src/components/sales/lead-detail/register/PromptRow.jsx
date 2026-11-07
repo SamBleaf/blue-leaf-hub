@@ -129,9 +129,9 @@ export default function PromptRow({
 
           {(!inherited || item) && !disabled && !locked && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
-              {kind !== "action" && QUICK.map(([k, l]) => (
+              {kind !== "action" && QUICK.filter(([k]) => kind !== "requirement" || k === "na" || k === "undecided").map(([k, l]) => (
                 <button key={k} type="button" onClick={() => set({ disposition: k })}
-                  className={`rounded-full border px-2 py-0.5 text-[10px] ${it.disposition === k && started ? "border-primary bg-primary text-white" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
+                  className={`rounded-full border px-2 py-0.5 text-[10px] ${it.disposition === k && started && k !== "undecided" ? "border-primary bg-primary text-white" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
               ))}
               {question?.options?.map((o) => (
                 <button key={o} type="button" onClick={() => appendOption(o)} className="rounded-full border border-dashed border-hairline px-2 py-0.5 text-[10px] text-ink hover:bg-surface">+ {o}</button>

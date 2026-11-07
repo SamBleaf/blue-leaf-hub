@@ -529,14 +529,15 @@ export function itemsByRoom(register) {
   return map;
 }
 
-/** Short, stable, human reference for an item in documents ("K-005·3F9A") — derived from its id. */
+/** Short, stable, human reference for an item in documents ("K005-3F9") — derived from its id; fits a
+ *  narrow schedule column on one line. */
 export function refCode(item) {
   let h = 2166136261;
   const s = String(item.id || "");
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  const tail = h.toString(36).toUpperCase().slice(-4).padStart(4, "0");
+  const tail = h.toString(36).toUpperCase().slice(-3).padStart(3, "0");
   const q = resolvePromptId(item.promptKey);
-  return `${q || "X"}·${tail}`;
+  return `${q ? q.replace("-", "") : "X"}-${tail}`;
 }
 
 /** Where to resume (Tab 18 §3 "Continue Brief"): last saved room/step, else first room, else context. */

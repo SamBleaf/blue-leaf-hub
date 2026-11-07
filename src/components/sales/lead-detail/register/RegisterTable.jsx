@@ -15,7 +15,7 @@ import PromptRow from "./PromptRow.jsx";
 
 const REASON_LABEL = { decision: "Decision", verification: "Verification", action: "Action" };
 
-export default function RegisterTable({ reg, context, stage, info, actor, updateItem, deleteItem, addItem, onPortalItems, onPortalItem, readOnly }) {
+export default function RegisterTable({ reg, context, stage, info, actor, baseline, updateItem, deleteItem, addItem, onPortalItems, onPortalItem, readOnly }) {
   const [f, setF] = useState({ q: "", room: "", kind: "", cat: "", disp: "", cert: "", tech: "", price: "", owner: "", open: true, portal: "" });
   const [expanded, setExpanded] = useState(null);
   const [picked, setPicked] = useState([]);
@@ -93,9 +93,8 @@ export default function RegisterTable({ reg, context, stage, info, actor, update
           <table className="w-full text-[11px]" data-testid="register-table">
             <thead><tr className="border-b border-hairline text-left text-muted">
               {info.mode === "project" && <th className="py-1 pr-1"></th>}
-              <th className="py-1 pr-2">Ref</th><th className="py-1 pr-2">Room</th><th className="py-1 pr-2">Type</th><th className="py-1 pr-2">Item / direction</th>
-              <th className="py-1 pr-2">Scope</th><th className="py-1 pr-2">Decision</th><th className="py-1 pr-2">Technical</th><th className="py-1 pr-2">Pricing</th>
-              <th className="py-1 pr-2">Owner / next action</th><th className="py-1 pr-2">Source</th><th className="py-1 pr-2">Open</th><th></th>
+              <th className="py-1 pr-2">Ref</th><th className="py-1 pr-2">Room</th><th className="py-1 pr-2">Item / direction</th>
+              <th className="py-1 pr-2">Scope</th><th className="py-1 pr-2">Status</th><th className="py-1 pr-2">Owner / next action</th><th className="py-1 pr-2">Open</th><th></th>
             </tr></thead>
             <tbody>
               {rows.map((i) => {
@@ -105,30 +104,35 @@ export default function RegisterTable({ reg, context, stage, info, actor, update
                 return [
                   <tr key={i.id} className="border-b border-hairline/60 align-top" data-testid={`reg-row-${i.id}`}>
                     {info.mode === "project" && <td className="py-1 pr-1">{canPick && !readOnly && <input type="checkbox" className="h-3 w-3 accent-primary" checked={picked.includes(i.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, i.id] : p.filter((x) => x !== i.id)))} />}</td>}
-                    <td className="py-1 pr-2 font-mono text-[10px] text-muted">{refCode(i)}</td>
+                    <td className="whitespace-nowrap py-1 pr-2 font-mono text-[10px] text-muted">{refCode(i)}</td>
                     <td className="py-1 pr-2 text-ink">{roomLabel(reg, i)}</td>
-                    <td className="py-1 pr-2"><Chip tone={i.itemKind === "selection" ? "blue" : i.itemKind === "requirement" ? "violet" : i.itemKind === "action" ? "amber" : "slate"}>{ITEM_KINDS[i.itemKind]}</Chip><div className="mt-0.5 text-[10px] text-muted">{categoryLabel(i.category)}</div></td>
-                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} className="inp w-full min-w-[10rem] text-[11px]" />
-                      {i.product && <div className="mt-0.5 text-[10px] text-muted">{[i.manufacturer, i.product, i.model].filter(Boolean).join(" · ")}</div>}</td>
+                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} className="inp w-full min-w-[9rem] text-[11px]" />
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-muted">
+                        <Chip tone={i.itemKind === "selection" ? "blue" : i.itemKind === "requirement" ? "violet" : i.itemKind === "action" ? "amber" : "slate"}>{ITEM_KINDS[i.itemKind]}</Chip>
+                        <span>{categoryLabel(i.category)}</span>
+                        {i.product && <span>· {[i.manufacturer, i.product, i.model].filter(Boolean).join(" ")}</span>}
+                        {i.source && <span>· {i.source}</span>}
+                      </div></td>
                     <td className="py-1 pr-2"><Select value={i.disposition} onChange={(v) => updateItem(i.id, { disposition: v })} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} disabled={readOnly || lock} /></td>
-                    <td className="py-1 pr-2">{i.itemKind === "selection" || i.itemKind === "requirement"
-                      ? <span className={i.certainty === "client_approved" ? "font-semibold text-green-700" : "text-ink"}>{REGISTER_CERTAINTY[i.certainty]}</span>
-                      : <span className="text-muted">—</span>}</td>
-                    <td className="py-1 pr-2"><span className={i.technicalStatus === "needs_verification" ? "text-amber-700" : i.technicalStatus === "verified" ? "text-green-700" : "text-muted"}>{TECHNICAL_STATUSES[i.technicalStatus]}</span></td>
-                    <td className="py-1 pr-2 text-muted">{i.itemKind === "selection" || i.itemKind === "scope" ? PRICING_STATUSES[i.pricingStatus] : "—"}{i.pricingRef ? <div className="text-[10px]">{i.pricingRef}</div> : null}</td>
+                    <td className="whitespace-nowrap py-1 pr-2 text-[10px] leading-snug">
+                      {(i.itemKind === "selection" || i.itemKind === "requirement") && <div className={i.certainty === "client_approved" ? "font-semibold text-green-700" : "text-ink"}>{REGISTER_CERTAINTY[i.certainty]}</div>}
+                      <div className={i.technicalStatus === "needs_verification" ? "text-amber-700" : i.technicalStatus === "verified" ? "text-green-700" : "text-muted"}>Tech: {TECHNICAL_STATUSES[i.technicalStatus].toLowerCase()}</div>
+                      {(i.itemKind === "selection" || i.itemKind === "scope") && <div className="text-muted">Price: {PRICING_STATUSES[i.pricingStatus].toLowerCase()}{i.pricingRef ? ` · ${i.pricingRef}` : ""}</div>}
+                    </td>
                     <td className="py-1 pr-2">
                       <Select value={i.responsibility} onChange={(v) => updateItem(i.id, { responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" disabled={readOnly} />
                       <input value={i.nextAction} disabled={readOnly} onChange={(e) => updateItem(i.id, { nextAction: e.target.value, resolved: false })} placeholder="next action" className="inp mt-1 w-full min-w-[8rem] text-[11px]" />
                     </td>
-                    <td className="py-1 pr-2"><input value={i.source} disabled={readOnly} onChange={(e) => updateItem(i.id, { source: e.target.value })} placeholder="sheet / doc" className="inp w-24 text-[11px]" /></td>
-                    <td className="py-1 pr-2">{reasons.map((r) => <div key={r}><Chip tone="amber">{REASON_LABEL[r]}</Chip></div>)}</td>
+                    <td className="py-1 pr-2">{reasons.map((r) => <div key={r}><Chip tone="amber">{REASON_LABEL[r]}</Chip></div>)}
+                      {baseline && (!baseline.itemVersions[i.id] ? <div><Chip tone="violet">Added after contract</Chip></div>
+                        : baseline.itemVersions[i.id] !== (i.sync?.version || i.updatedAt) ? <div><Chip tone="violet">Changed since contract</Chip></div> : null)}</td>
                     <td className="py-1 text-right whitespace-nowrap">
                       <button type="button" onClick={() => setExpanded(expanded === i.id ? null : i.id)} className="px-1 text-primary hover:underline">{expanded === i.id ? "Close" : "Edit"}</button>
                       {!readOnly && <button type="button" onClick={() => deleteItem(i.id)} className="px-1 text-red-500 hover:text-red-700">×</button>}
                     </td>
                   </tr>,
                   expanded === i.id && (
-                    <tr key={`${i.id}-x`}><td colSpan={13} className="pb-2">
+                    <tr key={`${i.id}-x`}><td colSpan={9} className="pb-2">
                       <PromptRow question={null} item={i} actor={actor} compact readOnlyReason={readOnly ? "Read-only" : null}
                         onChange={(partial) => updateItem(i.id, partial)} onDelete={() => deleteItem(i.id)} onPortal={(a, ev) => onPortalItem(i, a, ev)} />
                     </td></tr>

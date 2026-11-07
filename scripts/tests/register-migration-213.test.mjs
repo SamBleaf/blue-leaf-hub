@@ -193,6 +193,17 @@ async function main() {
   const bv = await verText("client_selections", board.id);
   const boardEdit = await apply([{ op: "sel_update", item_id: "cs_" + board.id, row_id: board.id, base_version: bv, row: { category: "Tiling", item_name: "Board approved tile", certainty: "client_approved", next_action: "Confirm grout colour" } }]);
   check("pre-existing board approval editable without new evidence", boardEdit.ok, JSON.stringify(boardEdit));
+  // changing the product of an approved selection while keeping it approved needs a NEW approval
+  const sinkA2 = await sel("ri_sink");
+  const vA2 = await verText("client_selections", sinkA2.id);
+  const baseA2 = { category: sinkA2.category, item_name: sinkA2.item_name, room_area: sinkA2.room_area, source_room_id: "rm_k", certainty: "client_approved", approval_evidence: sinkA2.approval_evidence };
+  const reap = await apply([{ op: "sel_update", item_id: "ri_sink", row_id: sinkA2.id, base_version: vA2, row: { ...baseA2, selected_product: "Different sink" } }]);
+  check("changing an approved product without a new approval → reapproval_required", !reap.ok && reap.conflicts?.[0]?.reason === "reapproval_required", JSON.stringify(reap));
+  const back = await apply([{ op: "sel_update", item_id: "ri_sink", row_id: sinkA2.id, base_version: vA2, row: { ...baseA2, certainty: "proposed", selected_product: "Different sink" } }]);
+  const sinkBack = await sel("ri_sink");
+  check("…stepping it back to proposed is allowed pre-contract (approval cleared)", back.ok && sinkBack.status === "not_started" && sinkBack.approved_at === null && sinkBack.approval_evidence === null, JSON.stringify(back));
+  const reApp = await apply([{ op: "sel_update", item_id: "ri_sink", row_id: sinkBack.id, base_version: await verText("client_selections", sinkBack.id), row: { ...baseA2, selected_product: "Franke Bell 1.5 bowl", approval_evidence: { at: "2026-11-15T09:00:00Z", by: "Staff Member", method: "email", ref: "Client email 15 Nov" } } }]);
+  check("…and re-approving with fresh evidence lands", reApp.ok && (await sel("ri_sink")).status === "approved");
   check("board-created row adopted into the register (source id stamped)", (await one(`SELECT source_register_item_id s FROM client_selections WHERE id=$1`, [board.id])).s === "cs_" + board.id);
   const rq = await rsi("ri_req");
   const tv = await verText("room_scope_items", rq.id);

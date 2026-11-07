@@ -30,7 +30,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
-  symlinkSync, unlinkSync, writeFileSync, lstatSync
+  symlinkSync, unlinkSync, writeFileSync, lstatSync, readlinkSync
 } from "node:fs";
 import net from "node:net";
 import { join, basename } from "node:path";
@@ -187,11 +187,22 @@ function writeHubEnv(secrets) {
   // can never pick up the repo's production .env. cwd-relative asset dirs are symlinked back.
   mkdirSync(HUB_CWD, { recursive: true, mode: 0o700 });
   writePrivate(join(HUB_CWD, ".env"), env);
-  for (const d of ["docs", "src", "public", "shared"]) {
+  linkHubCwd();
+}
+
+// cwd-relative paths the Hub + Vite/Tailwind resolve from the working directory, (re)pointed at THIS
+// checkout every time — so a home-directory run copy never reads through to a Desktop checkout (macOS TCC
+// blocks app-launched processes there) and Tailwind finds the Hub theme (tailwind/postcss config + content).
+function linkHubCwd() {
+  mkdirSync(HUB_CWD, { recursive: true, mode: 0o700 });
+  for (const d of ["docs", "src", "public", "shared", "index.html", "tailwind.config.js", "postcss.config.js"]) {
     const link = join(HUB_CWD, d);
-    let exists = false;
-    try { lstatSync(link); exists = true; } catch { /* missing */ }
-    if (!exists && existsSync(join(REPO, d))) symlinkSync(join(REPO, d), link);
+    const target = join(REPO, d);
+    let current = null;
+    try { if (lstatSync(link).isSymbolicLink()) current = readlinkSync(link); else continue; } catch { /* missing */ }
+    if (current === target) continue;
+    if (current !== null) unlinkSync(link);
+    if (existsSync(target)) symlinkSync(target, link);
   }
 }
 
@@ -434,6 +445,7 @@ function cmdGateway() {
 function hubProcessEnv() {
   if (!existsSync(HUB_ENV)) die(`missing ${HUB_ENV} — run init`);
   if (!existsSync(join(HUB_CWD, ".env"))) writeHubEnv(loadOrCreateSecrets());
+  linkHubCwd();
   const hubEnv = {};
   for (const line of readFileSync(HUB_ENV, "utf8").split("\n")) {
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);

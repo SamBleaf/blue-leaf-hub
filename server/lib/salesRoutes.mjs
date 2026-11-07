@@ -2388,6 +2388,16 @@ export function registerSalesRoutes(app) {
       .single();
     if (fetchErr || !doc) return res.status(404).json({ ok: false, error: "Document not found" });
 
+    // An ISSUED register document (mig 213) is a permanent record — refuse BEFORE touching storage, so
+    // the stored PDF can never be removed out from under its issue row. Pre-213 the column is absent.
+    {
+      const { data: issued, error: issuedErr } = await sb.from("lead_documents").select("issued_at")
+        .eq("id", req.params.docId).eq("lead_id", req.params.id).maybeSingle();
+      if (!issuedErr && issued?.issued_at) {
+        return err(res, 409, "Issued documents are permanent records and can't be deleted. Issue a new revision instead.", "ISSUED_IMMUTABLE");
+      }
+    }
+
     // Delete from Storage
     await sb.storage.from("lead-documents").remove([doc.storage_path]);
 

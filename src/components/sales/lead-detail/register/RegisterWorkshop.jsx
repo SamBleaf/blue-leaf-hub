@@ -7,7 +7,7 @@
  * project exists, the canonical project records afterwards — saved automatically, no sync button.
  * Sales facts (client, site, type, budget, consultants, drawings) are shown read-only and never re-asked.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resumePointer, outstandingItems, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
 import { apiFetch, apiPut } from "../../../../lib/apiFetch.js";
 import { useAuth } from "../../../../lib/useAuth.js";
@@ -17,6 +17,8 @@ import SectionStep from "./SectionStep.jsx";
 import RoomsStep from "./RoomsStep.jsx";
 import RegisterTable from "./RegisterTable.jsx";
 import DocumentsStep from "./DocumentsStep.jsx";
+import TenderPanel from "./TenderPanel.jsx";
+import HandoverPanel from "./HandoverPanel.jsx";
 
 const STEPS = [
   { key: "context", label: "Project" },
@@ -25,6 +27,8 @@ const STEPS = [
   { key: "rooms", label: "Rooms" },
   { key: "register", label: "Register" },
   { key: "documents", label: "Documents" },
+  { key: "tender", label: "Tender", stages: ["consultants", "tender", "won"] },
+  { key: "handover", label: "Handover", stages: ["won"], contract: true },
 ];
 const OPEN_BY_DEFAULT = new Set(["winning_offer", "consultants", "tender"]);
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
@@ -32,7 +36,18 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 
 export default function RegisterWorkshop({ lead, patch, stage }) {
   const { profile } = useAuth();
-  const store = useRegister(lead.id);
+  const rootRef = useRef(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const check = () => setVisible(el.getClientRects().length > 0);
+    check();
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(check) : null;
+    ro?.observe(document.body);
+    return () => ro?.disconnect();
+  }, []);
+  const store = useRegister(lead.id, { enabled: visible });
   const { reg, info, save } = store;
   const [context, setContext] = useState(null);
   const [open, setOpen] = useState(() => lsGet(`register.open.${lead.id}`, OPEN_BY_DEFAULT.has(stage) ? "1" : "0") === "1");
@@ -40,12 +55,18 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [showDetail, setShowDetail] = useState(() => lsGet("register.showDetail", "0") === "1");
   const [factError, setFactError] = useState(null);
+  const [baseline, setBaseline] = useState(null);
+  const steps = STEPS.filter((s) => !s.stages || s.stages.includes(stage) || (s.contract && lead.contract_status === "signed"));
+  useEffect(() => {
+    if (!visible || info.mode !== "project") return;
+    apiFetch(`/api/register/leads/${lead.id}/baseline`).then((r) => { if (r.ok) setBaseline(r.data.baseline); });
+  }, [lead.id, info.mode, visible]);
 
   const loadContext = useCallback(async () => {
     const r = await apiFetch(`/api/register/leads/${lead.id}/context`);
     if (r.ok) setContext(r.data.context);
   }, [lead.id]);
-  useEffect(() => { loadContext(); }, [loadContext, lead.project_type, lead.stage, lead.job_id]);
+  useEffect(() => { if (visible) loadContext(); }, [visible, loadContext, lead.project_type, lead.stage, lead.job_id]);
 
   // Resume where the brief was left (Tab 18 §3 "Continue Brief") once the register is loaded.
   useEffect(() => {
@@ -88,7 +109,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   const saveText = { idle: "", dirty: "Unsaved…", saving: "Saving…", saved: save.at ? `Saved ${save.at.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}` : "Saved", error: save.message || "Save failed" }[save.state];
 
   return (
-    <div className="rounded-card border border-hairline bg-surface" data-testid="register-workshop">
+    <div ref={rootRef} className="rounded-card border border-hairline bg-surface" data-testid="register-workshop">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -129,7 +150,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
           {factError && <p className="border-b border-red-200 bg-red-50 px-4 py-1.5 text-[11px] text-red-700">{factError}</p>}
 
           <div className="flex flex-wrap items-center gap-1 border-b border-hairline px-3 py-2">
-            {STEPS.map((s) => (
+            {steps.map((s) => (
               <button key={s.key} type="button" onClick={() => gotoStep(s.key)} data-testid={`step-${s.key}`}
                 className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${step === s.key ? "bg-primary text-white" : "border border-hairline text-ink hover:bg-page"}`}>
                 {s.label}{s.key === "register" && outstanding.length ? ` (${outstanding.length})` : ""}
@@ -165,12 +186,18 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
                 }} />
             )}
             {reg && step === "register" && (
-              <RegisterTable reg={reg} context={context} stage={stage} info={info} actor={profile}
+              <RegisterTable reg={reg} context={context} stage={stage} info={info} actor={profile} baseline={baseline}
                 updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
                 onPortalItems={(action, items) => store.portal(action, items)} onPortalItem={onPortalItem} />
             )}
+            {reg && step === "tender" && (
+              <TenderPanel lead={lead} reg={reg} updateItem={store.updateItem} flush={store.flush} />
+            )}
+            {reg && step === "handover" && (
+              <HandoverPanel lead={lead} reg={reg} info={info} flush={store.flush} portal={store.portal} onBaseline={setBaseline} />
+            )}
             {reg && step === "documents" && (
-              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flush} reload={store.reload} />
+              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flush} updateItem={store.updateItem} />
             )}
           </div>
         </>
