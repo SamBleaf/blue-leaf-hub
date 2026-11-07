@@ -700,8 +700,9 @@ export function registerPortalV2Routes(app) {
           if (withVisible) q = q.eq("client_visible", true);
           return q.maybeSingle();
         };
+        let hasVisibleCol = true;
         let { data: selection, error: selLookupErr } = await buildSelLookup(true);
-        if (selLookupErr?.code === "42703") ({ data: selection } = await buildSelLookup(false));
+        if (selLookupErr?.code === "42703") { hasVisibleCol = false; ({ data: selection } = await buildSelLookup(false)); }
         if (!selection) return err(res, 404, "Selection not found");
         // Terminal-status guard: once a selection is approved/ordered/installed it is
         // locked — the client must contact Blue Leaf to change it (avoids a client
@@ -724,7 +725,11 @@ export function registerPortalV2Routes(app) {
             : null;
 
         const nowIso = new Date().toISOString();
-        const { error: updErr } = await sb
+        // Race guard (Tab 25 issue 4): re-assert visibility, project and non-terminal status IN the UPDATE,
+        // not only the prior lookup — an office withdraw (client_visible→false) or finalise (status→
+        // approved/ordered/installed) landing between the lookup and this write must not let the client
+        // write a now-hidden or finalised row. Require exactly the one affected row, else 409.
+        let updQ = sb
           .from("client_selections")
           .update({
             selected_product: option.product_name,
@@ -735,8 +740,15 @@ export function registerPortalV2Routes(app) {
             status: "in_review",
             updated_at: nowIso
           })
-          .eq("id", selectionId);
+          .eq("id", selectionId)
+          .eq("project_id", projectId)
+          .not("status", "in", "(approved,ordered,installed)");
+        if (hasVisibleCol) updQ = updQ.eq("client_visible", true);
+        const { data: updatedRows, error: updErr } = await updQ.select("id");
         if (updErr) return err(res, 500, translateDbError(updErr));
+        if (!updatedRows || updatedRows.length === 0) {
+          return err(res, 409, "This selection is no longer available to change. Please refresh and try again.");
+        }
 
         await writePortalAudit(sb, {
           project,

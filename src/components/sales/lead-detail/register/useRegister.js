@@ -26,6 +26,7 @@ const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"
 const GUARD_REASONS = {
   issued_locked: "is on the client portal — withdraw it before deleting or re-classifying",
   post_contract_locked: "is approved under the signed contract — change it through a variation",
+  baseline_locked: "is part of the signed contract baseline — change it through a variation",
   approved_locked: "is client-approved and can't be withdrawn",
   evidence_required: "needs approval evidence before it can be marked client-approved",
   technical_evidence_required: "needs a technical reference before it can be marked verified",

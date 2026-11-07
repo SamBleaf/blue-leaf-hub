@@ -46,6 +46,7 @@ ALTER TABLE public.client_selections
   ADD COLUMN IF NOT EXISTS source_doc_id      uuid,            -- optional link to the received/issued lead_documents row
   ADD COLUMN IF NOT EXISTS next_action        text,
   ADD COLUMN IF NOT EXISTS source_room_id     text,            -- stable register room id (survives rename / reorder)
+  ADD COLUMN IF NOT EXISTS baselined_at       timestamptz,     -- stamped when captured in a signed contract baseline (audit; selections are already product-locked post-contract)
   ADD COLUMN IF NOT EXISTS register_detail    jsonb NOT NULL DEFAULT '{}'::jsonb; -- {promptKey, categoryKey, section, level, isDefault, overridesDefaultId}
 
 CREATE INDEX IF NOT EXISTS idx_csel_source_room ON public.client_selections (project_id, source_room_id);
@@ -80,6 +81,7 @@ ALTER TABLE public.room_scope_items
   ADD COLUMN IF NOT EXISTS quantity_unit      text,
   ADD COLUMN IF NOT EXISTS source_doc_id      uuid,
   ADD COLUMN IF NOT EXISTS source_room_id     text,
+  ADD COLUMN IF NOT EXISTS baselined_at       timestamptz,   -- stamped when captured in a signed contract baseline (P0 — protect baselined scope)
   ADD COLUMN IF NOT EXISTS register_detail    jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_rsi_source_room ON public.room_scope_items (project_id, source_room_id);
@@ -122,17 +124,24 @@ BEGIN
   END IF;
 END $$;
 
--- D-020: 212 shipped room_scope_items with only the permissive auth_internal policy, so a portal
--- client holding a real `authenticated` JWT could read it straight through PostgREST. Add the same
--- RESTRICTIVE staff-only policy migration 104 applies to every other RLS table.
+-- D-020 (P0 — FAIL CLOSED): 212 shipped room_scope_items with only the permissive auth_internal
+-- policy, so a portal client holding a real `authenticated` JWT could read it straight through
+-- PostgREST. Add the same RESTRICTIVE staff-only policy migration 104 applies to every other RLS
+-- table. If auth_is_staff() is absent (migration 104 not applied) this migration ABORTS rather than
+-- succeeding with room_scope_items left client-readable — there must be no window where the internal
+-- scope store is exposed. Apply 104 first, then re-run 213.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-             WHERE n.nspname = 'public' AND p.proname = 'auth_is_staff') THEN
-    EXECUTE 'DROP POLICY IF EXISTS deny_clients ON public.room_scope_items';
-    EXECUTE 'CREATE POLICY deny_clients ON public.room_scope_items AS RESTRICTIVE FOR ALL TO authenticated USING (public.auth_is_staff()) WITH CHECK (public.auth_is_staff())';
-  ELSE
-    RAISE NOTICE 'auth_is_staff() missing (migration 104 not applied) — deny_clients NOT created on room_scope_items. Apply 104 first, then re-run this migration.';
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public' AND p.proname = 'auth_is_staff') THEN
+    RAISE EXCEPTION 'register R03: public.auth_is_staff() is missing — apply migration 104 before 213. Aborting so room_scope_items is never left readable by client JWTs.';
+  END IF;
+  EXECUTE 'DROP POLICY IF EXISTS deny_clients ON public.room_scope_items';
+  EXECUTE 'CREATE POLICY deny_clients ON public.room_scope_items AS RESTRICTIVE FOR ALL TO authenticated USING (public.auth_is_staff()) WITH CHECK (public.auth_is_staff())';
+  -- Independently assert the restrictive policy is now present before the migration proceeds.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public'
+                 AND tablename = 'room_scope_items' AND policyname = 'deny_clients' AND permissive = 'RESTRICTIVE') THEN
+    RAISE EXCEPTION 'register R03: deny_clients RESTRICTIVE policy was not created on room_scope_items — aborting.';
   END IF;
 END $$;
 
@@ -213,8 +222,13 @@ BEGIN
 END $$;
 
 -- document_type: add the register outputs + received coordination documents (name-agnostic swap, as 194).
+-- P1 (Tab 25 issue 7): the replacement CHECK is NOT marked NOT VALID, so it validates every existing row
+-- at apply time. Before swapping it, assert every DISTINCT existing document_type is covered by the new
+-- allowed list and ABORT with the offending values named if not — the migration can never fail mid-apply
+-- on live data, and the fix (widen the list or reconcile the data) is explicit. Run the read-only
+-- preflight in docs/master_register/RELEASE_BLOCKER_REVIEW.md on production first.
 DO $$
-DECLARE c text;
+DECLARE c text; v_bad text;
 BEGIN
   FOR c IN
     SELECT con.conname FROM pg_constraint con
@@ -223,6 +237,17 @@ BEGIN
     WHERE n.nspname = 'public' AND rel.relname = 'lead_documents' AND con.contype = 'c'
       AND pg_get_constraintdef(con.oid) ILIKE '%document_type%'
   LOOP EXECUTE format('ALTER TABLE public.lead_documents DROP CONSTRAINT %I', c); END LOOP;
+
+  SELECT string_agg(DISTINCT document_type, ', ') INTO v_bad
+  FROM public.lead_documents
+  WHERE document_type IS NOT NULL AND document_type NOT IN (
+    'brief','blueprint','survey','quote','contract','ptsa_signed',
+    'concept_agreement','concept_drawings','working_drawings','construction_contract','invoice','other',
+    'client_brief','architect_brief','selections_schedule','register_baseline',
+    'consultant_document','supplier_document');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'register R03: existing lead_documents.document_type values are not in the new allowed list: % — widen the CHECK list in migration 213 or reconcile the data before applying.', v_bad;
+  END IF;
 END $$;
 ALTER TABLE public.lead_documents ADD CONSTRAINT lead_documents_document_type_check
   CHECK (document_type IN (
@@ -518,6 +543,21 @@ BEGIN
         v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'stale', 'current', to_jsonb(v_rsi));
         CONTINUE;
       END IF;
+      -- P0: a scope/requirement row captured in a signed contract baseline is protected. Deleting it,
+      -- or substantively changing it (description, disposition, kind, category, measured quantity), needs
+      -- an explicit variation reference (v_op->>'variation_ref'). Clerical fields — owner, next action,
+      -- technical/pricing status and refs, source, supplier, notes — stay editable for site coordination.
+      IF v_rsi.baselined_at IS NOT NULL AND COALESCE(NULLIF(v_op ->> 'variation_ref', ''), '') = '' THEN
+        IF v_kind = 'scope_delete'
+           OR NULLIF(v_row ->> 'description', '')  IS DISTINCT FROM NULLIF(v_rsi.description, '')
+           OR NULLIF(v_row ->> 'disposition', '')  IS DISTINCT FROM NULLIF(v_rsi.disposition, '')
+           OR NULLIF(v_row ->> 'item_kind', '')    IS DISTINCT FROM NULLIF(v_rsi.item_kind, '')
+           OR NULLIF(v_row ->> 'category', '')     IS DISTINCT FROM NULLIF(v_rsi.category, '')
+           OR NULLIF(v_row ->> 'quantity', '')::numeric IS DISTINCT FROM v_rsi.quantity THEN
+          v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'baseline_locked');
+          CONTINUE;
+        END IF;
+      END IF;
       IF v_kind = 'scope_update' THEN
         IF v_row ->> 'certainty' = 'client_approved' AND v_rsi.certainty IS DISTINCT FROM 'client_approved'
            AND (v_ev IS NULL OR COALESCE(v_ev ->> 'at', '') = '' OR COALESCE(v_ev ->> 'by', '') = '') THEN
@@ -766,7 +806,8 @@ BEGIN
         INSERT INTO public.job_events (job_id, event_type, actor_id, source, entity_type, entity_id, metadata)
         VALUES (v_proj.job_id, 'register.item.deleted', v_actor_id, 'register', 'room_scope_item', v_rsi.id,
                 jsonb_build_object('item_id', v_item, 'lead_id', p_lead_id, 'project_id', p_project_id, 'store', 'room_scope_items',
-                                   'actor_name', v_actor_name, 'post_contract', v_post, 'before', to_jsonb(v_rsi)));
+                                   'actor_name', v_actor_name, 'post_contract', v_post, 'baselined', (v_rsi.baselined_at IS NOT NULL),
+                                   'variation_ref', NULLIF(v_op ->> 'variation_ref', ''), 'before', to_jsonb(v_rsi)));
         v_results := v_results || jsonb_build_object('item_id', v_item, 'op', v_kind, 'table', 'room_scope_items', 'row_id', v_rsi.id);
         CONTINUE;
       END IF;
@@ -803,7 +844,8 @@ BEGIN
       INSERT INTO public.job_events (job_id, event_type, actor_id, source, entity_type, entity_id, metadata)
       VALUES (v_proj.job_id, 'register.item.updated', v_actor_id, 'register', 'room_scope_item', v_rnew.id,
               jsonb_build_object('item_id', v_item, 'lead_id', p_lead_id, 'project_id', p_project_id, 'store', 'room_scope_items',
-                                 'actor_name', v_actor_name, 'post_contract', v_post,
+                                 'actor_name', v_actor_name, 'post_contract', v_post, 'baselined', (v_rsi.baselined_at IS NOT NULL),
+                                 'variation_ref', NULLIF(v_op ->> 'variation_ref', ''),
                                  'changes', public.register_jsonb_diff(to_jsonb(v_rsi), to_jsonb(v_rnew))));
       v_results := v_results || jsonb_build_object('item_id', v_item, 'op', v_kind, 'table', 'room_scope_items',
                      'row_id', v_rnew.id, 'version', v_rnew.updated_at);
@@ -945,9 +987,9 @@ NOTIFY pgrst, 'reload schema';
 --   ALTER TABLE public.room_scope_items DROP CONSTRAINT IF EXISTS room_scope_items_item_kind_check;
 --   ALTER TABLE public.room_scope_items ADD CONSTRAINT room_scope_items_item_kind_check CHECK (item_kind IN ('scope','selection'));
 --   DROP INDEX IF EXISTS public.idx_rsi_source_room;
---   ALTER TABLE public.room_scope_items DROP COLUMN IF EXISTS technical_status, DROP COLUMN IF EXISTS technical_evidence, DROP COLUMN IF EXISTS pricing_status, DROP COLUMN IF EXISTS pricing_ref, DROP COLUMN IF EXISTS approval_evidence, DROP COLUMN IF EXISTS supply_by, DROP COLUMN IF EXISTS manufacturer, DROP COLUMN IF EXISTS supplier, DROP COLUMN IF EXISTS quantity, DROP COLUMN IF EXISTS quantity_unit, DROP COLUMN IF EXISTS source_doc_id, DROP COLUMN IF EXISTS source_room_id, DROP COLUMN IF EXISTS register_detail;
+--   ALTER TABLE public.room_scope_items DROP COLUMN IF EXISTS technical_status, DROP COLUMN IF EXISTS technical_evidence, DROP COLUMN IF EXISTS pricing_status, DROP COLUMN IF EXISTS pricing_ref, DROP COLUMN IF EXISTS approval_evidence, DROP COLUMN IF EXISTS supply_by, DROP COLUMN IF EXISTS manufacturer, DROP COLUMN IF EXISTS supplier, DROP COLUMN IF EXISTS quantity, DROP COLUMN IF EXISTS quantity_unit, DROP COLUMN IF EXISTS source_doc_id, DROP COLUMN IF EXISTS source_room_id, DROP COLUMN IF EXISTS baselined_at, DROP COLUMN IF EXISTS register_detail;
 --   ALTER TABLE public.client_selections DROP CONSTRAINT IF EXISTS csel_certainty_check, DROP CONSTRAINT IF EXISTS csel_disposition_check, DROP CONSTRAINT IF EXISTS csel_technical_status_check, DROP CONSTRAINT IF EXISTS csel_pricing_status_check;
 --   DROP INDEX IF EXISTS public.idx_csel_source_room;
---   ALTER TABLE public.client_selections DROP COLUMN IF EXISTS certainty, DROP COLUMN IF EXISTS disposition, DROP COLUMN IF EXISTS technical_status, DROP COLUMN IF EXISTS technical_evidence, DROP COLUMN IF EXISTS pricing_status, DROP COLUMN IF EXISTS pricing_ref, DROP COLUMN IF EXISTS approval_evidence, DROP COLUMN IF EXISTS responsibility, DROP COLUMN IF EXISTS supply_by, DROP COLUMN IF EXISTS finish, DROP COLUMN IF EXISTS manufacturer, DROP COLUMN IF EXISTS quantity, DROP COLUMN IF EXISTS quantity_unit, DROP COLUMN IF EXISTS source_ref, DROP COLUMN IF EXISTS source_doc_id, DROP COLUMN IF EXISTS next_action, DROP COLUMN IF EXISTS source_room_id, DROP COLUMN IF EXISTS register_detail;
+--   ALTER TABLE public.client_selections DROP COLUMN IF EXISTS certainty, DROP COLUMN IF EXISTS disposition, DROP COLUMN IF EXISTS technical_status, DROP COLUMN IF EXISTS technical_evidence, DROP COLUMN IF EXISTS pricing_status, DROP COLUMN IF EXISTS pricing_ref, DROP COLUMN IF EXISTS approval_evidence, DROP COLUMN IF EXISTS responsibility, DROP COLUMN IF EXISTS supply_by, DROP COLUMN IF EXISTS finish, DROP COLUMN IF EXISTS manufacturer, DROP COLUMN IF EXISTS quantity, DROP COLUMN IF EXISTS quantity_unit, DROP COLUMN IF EXISTS source_ref, DROP COLUMN IF EXISTS source_doc_id, DROP COLUMN IF EXISTS next_action, DROP COLUMN IF EXISTS source_room_id, DROP COLUMN IF EXISTS baselined_at, DROP COLUMN IF EXISTS register_detail;
 --   NOTIFY pgrst, 'reload schema';
 -- ════════════════════════════════════════════════════════════════════════════════════════════════

@@ -85,3 +85,19 @@ ORDER BY 1;
 4. Ship the code with the **feature switch off** (no behaviour change) before or after the migrations; turn on `REGISTER_PILOT_LEADS=<lead id>` for the pilot only.
 
 No step issues anything to a client; portal visibility remains staff-gated throughout.
+
+## 6. Post-review hardening (Tab 25 independent review)
+
+- **213 now FAILS CLOSED on RLS (blocker 1).** If `auth_is_staff()` is absent, 213 `RAISE EXCEPTION` and aborts (no window where `room_scope_items` is client-readable), and it asserts the RESTRICTIVE `deny_clients` policy exists before proceeding. So §1's `has_104` is now enforced by the migration itself — but still run the read-only check first to avoid a failed apply.
+- **document_type preflight (issue 7) — run this read-only on production before applying 213:**
+  ```sql
+  SELECT DISTINCT document_type FROM public.lead_documents
+  WHERE document_type IS NOT NULL AND document_type NOT IN (
+    'brief','blueprint','survey','quote','contract','ptsa_signed',
+    'concept_agreement','concept_drawings','working_drawings','construction_contract','invoice','other',
+    'client_brief','architect_brief','selections_schedule','register_baseline',
+    'consultant_document','supplier_document')
+  ORDER BY 1;
+  ```
+  Expected: **zero rows.** Any value returned must be added to the CHECK list in 213 (or the data reconciled) before applying — 213 now runs this same check internally and aborts, naming the offending value, rather than failing mid-apply on the constraint.
+- **Contract-baseline protection (blocker 2).** 213 adds `baselined_at` to `room_scope_items` and `client_selections`; `recordBaseline` stamps the current register, and `register_apply` refuses a delete or a substantive change (description / disposition / kind / category / quantity) to a baselined scope/requirement row unless the op carries a `variation_ref` (clerical fields stay editable). Rollback drops the new columns (already in the ROLLBACK block).

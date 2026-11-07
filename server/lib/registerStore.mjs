@@ -479,6 +479,7 @@ const REASON_TEXT = {
   exists: "was just created elsewhere",
   issued_locked: "has been issued to the client portal — withdraw it first",
   post_contract_locked: "is approved under the signed contract — change it through a variation",
+  baseline_locked: "is part of the signed contract baseline — change it through a variation",
   approved_locked: "is client-approved — it can't be withdrawn",
   evidence_required: "needs approval evidence (who, when, how) to be marked client-approved",
   technical_evidence_required: "needs a drawing / consultant reference to be marked verified",

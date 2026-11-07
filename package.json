@@ -92,6 +92,7 @@
     "test:register-213-db": "node scripts/tests/register-migration-213.test.mjs",
     "test:register-r03-model": "node scripts/tests/register-r03-model.test.mjs",
     "test:register-e2e": "node scripts/tests/register-e2e.test.mjs",
+    "test:register-portal-race": "node scripts/tests/register-portal-race.test.mjs",
     "test:register-flag": "node scripts/tests/register-flag.test.mjs",
     "test:register": "node scripts/tests/master-register-r02.test.mjs && node scripts/tests/register-r03-model.test.mjs && node scripts/tests/register-flag.test.mjs && node scripts/tests/register-promotion.test.mjs && node scripts/tests/register-migration-212.test.mjs && node scripts/tests/register-migration-213.test.mjs",
     "register:questions": "node scripts/register/build-question-library.mjs",

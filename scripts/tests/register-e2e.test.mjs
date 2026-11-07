@@ -165,6 +165,8 @@ async function main() {
   check("#15", "brief contains no dollar figures and no unfilled placeholders", pv.ok && !/\$\s?\d/.test(pvText) && !/\{[#/]?[A-Z_]{2,}\}/.test(pvText));
   const iss1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "Morgan & Alex Hart", recipientEmail: "hart.family@example.invalid" });
   check("#18", "client brief issued as P01 with recipient + checksum (no signature required)", iss1.ok && iss1.body.document.revision_label === "P01" && !!iss1.body.document.content_sha256, JSON.stringify(iss1.body).slice(0, 300));
+  const docxUrl = iss1.ok ? await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${iss1.body.document.id}/url?export=docx`) : null;
+  check("#5fix", "an issued document stores BOTH the PDF and the controlled DOCX export (no half-stored issue — Tab 25 issue 5)", !!docxUrl?.ok && !!docxUrl.body.url, JSON.stringify(docxUrl?.body || {}).slice(0, 160));
   const noRecip = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "" });
   check("#18", "issue is blocked without a recipient (pre-issue checks)", noRecip.status === 422);
 

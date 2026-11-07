@@ -104,11 +104,20 @@ export async function recordBaseline(sb, leadId, { actor, note } = {}) {
   }
   const loaded = await loadRegister(sb, leadId, { actor });
   if (loaded.mode !== "project") throw new DocumentError(409, "The brief must be on the project record first (it moves automatically once the project exists).", "NO_PROJECT");
-  const reg = loaded.register;
+  const stampedAt = new Date().toISOString();
+  // P0 (Tab 25 blocker 2): mark the current register as the signed-contract baseline so register_apply
+  // protects these scope/requirement rows from unreviewed post-contract change (deletes + substantive
+  // edits need a variation reference). Stamp BEFORE re-reading item versions, so the baseline's
+  // itemVersions reflect the post-stamp state — otherwise every item would read "changed since contract".
+  try {
+    await sb.from("room_scope_items").update({ baselined_at: stampedAt }).eq("project_id", loaded.projectId).is("baselined_at", null);
+    await sb.from("client_selections").update({ baselined_at: stampedAt }).eq("project_id", loaded.projectId).is("baselined_at", null);
+  } catch { /* pre-213 (column absent) — the JSON snapshot remains the record of truth */ }
+  const reg = (await loadRegister(sb, leadId, { actor })).register;   // re-read so itemVersions capture the post-stamp versions
   const { data: issued } = await sb.from("lead_documents").select("id, document_type, revision_label, issued_at, content_sha256")
     .eq("lead_id", leadId).in("document_type", ["client_brief", "architect_brief", "selections_schedule"]).eq("status", "current").not("issued_at", "is", null);
   const snapshot = {
-    kind: "register_contract_baseline", recordedAt: new Date().toISOString(), recordedBy: actor?.name || null, note: note || null,
+    kind: "register_contract_baseline", recordedAt: stampedAt, recordedBy: actor?.name || null, note: note || null,
     contractStatus: lead.contract_status || null, contractSignedDate: lead.contract_signed_date || null,
     projectId: loaded.projectId, jobId: lead.job_id, drawingBasis: reg.meta.planRev || null, libraryVersion: QUESTION_LIBRARY_VERSION,
     rooms: reg.meta.rooms,

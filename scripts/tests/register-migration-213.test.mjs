@@ -344,6 +344,60 @@ async function main() {
   let badDm = null; try { await q(`UPDATE leads SET delivery_model='nonsense' WHERE id=$1`, [lead]); } catch (e) { badDm = e.message; }
   check("delivery_model CHECK enforced", /delivery_model/.test(badDm || ""));
 
+  console.log("\n▸ P0: contract-baseline protects scope/requirements (Tab 25 blocker 2)");
+  {
+    const ins = await apply([{ op: "scope_insert", item_id: "ri_base", row: { item_kind: "scope", category: "scope", disposition: "included", description: "Contracted deck", room_area: "Deck" } }]);
+    check("fresh scope item inserted for the baseline test", ins.ok, JSON.stringify(ins));
+    const baseRow = await rsi("ri_base");
+    await q(`UPDATE room_scope_items SET baselined_at = now() WHERE id=$1`, [baseRow.id]);   // simulates recordBaseline stamping
+    const bv0 = await verText("room_scope_items", baseRow.id);
+    const scopeRow = (extra) => ({ item_kind: "scope", category: "scope", disposition: "included", description: "Contracted deck", ...extra });
+    const sub = await apply([{ op: "scope_update", item_id: "ri_base", row_id: baseRow.id, base_version: bv0, row: scopeRow({ description: "Contracted deck ENLARGED" }) }]);
+    check("baselined scope: substantive change without a variation → baseline_locked", !sub.ok && sub.conflicts?.[0]?.reason === "baseline_locked", JSON.stringify(sub));
+    const cler = await apply([{ op: "scope_update", item_id: "ri_base", row_id: baseRow.id, base_version: bv0, row: scopeRow({ next_action: "Confirm joist spec" }) }]);
+    check("baselined scope: clerical change (scope unchanged) → allowed", cler.ok, JSON.stringify(cler));
+    const bv1 = await verText("room_scope_items", baseRow.id);
+    const vary = await apply([{ op: "scope_update", item_id: "ri_base", row_id: baseRow.id, base_version: bv1, variation_ref: "VO-012", row: scopeRow({ description: "Contracted deck ENLARGED", next_action: "Confirm joist spec" }) }]);
+    check("baselined scope: substantive change WITH variation_ref → allowed", vary.ok, JSON.stringify(vary));
+    check("the variation reference is captured in history", !!(await one(`SELECT 1 FROM job_events WHERE event_type='register.item.updated' AND metadata->>'variation_ref'='VO-012'`)));
+    const bv2 = await verText("room_scope_items", baseRow.id);
+    const delNo = await apply([{ op: "scope_delete", item_id: "ri_base", row_id: baseRow.id, base_version: bv2 }]);
+    check("baselined scope: delete without a variation → baseline_locked", !delNo.ok && delNo.conflicts?.[0]?.reason === "baseline_locked");
+    const delYes = await apply([{ op: "scope_delete", item_id: "ri_base", row_id: baseRow.id, base_version: bv2, variation_ref: "VO-013" }]);
+    check("baselined scope: delete WITH variation_ref → allowed", delYes.ok && !(await rsi("ri_base")), JSON.stringify(delYes));
+    await apply([{ op: "scope_insert", item_id: "ri_free", row: { item_kind: "scope", category: "scope", disposition: "included", description: "New post-contract scope" } }]);
+    const freeRow = await rsi("ri_free");
+    const freeEdit = await apply([{ op: "scope_update", item_id: "ri_free", row_id: freeRow.id, base_version: await verText("room_scope_items", freeRow.id), row: { item_kind: "scope", category: "scope", disposition: "included", description: "New post-contract scope EDITED" } }]);
+    check("un-baselined scope (added after contract): substantive change allowed, no variation needed", freeEdit.ok, JSON.stringify(freeEdit));
+  }
+
+  console.log("\n▸ P1: document_type preflight aborts on an uncovered existing value (Tab 25 issue 7)");
+  {
+    await q(`ALTER TABLE lead_documents DROP CONSTRAINT IF EXISTS lead_documents_document_type_check`);
+    const dLead = (await one(`INSERT INTO leads (name) VALUES ('DocType Lead') RETURNING id`)).id;
+    await q(`INSERT INTO lead_documents (lead_id, filename, storage_path, document_type) VALUES ($1,'legacy.pdf','p/legacy.pdf','weird_legacy_type')`, [dLead]);
+    let raised = false, msg = "";
+    try { await q(sql213); } catch (e) { raised = true; msg = e.message; }
+    check("re-applying 213 aborts (names the value) when an existing document_type is uncovered", raised && /weird_legacy_type|not in the new allowed list/.test(msg), msg.slice(0, 160));
+    await q(`DELETE FROM lead_documents WHERE document_type='weird_legacy_type'`);
+    await q(sql213);   // data reconciled → re-applies cleanly, constraint restored
+    check("after reconciling the data, 213 re-applies cleanly and the document_type CHECK exists", !!(await one(`SELECT 1 FROM pg_constraint WHERE conname='lead_documents_document_type_check'`)));
+  }
+
+  console.log("\n▸ P0: 213 fails closed if auth_is_staff() is absent (Tab 25 blocker 1)");
+  {
+    await q(`DROP FUNCTION IF EXISTS public.auth_is_staff() CASCADE`);   // CASCADE also drops the deny_clients policy that depends on it
+    let raised = false, msg = "";
+    try { await q(sql213); } catch (e) { raised = true; msg = e.message; }
+    check("213 ABORTS (does not silently skip deny_clients) when auth_is_staff() is missing", raised && /auth_is_staff|migration 104/i.test(msg), msg.slice(0, 160));
+    check("room_scope_items has NO deny_clients after the aborted apply (no exposed window)", !(await one(`SELECT 1 FROM pg_policies WHERE tablename='room_scope_items' AND policyname='deny_clients'`)));
+    await q(`CREATE FUNCTION public.auth_is_staff() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
+      $f$ SELECT EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active AND up.role IN ('admin','supervisor','employee')) $f$`);
+    await q(`GRANT EXECUTE ON FUNCTION public.auth_is_staff() TO authenticated`);
+    await q(sql213);
+    check("with auth_is_staff() restored, 213 re-applies and recreates the deny_clients policy", !!(await one(`SELECT 1 FROM pg_policies WHERE tablename='room_scope_items' AND policyname='deny_clients' AND permissive='RESTRICTIVE'`)));
+  }
+
   console.log("\n▸ rollback + re-apply");
   await q(`DELETE FROM lead_documents WHERE issued_at IS NOT NULL AND false`); // (issued rows stay; rollback drops the guard first)
   await q(rollbackSql(sql213));

@@ -315,7 +315,13 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     const docxPath = `leads/${leadId}/register/${docType}/${stamp}.docx`;
     const up1 = await sb.storage.from(BUCKET).upload(pdfPath, out.pdf, { contentType: PDF_MIME, upsert: false });
     if (up1.error) throw new DocumentError(502, "Could not store the issued PDF.", "STORAGE");
-    await sb.storage.from(BUCKET).upload(docxPath, out.docx, { contentType: DOCX_MIME, upsert: false });
+    // Tab 25 issue 5: both files must store, or neither — a half-stored issue (PDF without its DOCX
+    // export) would 502 on the controlled-export download. Check the DOCX upload and roll back the PDF.
+    const up2 = await sb.storage.from(BUCKET).upload(docxPath, out.docx, { contentType: DOCX_MIME, upsert: false });
+    if (up2.error) {
+      await sb.storage.from(BUCKET).remove([pdfPath]).catch(() => {});
+      throw new DocumentError(502, "Could not store the issued document (DOCX export).", "STORAGE");
+    }
 
     const label = REGISTER_DOC_TYPES[docType].label;
     const filename = `${label} — ${fx.project.clientName} — P${String(revision).padStart(2, "0")}.pdf`.replace(/[\\/]/g, "-");
@@ -333,10 +339,19 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
       },
     });
     if (error) {
+      // The DB record was not written — remove the orphaned storage objects so "nothing was issued" is
+      // literally true (no unreferenced PDF/DOCX left behind). Tab 25 issue 5.
+      await sb.storage.from(BUCKET).remove([pdfPath, docxPath]).catch(() => {});
       if (error.code === "42883" || error.code === "PGRST202") throw new DocumentError(503, "Apply migration 213 first (document issue registry).", "SCHEMA");
       throw new DocumentError(400, "Could not record the issue — nothing was issued.", "ISSUE", { detail: error.message });
     }
-    if (data?.ok === false && data.reason === "version_conflict") continue;      // someone issued at the same time — re-render
+    if (data?.ok === false) {
+      // No revision was recorded — drop this attempt's orphan uploads. A version conflict re-renders at
+      // the next number on the retry; any other refusal surfaces cleanly.
+      await sb.storage.from(BUCKET).remove([pdfPath, docxPath]).catch(() => {});
+      if (data.reason === "version_conflict") continue;                           // someone issued at the same time — re-render
+      throw new DocumentError(409, "Could not record the issue — nothing was issued.", "ISSUE", { detail: data.reason });
+    }
     if (lead.job_id) {
       try {
         await sb.from("job_events").insert({ job_id: lead.job_id, event_type: "register.document.issued", source: "register", actor_id: actor?.id || null,
