@@ -26,6 +26,7 @@ import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
 import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
 import { promoteRegisterToProject } from "./registerPromotion.mjs";
+import { leadScratchpadLocked } from "./registerStore.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -387,6 +388,8 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
     ["client_email", lead.email?.trim() || null],
     ["client_phone", lead.phone?.trim() || null],
     ["project_type", lead.project_type || null],
+    // Commercial delivery model (mig 213) — stamped forward, never re-typed (Tab 23 Q4).
+    ["delivery_model", lead.delivery_model || null],
     ["architect_name", lead.architect_name?.trim() || null],
     // Lead's deal-value estimate → job estimate fact. NOT original_contract_value
     // (Phase 5 sets that at WIN from the accepted proposal).
@@ -1547,6 +1550,11 @@ export function registerSalesRoutes(app) {
       .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, suburb, job_id, geo_geocoded_at, geo_precision")
       .eq("id", req.params.id)
       .single();
+    // Master Register R03: once the brief has been promoted onto the project record, the lead scratchpad
+    // is read-only history — a stale screen must never write a second, competing copy (Tab 23 Q5).
+    if ("selections_schedule" in body && current && (await leadScratchpadLocked(sb, current))) {
+      return err(res, 409, "This brief now lives on the project record — reload the register to keep editing.", "REGISTER_PROMOTED");
+    }
     let gateWarnings = [];
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
       // Test/dev harness (mig 178): a TEST lead bypasses every hard gate and can jump to any stage in

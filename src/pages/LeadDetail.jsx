@@ -34,6 +34,7 @@ import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.j
 import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.jsx";
 import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
+import RegisterWorkshop from "../components/sales/lead-detail/register/RegisterWorkshop.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.jsx";
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
@@ -2576,6 +2577,8 @@ export default function LeadDetail() {
         <DesignerSelect lead={lead} patch={patch} reload={load} />
         <DiscoveryActions lead={lead} reload={load} />
         <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
+        {/* Master Register — optional at Discovery (context is read from Sales, never re-asked) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="discovery" />
         <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
         {conversationsBlock}
@@ -2611,6 +2614,8 @@ export default function LeadDetail() {
           </p>
         </div>
         <MeetingScheduler lead={lead} meetingType="plan_presentation" reload={load} />
+        {/* Master Register — detailed work normally starts at a signed PTSA; staff may work ahead (D-038) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="fee_proposal" />
       </div>
     );
   } else if (lead.stage === "consultants") {
@@ -2638,6 +2643,8 @@ export default function LeadDetail() {
     focusContent = (
       <div className="space-y-4">
         <WonStage lead={lead} patch={patch} />
+        {/* Master Register — the same records carry into the project (contract baseline, outstanding decisions) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="won" />
         <ConsentSpine lead={lead} />
         <ApprovalRiskChip lead={lead} patch={patch} />
         <OpsScheduleHandoff lead={lead} />

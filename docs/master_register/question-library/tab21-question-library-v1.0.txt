@@ -1,0 +1,214 @@
+21 | MASTER REGISTER QUESTION LIBRARY — ACTUAL EMPLOYEE CONTENT
+BLUE LEAF RESIDENTIAL WORKFLOW v1.0 | 07 NOVEMBER 2026
+AUTHOR: ChatGPT product/content specification informed by ZJ/Routleys/TLI/Rylock reference material and public NATSPEC, Metricon, Buildertrend and ConstructionOnline documentation. NOT an extract of paid NATSPEC clauses or copyrighted competitor copy.
+STATUS: PROPOSED CONTENT FOR IMPLEMENTATION; NOT A CLAIM THAT QUESTIONS ARE ALREADY STORED IN HUB.
+
+PURPOSE
+A staff-operated conversation guide for site and floor plan walkthroughs, not a 150-field mandatory survey. The full library ensures coverage across projects; each room presents only 4–8 relevant topic groups and 1–3 questions at a time. Answers can be a short selection, a note or not applicable. Office users expand details progressively; multiple audiences get the right document extracts. A standard design/selection can apply to whole house, with per-room exceptions.
+
+LEGEND
+P = prompt identifier; W = whole-project; R = room; E = building element; X = renovation overlay; M = management/procurement overlay.
+[C] Concept Meeting/Presentation: broad purpose and inclusion. [D] Detailed after PTSA, or staff work-ahead. [T] Tender/contract verification, not extra client question.
+CORE = most residential projects; NEW = new dwelling; RENO = renovation / extension; OPT = only when scoped; ROOMTYPE = specific room.
+KIND: FACT = read existing Sales/Hub field and DO NOT reask if present; SCOPE = included work/ownership; REQUIREMENT = desired outcome/performance; SELECTION = product/finish; TECH = design/consultant verification; ACTION = question/owner.
+Each library line is a question family, not necessarily an individual DB field. If a related Sales field already exists, show as 'Already on file' rather than asking it again.
+
+HOW THE WORKSHOP FEELS
+Open current plans → Project and Whole House → follow levels/rooms in drawing order → current room scope → key finishes/fixtures/architectural details → what's missing → Save & Next. If a room remains untouched, that's OK. 'Not yet discussed' is distinct from 'not applicable' or 'excluded'. At the end show the decisions that actually affect the next project milestone.
+Ask the client only what they can reasonably know. Questions about engineering, compliance or installation remain internal designer/consultant actions, not an expectation that a homeowner chooses technical details.
+
+1 | ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)
+P-001 [FACT/C] Project identity and address. Prompt to staff only if missing: Are we working on the correct client and site? Show current Sales value.
+P-002 [FACT/C] Drawings. Which plan set, sheet list, issue date and revision are we reviewing? Link existing document record; no reupload if present.
+P-003 [FACT/C] Concept Meeting/Presentation record and key decisions already made. Surface existing meeting facts; never force re-entry.
+P-004 [FACT/C] Client budget target, timing expectations and design priorities. Show current dated Sales fact; ask only to confirm material changes.
+P-005 [REQUIREMENT/C] What do you most want to improve: space, natural light, comfort, privacy, entertaining, storage, accessibility, low maintenance, energy use? Pick up to 3 priorities plus note.
+P-006 [SCOPE/C] What parts of the property are in this project, what are possible extras, and what is explicitly future work? Tag areas as Included / Optional / Excluded / Deferred.
+P-007 [SCOPE/C] Physical project type: New Build / Renovation / Extension / Combined. Delivery model separately Design & Build / Build Only / Management / Other; never combine types in one ambiguous field.
+P-008 [SCOPE/C] Will the property remain occupied or operational through work? Record temporary facility and access requirements only when relevant.
+P-009 [ACTION/C] Which decisions must be made before the next architect issue, budget check or PTSA? Owner, not necessarily due date.
+P-010 [FACT/C] Existing architects/consultants/suppliers and known agreements; link from Hub, not new text if authoritative contact already exists.
+
+2 | WHOLE-PROJECT SITE / EXISTING CONDITIONS
+W-001 [SCOPE/C CORE] Site access: restricted driveway, narrow site, crane/delivery access, neighbour restrictions, steep slope or parking? Note known facts, inspection tasks.
+W-002 [TECH/D CORE] Survey, boundaries, easements, services, geotech and site levels: which reports exist and which are required? Internal consultant action, not client specification.
+W-003 [SCOPE/C OPT] Trees, retaining walls, external structures and landscaping affected by construction? Include/retain/protect/remove/by others.
+W-004 [SCOPE/C RENO] What is being demolished, retained, altered and made good in the existing building? Record by area, not one vague demolition line.
+W-005 [TECH/D RENO] Existing structural, moisture, termite, asbestos/contamination, roof and foundation conditions: inspected / assumed / needs test; source.
+W-006 [SCOPE/C RENO] What existing finishes and fixtures must be protected and/or matched? Note acceptable variation or inability to match exact old products.
+W-007 [SCOPE/C RENO] Will the family live on site? Work zones, temporary kitchen/bathroom, dust separation, service outages and safe access.
+W-008 [TECH/D RENO] Where do new and existing work connect: roof, wall, floor, drainage, electrical, thermal envelope? Add interface action and drawing ref.
+W-009 [REQUIREMENT/C CORE] Overall project quality priorities: standard / upgraded / individually specified, and where is investment most important? Do not fabricate a universal inclusions package.
+W-010 [SCOPE/C CORE] External works scope: driveway, landscaping, paths, fencing, retaining, pergola, pool or boundary work included/excluded/deferred?
+W-011 [ACTION/C CORE] Unknown conditions likely to affect cost and design. Is investigation, contingency, exclusion or alternate scope appropriate?
+W-012 [TECH/D CORE] Planning/building approval and consultant design responsibilities. Identify who verifies requirements, not legal assertions based on questionnaire.
+
+3 | WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS
+W-013 [SELECTION/C CORE] Overall architectural material direction: masonry, render, lightweight cladding, timber feature, metal roof? What should the home look and feel like?
+W-014 [SELECTION/C CORE] Roof and gutter colour/material preference; roof profile/pitch/box gutter details to architect later.
+W-015 [REQUIREMENT/C CORE] Windows and glazing priorities: frame appearance, opening use, sun/shading, privacy, thermal/acoustic performance, insect screens.
+W-016 [REQUIREMENT/C CORE] Envelope quality: comfort/energy efficiency, insulation, airtightness and moisture management priority. Technical compliance by designers.
+W-017 [SELECTION/C CORE] General interior floor palette by zone: timber/laminate/hybrid/tile/carpet/polished concrete, wet-area separate.
+W-018 [SELECTION/C CORE] Internal doors and trims: standard or feature doors, general door heights, skirting/architraves/cornice and hardware style.
+W-019 [SELECTION/C CORE] General paint and ceiling finish direction: warm/cool palette, matte/sheen, square set/cornice, feature areas.
+W-020 [REQUIREMENT/C CORE] Heating/cooling, ventilation and hot water preference; any required comfort zones or special rooms?
+W-021 [REQUIREMENT/C CORE] Electrical, smart home, data, solar/battery/EV charging ambitions; note special requirements, not layouts yet.
+W-022 [SCOPE/C CORE] Window furnishings, appliances, loose furniture, fireplaces, landscaping, security and automation: included, by client, excluded or future?
+W-023 [SCOPE/D CORE] Standard supply/installation responsibilities for selected products and any client-supplied items; warranty and lead time implications noted internally.
+W-024 [TECH/D CORE] Document current building performance goal and required consultant checks (energy, thermal, fire, acoustic, moisture, accessibility as applicable). No automatic certification label.
+W-025 [ACTION/C CORE] Identify outstanding whole-house decision that materially changes cost/design and allocate owner.
+
+4 | SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)
+R-001 [FACT/C CORE] Room/zone name, level, drawing sheet/revision, order on plans; type: kitchen, bathroom, bedroom, hall, external etc.
+R-002 [SCOPE/C CORE] For THIS room: New / Renovate / Alter / Retain Existing / Remove / Make Good / By Others / Excluded / Deferred / N/A.
+R-003 [SCOPE/C CORE] What is being done here? One clear sentence, then inclusions/exclusions, retaining elements and existing condition notes.
+R-004 [REQUIREMENT/C CORE] What's most important about how this room works? Storage, circulation, accessibility, light/privacy, entertaining or durability.
+R-005 [SELECTION/C CORE] Floor finish: inherit whole-house default or select room exception; check steps/transitions if relevant.
+R-006 [SELECTION/C CORE] Wall, ceiling and feature finish: use defaults or note different materials/ceiling height/cornices.
+R-007 [SELECTION/C CORE] Internal/external doors, windows, screens or opening alterations specific to this room.
+R-008 [REQUIREMENT/C CORE] Lighting, power, data, comfort/ventilation needs as a broad prompt. Count/position in detailed electrical coordination.
+R-009 [SCOPE/C CORE] Joinery, fixtures, appliances, equipment or loose furniture: included, owner supplied or by others?
+R-010 [ACTION/C CORE] What's undecided, what changes the scope, and who follows up? Record only meaningful actions.
+R-011 [FACT/D CORE] Reference relevant drawing/consultant/supplier document and version; don't type from memory when source exists.
+R-012 [TECH/D CORE] Detail development and price/documentation status: design verified? trade quote/allowance? who is coordinating?
+R-013 [SCOPE/C RENO] Existing-to-new floor/wall/ceiling/service junction and matching/make-good requirements.
+R-014 [SCOPE/C CORE] Any scope item supplied or installed by the client, other trade or external consultant?
+R-015 [REQUIREMENT/D OPT] Tolerances and installation constraints that drive joinery/fixture/structural coordination (not client engineering choices).
+
+5 | ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY
+K-001 [SCOPE/C] New kitchen vs replace fronts vs partial retrofit? Existing kitchen demolition and make-good extent.
+K-002 [REQUIREMENT/C] Layout: island, peninsula, scullery, pantry, circulation and family use priorities. Link joinery drawings.
+K-003 [REQUIREMENT/C] Storage: full-height, walk-in, drawers, appliance garage, bins, pantry shelving, integrated appliances.
+K-004 [SELECTION/C] Cabinetry standard/look: flat-panel, profile, timber veneer/laminate/paint, cabinet interior standard.
+K-005 [SELECTION/C] Benchtop: preferred surface, appearance, thickness style; final product/edge/joints after PTSA.
+K-006 [SELECTION/C] Splashback: tile, stone, glass or other; preferred extent/colour; detailed layout later.
+K-007 [SELECTION/C] Sink and mixer: bowl arrangement, undermount/topmount, finish, water filter/hot tap; Routleys source later.
+K-008 [SCOPE/C] Appliances: list cooktop, oven, rangehood, dishwasher, fridge, microwave, wine storage; who supplies/install and any specialty dimensions?
+K-009 [REQUIREMENT/C] Cooking/exhaust requirements, induction/gas preference, outdoor connection and ventilation considerations.
+K-010 [REQUIREMENT/C] Power, feature lighting, LED strips and data/charging; location layout by electrician later.
+K-011 [TECH/D] Joinery hardware/drawers, handles/push-to-open, panels, plinths, clearances, stone shop drawings, service setouts and quantities.
+K-012 [ACTION/C] Main budget drivers or unresolved choices: kitchen footprint, stone choice, appliance tier, specialty hardware, scullery scope.
+K-013 [SCOPE/D] Appliance procurement, supplier selections, long-lead items, installation and warranty responsibility.
+K-014 [TECH/D] Coordinate supplier product dimensions with cabinetry, electrical, plumbing and drawings; verify, don't auto-approve.
+6 | ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER
+B-001 [SCOPE/C] Existing bathroom retained, full renovation or new? Demolition, protection, access and make-good.
+B-002 [REQUIREMENT/C] Room layout and priorities: shower-only, bath, double vanity, separate WC, storage, accessibility.
+B-003 [SELECTION/C] Toilet: back-to-wall, wall-hung, concealed cistern, existing retained; brand/model later.
+B-004 [SELECTION/C] Vanity: wall-hung/floorstanding, size, top material, basin number/type, drawers/storage.
+B-005 [SELECTION/C] Basin: inset/above-counter/undermount, shape/finish and likely plumbing constraint.
+B-006 [SELECTION/C] Shower: walk-in or enclosed, overhead/hand shower, screen style, niche, seat, hobless preference.
+B-007 [SELECTION/C] Bath: built-in/freestanding/none, location and quality; specific size/model later.
+B-008 [SELECTION/C] Tapware/accessories: finish direction, mixer types, towel rails, hooks, toilet-roll holders and mirrors.
+B-009 [SELECTION/C] Wall and floor finishes: tile type, size, full/partial tile heights, feature tile, grout colour and trim approach.
+B-010 [REQUIREMENT/C] Heating and ventilation: exhaust fan, window, underfloor heating, heated towel rail.
+B-011 [REQUIREMENT/C] Mirror/shaving cabinet, lighting, power outlets and electrical zones.
+B-012 [TECH/D] Waterproofing scope, drainage/waste, falls, thresholds, shower recess/screen/niche setouts for designer/trade verification.
+B-013 [TECH/D] Confirm product rough-in dimensions and approvals against Routleys selection pack and plumbing drawings.
+B-014 [SCOPE/C] Client-supplied fixtures vs Blue Leaf procurement and installation; any appliance or specialist installer.
+B-015 [ACTION/C] Significant decisions unresolved before wet-area setout, tender and ordering.
+
+7 | ROOM-SPECIFIC: LAUNDRY / MUDROOM
+L-001 [SCOPE/C] New or retained laundry, demolition, appliance relocation, cupboard and floor/wall making-good.
+L-002 [REQUIREMENT/C] Washing machine/dryer layout: stacked/side-by-side; underbench; ventilation.
+L-003 [SELECTION/C] Cabinetry, bench, trough, mixer, splashback, storage/broom cupboard and drying rail.
+L-004 [SELECTION/C] Flooring, skirting, tiled splash protection and door/wet-zone finish.
+L-005 [TECH/D] Waste, taps, hot-water provision, external access, power/GPO and appliance clearances.
+L-006 [SCOPE/C] Appliance supply responsibilities and any built-in whitegoods; client-owned equipment.
+L-007 [ACTION/C] Product size unknowns, existing drainage and retained service constraints.
+
+8 | ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE
+V-001 [SCOPE/C] New/altered/retained space; walls/openings to remove, flooring and ceiling transitions.
+V-002 [REQUIREMENT/C] Seating/dining layout, indoor-outdoor connection, TV/wall position, storage and acoustics.
+V-003 [SELECTION/C] Floor finish, threshold details, feature wall, ceiling finish/height, cornice/trim exception.
+V-004 [SELECTION/C] Window/slider/stacker style, glazing/shading, flyscreens, privacy and window-covering scope.
+V-005 [SCOPE/C] Fireplace/gas/electric appliance, built-in cabinetry, TV wall, shelving; included/by client?
+V-006 [REQUIREMENT/C] Lighting modes, power/data/AV, fans, heating/cooling and daylight control.
+V-007 [TECH/D] Structural openings, beams, lintels, access and glazing coordination to architect/engineer.
+V-008 [ACTION/C] Confirm furniture/layout-driven electrical and procurement decisions.
+
+9 | ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY
+D-001 [SCOPE/C] New, existing retained or refurbished; any partitions or built-in removals?
+D-002 [REQUIREMENT/C] Bed/desk placement, access, future furniture, storage and privacy.
+D-003 [SELECTION/C] Floor finish, general paint, feature wall, trim, doors and hardware.
+D-004 [SELECTION/C] Wardrobe layout: robe doors, shelves, drawers, hanging and lighting; standard or custom.
+D-005 [REQUIREMENT/C] Windows/glazing/screens, blackout/window furnishings, acoustic privacy.
+D-006 [REQUIREMENT/C] Ceiling fan, reverse-cycle zone, GPO/data and lighting needs.
+D-007 [ACTION/C] Outstanding robe layout/fitting and electrical decisions.
+
+10 | STAIRS / HALLS / ENTRY / GARAGE
+H-001 [SCOPE/C] Stair type/location, change to existing stair, new stair or no stair; engineering/design responsibility.
+H-002 [SELECTION/C] Stair treads/risers, balustrade/handrail material, finish and lighting intent.
+H-003 [SCOPE/C] Hall/entry flooring transitions, feature cladding, joinery, door and hardware.
+H-004 [SELECTION/C] Front entry door: material, glazing, pivot/hinged, hardware, security and thresholds.
+H-005 [REQUIREMENT/C] Entry storage, coats/shoes and visitor movement/lighting.
+H-006 [SCOPE/C] Garage: size, door motor/finish, storage, access door, slab/finish, insulation and services.
+H-007 [REQUIREMENT/C] EV charger, workshop power, hot/cold water, garage floor coating, security and ventilation.
+H-008 [TECH/D] Stair geometry/balustrade compliance, structural and fire/acoustic design to responsible consultant.
+
+11 | OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE
+O-001 [SCOPE/C] Is alfresco/deck/verandah/pergola/balcony included, future, by client or excluded? Areas and levels.
+O-002 [REQUIREMENT/C] Covered vs open, all-season use, BBQ/outdoor kitchen, privacy, orientation and shade.
+O-003 [SELECTION/C] External flooring: concrete/pavers/deck/tiles, levels, steps, drainage and slip resistance requirement.
+O-004 [SELECTION/C] Roof, soffit, posts, screens, ceiling fan/heater and cladding finish direction.
+O-005 [REQUIREMENT/C] Outdoor lighting, power, gas/water/drain connections, sink/fridge/BBQ provisions.
+O-006 [SCOPE/C] Driveway, paths, fences, gates, boundary wall, retaining, landscaping, turf and irrigation included?
+O-007 [SCOPE/C] Pool, outdoor shower, sauna, fire pit, shed or future additions by others?
+O-008 [TECH/D] Balustrades, waterproofed balconies, drainage, structural spans, roof connections and consents to engineer/designer.
+O-009 [ACTION/C] Boundary, drainage, existing-to-new and staging/contract exclusion issues.
+
+12 | ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)
+These appear as office coordination or consultant actions when the relevant system is in scope, not as compulsory homeowner questionnaire fields. Inspired by NATSPEC worksection coverage, but these are original Blue Leaf prompts.
+E-001 SITEWORKS [TECH/D] Confirm survey, geotechnical assumptions, setout, cut/fill, retaining, spoil, truck/access, stormwater, contaminated material/trees; owner, document reference.
+E-002 FOUNDATIONS [TECH/D] Confirm footing/slab design, reinforcement, waterproofing, termite management, subfloor ventilation and ground levels; engineer/certifier responsibilities.
+E-003 STRUCTURE [TECH/D] Confirm framing material, roof/floor systems, engineered beams, steel, bracing, tie-down and temporary support; designer approval and issue revision.
+E-004 WALLS [TECH/D] Confirm brick/masonry/blocks, cladding substrate, fixing details, movement joints, cavity/ventilation, weep holes, lintel/flashings.
+E-005 ROOFS [TECH/D] Confirm pitch, sheet/tile type, roof drainage, penetrations, eaves, gutters/box gutters, downpipes, sarking/membrane and condensation strategy.
+E-006 WINDOWS [TECH/D] Confirm window ID, opening sizes, handing, frame/material/finish, energy/glass, safety/acoustic/BAL where applicable, screens, reveals, water management, schedule revisions.
+E-007 DOORS [TECH/D] Confirm internal/external door schedule, heights, widths, leaf type, jamb, seal, fire/acoustic where applicable, hardware/locksets, handles, garage motors.
+E-008 ENVELOPE [TECH/D] Confirm insulation continuity, vapour/water-control layers, thermal bridges, airtightness, ventilation and window/roof/slab junction detailing, performance evidence.
+E-009 INTERNAL LININGS [TECH/D] Confirm plasterboard/cement sheet, ceiling profiles, feature substrate, wet-area lining, cornice/setout, acoustic requirements.
+E-010 WATERPROOFING [TECH/D] Confirm wet-area substrate/falls, membrane, hobs, wastes, wet-area joinery junctions and balcony/external waterproofing system.
+E-011 FLOOR FINISHES [TECH/D] Confirm substrate preparation, moisture, level transitions, tile/stone/timber/hybrid/carpet product, underlay and installation requirements.
+E-012 PAINT / FINISHES [TECH/D] Confirm paint system, substrate, number of coats/colour/sheens and feature/timber/metal finishes.
+E-013 JOINERY [TECH/D] Confirm cabinet/shop drawings, panel/hinge/runner types, laminates, stone, tolerances, fixtures, service cutouts and approvals.
+E-014 PLUMBING [TECH/D] Confirm hot/cold water, roof/stormwater, sanitary/drainage, fixture rough-ins, hot water system and specialist supplier schedule revisions.
+E-015 ELECTRICAL [TECH/D] Confirm general power, RCD/switchboard, lighting legend, switches, data/AV, solar/EV/smart/security and exact fixture positions.
+E-016 HVAC/VENT [TECH/D] Confirm mechanical sizing, zones, duct/penetration routes, bathrooms/kitchen exhaust, makeup air and controls.
+E-017 ENERGY/COMPLIANCE [TECH/D] Confirm relevant NCC version, design energy assessment, approvals, special site conditions, thermal/glazing/fire/BAL ratings where applicable (all require qualified review, no guessed compliance).
+E-018 EXTERNAL [TECH/D] Confirm decking/substructure, external paving/slopes, balconies, decks/pergolas, retaining/fences, drainage and landscaping interfaces.
+E-019 DEMOLITION [TECH/D RENO] Confirm strip-out extents, isolation/protection, temporary works, waste and disposal, latent hazard investigation, service alterations.
+E-020 EXISTING-TO-NEW [TECH/D RENO] Confirm roof/floor/wall/slab interface, levels, material matching or transition, damp/air/thermal continuity, structural differential movement and remedial making-good.
+E-021 PROCUREMENT [TECH/T] Identify long lead materials, owner supply versus Blue Leaf/trade supply and install, procurement schedule and warranty liabilities.
+E-022 COST [TECH/T] Confirm scope item priced/allowed/excluded against current drawings; source quote/date, quantity confidence, GST and contract-specific allowance classification.
+E-023 DOC CONTROL [TECH/T] Reconcile specification, supplier schedule, drawings and approved register versions to prevent cross-version tender errors.
+
+13 | MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY
+M-001 [SCOPE/C] Who owns design coordination: client architect, Blue Leaf, other? Design deliverables and communication route.
+M-002 [SCOPE/C] Who engages and pays each consultant, surveyor, certifier and authority? Record contract responsibility, not just contact.
+M-003 [SCOPE/D] Who sources, orders, stores and warrants each fixture/finish/major component? Who installs it? Avoid 'client supplied' ambiguity.
+M-004 [SCOPE/D] Which items are direct client costs, construction management fees, trade packages or excluded? Link commercial terms; do not invent pricing.
+M-005 [ACTION/D] What approvals/decisions can Blue Leaf give versus those requiring client/designer signature?
+M-006 [SCOPE/C] Programme and interface responsibility between other trades and Blue Leaf; site access/occupation risks.
+
+14 | SHORT CONCEPT MEETING PATH — DO NOT SHOW THE WHOLE LIBRARY
+A 10–20 minute concept or plan walkthrough should ask just:
+1. Confirm drawing revision and project goals already on file.
+2. Which areas are in scope / retained / excluded?
+3. What material/quality direction applies across the home?
+4. Walk rooms: what's changing, primary finish, joinery/fixture needs, services, unresolved issues.
+5. What are the 3–5 biggest choices that affect budget or design?
+6. Which consultant action or client decision comes next?
+Clients should not be asked to pick waterproofing systems, slab reinforcement or compliance ratings in this workshop.
+
+15 | ACCEPTANCE CRITERIA FOR CONTENT IMPLEMENTATION
+- Question metadata can select by room type, physical project type and stage without thousands of condition branches.
+- Whole-house standard prompts appear once, room exceptions only when needed.
+- No duplicate prompts for budget/client/address or contact details already in Sales.
+- New builds do not show renovation retained/make-good questions except activated scope.
+- Bathrooms show plumbing/wet-area specifics; living rooms do not.
+- Construction management overlays ownership and procurement questions without changing physical project type.
+- Scope-only items never generate selection-approval tasks in portal.
+- Unknown/not discussed ≠ N/A ≠ excluded ≠ existing retained ≠ decision pending.
+- Outputs include relevant included/excluded items, status, assumptions and source drawing revision; clients don't see internal engineering/costing administration.
+- Normal PTSA signed milestone increases detail, but staff can choose to work ahead. No payment gate.
+- Custom fields are possible but stable IDs/category mapping maintained; staff cannot overwrite approved information without recorded review.

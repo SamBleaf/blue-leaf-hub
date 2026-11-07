@@ -100,13 +100,17 @@ ok("T01 scope vs selection: disposition and certainty are separate vocabularies,
 
 // ── T03 — room prompts are type-specific; reno overlay adds demolition; irrelevant prompts absent ─
 {
+  // R03: prompts come from the Tab 21 library (K-005 benchtop, K-008 appliances, B-012 waterproofing,
+  // R-013 existing-to-new / make good). Technical (stage D) prompts are hidden at Concept by default.
   const k = roomPrompts("kitchen").map((p) => p.key);
   const br = roomPrompts("bedroom").map((p) => p.key);
-  const bath = roomPrompts("bathroom").map((p) => p.key);
+  const bathConcept = roomPrompts("bathroom").map((p) => p.key);
+  const bathDetail = roomPrompts("bathroom", { stage: "consultants" }).map((p) => p.key);
   const brReno = roomPrompts("bedroom", { renovationOverlay: true }).map((p) => p.key);
-  ok("T03 room-prompt specificity: kitchen has benchtop/appliances; bedroom does not; bathroom has waterproofing; reno adds demolition without leaking kitchen prompts",
-    k.includes("k_bench") && k.includes("k_appliances") && !br.includes("k_bench") &&
-    bath.includes("b_wp") && brReno.includes("r_demo") && !brReno.includes("k_bench") && !br.includes("r_demo"));
+  ok("T03 room-prompt specificity: kitchen has benchtop/appliances; bedroom does not; bathroom waterproofing appears at detail stage only; reno adds make-good without leaking kitchen prompts",
+    k.includes("K-005") && k.includes("K-008") && !br.includes("K-005") &&
+    !bathConcept.includes("B-012") && bathDetail.includes("B-012") &&
+    brReno.includes("R-013") && !brReno.includes("K-005") && !br.includes("R-013"));
 }
 
 // ── T04 — a whole-house default applies to chosen rooms as explicit records; one exception; others untouched; idempotent ─
@@ -233,8 +237,8 @@ ok("T01 scope vs selection: disposition and certainty are separate vocabularies,
 {
   const newRoomPrompts = roomPrompts("bedroom", { renovationOverlay: true, roomScope: "new" }).map((p) => p.key);
   const renoRoomPrompts = roomPrompts("bedroom", { renovationOverlay: false, roomScope: "renovated" }).map((p) => p.key);
-  ok("FIX reno scope: a scope:new room gets no demolition prompt even with overlay on; a renovated room gets them without the overlay",
-    !newRoomPrompts.includes("r_demo") && renoRoomPrompts.includes("r_demo"));
+  ok("FIX reno scope: a scope:new room gets no existing-to-new/make-good prompt even with overlay on; a renovated room gets it without the overlay",
+    !newRoomPrompts.includes("R-013") && renoRoomPrompts.includes("R-013"));
 }
 
 console.log(`\nMaster Register R02 Increment 1 — model tests: ${pass} passed, ${fail} failed`);

@@ -1,61 +1,114 @@
 /**
- * register.js — the Master Register model (Tab 18 / R02 Increment 1).
+ * register.js — the Master Register model (Tab 18 / R02 / R03).
  *
  * The register is the staff-operated, room-by-room brief captured while sitting with a client over
- * their plans. In this increment it lives ENTIRELY in the existing pre-job scratchpad
- * `leads.selections_schedule` (JSONB, migration 188) — NO new table, NO migration. Promotion into the
- * canonical project-keyed `client_selections` store is a later, additive increment.
+ * their plans, refined in the office and carried through tender into the project. Storage is
+ * STAGE-AWARE (server/lib/registerStore.mjs):
+ *   • before a project exists — the lead scratchpad `leads.selections_schedule` (JSONB, mig 188):
+ *       at most one { kind: "meta" } record + { kind: "item" } records (+ legacy {area,item,notes} rows,
+ *       read non-destructively);
+ *   • once a project exists — the canonical project records (mig 212/213): genuine product/finish CHOICES
+ *     in `client_selections` (staged, client_visible=false, until the office issues them), and every
+ *     other item — scope/works, requirements, actions, settled-out selections — in internal-only
+ *     `room_scope_items`; the room list / drawing basis in `projects.register_meta`. The lead scratchpad
+ *     is then read-only history.
  *
- * Storage convention: `selections_schedule` is an array holding
- *   • at most one  { kind: "meta",  ... }   record  — plan revision, room list, defaults, resume pointer
- *   • zero or more { kind: "item",  ... }   records  — the register entries
- *   • legacy rows  { area, item, notes }    (the old "finishes schedule v1") are read non-destructively
- *     as items, so no existing lead loses data.
+ * Four item kinds (Tab 23 Q1, D-041) — only "selection" can ever become a client-facing record:
+ *   • scope        — WORK: new / included / alter / retain / remove / make good / by others / excluded / deferred
+ *   • requirement  — an intended function, performance outcome or design constraint (e.g. thermal comfort)
+ *   • selection    — a specific material / fixture / finish / product CHOICE
+ *   • action       — a decision, consultant/trade verification or follow-up owned by someone
+ * Status axes are INDEPENDENT (Tab 22 §C, D-006): scope disposition · decision certainty · technical
+ * verification · pricing readiness. A client-approved product is not engineer-verified; a supplier quote
+ * is not a fixed contract price.
  *
- * CRITICAL distinction (Tab 19 data guard): a register item is either
- *   • itemKind "scope"      — WORK/inclusion (demolish / retain / make good / by others / excluded …)
- *   • itemKind "selection"  — a product/finish CHOICE the client may need to make
- * Only "selection" items are ever candidates for the client-facing `client_selections` store.
- * Scope disposition (what work happens) is a DIFFERENT axis from selection certainty (how settled a choice is).
- *
- * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests.
+ * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests/server.
  */
+import { QUESTIONS, QUESTION_LIBRARY_VERSION } from "./registerQuestions.js";
 
-// ── Vocabulary (self-contained; not DB status columns in this increment) ─────────────────────────
+export { QUESTION_LIBRARY_VERSION };
 
-// Scope / disposition — what WORK the project does to this element (Tab 18 §6).
+// ── Vocabulary ────────────────────────────────────────────────────────────────────────────────────
+
+export const ITEM_KINDS = {
+  scope: "Scope / works",
+  requirement: "Requirement",
+  selection: "Selection",
+  action: "Action / verification",
+};
+
+// Scope / disposition — what WORK the project does to this element (Tab 18 §6, Tab 22 §C).
 export const REGISTER_DISPOSITIONS = {
-  new: "New / Included",
+  new: "New",
+  included: "Included",
   alter: "Alter",
   retain: "Existing to Remain",
-  remove: "Remove",
+  remove: "Remove / demolish",
   make_good: "Make Good",
   by_others: "By Others",
   excluded: "Excluded",
+  deferred: "Deferred / future",
   na: "N/A",
   undecided: "Undecided",
 };
-export const DISPOSITION_ORDER = ["new", "alter", "retain", "remove", "make_good", "by_others", "excluded", "na", "undecided"];
-// Dispositions that are a settled outcome (NOT an outstanding decision). Tab 18 §7: these are
-// legitimate answers, not missing mistakes.
-export const SETTLED_DISPOSITIONS = new Set(["retain", "remove", "by_others", "excluded", "na", "make_good"]);
+export const DISPOSITION_ORDER = ["new", "included", "alter", "retain", "remove", "make_good", "by_others", "excluded", "deferred", "na", "undecided"];
+// Settled outcomes — legitimate answers, not missing data (Tab 18 §7). "Not discussed" ≠ N/A ≠ excluded.
+export const SETTLED_DISPOSITIONS = new Set(["retain", "remove", "by_others", "excluded", "deferred", "na", "make_good"]);
+// Dispositions that put an element INSIDE Blue Leaf's scope.
+export const INCLUDED_DISPOSITIONS = new Set(["new", "included", "alter", "make_good", "remove"]);
 
-// Selection certainty — how settled a product/finish CHOICE is (Tab 18 §6). Separate from disposition.
+// Decision certainty — how settled a CHOICE (or a client requirement) is. Separate from disposition.
 export const REGISTER_CERTAINTY = {
-  not_considered: "Not Considered",
+  not_considered: "Not discussed",
   preference: "Preference",
   proposed: "Proposed",
   client_approved: "Client-approved",
 };
 export const CERTAINTY_ORDER = ["not_considered", "preference", "proposed", "client_approved"];
 
-// Who owns the decision / supply (Tab 18 §6).
+// Technical verification — designer / engineer / trade confirmation (Tab 23 Q2). Independent axis.
+export const TECHNICAL_STATUSES = {
+  not_required: "Not required",
+  needs_verification: "Needs verification",
+  verified: "Verified",
+};
+export const TECHNICAL_ORDER = ["not_required", "needs_verification", "verified"];
+
+// Pricing readiness — a LINK to an existing estimate / RFQ / quote, never a price (Tab 23 Q2).
+// "quoted_or_confirmed" = a builder-reviewed cost source, NOT a fixed contract amount (Tab 23 §5).
+export const PRICING_STATUSES = {
+  not_reviewed: "Not reviewed",
+  allowance_or_estimate: "Allowance / estimate",
+  quoted_or_confirmed: "Quoted & reviewed",
+};
+export const PRICING_ORDER = ["not_reviewed", "allowance_or_estimate", "quoted_or_confirmed"];
+
+// Who owns the decision / next action (Tab 18 §6).
 export const RESPONSIBILITIES = {
   client: "Client",
-  architect: "Architect",
+  architect: "Architect / designer",
+  consultant: "Engineer / consultant",
   blue_leaf: "Blue Leaf",
   trade: "Trade / supplier",
 };
+
+// Who supplies (and normally installs) the item (Tab 21 P-11 / M-003).
+export const SUPPLY_BY = {
+  blue_leaf: "Blue Leaf",
+  trade: "Trade (via Blue Leaf)",
+  client: "Client supplied",
+  by_others: "By others",
+};
+
+// Commercial delivery model — a first-class Sales fact, separate from physical project type (Tab 23 Q4).
+export const DELIVERY_MODELS = {
+  design_build: "Design & build",
+  build_only: "Build only",
+  construction_management: "Construction management",
+  other: "Other",
+};
+/** Delivery models that activate the management / third-party responsibility overlay (Tab 21 §13). */
+export const MANAGEMENT_DELIVERY = new Set(["build_only", "construction_management", "other"]);
 
 // Room scope on the plan (Tab 18 §4 room header).
 export const ROOM_SCOPES = {
@@ -65,9 +118,13 @@ export const ROOM_SCOPES = {
   not_in_scope: "Not in scope",
 };
 
-// Controlled category keys (coverage checklist from Tab 08 / Tab 18 §5 — a practical subset).
+// Controlled category keys (Tab 08 / Tab 21 coverage).
 export const REGISTER_CATEGORIES = {
   scope: "Scope of works",
+  site: "Site & access",
+  existing: "Existing conditions & interfaces",
+  demolition: "Demolition / strip-out",
+  layout: "Layout & function",
   structure: "Structure / framing",
   roof: "Roof & gutters",
   cladding: "Cladding / brick / render",
@@ -83,163 +140,175 @@ export const REGISTER_CATEGORIES = {
   sanitary: "Sanitary / tapware",
   tiling: "Tiling / waterproofing",
   electrical: "Electrical / lighting",
-  hvac: "Heating / cooling",
-  plumbing: "Plumbing / hot water",
-  services: "Services",
-  external: "External / landscape",
+  hvac: "Heating / cooling / ventilation",
+  plumbing: "Plumbing / hot water / drainage",
+  services: "Services strategy",
   insulation: "Insulation / envelope",
+  external: "External works / landscape",
+  stairs: "Stairs & balustrades",
+  consultants: "Consultants & approvals",
+  procurement: "Procurement & responsibilities",
   notes: "Notes / preferences",
 };
 
-// Room types that drive which prompts appear (Tab 18 §5). "generic" = any other room.
+// Schedule grouping used by the Selections & Finishes Schedule (documentPayloads GROUP_ORDER).
+export const CATEGORY_DOC_GROUP = {
+  roof: "External", cladding: "External", windows: "External", insulation: "External",
+  flooring: "Internal Finishes", walls_ceiling: "Internal Finishes", paint: "Internal Finishes", trim: "Internal Finishes",
+  doors: "Internal Finishes", stairs: "Internal Finishes",
+  joinery: "Joinery", benchtop: "Joinery", appliances: "Joinery",
+  sanitary: "Wet Areas", tiling: "Wet Areas",
+  electrical: "Services & Fixtures", hvac: "Services & Fixtures", plumbing: "Services & Fixtures", services: "Services & Fixtures",
+  external: "External Works", site: "External Works",
+};
+export const docGroupFor = (category) => CATEGORY_DOC_GROUP[category] || "General";
+
+// Room types that drive which prompts appear (Tab 21 §4–§11). "generic" = any other room.
 export const ROOM_TYPES = {
   kitchen: "Kitchen",
   scullery: "Scullery / butler's",
+  pantry: "Pantry",
   bathroom: "Bathroom",
   ensuite: "Ensuite",
   wc: "WC / powder",
   laundry: "Laundry",
+  mudroom: "Mudroom",
   living: "Living",
   dining: "Dining",
+  family: "Family / rumpus",
+  theatre: "Theatre / media",
   bedroom: "Bedroom",
+  wir: "Walk-in robe",
   study: "Study",
   stairs: "Stairs",
   hall: "Hall / entry",
-  alfresco: "Alfresco",
   garage: "Garage",
+  alfresco: "Alfresco / pergola",
+  balcony: "Balcony / deck",
   external: "External / site",
   generic: "Other room",
 };
 
-// ── Prompt libraries — expose only the subset appropriate to the room/stage (Tab 18 §5, §7) ───────
-// A prompt is a *suggestion* that seeds a register item; never a compulsory field.
-// { key, category, label, itemKind } — itemKind is the natural default; staff can change it.
-
-const BASE_PROMPTS = [
-  { key: "scope_change", category: "scope", label: "What's changing here? (new / retain / alter / remove / make good / by others / excluded)", itemKind: "scope" },
-  { key: "floor", category: "flooring", label: "Floor finish & transitions", itemKind: "selection" },
-  { key: "walls_ceiling", category: "walls_ceiling", label: "Walls, ceiling & any feature materials", itemKind: "selection" },
-  { key: "paint_trim", category: "paint", label: "Paint, skirting, architraves & trim", itemKind: "selection" },
-  { key: "windows_doors", category: "doors", label: "Windows / doors / hardware & opening changes", itemKind: "selection" },
-  { key: "services", category: "electrical", label: "Lighting, power, heating/cooling, plumbing — basic needs now", itemKind: "selection" },
-  { key: "notes", category: "notes", label: "Other preferences, buildability notes, exclusions", itemKind: "scope" },
-];
-
-const TYPE_EXTRAS = {
-  kitchen: [
-    { key: "k_layout", category: "joinery", label: "Layout, storage & cabinet finish standard", itemKind: "selection" },
-    { key: "k_bench", category: "benchtop", label: "Benchtop & splashback", itemKind: "selection" },
-    { key: "k_appliances", category: "appliances", label: "Appliances — who supplies?", itemKind: "selection" },
-    { key: "k_sink", category: "sanitary", label: "Sink & mixer (Routleys)", itemKind: "selection" },
-  ],
-  scullery: [
-    { key: "sc_joinery", category: "joinery", label: "Cabinetry & storage", itemKind: "selection" },
-    { key: "sc_bench", category: "benchtop", label: "Benchtop & splashback", itemKind: "selection" },
-    { key: "sc_sink", category: "sanitary", label: "Sink & mixer", itemKind: "selection" },
-  ],
-  bathroom: [
-    { key: "b_layout", category: "sanitary", label: "Shower / bath / toilet / vanity", itemKind: "selection" },
-    { key: "b_tiles", category: "tiling", label: "Tiles & extent", itemKind: "selection" },
-    { key: "b_screen", category: "joinery", label: "Screens & accessories", itemKind: "selection" },
-    { key: "b_tap", category: "sanitary", label: "Tapware (Routleys)", itemKind: "selection" },
-    { key: "b_wp", category: "tiling", label: "Waterproofing & ventilation", itemKind: "scope" },
-  ],
-  ensuite: [
-    { key: "e_layout", category: "sanitary", label: "Shower / toilet / vanity", itemKind: "selection" },
-    { key: "e_tiles", category: "tiling", label: "Tiles & extent", itemKind: "selection" },
-    { key: "e_tap", category: "sanitary", label: "Tapware (Routleys)", itemKind: "selection" },
-    { key: "e_wp", category: "tiling", label: "Waterproofing & ventilation", itemKind: "scope" },
-  ],
-  wc: [
-    { key: "w_fixtures", category: "sanitary", label: "Toilet & basin", itemKind: "selection" },
-    { key: "w_tiles", category: "tiling", label: "Tiling / splashback", itemKind: "selection" },
-  ],
-  laundry: [
-    { key: "l_joinery", category: "joinery", label: "Cabinetry & benchtop", itemKind: "selection" },
-    { key: "l_trough", category: "sanitary", label: "Trough & mixer", itemKind: "selection" },
-    { key: "l_machine", category: "plumbing", label: "Machine space & drainage", itemKind: "scope" },
-  ],
-  living: [
-    { key: "lv_feature", category: "walls_ceiling", label: "Feature walls / ceiling detail / fireplace", itemKind: "selection" },
-    { key: "lv_window", category: "windows", label: "Window coverings & glazing / shading", itemKind: "selection" },
-    { key: "lv_data", category: "electrical", label: "Power / data / TV", itemKind: "selection" },
-  ],
-  dining: [
-    { key: "d_feature", category: "walls_ceiling", label: "Feature / ceiling detail", itemKind: "selection" },
-    { key: "d_light", category: "electrical", label: "Pendant / lighting", itemKind: "selection" },
-  ],
-  bedroom: [
-    { key: "br_robe", category: "joinery", label: "Robes / built-in joinery", itemKind: "selection" },
-    { key: "br_data", category: "electrical", label: "Outlets / data / fans / AC", itemKind: "selection" },
-  ],
-  study: [
-    { key: "st_joinery", category: "joinery", label: "Built-in desk / storage", itemKind: "selection" },
-    { key: "st_data", category: "electrical", label: "Power / data", itemKind: "selection" },
-  ],
-  stairs: [
-    { key: "s_structure", category: "structure", label: "Structure & balustrades", itemKind: "selection" },
-    { key: "s_handrail", category: "joinery", label: "Handrails & transitions", itemKind: "selection" },
-  ],
-  hall: [
-    { key: "h_floor", category: "flooring", label: "Flooring transitions", itemKind: "selection" },
-    { key: "h_doors", category: "doors", label: "Door schedule & lighting", itemKind: "selection" },
-  ],
-  alfresco: [
-    { key: "a_structure", category: "roof", label: "Roof / structure & posts", itemKind: "selection" },
-    { key: "a_paving", category: "external", label: "Paving / decking", itemKind: "selection" },
-    { key: "a_bbq", category: "joinery", label: "BBQ joinery & services", itemKind: "selection" },
-  ],
-  garage: [
-    { key: "g_door", category: "doors", label: "Garage door & access", itemKind: "selection" },
-    { key: "g_finish", category: "walls_ceiling", label: "Lining / floor finish", itemKind: "selection" },
-  ],
-  external: [
-    { key: "x_envelope", category: "cladding", label: "Cladding / brick / render", itemKind: "selection" },
-    { key: "x_roof", category: "roof", label: "Roof & gutters", itemKind: "selection" },
-    { key: "x_landscape", category: "external", label: "Driveway / paving / landscape scope", itemKind: "scope" },
-    { key: "x_drainage", category: "plumbing", label: "Drainage & external services", itemKind: "scope" },
-  ],
-  generic: [],
+export const PROJECT_TYPE_LABELS = {
+  new_build: "New Build", extension: "Extension", renovation: "Renovation", knockdown_rebuild: "Knockdown Rebuild",
 };
+/** Renovation-type projects activate the existing-building (RENO) prompts (Tab 21 legend). */
+export function isRenovationProject(projectType) {
+  return projectType === "renovation" || projectType === "extension";
+}
 
-// Renovation overlay — expand ONLY on applicable rooms (Tab 18 §5).
-const RENOVATION_PROMPTS = [
-  { key: "r_existing", category: "scope", label: "Existing-condition notes for this area", itemKind: "scope" },
-  { key: "r_demo", category: "scope", label: "Demolish / retain / make good", itemKind: "scope" },
-  { key: "r_concealed", category: "scope", label: "Concealed-condition investigation / interfaces", itemKind: "scope" },
+// Sales stages from which detailed (stage D) prompts are shown by default. Staff may always work ahead
+// (D-038) — this is visibility guidance, never a lock.
+const DETAIL_STAGES = new Set(["fee_proposal", "consultants", "tender", "won"]);
+const TENDER_STAGES = new Set(["tender", "won"]);
+
+// ── Question library (Tab 21) — relevance filtering, no rules engine ─────────────────────────────
+
+const QUESTION_INDEX = new Map(QUESTIONS.map((q) => [q.id, q]));
+export function questionById(id) { return QUESTION_INDEX.get(id) || null; }
+
+// R02 Increment 1 prompt keys → Tab 21 question IDs (the stub prompts were replaced by the library).
+const LEGACY_PROMPT_MAP = {
+  scope_change: "R-003", floor: "R-005", walls_ceiling: "R-006", paint_trim: "R-006", windows_doors: "R-007",
+  services: "R-008", notes: "R-010",
+  k_layout: "K-002", k_bench: "K-005", k_appliances: "K-008", k_sink: "K-007",
+  sc_joinery: "K-004", sc_bench: "K-005", sc_sink: "K-007",
+  b_layout: "B-002", b_tiles: "B-009", b_screen: "B-006", b_tap: "B-008", b_wp: "B-012",
+  e_layout: "B-002", e_tiles: "B-009", e_tap: "B-008", e_wp: "B-012",
+  w_fixtures: "B-003", w_tiles: "B-009",
+  l_joinery: "L-003", l_trough: "L-003", l_machine: "L-002",
+  lv_feature: "V-003", lv_window: "V-004", lv_data: "V-006", d_feature: "V-003", d_light: "V-006",
+  br_robe: "D-004", br_data: "D-006", st_joinery: "D-002", st_data: "D-006",
+  s_structure: "H-001", s_handrail: "H-002", h_floor: "H-003", h_doors: "H-004",
+  a_structure: "O-004", a_paving: "O-003", a_bbq: "O-005", g_door: "H-006", g_finish: "H-006",
+  x_landscape: "O-006", x_drainage: "O-009",
+  r_existing: "R-013", r_demo: "W-004", r_concealed: "R-013",
+  wh_goals: "W-009", wh_envelope: "W-013", wh_insulation: "W-016", wh_flooring: "W-017", wh_paint: "W-019",
+  wh_doors: "W-018", wh_trim: "W-018", wh_services: "W-020", wh_exclusions: "W-022",
+};
+/** Normalise a stored promptKey (Tab 21 ID or an R02 legacy key) to a Tab 21 question ID. */
+export function resolvePromptId(promptKey) {
+  if (!promptKey) return null;
+  if (QUESTION_INDEX.has(promptKey)) return promptKey;
+  return LEGACY_PROMPT_MAP[promptKey] || null;
+}
+
+// Fixed topic order inside a room card (Tab 22 §I worked card).
+export const ROOM_TOPICS = [
+  { key: "scope", label: "Scope — what's changing?" },
+  { key: "layout", label: "Layout & function" },
+  { key: "finishes", label: "Finishes" },
+  { key: "fixtures", label: "Fixtures, appliances & supply" },
+  { key: "services", label: "Services" },
+  { key: "decisions", label: "Decisions & follow-up" },
+  { key: "technical", label: "Technical & detail" },
 ];
-
-// Whole-house / site default elements (Tab 18 §5, Step 1). These seed project-wide defaults.
-export const WHOLE_HOUSE_PROMPTS = [
-  { key: "wh_goals", category: "notes", label: "Project goals & overall quality tier", itemKind: "scope" },
-  { key: "wh_envelope", category: "cladding", label: "Envelope: roof / cladding / windows", itemKind: "selection" },
-  { key: "wh_insulation", category: "insulation", label: "Insulation / moisture / envelope performance", itemKind: "selection" },
-  { key: "wh_flooring", category: "flooring", label: "Default flooring standard", itemKind: "selection" },
-  { key: "wh_paint", category: "paint", label: "Default paint standard", itemKind: "selection" },
-  { key: "wh_doors", category: "doors", label: "Default door / handle standard", itemKind: "selection" },
-  { key: "wh_trim", category: "trim", label: "Default skirting / architrave standard", itemKind: "selection" },
-  { key: "wh_services", category: "services", label: "Services strategy: heating/cooling, hot water, electrical/solar", itemKind: "selection" },
-  { key: "wh_exclusions", category: "notes", label: "Exclusions / deferred works", itemKind: "scope" },
+export const PROJECT_TOPICS = [
+  { key: "brief", label: "Brief" },
+  { key: "envelope", label: "Envelope & external materials" },
+  { key: "internal", label: "Internal standards (defaults)" },
+  { key: "services", label: "Services & performance" },
+  { key: "inclusions", label: "Inclusions & responsibilities" },
+];
+export const SITE_TOPICS = [
+  { key: "access", label: "Access & occupation" },
+  { key: "existing", label: "Existing building & interfaces" },
+  { key: "external", label: "External works" },
+  { key: "consultants", label: "Surveys, approvals & consultants" },
+  { key: "quality", label: "Quality priorities" },
+];
+export const TECH_TOPICS = [
+  { key: "site", label: "Site & demolition" },
+  { key: "structure", label: "Structure & interfaces" },
+  { key: "envelope", label: "Envelope" },
+  { key: "internal", label: "Internal" },
+  { key: "services", label: "Services & compliance" },
+  { key: "commercial", label: "Procurement, cost & document control" },
 ];
 
 /**
- * Prompts for a room, trimmed to its type. Renovation prompts (existing-condition / demolish /
- * make-good) are driven by the ROOM's own scope — a brand-new room never gets demolition prompts —
- * with the project-wide overlay only as a fallback for rooms not marked brand-new (Tab 18 §5).
+ * The prompts relevant to ONE step/room — never the whole library (Tab 21 §14 / Tab 22 §B).
+ * ctx: { roomType, roomScope, projectType, deliveryModel, renovationOverlay, stage, showDetail }.
+ * Returns question entries in library order. FACT questions are excluded (they are Sales context).
  */
-export function roomPrompts(roomType, { renovationOverlay = false, roomScope } = {}) {
+export function promptsFor(section, ctx = {}) {
+  const { roomType, roomScope, projectType, deliveryModel, renovationOverlay = false, stage, showDetail = false } = ctx;
+  const reno = isRenovationProject(projectType) || !!renovationOverlay;
+  const detailVisible = showDetail || DETAIL_STAGES.has(stage);
+  const tenderVisible = showDetail || TENDER_STAGES.has(stage);
+  if (section === "mgmt" && !MANAGEMENT_DELIVERY.has(deliveryModel)) return [];
   const type = ROOM_TYPES[roomType] ? roomType : "generic";
-  const extras = TYPE_EXTRAS[type] || [];
-  const isExisting = roomScope === "renovated" || roomScope === "existing_remain";
-  const showReno = isExisting || (renovationOverlay && roomScope !== "new");
-  const reno = showReno ? RENOVATION_PROMPTS : [];
-  // Reno prompts first (scope conversation leads), then the base a–g, then the room specifics.
-  return [...reno, ...BASE_PROMPTS, ...extras];
+  return QUESTIONS.filter((q) => {
+    if (q.section !== section) return false;
+    if (q.itemKind == null) return false;                              // FACT → read-only context
+    if (q.render && q.render.startsWith("disposition_of:")) return false; // folded into its target row
+    if (q.stage === "T" && !tenderVisible) return false;
+    if (q.detail && !detailVisible) return false;
+    if (q.projects === "reno") {
+      if (section === "room") {
+        // Room-level renovation prompts follow the ROOM's own scope: an existing/renovated room always gets
+        // them; otherwise only on a renovation project (or overlay) — and a brand-new room never does.
+        const existing = roomScope === "renovated" || roomScope === "existing_remain";
+        if (!existing && !(reno && roomScope !== "new")) return false;
+      } else if (!reno) return false;
+    }
+    if (section === "room" && Array.isArray(q.rooms) && !q.rooms.includes(type)) return false;
+    return true;
+  });
 }
+
+/** R02-compatible room prompt list (now driven by the Tab 21 library). */
+export function roomPrompts(roomType, { renovationOverlay = false, roomScope, projectType, stage, showDetail } = {}) {
+  return promptsFor("room", { roomType, roomScope, renovationOverlay, projectType, stage, showDetail })
+    .map((q) => ({ key: q.id, category: q.category, label: q.short, itemKind: q.itemKind, question: q }));
+}
+/** R02-compatible whole-house prompt list (Tab 21 §3 — W-013..W-025). */
+export const WHOLE_HOUSE_PROMPTS = QUESTIONS.filter((q) => q.section === "project" && q.itemKind && !q.render && q.id.startsWith("W-"))
+  .map((q) => ({ key: q.id, category: q.category, label: q.short, itemKind: q.itemKind, question: q }));
 
 // ── Identity + factories ─────────────────────────────────────────────────────────────────────────
 
-/** Stable id (survives edits + later promotion). */
+/** Stable id (survives edits, promotion and stage changes). */
 export function genId() {
   try { if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") return "ri_" + globalThis.crypto.randomUUID(); } catch { /* fall through */ }
   return "ri_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -249,9 +318,8 @@ function nowIso() { try { return new Date().toISOString(); } catch { return ""; 
 
 /**
  * Deterministic id for a legacy {area,item[,supplier],notes} row. Legacy rows carry no persisted id,
- * so a random id would differ on every read — breaking idempotent promotion (each run would insert a
- * fresh client_selections row for the same finishes entry). A content hash keeps it stable across
- * reads and across a later edit→save (writeRegister then persists it as a proper item with this id).
+ * so a random id would differ on every read — breaking idempotent promotion. A content hash keeps it
+ * stable across reads and across a later edit→save.
  */
 function legacyId(row) {
   const basis = [row?.area, row?.item, row?.supplier, row?.notes].map((x) => (x == null ? "" : String(x))).join("\u0001");
@@ -260,31 +328,50 @@ function legacyId(row) {
   return "ri_legacy_" + h.toString(36);
 }
 
-/** A fresh register item. Only id/kind are required; everything else is optional. */
+const oneOf = (v, set, def) => (v && Object.prototype.hasOwnProperty.call(set, v) ? v : def);
+const numOrNull = (v) => (v === "" || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** A register item. Only id/kind are required; everything else is optional and defaulted. */
 export function makeItem(partial = {}) {
+  const itemKind = oneOf(partial.itemKind, ITEM_KINDS, "selection");
+  const roomId = partial.roomId || null;                        // null ⇒ project-wide (whole house / site)
   return {
     id: partial.id || genId(),
     kind: "item",
-    itemKind: partial.itemKind === "scope" ? "scope" : "selection",
-    roomId: partial.roomId || null,          // null ⇒ whole-house / project-wide
+    itemKind,
+    section: roomId ? "room" : (partial.section && partial.section !== "room" ? partial.section : "project"),
+    roomId,
     level: partial.level || "",
-    room: partial.room || "",
+    room: partial.room || "",                                  // label snapshot (the live room list wins)
     category: partial.category || "notes",
-    promptKey: partial.promptKey || null,    // which library prompt seeded it (for resume / dedup)
-    disposition: partial.disposition || "undecided",
+    promptKey: partial.promptKey || null,                      // Tab 21 question ID that seeded it
+    disposition: oneOf(partial.disposition, REGISTER_DISPOSITIONS, "undecided"),
     description: partial.description || "",
     product: partial.product || "",
+    manufacturer: partial.manufacturer || "",
     model: partial.model || "",
     colour: partial.colour || "",
-    certainty: partial.certainty || "not_considered",
-    responsibility: partial.responsibility || "",
-    source: partial.source || "",            // drawing sheet+rev OR supplier doc/version OR meeting note
+    supplier: partial.supplier || "",
+    quantity: numOrNull(partial.quantity),                      // null = not measured (never shown as 0)
+    unit: partial.unit || "",
+    certainty: oneOf(partial.certainty, REGISTER_CERTAINTY, "not_considered"),
+    responsibility: oneOf(partial.responsibility, RESPONSIBILITIES, ""),
+    supplyBy: oneOf(partial.supplyBy, SUPPLY_BY, ""),
+    technicalStatus: oneOf(partial.technicalStatus, TECHNICAL_STATUSES, "not_required"),
+    technicalEvidence: partial.technicalEvidence || null,      // {at, by, ref} — required for "verified"
+    pricingStatus: oneOf(partial.pricingStatus, PRICING_STATUSES, "not_reviewed"),
+    pricingRef: partial.pricingRef || "",                      // pointer to an existing estimate/RFQ line
+    source: partial.source || "",                              // drawing sheet+rev / supplier doc no+rev / meeting note
+    sourceDocId: partial.sourceDocId || null,                  // linked lead_documents row (received/issued)
     nextAction: partial.nextAction || "",
-    isDefault: !!partial.isDefault,          // a whole-house default
-    overridesDefaultId: partial.overridesDefaultId || null, // a room-specific exception to a default
-    evidence: partial.evidence || null,      // { at, by } — required to call a selection client_approved (Tab 18 §6)
+    resolved: !!partial.resolved,                              // an action / follow-up closed out
+    isDefault: !!partial.isDefault,                            // a project-wide default
+    overridesDefaultId: partial.overridesDefaultId || null,    // an explicit room exception to a default
+    evidence: partial.evidence || null,                        // {at, by, ref, method} — required for client_approved
     createdAt: partial.createdAt || nowIso(),
-    updatedAt: nowIso(),
+    updatedAt: partial.updatedAt || nowIso(),
+    // Server-owned, read-only: canonical row identity + version + portal state (project mode only).
+    sync: partial.sync || null,
   };
 }
 
@@ -292,19 +379,20 @@ export function makeItem(partial = {}) {
 export function emptyMeta(partial = {}) {
   return {
     kind: "meta",
-    version: 1,
+    version: 2,
+    rev: Number.isFinite(partial.rev) ? partial.rev : 0,       // canonical meta revision (project mode)
     planRev: partial.planRev || "",
-    deliveryModel: partial.deliveryModel || "",
+    deliveryModel: partial.deliveryModel || "",                // R02 legacy — now the leads/jobs.delivery_model fact
     occupancy: partial.occupancy || "",
     renovationOverlay: !!partial.renovationOverlay,
     scopeAreas: Array.isArray(partial.scopeAreas) ? partial.scopeAreas : [],
-    rooms: Array.isArray(partial.rooms) ? partial.rooms : [],
+    rooms: Array.isArray(partial.rooms) ? partial.rooms.map((r) => makeRoom(r)) : [],
     lastRoomId: partial.lastRoomId || null,
     lastStep: partial.lastStep || null,
   };
 }
 
-/** A fresh room in the room list. */
+/** A room in the room list. Its id is stable for life (rename / reorder never break item links). */
 export function makeRoom(partial = {}) {
   return {
     id: partial.id || genId(),
@@ -313,11 +401,11 @@ export function makeRoom(partial = {}) {
     roomType: ROOM_TYPES[partial.roomType] ? partial.roomType : "generic",
     scope: ROOM_SCOPES[partial.scope] ? partial.scope : "new",
     order: Number.isFinite(partial.order) ? partial.order : 0,
-    sheet: partial.sheet || "",              // drawing sheet/revision for this room (optional)
+    sheet: partial.sheet || "",                                // drawing sheet/revision for this room
   };
 }
 
-// ── Read / write the scratchpad (backward-compatible with legacy {area,item,notes}) ───────────────
+// ── Read / write the lead scratchpad (backward-compatible with legacy {area,item,notes}) ─────────
 
 /** Parse `lead.selections_schedule` into { meta, items }. Never throws; tolerates legacy shapes. */
 export function readRegister(lead) {
@@ -329,27 +417,26 @@ export function readRegister(lead) {
     if (row.kind === "meta") { meta = emptyMeta(row); continue; }
     if (row.kind === "item") { items.push(makeItem(row)); continue; }
     // Legacy rows — Concept "finishes schedule v1" {area,item,notes} and Consultants provisional F&F
-    // {area,item,supplier,notes} — adopt non-destructively. Fold every populated extra field into the
-    // description so NOTHING is lost (supplier was the only extra the F&F editor captured).
+    // {area,item,supplier,notes} — adopted non-destructively; every populated field kept.
     items.push(makeItem({
       id: legacyId(row),
       itemKind: "selection",
       category: "notes",
       room: typeof row.area === "string" ? row.area : "",
       description: [row.item, row.supplier && ("Supplier: " + row.supplier), row.notes].filter(Boolean).join(" — "),
+      supplier: row.supplier || "",
       disposition: "undecided",
       certainty: "not_considered",
+      updatedAt: "1970-01-01T00:00:00.000Z",
     }));
   }
   return { meta: meta || emptyMeta(), items };
 }
 
-/** Serialise { meta, items } back to the array stored in `selections_schedule`. */
+/** Serialise { meta, items } back to the array stored in `selections_schedule` (strips server sync). */
 export function writeRegister(register) {
   const meta = register?.meta ? { ...emptyMeta(register.meta) } : null;
-  const items = Array.isArray(register?.items) ? register.items.map((i) => makeItem(i)) : [];
-  // Only persist a meta record once the staff has actually started a register (rooms or any field set),
-  // so an untouched lead keeps an empty [] (unchanged behaviour).
+  const items = Array.isArray(register?.items) ? register.items.map((i) => { const it = makeItem(i); delete it.sync; return it; }) : [];
   const metaStarted = meta && (meta.rooms.length || meta.planRev || meta.deliveryModel ||
     meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId);
   return [...(metaStarted ? [meta] : []), ...items];
@@ -357,11 +444,15 @@ export function writeRegister(register) {
 
 // ── Defaults with explicit exceptions (Tab 18 §6 — "Apply to selected rooms", no silent edits) ────
 
+/** The project-wide default item for a question ID (e.g. W-017 floor palette), if captured. */
+export function defaultItemFor(register, questionId) {
+  return register.items.find((i) => i.isDefault && !i.roomId && resolvePromptId(i.promptKey) === questionId) || null;
+}
+
 /**
- * Apply a whole-house DEFAULT item to specific rooms as explicit, separate override records.
+ * Apply a project-wide DEFAULT item to specific rooms as explicit, separate exception records.
  * Never mutates other rooms silently: each target gets its own item linked via overridesDefaultId.
- * Rooms that already carry an override of this default are skipped (idempotent).
- * Returns a NEW register ({ meta, items }).
+ * Rooms that already carry an exception of this default are skipped (idempotent). Returns a NEW register.
  */
 export function applyDefaultToRooms(register, defaultItemId, roomIds) {
   const items = register.items.slice();
@@ -371,18 +462,10 @@ export function applyDefaultToRooms(register, defaultItemId, roomIds) {
     const already = items.some((i) => i.overridesDefaultId === defaultItemId && i.roomId === roomId);
     if (already) continue;
     items.push(makeItem({
-      itemKind: def.itemKind,
-      roomId,
-      category: def.category,
-      promptKey: null,            // no 'wh_*' key → shows as an editable room record, not a hidden ghost
-      disposition: def.disposition,
-      description: def.description,
-      product: def.product,
-      model: def.model,
-      colour: def.colour,
-      certainty: def.certainty,
-      responsibility: def.responsibility,
-      overridesDefaultId: defaultItemId,
+      itemKind: def.itemKind, roomId, category: def.category, promptKey: null,
+      disposition: def.disposition, description: def.description, product: def.product, manufacturer: def.manufacturer,
+      model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty,
+      responsibility: def.responsibility, supplyBy: def.supplyBy, overridesDefaultId: defaultItemId,
     }));
   }
   return { ...register, items };
@@ -390,32 +473,47 @@ export function applyDefaultToRooms(register, defaultItemId, roomIds) {
 
 // ── Selectors ─────────────────────────────────────────────────────────────────────────────────────
 
-/** Is this item an outstanding decision (Tab 18 §7 "Outstanding Decisions")? */
-export function isOutstanding(item) {
-  // A settled disposition (retain/remove/make good/by others/excluded/N-A) is a finished answer — for
-  // scope AND selection items (Tab 18 §7) — outstanding only if an open next action remains.
-  if (SETTLED_DISPOSITIONS.has(item.disposition)) return !!(item.nextAction && item.nextAction.trim());
-  // A selection is outstanding until it is client-approved (whatever the work disposition).
-  if (item.itemKind === "selection") return item.certainty !== "client_approved";
-  // A scope item is outstanding while undecided, or while it carries an open next action.
-  if (item.disposition === "undecided") return true;
-  return !!(item.nextAction && item.nextAction.trim());
+/**
+ * Why an item is outstanding (Tab 18 §7): 'decision' (a choice / scope still open), 'verification'
+ * (a designer / engineer / trade must confirm), 'action' (an open follow-up). [] = settled.
+ */
+export function outstandingReasons(item) {
+  const reasons = [];
+  const openAction = !!(item.nextAction && item.nextAction.trim()) && !item.resolved;
+  if (item.itemKind === "action") return item.resolved ? [] : ["action"];
+  if (item.technicalStatus === "needs_verification") reasons.push("verification");
+  if (SETTLED_DISPOSITIONS.has(item.disposition)) { if (openAction) reasons.push("action"); return reasons; }
+  if (item.itemKind === "selection" && item.certainty !== "client_approved") reasons.push("decision");
+  else if (item.itemKind === "scope" && item.disposition === "undecided") reasons.push("decision");
+  if (openAction) reasons.push("action");
+  return reasons;
 }
+export function isOutstanding(item) { return outstandingReasons(item).length > 0; }
+export function outstandingItems(register) { return register.items.filter(isOutstanding); }
 
-export function outstandingItems(register) {
-  return register.items.filter(isOutstanding);
-}
-
-// A selection is settled-OUT (by others / excluded / N-A) — a finished answer, not a client CHOICE.
-// Such rows still appear in the Client Brief's excluded/by-others section, never in the Selections
-// schedule or portal. Scope-only items NEVER qualify. This is the load-bearing scope-vs-selection guard.
-const NON_SELECTION_DISPOSITIONS = new Set(["excluded", "by_others", "na"]);
+// A selection settled OUT (by others / excluded / deferred / N-A) is a finished answer, not a client
+// CHOICE: it surfaces in the Client Brief scope boundary, never in the Selections schedule or portal.
+// Scope, requirement and action items NEVER qualify. This is the load-bearing scope-vs-selection guard.
+const NON_SELECTION_DISPOSITIONS = new Set(["excluded", "by_others", "na", "deferred"]);
 export function isClientSelection(item) {
   return item.itemKind === "selection" && !NON_SELECTION_DISPOSITIONS.has(item.disposition);
 }
 
+/** Business-rule problems with one item (shown inline; the server enforces the same rules). */
+export function itemIssues(item) {
+  const issues = [];
+  if (item.certainty === "client_approved" && !(item.evidence?.at && item.evidence?.by) && !item.sync?.approvedOnBoard) {
+    issues.push("Client approval needs evidence (who, when, how).");
+  }
+  if (item.technicalStatus === "verified" && !(item.technicalEvidence?.at && item.technicalEvidence?.ref)) {
+    issues.push("Verified needs a technical reference (drawing / consultant document).");
+  }
+  return issues;
+}
+
 /** Display name for an item's room — the LIVE room list is canonical (survives a room rename). */
 export function roomLabel(register, item) {
+  if (!item.roomId) return item.section === "site" ? "Site / existing" : "Whole house";
   return (register.meta.rooms || []).find((r) => r.id === item.roomId)?.name || item.room || "Whole house";
 }
 
@@ -431,24 +529,37 @@ export function itemsByRoom(register) {
   return map;
 }
 
-/** Where to resume (Tab 18 §3 "Continue Brief"): last saved room, else first room, else setup. */
-export function resumePointer(register) {
-  const rooms = register.meta.rooms || [];
-  if (register.meta.lastRoomId && rooms.some((r) => r.id === register.meta.lastRoomId)) {
-    return { step: register.meta.lastStep || "rooms", roomId: register.meta.lastRoomId };
-  }
-  if (rooms.length) return { step: "rooms", roomId: rooms[0].id };
-  return { step: "setup", roomId: null };
+/** Short, stable, human reference for an item in documents ("K-005·3F9A") — derived from its id. */
+export function refCode(item) {
+  let h = 2166136261;
+  const s = String(item.id || "");
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  const tail = h.toString(36).toUpperCase().slice(-4).padStart(4, "0");
+  const q = resolvePromptId(item.promptKey);
+  return `${q || "X"}·${tail}`;
 }
 
-/** Genuine blockers only (Tab 18 §10 M / Tab 19) — never nag about blank optional fields. */
-export function registerBlockers(register, { forDoc } = {}) {
+/** Where to resume (Tab 18 §3 "Continue Brief"): last saved room/step, else first room, else context. */
+export function resumePointer(register) {
+  const rooms = register.meta.rooms || [];
+  const step = register.meta.lastStep === "setup" ? "context" : register.meta.lastStep;
+  if (register.meta.lastRoomId && rooms.some((r) => r.id === register.meta.lastRoomId)) {
+    return { step: step || "rooms", roomId: register.meta.lastRoomId };
+  }
+  if (step && step !== "rooms") return { step, roomId: rooms[0]?.id || null };
+  if (rooms.length) return { step: "rooms", roomId: rooms[0].id };
+  return { step: "context", roomId: null };
+}
+
+/** Genuine blockers only (Tab 18 §10 M) — never nag about blank optional fields. */
+export function registerBlockers(register, { forDoc, lead } = {}) {
   const blockers = [];
   if ((register.meta.rooms || []).length === 0 && register.items.length === 0) {
     blockers.push("No rooms or register items captured yet.");
   }
-  if (forDoc === "client_brief" && !register.meta.projectType) {
-    blockers.push("Project type not set (Plan Setup).");
+  if (forDoc === "client_brief" && lead && !lead.project_type) blockers.push("Project type not set (lead details).");
+  if ((forDoc === "architect_brief" || forDoc === "selections_schedule") && !register.meta.planRev) {
+    blockers.push("Current drawing set / revision not recorded (Project context).");
   }
   return blockers;
 }
@@ -459,62 +570,53 @@ export const certaintyLabel = (k) => REGISTER_CERTAINTY[k] || k || "—";
 export const categoryLabel = (k) => REGISTER_CATEGORIES[k] || k || "—";
 export const roomTypeLabel = (k) => ROOM_TYPES[k] || k || "—";
 export const responsibilityLabel = (k) => RESPONSIBILITIES[k] || k || "—";
+export const technicalLabel = (k) => TECHNICAL_STATUSES[k] || k || "—";
+export const pricingLabel = (k) => PRICING_STATUSES[k] || k || "—";
+export const supplyLabel = (k) => SUPPLY_BY[k] || k || "—";
+export const itemKindLabel = (k) => ITEM_KINDS[k] || k || "—";
+export const deliveryLabel = (k) => DELIVERY_MODELS[k] || k || "—";
 
 const TBC = "TBC";
 
 /**
- * Build the three stage documents from the SAME register (Tab 19 Phase 3 / T07).
- * Returns plain view-models (no rendering) so the SAME values provably feed every document and the
- * Node test can assert "identical underlying values". Unknowns are labelled TBC, never invented.
+ * Lightweight on-screen draft views (kept for R02 compatibility and quick previews). Issued documents
+ * are built by src/lib/registerDocuments.js from the SAME register and rendered by the existing engine.
  */
 export function buildDocViews(lead, register) {
   const clientName = (lead?.name || [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "").trim();
   const items = register.items;
   const roomName = (it) => roomLabel(register, it);
-
-  // Scope grouped by disposition (for the Client Brief "major scope" + exclusions).
-  const scopeItems = items.filter((i) => i.itemKind === "scope" || i.disposition !== "undecided");
-  const included = scopeItems.filter((i) => ["new", "alter", "make_good"].includes(i.disposition));
-  const excluded = scopeItems.filter((i) => ["excluded", "by_others"].includes(i.disposition));
-  const retained = scopeItems.filter((i) => i.disposition === "retain");
-
-  // Preferences = selection items with any direction yet.
-  const preferences = items.filter((i) => i.itemKind === "selection" && CERTAINTY_ORDER.indexOf(i.certainty) >= 1);
+  const included = items.filter((i) => i.itemKind === "scope" && INCLUDED_DISPOSITIONS.has(i.disposition));
+  const excluded = items.filter((i) => ["excluded", "by_others", "deferred"].includes(i.disposition));
+  const retained = items.filter((i) => i.disposition === "retain");
+  const preferences = items.filter((i) => isClientSelection(i) && CERTAINTY_ORDER.indexOf(i.certainty) >= 1);
   const outstanding = outstandingItems(register);
-
   const selectionRow = (it) => ({
-    room: roomName(it),
-    category: categoryLabel(it.category),
-    item: it.description || TBC,
-    product: it.product || it.model || TBC,
-    finish: it.colour || TBC,
-    source: it.source || TBC,
-    status: certaintyLabel(it.certainty),
-    disposition: dispositionLabel(it.disposition),
+    room: roomName(it), category: categoryLabel(it.category), item: it.description || TBC,
+    product: it.product || it.model || TBC, finish: it.colour || TBC, source: it.source || TBC,
+    status: certaintyLabel(it.certainty), disposition: dispositionLabel(it.disposition), technical: technicalLabel(it.technicalStatus),
   });
-
+  const goalsItem = items.find((i) => ["W-009", "P-005"].includes(resolvePromptId(i.promptKey)));
   return {
     meta: { clientName: clientName || "[Client]", planRev: register.meta.planRev || TBC, projectType: lead?.project_type || TBC },
-    // D1 — Preliminary Client Project Brief (issue-only, no signature)
     clientBrief: {
-      goals: items.find((i) => i.promptKey === "wh_goals")?.description || TBC,
+      goals: goalsItem?.description || TBC,
       majorScope: included.map((i) => ({ area: roomName(i), work: i.description || dispositionLabel(i.disposition) })),
+      requirements: items.filter((i) => i.itemKind === "requirement").map((i) => ({ area: roomName(i), requirement: i.description || TBC })),
       preferences: preferences.map((i) => ({ area: roomName(i), direction: i.description || i.product || TBC, status: certaintyLabel(i.certainty) })),
       excludedDeferred: excluded.map((i) => ({ area: roomName(i), note: i.description || dispositionLabel(i.disposition) })),
       retained: retained.map((i) => ({ area: roomName(i), note: i.description || "Existing to remain" })),
       nextDecisions: outstanding.map((i) => ({ area: roomName(i), item: i.description || categoryLabel(i.category), owner: responsibilityLabel(i.responsibility) })),
     },
-    // D2 — Architect Design Brief (confirmed outcomes vs proposed; actions by room/sheet/rev)
     architectBrief: {
-      confirmedOutcomes: items.filter((i) => i.certainty === "client_approved" || ["new", "alter"].includes(i.disposition))
-        .map((i) => ({ area: roomName(i), outcome: i.description || dispositionLabel(i.disposition), status: certaintyLabel(i.certainty) })),
-      proposedSolutions: items.filter((i) => i.certainty === "proposed")
-        .map((i) => ({ area: roomName(i), proposal: i.description || i.product || TBC })),
-      actions: items.filter((i) => i.responsibility === "architect" || (i.nextAction && i.nextAction.trim()))
-        .map((i) => ({ area: roomName(i), action: i.nextAction || "Coordinate", sheet: i.source || TBC, owner: responsibilityLabel(i.responsibility) })),
+      // Client intent (approved requirements / scope) — kept distinct from proposed technical solutions.
+      confirmedOutcomes: items.filter((i) => (i.itemKind === "requirement" && i.certainty === "client_approved") || (i.itemKind === "scope" && ["new", "alter"].includes(i.disposition)))
+        .map((i) => ({ area: roomName(i), outcome: i.description || dispositionLabel(i.disposition), status: i.itemKind === "requirement" ? "Client-approved requirement" : dispositionLabel(i.disposition) })),
+      proposedSolutions: items.filter((i) => i.certainty === "proposed").map((i) => ({ area: roomName(i), proposal: i.description || i.product || TBC })),
+      toVerify: items.filter((i) => i.technicalStatus === "needs_verification").map((i) => ({ area: roomName(i), item: i.description || categoryLabel(i.category), owner: responsibilityLabel(i.responsibility) })),
+      actions: items.filter((i) => (i.responsibility === "architect" || (i.nextAction && i.nextAction.trim())) && !i.resolved)
+        .map((i) => ({ area: roomName(i), action: i.nextAction || i.description || "Coordinate", sheet: i.source || TBC, owner: responsibilityLabel(i.responsibility) })),
     },
-    // D3 — Selections & Finishes Schedule (client CHOICES only — never scope-only rows, and never a
-    // selection settled as excluded/by-others/N-A; those surface in the Client Brief instead).
     selections: items.filter(isClientSelection).map(selectionRow),
   };
 }

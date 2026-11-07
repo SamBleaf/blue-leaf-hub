@@ -31,6 +31,8 @@ export async function apiFetch(url, options = {}) {
         error: json?.error || `Request failed (HTTP ${res.status})`,
         status: res.status,
         code: json?.code || null,
+        // The parsed error body (e.g. a 409's `conflicts` list) — additive; callers may ignore it.
+        body: json,
       };
     }
 

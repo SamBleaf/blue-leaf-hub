@@ -1,307 +1,153 @@
 /**
- * register-promotion.test.mjs — Master Register R02 · Increment 2 logic tests (no DB).
+ * register-promotion.test.mjs — Master Register R03 store unit tests (no DB).
  *
- * Exercises the REAL server/lib/registerPromotion.mjs against an in-memory fake Supabase that mimics
- * the exact query surface the service uses (.from/.select/.eq/.maybeSingle/.upsert) and honours
- * ON CONFLICT DO NOTHING (ignoreDuplicates). Proves the behaviours that matter most:
- *   • scope-vs-selection partition (the load-bearing client_selections guard),
- *   • promoted selections are STAGED (client_visible=false) and raise NO client_actions / no comms,
- *   • certainty→status mapping, provenance, stable-id keying,
- *   • idempotent re-run (no duplicates).
- *
+ * The SQL side of promotion / write-through (register_apply) is proven on a real Postgres by
+ * register-migration-213.test.mjs and end-to-end through the real API by register-e2e.test.mjs. This
+ * file pins the JS side of server/lib/registerStore.mjs with an in-memory client that records the RPC:
+ *   • the load-bearing partition (only genuine choices → client_selections; scope / requirement / action /
+ *     settled-out selections → room_scope_items), promotion never issues anything to the client,
+ *   • promote-once (no-op when already promoted / no project / pre-213), failures are observable,
+ *   • lossless item ⇄ row mapping (description, category key, room id, quantity, evidence, readiness),
+ *   • save → ops: update with base version, reclassification = delete + insert (same id), deletes only for
+ *     persisted rows, conflicts surface as 409 with nothing written.
  * Run: npm run test:register-promotion
  */
+import {
+  promoteRegisterToProject, saveRegister, storeFor, itemToSelRow, itemToRsiRow, selRowToItem, rsiRowToItem, RegisterError,
+} from "../../server/lib/registerStore.mjs";
+import { makeItem, makeRoom, emptyMeta, writeRegister } from "../../src/lib/register.js";
 
-import assert from "node:assert/strict";
-import { promoteRegisterToProject } from "../../server/lib/registerPromotion.mjs";
-import { emptyMeta, makeRoom, makeItem, writeRegister } from "../../src/lib/register.js";
+let pass = 0, fail = 0;
+const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ""}`); } };
 
-// ── Minimal fake Supabase (service-role surface the promotion uses) ───────────────────────────────
-function makeFakeSb(seed = {}) {
-  const store = {
-    leads: seed.leads ? seed.leads.slice() : [],
-    projects: seed.projects ? seed.projects.slice() : [],
-    client_selections: [],
-    room_scope_items: [],
-    client_actions: [], // MUST stay empty — promotion never creates a client-facing action.
-  };
-  const matches = (r, preds) => preds.every((p) => p(r));
-  function from(table) {
-    const preds = [];
-    let op = "select";
-    const api = {
-      select() { op = "select"; return api; },
-      delete() { op = "delete"; return api; },
-      eq(col, val) { preds.push((r) => r[col] === val); return api; },
-      in(col, arr) { const s = new Set(arr); preds.push((r) => s.has(r[col])); return api; },
-      gte(col, val) { preds.push((r) => r[col] != null && r[col] >= val); return api; },
-      order() { return api; },
-      limit() { return api; },
-      not(col, operator, val) {
-        if (operator === "is" && val === null) preds.push((r) => r[col] != null);
-        else if (operator === "in") { const s = new Set(val); preds.push((r) => !s.has(r[col])); }
-        else preds.push((r) => r[col] !== val);
-        return api;
-      },
-      async maybeSingle() {
-        const rows = (store[table] || []).filter((r) => matches(r, preds));
-        return { data: rows[0] || null, error: null };
-      },
-      async upsert(rows, opts = {}) {
-        const list = Array.isArray(rows) ? rows : [rows];
-        const key = String(opts.onConflict || "").split(",").map((s) => s.trim()).filter(Boolean);
-        for (const row of list) {
-          if (opts.ignoreDuplicates && key.length) {
-            const dup = store[table].some((r) => key.every((k) => r[k] === row[k]));
-            if (dup) continue; // ON CONFLICT DO NOTHING
-          }
-          store[table].push({ ...row });
-        }
-        return { error: null };
-      },
-      async insert(rows) {
-        const list = Array.isArray(rows) ? rows : [rows];
-        for (const r of list) store[table].push({ ...r });
-        return { error: null };
-      },
-      // Thenable — awaiting the builder (no .maybeSingle) runs a select, or a delete when .delete() was called.
-      then(resolve) {
-        if (op === "delete") {
-          store[table] = (store[table] || []).filter((r) => !matches(r, preds));
-          resolve({ data: null, error: null });
-        } else {
-          resolve({ data: (store[table] || []).filter((r) => matches(r, preds)), error: null });
-        }
-      },
+/** Minimal supabase-js stand-in: tables in memory, rpc recorded / scripted. */
+function fakeSb({ tables = {}, rpc = () => ({ data: { ok: true, results: [], promoted: { selections: 0, scopeItems: 0 } }, error: null }) } = {}) {
+  const calls = [];
+  const db = JSON.parse(JSON.stringify(tables));
+  const from = (t) => {
+    const st = { t, filters: [], op: "select", payload: null };
+    const rows = () => (db[t] || []).filter((r) => st.filters.every(([c, v]) => String(r[c]) === String(v)));
+    const b = {
+      select() { return b; }, order() { return b; }, limit() { return b; },
+      eq(c, v) { st.filters.push([c, v]); return b; },
+      insert(p) { st.op = "insert"; st.payload = p; (db[t] ||= []).push(...[].concat(p)); calls.push({ insert: t, p }); return b; },
+      maybeSingle() { return Promise.resolve({ data: rows()[0] || null, error: null }); },
+      then(res, rej) { return Promise.resolve({ data: st.op === "insert" ? st.payload : rows(), error: null }).then(res, rej); },
     };
-    return api;
-  }
-  return { from, __store: store };
-}
-
-// Flip the stored register item's fields (simulate staff reclassifying between promotion runs).
-function setItem(lead, id, patch) {
-  const row = (lead.selections_schedule || []).find((r) => r.kind === "item" && r.id === id);
-  if (row) Object.assign(row, patch);
-}
-function singleItemLead(itemKind, disposition) {
-  const room = makeRoom({ name: "Kitchen", roomType: "kitchen", scope: "renovated" });
-  const item = makeItem({ id: "ri_x", itemKind, roomId: room.id, category: "appliances", description: "Appliances", disposition });
-  return { id: "lead-x", job_id: "job-x", stage: "consultants", selections_schedule: writeRegister({ meta: emptyMeta({ rooms: [room] }), items: [item] }) };
-}
-
-// ── Fixture: one lead whose register covers every partition case ──────────────────────────────────
-function fixtureLead() {
-  const kitchen = makeRoom({ name: "Kitchen", roomType: "kitchen", scope: "renovated", level: "Ground" });
-  const bath = makeRoom({ name: "Bathroom", roomType: "bathroom", scope: "renovated", level: "Ground" });
-  const meta = emptyMeta({ planRev: "DA-02", rooms: [kitchen, bath], renovationOverlay: true });
-
-  const items = [
-    // CHOICES → client_selections (staged)
-    makeItem({ itemKind: "selection", roomId: kitchen.id, category: "flooring", description: "Engineered oak", certainty: "client_approved", evidence: { at: "2026-10-01T00:00:00.000Z", by: "sam" }, product: "Oak XL", colour: "Natural" }),
-    makeItem({ itemKind: "selection", roomId: kitchen.id, category: "benchtop", description: "Stone benchtop", certainty: "proposed" }),
-    makeItem({ itemKind: "selection", roomId: bath.id, category: "tiling", description: "Floor + wall tiles", certainty: "not_considered" }),
-    makeItem({ itemKind: "selection", roomId: null, category: "flooring", description: "Default flooring standard", certainty: "preference", isDefault: true }),
-    // SCOPE / WORKS → room_scope_items
-    makeItem({ itemKind: "scope", roomId: kitchen.id, category: "scope", description: "Demolish dividing wall", disposition: "remove" }),
-    makeItem({ itemKind: "scope", roomId: bath.id, category: "tiling", description: "Waterproof + vent", disposition: "new", nextAction: "Confirm fall to waste" }),
-    // SETTLED-OUT SELECTIONS → room_scope_items (NEVER client_selections) — load-bearing guard
-    makeItem({ itemKind: "selection", roomId: kitchen.id, category: "appliances", description: "Appliances", disposition: "by_others" }),
-    makeItem({ itemKind: "selection", roomId: bath.id, category: "sanitary", description: "Spa bath", disposition: "excluded" }),
-  ];
-
-  const register = { meta, items };
-  // Add a LEGACY finishes row ({area,item,notes}) to prove non-destructive adoption → promotes as a selection.
-  const schedule = [...writeRegister(register), { area: "Laundry", item: "Trough + mixer", notes: "client to confirm" }];
-
-  return {
-    lead: { id: "lead-1", job_id: "job-1", name: "Jane Client", first_name: "Jane", last_name: "Client", project_type: "renovation", stage: "consultants", selections_schedule: schedule },
-    rooms: { kitchen, bath },
-    items,
+    return b;
   };
+  return { from, rpc: async (name, args) => { calls.push({ rpc: name, args }); return rpc(name, args); }, calls, db };
 }
 
-// ── Tiny runner ───────────────────────────────────────────────────────────────────────────────────
-let passed = 0, failed = 0;
-async function test(name, fn) {
-  try { await fn(); passed++; console.log(`  ✓ ${name}`); }
-  catch (e) { failed++; console.log(`  ✗ ${name}\n    ${e.message}`); }
+const kitchen = makeRoom({ name: "Kitchen", roomType: "kitchen", level: "GF" });
+const sink = makeItem({ itemKind: "selection", category: "sanitary", promptKey: "K-007", roomId: kitchen.id, description: "Undermount sink", product: "Franke Bell", certainty: "proposed", supplier: "Routleys", quantity: 1, unit: "ea" });
+const demo = makeItem({ itemKind: "scope", category: "demolition", promptKey: "W-004", section: "site", disposition: "remove", description: "Demolish existing kitchen" });
+const req = makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", description: "Improve thermal comfort", technicalStatus: "needs_verification" });
+const act = makeItem({ itemKind: "action", category: "joinery", promptKey: "K-014", roomId: kitchen.id, description: "Coordinate appliance dims", responsibility: "blue_leaf" });
+const byOthers = makeItem({ itemKind: "selection", category: "appliances", roomId: kitchen.id, description: "Client supplies fridge", disposition: "by_others" });
+const deferred = makeItem({ itemKind: "selection", category: "external", description: "Pool fence", disposition: "deferred" });
+const meta = emptyMeta({ rooms: [kitchen], planRev: "A102 Rev C" });
+const register = { meta, items: [sink, demo, req, act, byOthers, deferred] };
+const lead = { id: "11111111-1111-1111-1111-111111111111", job_id: "22222222-2222-2222-2222-222222222222", stage: "consultants", selections_schedule: writeRegister(register), updated_at: "2026-11-07T00:00:00Z" };
+const project = { id: "33333333-3333-3333-3333-333333333333", job_id: lead.job_id, is_preconstruction: true, register_meta: null };
+
+// ── partition guard ─────────────────────────────────────────────────────────────────────────────
+ok("partition: only the genuine choice goes to client_selections",
+  storeFor(sink) === "client_selections" && [demo, req, act, byOthers, deferred].every((i) => storeFor(i) === "room_scope_items"));
+
+// ── promotion ───────────────────────────────────────────────────────────────────────────────────
+{
+  const sb = fakeSb({ tables: { leads: [lead], projects: [project] } });
+  const r = await promoteRegisterToProject(sb, { leadId: lead.id, actor: { id: null, name: "Tester" } });
+  const call = sb.calls.find((c) => c.rpc === "register_apply");
+  const ops = call?.args?.p_ops || [];
+  ok("promote: one atomic register_apply call in promote mode", r.ok && call && call.args.p_mode === "promote" && call.args.p_project_id === project.id);
+  ok("promote: meta_init carries the room list + drawing basis", ops[0]?.op === "meta_init" && ops[0].meta.rooms.length === 1 && ops[0].meta.planRev === "A102 Rev C");
+  ok("promote: the sink is a sel_insert; scope / requirement / action / by-others / deferred are scope_inserts",
+    ops.filter((o) => o.op === "sel_insert").map((o) => o.item_id).join() === sink.id
+    && ops.filter((o) => o.op === "scope_insert").length === 5);
+  ok("promote: nothing is issued to the client (no issue op, no client_visible flag sent)",
+    !ops.some((o) => o.op === "sel_issue") && !ops.some((o) => o.row && "client_visible" in o.row));
+  ok("promote: provenance note recorded internally", /Master Register/.test(ops.find((o) => o.op === "sel_insert").row.internal_notes));
+  ok("promote: requirement keeps its kind + needs-verification state", ops.find((o) => o.item_id === req.id).row.item_kind === "requirement"
+    && ops.find((o) => o.item_id === req.id).row.technical_status === "needs_verification");
+}
+{
+  const sb = fakeSb({ tables: { leads: [lead], projects: [{ ...project, register_meta: { rev: 1 } }] } });
+  const r = await promoteRegisterToProject(sb, { leadId: lead.id });
+  ok("promote: no-op when the project is already promoted (no RPC)", r.ok && r.alreadyPromoted && !sb.calls.some((c) => c.rpc));
+}
+{
+  const sb = fakeSb({ tables: { leads: [{ ...lead, job_id: null }], projects: [] } });
+  const r = await promoteRegisterToProject(sb, { leadId: lead.id });
+  ok("promote: never creates a project — no job ⇒ nothing happens", !r.ok && /no job/.test(r.reason) && !sb.calls.some((c) => c.rpc));
+}
+{
+  const sb = fakeSb({ tables: { leads: [lead], projects: [project] }, rpc: () => ({ data: null, error: { message: "boom" } }) });
+  const r = await promoteRegisterToProject(sb, { leadId: lead.id });
+  ok("promote: a failure returns ok:false and is recorded as a register.promotion_failed event (observable, retried on next open)",
+    !r.ok && sb.calls.some((c) => c.insert === "job_events" && c.p.event_type === "register.promotion_failed"));
 }
 
-console.log("Master Register R02 · Increment 2 — promotion logic\n");
+// ── lossless mapping ────────────────────────────────────────────────────────────────────────────
+{
+  const ev = { at: "2026-11-12T10:00:00Z", by: "Sam", method: "meeting", ref: "Concept presentation" };
+  const approved = makeItem({ ...sink, certainty: "client_approved", evidence: ev, technicalStatus: "verified", technicalEvidence: { at: "2026-11-20", by: "Arch", ref: "A301 D" } });
+  const row = { id: "r1", ...itemToSelRow(approved, register, 3), source_register_item_id: approved.id, status: "approved", approved_at: ev.at, client_visible: false, updated_at: "2026-11-12T10:00:00.123456+00:00" };
+  const back = selRowToItem(row, { isPreconstruction: true });
+  ok("mapping: selection ⇄ client_selections row is lossless (description, category key, room, product, supplier, qty, readiness, evidence)",
+    back.id === approved.id && back.description === "Undermount sink" && back.category === "sanitary" && back.roomId === kitchen.id
+    && back.product === "Franke Bell" && back.supplier === "Routleys" && back.quantity === 1 && back.unit === "ea"
+    && back.certainty === "client_approved" && back.evidence?.ref === "Concept presentation" && back.technicalStatus === "verified");
+  ok("mapping: the row version + canonical id travel in sync (never persisted to the lead)", back.sync.rowId === "r1" && back.sync.version === row.updated_at && back.sync.table === "client_selections");
+  ok("mapping: portal title falls back to the question heading when the direction is blank", itemToSelRow(makeItem({ ...sink, description: "" }), register).item_name === "Sink & mixer");
+  const rrow = { id: "s1", ...itemToRsiRow(req, register), source_register_item_id: req.id, updated_at: "x" };
+  const rback = rsiRowToItem(rrow);
+  ok("mapping: requirement ⇄ room_scope_items row is lossless", rback.itemKind === "requirement" && rback.description === "Improve thermal comfort" && rback.technicalStatus === "needs_verification" && rback.promptKey === "W-016");
+  const board = selRowToItem({ id: "b1", project_id: project.id, category: "Tiling", item_name: "Board tile", status: "approved", approved_at: "2026-10-01", client_visible: true, updated_at: "v" }, { isPreconstruction: false });
+  ok("mapping: a portal-board row is adopted (cs_ id), shows as approved-on-board and locked after contract",
+    board.id === "cs_b1" && board.certainty === "client_approved" && board.sync.approvedOnBoard && board.sync.locked && board.sync.boardCreated);
+}
 
-await test("T-P01 selections promote to client_selections; scope + settled-out go to room_scope_items", async () => {
-  const { lead, items } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  const r = await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  assert.equal(r.ok, true);
-  // Genuine choices: 3 approved/proposed/not_considered + 1 default (preference) + 1 legacy = 5.
-  assert.equal(sb.__store.client_selections.length, 5, "expected 5 client_selections");
-  // scope: remove + new(bath wp) = 2; settled-out selections: by_others + excluded = 2 → 4.
-  assert.equal(sb.__store.room_scope_items.length, 4, "expected 4 room_scope_items");
-  assert.equal(r.selections, 5);
-  assert.equal(r.scopeItems, 4);
-});
+// ── save → ops ──────────────────────────────────────────────────────────────────────────────────
+{
+  const selRow = { id: "row-sink", project_id: project.id, ...itemToSelRow(sink, register), source_register_item_id: sink.id, status: "not_started", client_visible: false, updated_at: "2026-11-08T01:00:00.000001+00:00" };
+  const rsiRow = { id: "row-demo", project_id: project.id, ...itemToRsiRow(demo, register), source_register_item_id: demo.id, updated_at: "2026-11-08T01:00:00.000002+00:00" };
+  const promoted = { ...project, register_meta: { ...meta, rev: 4 } };
+  const tables = { leads: [lead], projects: [promoted], client_selections: [selRow], room_scope_items: [rsiRow] };
+  const loadedSink = selRowToItem(selRow, { isPreconstruction: true });
+  const loadedDemo = rsiRowToItem(rsiRow);
+  const sb = fakeSb({ tables, rpc: () => ({ data: { ok: true, results: [] }, error: null }) });
+  await saveRegister(sb, lead.id, {
+    meta: { ...meta, rev: 4, planRev: "A102 Rev D" },
+    changes: [
+      makeItem({ ...loadedSink, product: "Franke Bell 1.5", sync: loadedSink.sync }),                                // same store → update
+      makeItem({ ...loadedDemo, itemKind: "selection", disposition: "included", sync: loadedDemo.sync }),              // scope → selection
+      makeItem({ itemKind: "action", description: "New follow-up" }),                                                  // new
+    ],
+    deletes: [{ id: "never-saved", sync: null }],
+  }, { actor: { id: null, name: "T" } });
+  const ops = sb.calls.find((c) => c.rpc === "register_apply")?.args.p_ops || [];
+  ok("save: meta change → meta_set with base rev", ops.some((o) => o.op === "meta_set" && o.base_rev === 4 && o.meta.planRev === "A102 Rev D"));
+  ok("save: same-store edit → sel_update with the loaded base version", ops.some((o) => o.op === "sel_update" && o.row_id === "row-sink" && o.base_version === selRow.updated_at && o.row.selected_product === "Franke Bell 1.5"));
+  ok("save: reclassification → scope_delete + sel_insert with the SAME stable id",
+    ops.some((o) => o.op === "scope_delete" && o.item_id === demo.id && o.base_version === rsiRow.updated_at) && ops.some((o) => o.op === "sel_insert" && o.item_id === demo.id));
+  ok("save: a brand-new item → insert; an unsaved delete → no op", ops.filter((o) => o.op === "scope_insert").length === 1 && !ops.some((o) => o.item_id === "never-saved"));
+  ok("save: existing rows keep their sort order (not re-indexed)", ops.find((o) => o.op === "sel_update").row.sort_order === null);
 
-await test("T-P02 LOAD-BEARING: no by-others/excluded selection ever reaches client_selections", async () => {
-  const { lead, items } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  const byOthers = items.find((i) => i.disposition === "by_others");
-  const excluded = items.find((i) => i.disposition === "excluded");
-  const csIds = new Set(sb.__store.client_selections.map((r) => r.source_register_item_id));
-  assert.ok(!csIds.has(byOthers.id), "by_others leaked into client_selections");
-  assert.ok(!csIds.has(excluded.id), "excluded leaked into client_selections");
-  // They are in room_scope_items, tagged as selection-kind.
-  const rsi = sb.__store.room_scope_items.find((r) => r.source_register_item_id === byOthers.id);
-  assert.equal(rsi.item_kind, "selection");
-  assert.equal(rsi.disposition, "by_others");
-});
+  const sbC = fakeSb({ tables, rpc: () => ({ data: { ok: false, conflicts: [{ item_id: sink.id, reason: "stale" }] }, error: null }) });
+  let caught = null;
+  try { await saveRegister(sbC, lead.id, { changes: [makeItem({ ...loadedSink, product: "X", sync: loadedSink.sync })] }); } catch (e) { caught = e; }
+  ok("save: an RPC conflict surfaces as 409 with the conflicting item (nothing written)", caught instanceof RegisterError && caught.status === 409 && caught.conflicts?.[0]?.itemId === sink.id);
+}
+{
+  // a project appeared since the screen loaded → promote then MODE_CHANGED (client re-applies its edits)
+  const sb = fakeSb({ tables: { leads: [lead], projects: [project] } });
+  let caught = null;
+  try { await saveRegister(sb, lead.id, { changes: [makeItem({ ...sink, sync: { mode: "lead", version: sink.updatedAt } })] }); } catch (e) { caught = e; }
+  ok("save: when a project now exists, the brief is promoted and the client is told to reload (MODE_CHANGED)",
+    caught?.code === "MODE_CHANGED" && sb.calls.some((c) => c.rpc === "register_apply" && c.args.p_mode === "promote"));
+}
 
-await test("T-P03 every promoted selection is STAGED (client_visible=false)", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  assert.ok(sb.__store.client_selections.every((r) => r.client_visible === false), "a promoted selection was visible");
-});
-
-await test("T-P04 promotion creates NO client_actions and sends nothing", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  assert.equal(sb.__store.client_actions.length, 0, "promotion raised a client action");
-});
-
-await test("T-P05 certainty → status mapping", async () => {
-  const { lead, items } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  const byId = Object.fromEntries(sb.__store.client_selections.map((r) => [r.source_register_item_id, r]));
-  const approved = items.find((i) => i.certainty === "client_approved");
-  const proposed = items.find((i) => i.certainty === "proposed" && i.itemKind === "selection");
-  const notConsidered = items.find((i) => i.certainty === "not_considered" && i.itemKind === "selection" && i.disposition === "undecided");
-  assert.equal(byId[approved.id].status, "approved");
-  assert.equal(byId[proposed.id].status, "in_review");
-  assert.equal(byId[notConsidered.id].status, "not_started");
-  // client_approved with evidence stamps approved_at.
-  assert.equal(byId[approved.id].approved_at, "2026-10-01T00:00:00.000Z");
-});
-
-await test("T-P06 provenance + stable-id keying on both stores", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  for (const r of sb.__store.client_selections) {
-    assert.equal(r.source_lead_id, "lead-1");
-    assert.ok(String(r.source_register_item_id).startsWith("ri_"), "selection missing stable id");
-    assert.ok(/Master Register/.test(r.internal_notes || ""), "selection missing provenance");
-  }
-  for (const r of sb.__store.room_scope_items) {
-    assert.equal(r.source_lead_id, "lead-1");
-    assert.ok(/Master Register/.test(r.notes || ""), "scope item missing provenance");
-  }
-});
-
-await test("T-P07 legacy {area,item,notes} row promotes (adopted as a selection)", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  const legacy = sb.__store.client_selections.find((r) => /Trough \+ mixer/.test(r.item_name || ""));
-  assert.ok(legacy, "legacy finishes row did not promote");
-  assert.equal(legacy.room_area, "Laundry");
-});
-
-await test("T-P08 idempotent — a second run adds nothing (ON CONFLICT DO NOTHING)", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-1", job_id: "job-1" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  const selAfter1 = sb.__store.client_selections.length;
-  const rsiAfter1 = sb.__store.room_scope_items.length;
-  await promoteRegisterToProject(sb, { leadId: "lead-1", projectId: "proj-1" });
-  assert.equal(sb.__store.client_selections.length, selAfter1, "re-run duplicated selections");
-  assert.equal(sb.__store.room_scope_items.length, rsiAfter1, "re-run duplicated scope items");
-});
-
-await test("T-P09 projectId resolved from the lead's job when omitted", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-9", job_id: "job-1" }] });
-  const r = await promoteRegisterToProject(sb, { leadId: "lead-1" });
-  assert.equal(r.ok, true);
-  assert.equal(r.projectId, "proj-9");
-  assert.ok(sb.__store.client_selections.every((x) => x.project_id === "proj-9"));
-});
-
-await test("T-P10 no project yet → ok:false, nothing written", async () => {
-  const { lead } = fixtureLead();
-  const sb = makeFakeSb({ leads: [lead], projects: [] });
-  const r = await promoteRegisterToProject(sb, { leadId: "lead-1" });
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /no project/i);
-  assert.equal(sb.__store.client_selections.length, 0);
-  assert.equal(sb.__store.room_scope_items.length, 0);
-});
-
-await test("T-P11 empty register → ok:true, no rows, no error", async () => {
-  const sb = makeFakeSb({ leads: [{ id: "lead-2", job_id: "job-2", stage: "consultants", selections_schedule: [] }], projects: [{ id: "proj-2", job_id: "job-2" }] });
-  const r = await promoteRegisterToProject(sb, { leadId: "lead-2" });
-  assert.equal(r.ok, true);
-  assert.equal(r.selections, 0);
-  assert.equal(r.scopeItems, 0);
-});
-
-await test("T-P12 reclassify selection → settled-out RETRACTS the staged client_selections row (F2/F4)", async () => {
-  const lead = singleItemLead("selection", "undecided"); // selection → client_selections (staged)
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-x", job_id: "job-x" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  assert.equal(sb.__store.client_selections.length, 1, "selection not staged on run 1");
-  assert.equal(sb.__store.room_scope_items.length, 0);
-  // Staff settle it as by-others → it is no longer a client selection.
-  setItem(lead, "ri_x", { disposition: "by_others" });
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  const leaked = sb.__store.client_selections.some((r) => r.source_register_item_id === "ri_x");
-  assert.ok(!leaked, "reclassified selection stayed in client_selections (guard breach)");
-  assert.ok(sb.__store.room_scope_items.some((r) => r.source_register_item_id === "ri_x"), "not moved to room_scope_items");
-});
-
-await test("T-P13 reclassify scope → selection RETRACTS the room_scope_items row", async () => {
-  const lead = singleItemLead("scope", "remove"); // scope → room_scope_items
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-x", job_id: "job-x" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  assert.equal(sb.__store.room_scope_items.length, 1);
-  assert.equal(sb.__store.client_selections.length, 0);
-  setItem(lead, "ri_x", { itemKind: "selection", disposition: "new" }); // now a genuine choice
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  assert.ok(!sb.__store.room_scope_items.some((r) => r.source_register_item_id === "ri_x"), "stale scope row not retracted");
-  assert.ok(sb.__store.client_selections.some((r) => r.source_register_item_id === "ri_x"), "not moved to client_selections");
-});
-
-await test("T-P14 an ISSUED (client_visible=true) row is NEVER auto-retracted (no-clobber)", async () => {
-  const lead = singleItemLead("selection", "undecided");
-  const sb = makeFakeSb({ leads: [lead], projects: [{ id: "proj-x", job_id: "job-x" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  // Office issues it to the client.
-  sb.__store.client_selections.find((r) => r.source_register_item_id === "ri_x").client_visible = true;
-  // Then the register item is reclassified to by-others.
-  setItem(lead, "ri_x", { disposition: "by_others" });
-  await promoteRegisterToProject(sb, { leadId: "lead-x", projectId: "proj-x" });
-  assert.ok(sb.__store.client_selections.some((r) => r.source_register_item_id === "ri_x" && r.client_visible === true),
-    "an issued row was wrongly auto-retracted");
-});
-
-await test("T-P15 reconciliation is scoped to the promoting lead (two leads, one project — N2)", async () => {
-  const roomA = makeRoom({ name: "Kitchen", roomType: "kitchen" });
-  const roomB = makeRoom({ name: "Bathroom", roomType: "bathroom" });
-  const leadA = { id: "lead-a", job_id: "job-s", stage: "consultants", selections_schedule: writeRegister({ meta: emptyMeta({ rooms: [roomA] }), items: [makeItem({ id: "ri_a", itemKind: "selection", roomId: roomA.id, description: "A choice", disposition: "undecided" })] }) };
-  const leadB = { id: "lead-b", job_id: "job-s", stage: "consultants", selections_schedule: writeRegister({ meta: emptyMeta({ rooms: [roomB] }), items: [makeItem({ id: "ri_b", itemKind: "selection", roomId: roomB.id, description: "B choice", disposition: "undecided" })] }) };
-  const sb = makeFakeSb({ leads: [leadA, leadB], projects: [{ id: "proj-s", job_id: "job-s" }] });
-  await promoteRegisterToProject(sb, { leadId: "lead-a", projectId: "proj-s" });
-  await promoteRegisterToProject(sb, { leadId: "lead-b", projectId: "proj-s" });
-  assert.equal(sb.__store.client_selections.length, 2, "both leads' selections should be staged");
-  // Re-promote lead A — must NOT retract lead B's staged row.
-  await promoteRegisterToProject(sb, { leadId: "lead-a", projectId: "proj-s" });
-  assert.ok(sb.__store.client_selections.some((r) => r.source_register_item_id === "ri_a"), "lead A's own row wrongly retracted");
-  assert.ok(sb.__store.client_selections.some((r) => r.source_register_item_id === "ri_b"), "lead B's row wrongly retracted by lead A's run");
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+console.log(`\nregister-promotion (R03 store): ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

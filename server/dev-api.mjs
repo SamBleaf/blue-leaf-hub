@@ -59,6 +59,7 @@ import { classifyInboundQuoteEmail } from "./lib/quoteInboxClassify.mjs";
 import { createInboundSubmission, addSubmissionAttachment } from "./lib/tenderSubmissions.mjs";
 import { registerBlueprintRoutes } from "./lib/blueprintRoutes.mjs";
 import { registerSalesRoutes } from "./lib/salesRoutes.mjs";
+import { registerRegisterRoutes } from "./lib/registerRoutes.mjs";
 import { registerFinanceRoutes } from "./lib/financeRoutes.mjs";
 import { registerFinanceCCRoutes } from "./lib/financeCCRoutes.mjs";
 import { registerXeroRoutes } from "./lib/xeroRoutes.mjs";
@@ -1007,6 +1008,7 @@ registerBlueprintRoutes(app);
 registerInductionRoutes(app);
 registerJobsApiRoutes(app);
 registerSalesRoutes(app);
+registerRegisterRoutes(app); // Master Register R03 — stage-aware register API (lead scratchpad → canonical project records)
 registerCalcomRoutes(app); // Sales meetings: lead_meetings read/link/agenda + book-on-behalf (cal.com). Webhook is mounted RAW above.
 registerFinanceRoutes(app);
 registerFinanceCCRoutes(app);
