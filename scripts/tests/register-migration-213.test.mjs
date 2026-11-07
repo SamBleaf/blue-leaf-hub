@@ -167,6 +167,28 @@ async function main() {
   check("no duplicate rows after re-promotion", Number((await one(`SELECT count(*) c FROM client_selections WHERE project_id=$1`, [proj])).c) === 2);
   check("promotion recorded in job_events", Number((await one(`SELECT count(*) c FROM job_events WHERE event_type='register.promoted'`)).c) === 1);
 
+  console.log("\n▸ promotion tolerates scratchpad data-quality issues (never stranded)");
+  {
+    // Regression: the evidence/verification guards are edit-only. A single unevidenced approval in the
+    // scratchpad must NOT make register_apply(mode=promote) return ok:false and strand the whole project.
+    const job2 = (await one(`INSERT INTO jobs (address) VALUES ('2 Fix St') RETURNING id`)).id;
+    const leadF = (await one(`INSERT INTO leads (name, job_id) VALUES ('Fix Lead', $1) RETURNING id`, [job2])).id;
+    const projF = (await one(`INSERT INTO projects (job_id, is_preconstruction) VALUES ($1, true) RETURNING id`, [job2])).id;
+    const metaF = { rooms: [{ id: "rm_b", name: "Bath", level: "GF", roomType: "bathroom", scope: "renovated", order: 0 }], planRev: "A200 Rev A" };
+    const opsF = [
+      { op: "meta_init", meta: metaF },
+      { op: "sel_insert", item_id: "ri_tap", row: { category: "Sanitary / tapware", item_name: "Basin mixer", room_area: "Bath", source_room_id: "rm_b", certainty: "client_approved", selected_product: "Astra Walker" } },
+      { op: "scope_insert", item_id: "ri_glz", row: { item_kind: "requirement", category: "windows", description: "Obscure glazing to bath", technical_status: "verified" } },
+    ];
+    const pf = await apply(opsF, "promote", projF, leadF);
+    check("promotion SUCCEEDS despite an unevidenced approval + unref'd verification (not stranded)", pf.ok === true && !pf.already_promoted, JSON.stringify(pf));
+    check("the approved-without-evidence selection was copied forward (staged)",
+      !!(await one(`SELECT 1 FROM client_selections WHERE project_id=$1 AND source_register_item_id='ri_tap' AND certainty='client_approved' AND client_visible=false`, [projF])));
+    check("project is now promoted (register_meta set)", !!(await one(`SELECT 1 FROM projects WHERE id=$1 AND register_meta IS NOT NULL`, [projF])));
+    const editBlock = await apply([{ op: "sel_insert", item_id: "ri_new", row: { category: "Flooring", item_name: "New approved tile", certainty: "client_approved" } }], "edit", projF, leadF);
+    check("but edit-mode creation of an approved item WITHOUT evidence is still blocked", editBlock.ok === false && (editBlock.conflicts || []).some((c) => c.reason === "evidence_required"), JSON.stringify(editBlock));
+  }
+
   console.log("\n▸ versioned edits (write-through after promotion)");
   const v0 = await verText("client_selections", sink.id);
   const e1 = await apply([{ op: "sel_update", item_id: "ri_sink", row_id: sink.id, base_version: v0, row: { ...{ category: "Sanitary / tapware", item_name: "Sink & mixer", room_area: "Kitchen", source_room_id: "rm_k" }, certainty: "proposed", selected_product: "Franke Bell 1.5 bowl", technical_status: "not_required", pricing_status: "allowance_or_estimate", pricing_ref: "fee_proposal:PC-12" } }]);

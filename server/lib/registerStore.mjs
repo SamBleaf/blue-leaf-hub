@@ -336,6 +336,18 @@ export async function promoteRegisterToProject(sb, { leadId, projectId = null, a
     } catch { /* observability is best-effort */ }
     return { ok: false, reason: error.message || "promotion failed" };
   }
+  // Defence in depth: register_apply reports a validation conflict as { ok:false } and writes NOTHING.
+  // Promotion must NEVER report success in that case (register_meta stays NULL, so the scratchpad stays
+  // authoritative and it is retried — not silently stranded with a false "promoted" result).
+  if (data && data.ok === false) {
+    const reason = (data.conflicts || []).map((c) => c.reason).join(", ") || "validation conflict";
+    console.warn("[register] promotion blocked (nothing written; retried on next open):", reason);
+    try {
+      await sb.from("job_events").insert({ job_id: target.lead.job_id, event_type: "register.promotion_failed", source: "register",
+        entity_type: "project", entity_id: pid, metadata: { lead_id: target.lead.id, reason, conflicts: (data.conflicts || []).slice(0, 50) } });
+    } catch { /* observability is best-effort */ }
+    return { ok: false, reason, conflicts: data.conflicts || [] };
+  }
   if (data?.already_promoted) return { ok: true, alreadyPromoted: true, projectId: pid };
   return { ok: true, projectId: pid, selections: data?.promoted?.selections ?? 0, scopeItems: data?.promoted?.scopeItems ?? 0 };
 }

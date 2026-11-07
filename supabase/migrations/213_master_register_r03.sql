@@ -413,16 +413,20 @@ BEGIN
     END IF;
 
     IF v_kind IN ('sel_insert', 'scope_insert') THEN
-      -- evidence is required when an item is CREATED already approved / verified
-      IF v_row ->> 'certainty' = 'client_approved'
-         AND (v_ev IS NULL OR COALESCE(v_ev ->> 'at', '') = '' OR COALESCE(v_ev ->> 'by', '') = '') THEN
-        v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'evidence_required');
-      END IF;
-      IF v_row ->> 'technical_status' = 'verified'
-         AND (v_tev IS NULL OR COALESCE(v_tev ->> 'at', '') = '' OR COALESCE(v_tev ->> 'ref', '') = '') THEN
-        v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'technical_evidence_required');
-      END IF;
+      -- The evidence/verification guards apply only when STAFF CREATE a new already-approved/verified
+      -- item in the office (edit mode). They must NOT apply to PROMOTION, which mechanically copies the
+      -- lead's already-captured items into the project once: a single unevidenced approval in the
+      -- scratchpad must never block (and silently strand) the whole promotion — it is copied forward,
+      -- surfaced as a flagged item, and still blocked at document issue, where evidence actually matters.
       IF p_mode = 'edit' THEN
+        IF v_row ->> 'certainty' = 'client_approved'
+           AND (v_ev IS NULL OR COALESCE(v_ev ->> 'at', '') = '' OR COALESCE(v_ev ->> 'by', '') = '') THEN
+          v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'evidence_required');
+        END IF;
+        IF v_row ->> 'technical_status' = 'verified'
+           AND (v_tev IS NULL OR COALESCE(v_tev ->> 'at', '') = '' OR COALESCE(v_tev ->> 'ref', '') = '') THEN
+          v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'technical_evidence_required');
+        END IF;
         IF EXISTS (SELECT 1 FROM public.client_selections WHERE project_id = p_project_id AND source_register_item_id = v_item)
            AND NOT (v_kind = 'scope_insert' AND v_item = ANY (v_deleting)) THEN
           v_conflicts := v_conflicts || jsonb_build_object('item_id', v_item, 'reason', 'exists');
