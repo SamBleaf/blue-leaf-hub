@@ -18,6 +18,7 @@ const REASON_LABEL = { decision: "Decision", verification: "Verification", actio
 export default function RegisterTable({ reg, context, stage, info, actor, baseline, updateItem, deleteItem, addItem, onPortalItems, onPortalItem, readOnly }) {
   const [f, setF] = useState({ q: "", room: "", kind: "", cat: "", disp: "", cert: "", tech: "", price: "", owner: "", open: true, portal: "" });
   const [expanded, setExpanded] = useState(null);
+  const [advanced, setAdvanced] = useState(false);
   const [picked, setPicked] = useState([]);
   const [techAdd, setTechAdd] = useState("");
   const rooms = useMemo(() => reg.meta.rooms || [], [reg.meta.rooms]);
@@ -56,6 +57,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
   const techQs = promptsFor("tech", { projectType: context?.projectType, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail: true });
   const techUsed = new Set(reg.items.filter((i) => !i.roomId).map((i) => resolvePromptId(i.promptKey)));
   const stagedSelections = rows.filter((i) => i.sync?.table === "client_selections" && !i.sync.clientVisible && !i.sync.locked && isClientSelection(i));
+  const activeAdvanced = [f.kind, f.cat, f.disp, f.tech, f.price, f.owner, f.portal].filter(Boolean).length;
 
   return (
     <div className="space-y-3">
@@ -65,18 +67,26 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
         {info.mode === "project" && <span>· portal: {counts.staged} staged / {counts.live} issued{counts.review ? ` / ${counts.review} to review` : ""}</span>}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Search item, product, ref…" className="inp w-44 text-[11px]" />
-        <label className="flex items-center gap-1 text-ink"><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={f.open} onChange={(e) => set("open", e.target.checked)} /> Outstanding only</label>
-        <Select value={f.room} onChange={(v) => set("room", v)} options={[["__project", "Whole house / site"], ...rooms.map((r) => [r.id, r.name])]} placeholder="All rooms" className="w-36" />
-        <Select value={f.kind} onChange={(v) => set("kind", v)} options={Object.entries(ITEM_KINDS)} placeholder="Any type" className="w-32" />
-        <Select value={f.cat} onChange={(v) => set("cat", v)} options={Object.entries(REGISTER_CATEGORIES)} placeholder="Any category" className="w-36" />
-        <Select value={f.disp} onChange={(v) => set("disp", v)} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} placeholder="Any scope status" className="w-36" />
-        <Select value={f.cert} onChange={(v) => set("cert", v)} options={CERTAINTY_ORDER.map((k) => [k, REGISTER_CERTAINTY[k]])} placeholder="Any decision" className="w-32" />
-        <Select value={f.tech} onChange={(v) => set("tech", v)} options={Object.entries(TECHNICAL_STATUSES)} placeholder="Any verification" className="w-36" />
-        <Select value={f.price} onChange={(v) => set("price", v)} options={Object.entries(PRICING_STATUSES)} placeholder="Any pricing" className="w-32" />
-        <Select value={f.owner} onChange={(v) => set("owner", v)} options={Object.entries(RESPONSIBILITIES)} placeholder="Any owner" className="w-36" />
-        {info.mode === "project" && <Select value={f.portal} onChange={(v) => set("portal", v)} options={[["staged", "Staged (internal)"], ["live", "On client portal"], ["review", "Client choice to review"]]} placeholder="Any portal state" className="w-40" />}
+      <div className="space-y-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Search item, product, ref…" className="inp w-44 text-[11px]" />
+          <label className="flex items-center gap-1 text-ink"><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={f.open} onChange={(e) => set("open", e.target.checked)} /> Outstanding only</label>
+          <Select value={f.room} onChange={(v) => set("room", v)} options={[["__project", "Whole house / site"], ...rooms.map((r) => [r.id, r.name])]} placeholder="All rooms" className="w-36" />
+          <Select value={f.cert} onChange={(v) => set("cert", v)} options={CERTAINTY_ORDER.map((k) => [k, REGISTER_CERTAINTY[k]])} placeholder="Any client status" className="w-36" />
+          <button type="button" onClick={() => setAdvanced((v) => !v)} className="rounded-lg border border-hairline px-2 py-1 text-[11px] text-muted hover:text-ink" data-testid="register-advanced-toggle">{advanced ? "Fewer filters" : "Advanced filters"}{activeAdvanced ? ` · ${activeAdvanced}` : ""}</button>
+        </div>
+        {advanced && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-hairline bg-page px-2 py-1.5" data-testid="register-advanced">
+            <Select value={f.kind} onChange={(v) => set("kind", v)} options={Object.entries(ITEM_KINDS)} placeholder="Any type" className="w-32" />
+            <Select value={f.cat} onChange={(v) => set("cat", v)} options={Object.entries(REGISTER_CATEGORIES)} placeholder="Any category" className="w-36" />
+            <Select value={f.disp} onChange={(v) => set("disp", v)} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} placeholder="Any scope status" className="w-36" />
+            <Select value={f.tech} onChange={(v) => set("tech", v)} options={Object.entries(TECHNICAL_STATUSES)} placeholder="Any verification" className="w-36" />
+            <Select value={f.price} onChange={(v) => set("price", v)} options={Object.entries(PRICING_STATUSES)} placeholder="Any pricing" className="w-32" />
+            <Select value={f.owner} onChange={(v) => set("owner", v)} options={Object.entries(RESPONSIBILITIES)} placeholder="Any owner" className="w-36" />
+            {info.mode === "project" && <Select value={f.portal} onChange={(v) => set("portal", v)} options={[["staged", "Staged (internal)"], ["live", "On client portal"], ["review", "Client choice to review"]]} placeholder="Any portal state" className="w-40" />}
+            {activeAdvanced > 0 && <button type="button" onClick={() => setF((x) => ({ ...x, kind: "", cat: "", disp: "", tech: "", price: "", owner: "", portal: "" }))} className="text-[11px] text-muted hover:text-ink">Clear</button>}
+          </div>
+        )}
       </div>
 
       {info.mode === "project" && stagedSelections.length > 0 && !readOnly && (
@@ -102,7 +112,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                 const lock = !!i.sync?.locked;
                 const canPick = i.sync?.table === "client_selections" && !i.sync.clientVisible && !lock;
                 return [
-                  <tr key={i.id} className="border-b border-hairline/60 align-top" data-testid={`reg-row-${i.id}`}>
+                  <tr key={i.id} className={`border-b border-hairline/60 align-top ${reasons.length ? "border-l-2 border-l-amber-400" : "border-l-2 border-l-transparent"}`} data-testid={`reg-row-${i.id}`}>
                     {info.mode === "project" && <td className="py-1 pr-1">{canPick && !readOnly && <input type="checkbox" className="h-3 w-3 accent-primary" checked={picked.includes(i.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, i.id] : p.filter((x) => x !== i.id)))} />}</td>}
                     <td className="whitespace-nowrap py-1 pr-2 font-mono text-[10px] text-muted">{refCode(i)}</td>
                     <td className="py-1 pr-2 text-ink">{roomLabel(reg, i)}</td>
@@ -122,6 +132,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                     <td className="py-1 pr-2">
                       <Select value={i.responsibility} onChange={(v) => updateItem(i.id, { responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" disabled={readOnly} />
                       <input value={i.nextAction} disabled={readOnly} onChange={(e) => updateItem(i.id, { nextAction: e.target.value, resolved: false })} placeholder="next action" className="inp mt-1 w-full min-w-[8rem] text-[11px]" />
+                      {!i.responsibility && (reasons.includes("action") || reasons.includes("verification")) && <div className="mt-0.5 text-[10px] font-medium text-amber-700">Assign an owner</div>}
                     </td>
                     <td className="py-1 pr-2">{reasons.map((r) => <div key={r}><Chip tone="amber">{REASON_LABEL[r]}</Chip></div>)}
                       {baseline && (!baseline.itemVersions[i.id] ? <div><Chip tone="violet">Added after contract</Chip></div>

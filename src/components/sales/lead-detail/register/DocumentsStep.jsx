@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../../../lib/apiFetch.js";
-import { roomLabel, refCode, outstandingReasons } from "../../../../lib/register.js";
+import { roomLabel, refCode, outstandingReasons, isClientSelection } from "../../../../lib/register.js";
 import { Chip, Mini, Section, Select } from "./ui.jsx";
 
 const DOCS = [
@@ -102,6 +102,19 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     return m;
   }, [docs]);
 
+  const roomsCount = reg.meta.rooms?.length || 0;
+  function scopeSummary(key) {
+    if (key === "selections_schedule") {
+      const n = reg.items.filter((i) => isClientSelection(i)).length;
+      return `${n} client selection${n === 1 ? "" : "s"} across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. Scope, requirements and prices are excluded.`;
+    }
+    if (key === "architect_brief") {
+      const tech = reg.items.filter((i) => i.itemKind === "action" || i.technicalStatus === "needs_verification").length;
+      return `Client intent and scope plus ${tech} technical item${tech === 1 ? "" : "s"} to verify, across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No prices.`;
+    }
+    return `Scope and client preferences across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No internal notes or prices.`;
+  }
+
   return (
     <div className="space-y-3">
       {!docs.schemaReady && <p className="rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">Document issuing needs migration 213 — drafts still preview.</p>}
@@ -115,7 +128,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>}</p>
-                <p className="text-[11px] text-muted">{d.hint} {current ? `Current: ${current.revision_label} · ${fmtDate(current.issued_at)} · to ${current.recipient_name || "—"}` : "Not issued yet."}</p>
+                <p className="text-[11px] text-muted">{d.hint} {current ? `Issued: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · to ${current.recipient_name || "—"}` : "Draft — not issued yet."}</p>
               </div>
               <div className="flex items-center gap-2">
                 {d.key === "selections_schedule" && <Select value={layout} onChange={setLayout} options={[["technical", "Technical register"], ["client", "Client presentation"]]} className="w-40" />}
@@ -125,6 +138,16 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
 
             {active === d.key && preview && (
               <div className="mt-2 space-y-2">
+                <div className="rounded border border-primary/30 bg-primary/[0.04] p-2 text-[11px]" data-testid={`pre-issue-${d.key}`}>
+                  <p className="font-semibold text-primary">Preview of the draft — not a controlled record until you issue it as P{String(preview.revision).padStart(2, "0")}.</p>
+                  <dl className="mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                    <div><span className="text-muted">Project: </span><span className="text-ink">{[context?.identity?.clientName, context?.identity?.siteAddress].filter(Boolean).join(" — ") || "—"}</span></div>
+                    <div><span className="text-muted">Recipient: </span><span className="text-ink">{recipient.name || "— enter below"}</span></div>
+                    <div><span className="text-muted">Drawing basis: </span><span className="text-ink">{reg.meta.planRev || "— not set"}</span></div>
+                    <div><span className="text-muted">Document: </span><span className="text-ink">{d.label} · P{String(preview.revision).padStart(2, "0")}</span></div>
+                    <div className="sm:col-span-2"><span className="text-muted">Includes: </span><span className="text-ink">{scopeSummary(d.key)}</span></div>
+                  </dl>
+                </div>
                 {(preview.checks.errors.length > 0 || preview.checks.warnings.length > 0) && (
                   <ul className="space-y-0.5 text-[11px]">
                     {preview.checks.errors.map((e) => <li key={e} className="text-red-700">✕ {e}</li>)}

@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resumePointer, outstandingItems, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
+import { STAGES } from "../../../../lib/salesPipeline.js";
 import { apiFetch, apiPut } from "../../../../lib/apiFetch.js";
 import { useAuth } from "../../../../lib/useAuth.js";
 import { useRegister } from "./useRegister.js";
@@ -61,11 +62,22 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   const [showDetail, setShowDetail] = useState(() => lsGet("register.showDetail", "0") === "1");
   const [factError, setFactError] = useState(null);
   const [baseline, setBaseline] = useState(null);
+  const [expanded, setExpanded] = useState(false);
   const steps = STEPS.filter((s) => !s.stages || s.stages.includes(stage) || (s.contract && lead.contract_status === "signed"));
   useEffect(() => {
     if (!visible || info.mode !== "project") return;
     apiFetch(`/api/register/leads/${lead.id}/baseline`).then((r) => { if (r.ok) setBaseline(r.data.baseline); });
   }, [lead.id, info.mode, visible]);
+
+  // Full-width workspace: lock page scroll + Escape to exit.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setExpanded(false); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [expanded]);
 
   const loadContext = useCallback(async () => {
     const r = await apiFetch(`/api/register/leads/${lead.id}/context`);
@@ -118,7 +130,17 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   if (!loaded && !store.error) return <div ref={rootRef} />; // first load — nothing shows until the switch is known
 
   return (
-    <div ref={rootRef} className="rounded-card border border-hairline bg-surface" data-testid="register-workshop">
+    <div ref={rootRef} className={expanded ? "fixed inset-0 z-40 overflow-y-auto bg-page px-2 py-3 sm:px-6 sm:py-4" : ""}>
+      <div className={`rounded-card border border-hairline bg-surface ${expanded ? "mx-auto max-w-[1180px]" : ""}`} data-testid="register-workshop">
+      {expanded && (
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-hairline bg-surface px-4 py-2 text-[11px]">
+          <span className="font-semibold text-ink">{context?.identity?.clientName || lead.name || "This project"}</span>
+          {context?.identity?.siteAddress && <span className="text-muted">{[context.identity.siteAddress, context.identity.suburb].filter(Boolean).join(", ")}</span>}
+          <span className="text-muted">Stage: {STAGES.find((s) => s.id === context?.stage)?.label || stage}</span>
+          <span className="text-muted">Drawings: {reg?.meta.planRev || "—"}</span>
+          <button type="button" onClick={() => setExpanded(false)} className="ml-auto rounded border border-hairline px-2 py-0.5 text-ink hover:bg-page" data-testid="register-exit-expand">Exit full width ✕</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -136,9 +158,10 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
         <div className="flex items-center gap-2">
           {saveText && <span className={`text-[11px] ${save.state === "error" ? "text-red-600" : save.state === "saved" ? "text-green-600" : "text-amber-600"}`} data-testid="register-save-state">{saveText}</span>}
           {open && <button type="button" onClick={() => store.flush()} disabled={save.state === "saving"} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40">Save</button>}
+          {open && !expanded && <button type="button" onClick={() => setExpanded(true)} className="hidden rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page sm:inline-block" data-testid="register-expand" title="Open the register in a full-width workspace">⤢ Expand</button>}
           {!open
             ? <button type="button" onClick={continueBrief} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" data-testid="continue-brief">{reg && (reg.items.length || rooms.length) ? "Continue brief →" : "Start brief →"}</button>
-            : <button type="button" onClick={() => toggleOpen(false)} className="text-[11px] text-muted hover:text-ink">Collapse</button>}
+            : <button type="button" onClick={() => { setExpanded(false); toggleOpen(false); }} className="text-[11px] text-muted hover:text-ink">Collapse</button>}
         </div>
       </div>
 
@@ -211,6 +234,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }
