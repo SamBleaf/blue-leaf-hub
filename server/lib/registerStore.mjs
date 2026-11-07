@@ -32,6 +32,18 @@ export class RegisterError extends Error {
   constructor(status, message, code, extra = {}) { super(message); this.status = status; this.code = code; Object.assign(this, extra); }
 }
 
+/**
+ * Feature switch (default OFF). REGISTER_ENABLED=true turns the register on for every lead;
+ * REGISTER_PILOT_LEADS=<lead id>,<lead id> turns it on for those leads only (the pilot). While off,
+ * every /api/register route answers 404 REGISTER_DISABLED, the lead page hides the card and no
+ * automatic promotion runs — so the code can ship before migrations 212/213 are applied.
+ */
+export function registerEnabledFor(leadId) {
+  if (String(process.env.REGISTER_ENABLED || "").trim().toLowerCase() === "true") return true;
+  const pilot = String(process.env.REGISTER_PILOT_LEADS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return !!leadId && pilot.includes(String(leadId).toLowerCase());
+}
+
 const nullIfBlank = (v) => (v === "" || v === undefined ? null : v);
 const CATEGORY_KEY_BY_LABEL = Object.fromEntries(Object.entries(REGISTER_CATEGORIES).map(([k, l]) => [l.toLowerCase(), k]));
 const categoryKeyFromLabel = (label) => CATEGORY_KEY_BY_LABEL[String(label || "").toLowerCase()] || null;

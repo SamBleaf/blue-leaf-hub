@@ -106,7 +106,11 @@ export function useRegister(leadId, { enabled = true } = {}) {
     setStatus((s) => ({ ...s, loading: true }));
     const r = await apiFetch(`/api/register/leads/${leadId}`);
     if (!mounted.current) return null;
-    if (!r.ok) { setStatus({ loading: false, error: r.error }); return null; }
+    if (!r.ok) {
+      const disabled = r.code === "REGISTER_DISABLED"; // feature switch off for this lead — not an error
+      setStatus({ loading: false, error: disabled ? null : r.error, disabled });
+      return null;
+    }
     const next = adopt(r.data);
     dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
@@ -308,7 +312,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
   }, [leadId, adopt]);
 
   return {
-    loading: status.loading, error: status.error, reg, info, save, notices,
+    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
     reload: load, flush, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
   };

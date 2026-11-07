@@ -180,6 +180,7 @@ function writeHubEnv(secrets) {
     `SUPABASE_SERVICE_ROLE_KEY=${secrets.service_key}`,
     `VITE_SUPABASE_ANON_KEY=${secrets.anon_key}`,
     `PORT_API=8797`,
+    `REGISTER_ENABLED=true`, // feature switch (default off in production) — on for every sandbox lead
     `NODE_ENV=development`
   ].join("\n") + "\n";
   writePrivate(HUB_ENV, env);

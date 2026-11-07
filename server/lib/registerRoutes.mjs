@@ -17,7 +17,7 @@ import { requireAuth } from "./requireAuth.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { ok, err } from "./apiResponse.mjs";
 import {
-  loadRegister, saveRegister, promoteRegisterToProject, portalAction, itemHistory, RegisterError,
+  loadRegister, saveRegister, promoteRegisterToProject, portalAction, itemHistory, RegisterError, registerEnabledFor,
 } from "./registerStore.mjs";
 import { loadRegisterContext, setDeliveryModel } from "./registerContext.mjs";
 import {
@@ -49,6 +49,11 @@ export function sendRegisterError(res, e, fallback = "Register request failed") 
 
 export function registerRegisterRoutes(app) {
   const base = "/api/register/leads/:leadId";
+
+  // Feature switch (REGISTER_ENABLED / REGISTER_PILOT_LEADS, default off) — see registerEnabledFor.
+  app.use(base, (req, res, next) => (registerEnabledFor(req.params.leadId)
+    ? next()
+    : err(res, 404, "The project register isn't switched on for this lead.", "REGISTER_DISABLED")));
 
   app.get(base, requireAuth, async (req, res) => {
     const sb = getServiceSupabase();

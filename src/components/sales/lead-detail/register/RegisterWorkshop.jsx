@@ -19,6 +19,7 @@ import RegisterTable from "./RegisterTable.jsx";
 import DocumentsStep from "./DocumentsStep.jsx";
 import TenderPanel from "./TenderPanel.jsx";
 import HandoverPanel from "./HandoverPanel.jsx";
+import LegacyScheduleRows from "./LegacyScheduleRows.jsx";
 
 const STEPS = [
   { key: "context", label: "Project" },
@@ -33,6 +34,9 @@ const STEPS = [
 const OPEN_BY_DEFAULT = new Set(["winning_offer", "consultants", "tender"]);
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+
+// Which pre-register list a stage showed before R02 (shown again while the register is switched off).
+const LEGACY_BY_STAGE = { winning_offer: "concept", consultants: "consultants" };
 
 export default function RegisterWorkshop({ lead, patch, stage }) {
   const { profile } = useAuth();
@@ -49,6 +53,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   }, []);
   const store = useRegister(lead.id, { enabled: visible });
   const { reg, info, save } = store;
+  const loaded = !!reg;
   const [context, setContext] = useState(null);
   const [open, setOpen] = useState(() => lsGet(`register.open.${lead.id}`, OPEN_BY_DEFAULT.has(stage) ? "1" : "0") === "1");
   const [step, setStep] = useState(null);
@@ -66,7 +71,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     const r = await apiFetch(`/api/register/leads/${lead.id}/context`);
     if (r.ok) setContext(r.data.context);
   }, [lead.id]);
-  useEffect(() => { if (visible) loadContext(); }, [visible, loadContext, lead.project_type, lead.stage, lead.job_id]);
+  useEffect(() => { if (visible && loaded) loadContext(); }, [visible, loaded, loadContext, lead.project_type, lead.stage, lead.job_id]);
 
   // Resume where the brief was left (Tab 18 §3 "Continue Brief") once the register is loaded.
   useEffect(() => {
@@ -107,6 +112,10 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
       : { t: "Project record · under contract", c: "bg-green-100 text-green-700", h: "Live project — approved selections change through variations." })
     : { t: "Lead brief", c: "bg-page text-muted", h: "Saved on the lead until a project record exists, then moved onto it automatically." };
   const saveText = { idle: "", dirty: "Unsaved…", saving: "Saving…", saved: save.at ? `Saved ${save.at.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}` : "Saved", error: save.message || "Save failed" }[save.state];
+
+  // Switched off for this lead (REGISTER_ENABLED / REGISTER_PILOT_LEADS): the pre-register lists, exactly as before.
+  if (store.disabled) return <div ref={rootRef}>{LEGACY_BY_STAGE[stage] && <LegacyScheduleRows lead={lead} patch={patch} variant={LEGACY_BY_STAGE[stage]} />}</div>;
+  if (!loaded && !store.error) return <div ref={rootRef} />; // first load — nothing shows until the switch is known
 
   return (
     <div ref={rootRef} className="rounded-card border border-hairline bg-surface" data-testid="register-workshop">

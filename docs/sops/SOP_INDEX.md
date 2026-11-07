@@ -1,7 +1,7 @@
 # Blue Leaf Hub — SOP Index
 
-> Last updated: 2026-10-26 (Takeoffs HUB 029/030 — an order you can place and pine battens: 20-05 v2.2, 20-06 v2.7, 20-08 v1.6, 20-09 v2.2 and 20-12 v1.5 updated, all test_status untested) · 2026-10-25 (Takeoffs HUB 028 Walls: 20-08 v1.5 then v1.5.1 after the final review, 20-09 v2.1, 20-01 v1.2 and 20-12 v1.4.1 updated, all test_status untested) · 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
-> Total SOPs: 169 (+ 1 reference: portal stack matrix) — counted from the rows in this index on 2026-10-14. Note: 6 files on disk in `18_marketing_agent/` (18-02 to 18-07) are not yet indexed.  
+> Last updated: 2026-11-07 (Master Register R03 — new SOPs 21-01 to 21-04, all test_status untested; feature on branch master-register-r02, not deployed) · 2026-10-26 (Takeoffs HUB 029/030 — an order you can place and pine battens: 20-05 v2.2, 20-06 v2.7, 20-08 v1.6, 20-09 v2.2 and 20-12 v1.5 updated, all test_status untested) · 2026-10-25 (Takeoffs HUB 028 Walls: 20-08 v1.5 then v1.5.1 after the final review, 20-09 v2.1, 20-01 v1.2 and 20-12 v1.4.1 updated, all test_status untested) · 2026-10-19 (Takeoffs Hub review batches 1–3: 20-01, 20-03, 20-04, 20-06, 20-11 updated) · earlier 2026-10-14 (Takeoffs TC-R04 — new SOPs 20-08 to 20-12 for timber, cladding walls, aluminium cutting, continuous flashing runs and the company product catalogue; 20-03, 20-05 and 20-06 updated to v2.0)
+> Total SOPs: 173 (+ 1 reference: portal stack matrix) — 169 counted from the rows on 2026-10-14, + 4 Master Register SOPs on 2026-11-07. Note: 6 files on disk in `18_marketing_agent/` (18-02 to 18-07) are not yet indexed.  
 > Run SOP audit to check for gaps (see SOP_MAINTENANCE.md)
 
 **SOP Status key:**
@@ -206,3 +206,14 @@
 | 20-10 | Aluminium profiles and the cutting sheet | [20-10_aluminium_cutting_sheet.md](20_takeoff/20-10_aluminium_cutting_sheet.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
 | 20-11 | Continuous flashing runs and splitting at the limit | [20-11_continuous_flashing_runs.md](20_takeoff/20-11_continuous_flashing_runs.md) | Takeoffs | Admin, Supervisor, Leading hand | Draft | untested | Yes | High |
 | 20-12 | Company product catalogue (timber, cladding, battens, aluminium, accessories) | [20-12_company_product_catalogue.md](20_takeoff/20-12_company_product_catalogue.md) | Takeoffs | Admin, Supervisor (use on a job: Leading hand too) | Draft | untested | Yes | High |
+
+---
+
+**21 — Master Project Register (project brief, room-by-room register, briefs, selections schedule, contract baseline)** — added 2026-11-07 (4 SOPs, Total SOPs 169 → 173). Lives inside the existing Sales lead stages (no new stage or page). Built on branch `master-register-r02` (R03); needs migrations 212 + 213 and is not deployed. Document issuing is switched off with a notice until migration 213 is applied.
+
+| SOP ID | SOP Name | File | Module | User Role | Status | Test Status | Screenshots | Priority |
+|--------|----------|------|--------|-----------|--------|-------------|-------------|----------|
+| 21-01 | Capture the project brief — Project, Whole house, Site & existing, Rooms | [21-01_capture_project_brief.md](21_master_register/21-01_capture_project_brief.md) | Master Register | Admin (Director, sales lead, PM, estimator) | Draft | untested | Yes | High |
+| 21-02 | Review the register — decisions, technical checks, pricing links and the client portal | [21-02_register_review_approvals_portal.md](21_master_register/21-02_register_review_approvals_portal.md) | Master Register | Admin (Director, PM, office) | Draft | untested | Yes | High |
+| 21-03 | Issue the client brief, architect brief and selections schedule — and record received documents | [21-03_issue_briefs_and_schedule.md](21_master_register/21-03_issue_briefs_and_schedule.md) | Master Register | Admin (Director, PM, office) | Draft | untested | Yes | High |
+| 21-04 | Tender summary, contract baseline and handover to Operations | [21-04_tender_baseline_handover.md](21_master_register/21-04_tender_baseline_handover.md) | Master Register | Admin (baseline: Director) | Draft | untested | Yes | High |
