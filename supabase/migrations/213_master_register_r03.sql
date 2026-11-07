@@ -21,8 +21,9 @@
 --
 -- SAFETY: purely ADDITIVE (new nullable columns, widened CHECKs, new functions/triggers/policy).
 -- Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / name-guarded constraints). ROLLBACK at the foot.
--- PREREQUISITES: 103 (client portal v2), 104 (auth_is_staff — the deny_clients policy is skipped with a
--- NOTICE if absent), 188 (leads.selections_schedule), 199 (projects.is_preconstruction), 212.
+-- PREREQUISITES: 103 (client portal v2), 104 (auth_is_staff — REQUIRED: if it is absent this migration
+-- ABORTS with an exception at the room_scope_items deny_clients step rather than leaving the table
+-- readable by client JWTs — see section B), 188 (leads.selections_schedule), 199 (projects.is_preconstruction), 212.
 -- Apply on a disposable / staging database first (scripts/tests/register-migration-213.test.mjs and
 -- scripts/dev/register-sandbox). Production application requires explicit Blue Leaf sign-off.
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
