@@ -401,12 +401,19 @@ export const ROOM_PRIMARY_PROMPT_IDS = new Set([
   "L-001", "L-002", "L-003", "L-004", "L-007",                     // laundry / utility
   "H-001", "H-002", "H-004", "H-005", "H-006", "H-007",            // hall / entry / stairs / garage
   "D-001", "D-002", "D-003", "D-004", "D-007",                     // bedroom / robe (D family)
+  "O-001", "O-002",                                               // outdoor (alfresco / balcony / external) — scope + use
 ]);
 /** The Set of question ids that are PRIMARY for a room (the rest render under "Explore more"). */
 export function partitionRoomPrompts(questions) {
   const list = questions || [];
+  // SUPERSEDE must mean REPLACE, never remove-to-nothing: only let a room-specific scope/layout prompt
+  // suppress the generic R- one when that room-specific prompt is ITSELF promoted to primary (i.e. it is a
+  // curated primary id). Otherwise a family (e.g. outdoor "O-") whose prompt is not curated would suppress
+  // the generic anchor and leave the topic with no lead prompt at all.
   const coveredByRoomSpecific = new Set(
-    list.filter((q) => ROOM_FAMILY_PREFIXES.has(famOf(q.id)) && DEDUP_TOPICS.has(q.topic)).map((q) => `${q.topic}|${q.itemKind}`),
+    list.filter((q) => ROOM_FAMILY_PREFIXES.has(famOf(q.id)) && famOf(q.id) !== "R"
+                  && DEDUP_TOPICS.has(q.topic) && ROOM_PRIMARY_PROMPT_IDS.has(q.id))
+        .map((q) => `${q.topic}|${q.itemKind}`),
   );
   const primary = new Set();
   for (const q of list) {

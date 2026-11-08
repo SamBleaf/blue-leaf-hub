@@ -58,6 +58,21 @@ const partition = (roomType, roomScope) => { const qs = qsFor(roomType, roomScop
   ok("generic room: nothing dropped", g.prim.length + g.more.length === g.qs.length);
 }
 
+// ── Outdoor families (O-) must lead with scope + layout, not collapse to Decisions only ───────────
+// Regression guard for the review finding: the de-dup must never suppress the generic scope/layout anchor
+// unless a room-specific prompt actually takes its place in PRIMARY.
+for (const rt of ["alfresco", "balcony", "external"]) {
+  const o = partition(rt);
+  const prim = new Set(o.ids(o.prim));
+  const scopePrims = o.prim.filter((q) => q.topic === "scope");
+  const layoutPrims = o.prim.filter((q) => q.topic === "layout");
+  ok(`${rt}: leads with its outdoor scope prompt O-001 (not demoted to Explore more)`, prim.has("O-001"));
+  ok(`${rt}: the scope topic has at least one PRIMARY prompt (never collapses to Decisions only)`, scopePrims.length > 0);
+  ok(`${rt}: generic R-003 is superseded by O-001 (replaced, not just removed)`, !prim.has("R-003"));
+  ok(`${rt}: nothing dropped — primary ∪ more === all`, o.prim.length + o.more.length === o.qs.length);
+  if (rt !== "external") ok(`${rt}: leads with its outdoor use/layout prompt O-002`, prim.has("O-002") && layoutPrims.length > 0);
+}
+
 // ── Inheritance preserved: a retained room still produces prompts and loses nothing ───────────────
 {
   const r = partition("kitchen", "renovated");
