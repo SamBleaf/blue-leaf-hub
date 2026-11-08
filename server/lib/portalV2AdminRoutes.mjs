@@ -221,6 +221,8 @@ export function registerPortalV2AdminRoutes(app) {
       for (const [k, col] of [
         ["status", "status"], ["internalNotes", "internal_notes"],
         ["dueDate", "due_date"], ["orderByDate", "order_by_date"], ["allowanceAmount", "allowance_amount"],
+        // clientVisible: the office issues a staged register-promoted selection to the client (mig 212).
+        ["clientVisible", "client_visible"],
       ]) if (b[k] !== undefined) patch[col] = b[k];
       if (b.status === "approved") { patch.approved_at = new Date().toISOString(); patch.approved_by_user_id = req.caller?.id || null; }
       const { data, error } = await sb.from("client_selections").update(patch)

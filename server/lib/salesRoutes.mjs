@@ -25,6 +25,8 @@ import { buildCanonicalSchedule, loadScheduleBuffers } from "./scheduleEngine.mj
 import { buildScheduleGanttSvg } from "./scheduleGantt.mjs";
 import { buildDraftScheduleRows, buildNotificationRows } from "./scheduleSeed.mjs";
 import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
+import { promoteRegisterToProject } from "./registerPromotion.mjs";
+import { leadScratchpadLocked, registerEnabledFor } from "./registerStore.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -386,6 +388,8 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
     ["client_email", lead.email?.trim() || null],
     ["client_phone", lead.phone?.trim() || null],
     ["project_type", lead.project_type || null],
+    // Commercial delivery model (mig 213) — stamped forward, never re-typed (Tab 23 Q4).
+    ["delivery_model", lead.delivery_model || null],
     ["architect_name", lead.architect_name?.trim() || null],
     // Lead's deal-value estimate → job estimate fact. NOT original_contract_value
     // (Phase 5 sets that at WIN from the accepted proposal).
@@ -511,6 +515,14 @@ export async function finalizeWonJob(sb, lead) {
     //    turns the SAME row into the live project — the portal, comms + client login all carry over.
     try { await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true); }
     catch { /* pre-migration-199 — column absent, non-fatal */ }
+
+    // 4.5 Master Register → project: stage the room-by-room brief into the canonical stores (mig 212).
+    //     Selections land in client_selections as client_visible=false (hidden — no client action, no
+    //     notification); scope/works records land in room_scope_items. Idempotent + best-effort.
+    if (registerEnabledFor(lead.id)) {
+      try { await promoteRegisterToProject(sb, { leadId: lead.id }); }
+      catch (e) { console.warn("[finalize-won] register promotion:", e?.message || e); }
+    }
 
     // 5. Handover: carry consultant correspondence (files consultants emailed in, filed per-consultant
     //    under the client folder) into the job folder → CONSULTANTS/<Consultant>/. Best-effort.
@@ -1095,7 +1107,23 @@ export function registerSalesRoutes(app) {
       if (!error) return ok(res, { project: proj ? rowToCamel(proj) : null, columnMissing: true });
     }
     if (error) return err(res, 400, translateDbError(error));
-    ok(res, { project: proj ? rowToCamel(proj) : null });
+    // Separate the portal lifecycle: a configured project / client email is NOT the same as an INVITE
+    // having been sent, nor the client having ONBOARDED. "Invite sent" = a non-revoked client `invitations`
+    // row (a project_client_users row is only created when the client ACCEPTS, so it is NOT an invited-sent
+    // signal). Onboarded = project_client_users.invite_accepted_at. (No auto-invite; invites are deliberate.)
+    let clientLink = null, inviteLive = false;
+    if (proj?.id) {
+      const { data: link } = await sb.from("project_client_users")
+        .select("invited_at, invite_accepted_at").eq("project_id", proj.id).eq("is_active", true)
+        .order("invite_accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      clientLink = link || null;
+      const { data: inv } = await sb.from("invitations")
+        .select("accepted_at, revoked_at, expires_at").eq("project_id", proj.id).eq("role", "client").is("revoked_at", null)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      inviteLive = !!inv && (!!inv.accepted_at || (inv.expires_at ? new Date(inv.expires_at) > new Date() : true));
+    }
+    const onboarded = !!clientLink?.invite_accepted_at;
+    ok(res, { project: proj ? rowToCamel(proj) : null, clientInvited: onboarded || inviteLive, clientOnboarded: onboarded });
   });
 
   app.post("/api/sales/leads/:id/preconstruction-portal", requireAuth, async (req, res) => {
@@ -1117,6 +1145,11 @@ export function registerSalesRoutes(app) {
         await sb.from("projects").update({ portal_v2_enabled: true }).eq("id", existing.id);
         existing = { ...existing, portal_v2_enabled: true };
       }
+      // Stage the Master Register into the project (idempotent; picks up items added since last time).
+      if (registerEnabledFor(lead.id)) {
+        try { await promoteRegisterToProject(sb, { leadId: lead.id, projectId: existing.id }); }
+        catch (e) { console.warn("[preconstruction-portal] register promotion:", e?.message || e); }
+      }
       return ok(res, { project: rowToCamel(existing), created: false });
     }
 
@@ -1129,6 +1162,11 @@ export function registerSalesRoutes(app) {
       return err(res, 400, translateDbError(cErr));
     }
     try { await sb.from("lead_activities").insert({ lead_id: lead.id, activity_type: "note", summary: "Pre-construction client portal set up" }); } catch { /* best-effort */ }
+    // Stage the Master Register (selections hidden, scope → room_scope_items). Idempotent + best-effort.
+    if (registerEnabledFor(lead.id)) {
+      try { await promoteRegisterToProject(sb, { leadId: lead.id, projectId: created.id }); }
+      catch (e) { console.warn("[preconstruction-portal] register promotion:", e?.message || e); }
+    }
     ok(res, { project: rowToCamel(created), created: true });
   });
 
@@ -1534,6 +1572,11 @@ export function registerSalesRoutes(app) {
       .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, suburb, job_id, geo_geocoded_at, geo_precision")
       .eq("id", req.params.id)
       .single();
+    // Master Register R03: once the brief has been promoted onto the project record, the lead scratchpad
+    // is read-only history — a stale screen must never write a second, competing copy (Tab 23 Q5).
+    if ("selections_schedule" in body && current && (await leadScratchpadLocked(sb, current))) {
+      return err(res, 409, "This brief now lives on the project record — reload the register to keep editing.", "REGISTER_PROMOTED");
+    }
     let gateWarnings = [];
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
       // Test/dev harness (mig 178): a TEST lead bypasses every hard gate and can jump to any stage in
@@ -2366,6 +2409,16 @@ export function registerSalesRoutes(app) {
       .eq("lead_id", req.params.id)
       .single();
     if (fetchErr || !doc) return res.status(404).json({ ok: false, error: "Document not found" });
+
+    // An ISSUED register document (mig 213) is a permanent record — refuse BEFORE touching storage, so
+    // the stored PDF can never be removed out from under its issue row. Pre-213 the column is absent.
+    {
+      const { data: issued, error: issuedErr } = await sb.from("lead_documents").select("issued_at")
+        .eq("id", req.params.docId).eq("lead_id", req.params.id).maybeSingle();
+      if (!issuedErr && issued?.issued_at) {
+        return err(res, 409, "Issued documents are permanent records and can't be deleted. Issue a new revision instead.", "ISSUED_IMMUTABLE");
+      }
+    }
 
     // Delete from Storage
     await sb.storage.from("lead-documents").remove([doc.storage_path]);

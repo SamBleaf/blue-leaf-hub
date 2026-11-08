@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { callAI } from "./aiGateway.mjs";
 import { renderDocxTemplate } from "./docTemplates.mjs";
+import { convertDocxToPdfBuffer } from "./docxToPdf.mjs";
 import { exec } from "child_process";
 import { mkdtemp, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
@@ -28,49 +29,7 @@ import { requireAuth, requireRole } from "./requireAuth.mjs";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 
-// Candidate soffice paths in priority order
-const SOFFICE_CANDIDATES = [
-  "/Applications/LibreOffice.app/Contents/MacOS/soffice", // macOS
-  "/usr/bin/soffice",
-  "/usr/bin/libreoffice",
-  "soffice"
-];
-
-async function findSoffice() {
-  const { promisify } = await import("util");
-  const execP = promisify(exec);
-  for (const bin of SOFFICE_CANDIDATES) {
-    try {
-      await execP(`"${bin}" --version`);
-      return bin;
-    } catch {
-      // not found, try next
-    }
-  }
-  return null;
-}
-
-async function convertDocxToPdfBuffer(docxBuffer) {
-  const soffice = await findSoffice();
-  if (!soffice) {
-    throw new Error(
-      "LibreOffice is not installed. Install it with: brew install --cask libreoffice (macOS) or apt install libreoffice (Linux)"
-    );
-  }
-  const { promisify } = await import("util");
-  const execP = promisify(exec);
-  const dir = await mkdtemp(join(tmpdir(), "blb-pdf-"));
-  const docxPath = join(dir, "proposal.docx");
-  try {
-    await writeFile(docxPath, docxBuffer);
-    await execP(`"${soffice}" --headless --convert-to pdf --outdir "${dir}" "${docxPath}"`);
-    const pdfPath = join(dir, "proposal.pdf");
-    const pdfBuffer = await readFile(pdfPath);
-    return pdfBuffer;
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+// DOCX→PDF conversion lives in docxToPdf.mjs (shared with the Master Register documents).
 
 function safeFilePart(s) {
   return String(s || "QUOTE")

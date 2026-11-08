@@ -49,17 +49,22 @@ export default function PreconstructionPortalCard({ lead }) {
         </button>
       ) : (
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-sm">
-            <span className={isLive ? "text-green-700" : "text-primary"}>{isLive ? "✓ Portal live (build stage)" : "✓ Pre-construction portal active"}</span>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-primary">{isLive ? "✓ Live Operations project" : "✓ Pre-construction project"}</span>
+            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${project.portalV2Enabled ? "border-hairline bg-page text-muted" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{project.portalV2Enabled ? "portal v2 enabled" : "portal v2 off"}</span>
           </div>
           <p className="text-[11px] text-muted">{project.address}</p>
           {project.portalClientEmail
-            ? <p className="text-[11px] text-green-700">Client invited: {project.portalClientEmail}</p>
-            : <p className="text-[11px] text-amber-700">No client invited yet — invite them from the Portal admin.</p>}
+            ? <p className="text-[11px] text-ink">Client linked: {project.portalClientEmail}
+                {state.clientOnboarded ? <span className="text-green-700"> · onboarded</span>
+                  : state.clientInvited ? <span className="text-amber-700"> · invited (awaiting sign-in)</span>
+                  : <span className="text-muted"> · not invited yet</span>}
+              </p>
+            : <p className="text-[11px] text-amber-700">No client linked yet.</p>}
+          <p className="text-[10px] text-muted">Client invitations are a deliberate step from Portal Admin after staff approval (normally once the construction contract is signed) — never sent automatically.</p>
           <Link to={`/portal-admin/${project.id}`} className="inline-block text-xs font-semibold text-primary hover:underline">
             Open Portal admin (invite client, manage access) ↗
           </Link>
-          {!project.portalV2Enabled && <p className="text-[10px] text-amber-700">Portal v2 not enabled — enable it in Portal admin.</p>}
         </div>
       )}
       {msg && <p className={`mt-2 text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}

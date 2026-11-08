@@ -57,3 +57,6 @@ docs/ui-review/
 # Takeoff evidence capture — raw Playwright artifacts (the curated copy lives beside STEPS.md)
 docs/takeoff/evidence/workflow/_artifacts/
 e2e/ui-review/_adv/
+
+# R01 doc-engine rendered outputs (local only)
+scripts/documents/out/

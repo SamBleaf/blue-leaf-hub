@@ -19,6 +19,7 @@ import {
 import MeetingScheduler from "./MeetingScheduler.jsx";
 import StageEmailButton from "./StageEmailButton.jsx";
 import ScheduleProgramme from "./ScheduleProgramme.jsx";
+import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -79,6 +80,9 @@ export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJ
         </Link>
         <p className="mt-2 text-[11px] text-muted">Specifications, allowances &amp; the specified F&amp;F schedule (from Consultants) feed the proposal.</p>
       </div>
+
+      {/* Selection register — current scope + decisions for the estimator (read/resolve; no prices created here) */}
+      <RegisterWorkshop lead={lead} patch={patch} stage="tender" />
 
       {/* SC-1 — the construction programme derived from the estimate's SCHED lines + buffers */}
       <ScheduleProgramme lead={lead} />

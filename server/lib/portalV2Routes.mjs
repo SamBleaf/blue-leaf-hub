@@ -290,15 +290,21 @@ export function registerPortalV2Routes(app) {
         .order("taken_at", { ascending: false })
         .limit(8);
 
-      // Coming up — next 3 selections by due date (NOT internal_notes).
-      const { data: comingUp } = await sb
-        .from("client_selections")
-        .select("id, item_name, category, due_date, status")
-        .eq("project_id", projectId)
-        .in("status", ["not_started", "awaiting_client"])
-        .gte("due_date", today)
-        .order("due_date", { ascending: true })
-        .limit(3);
+      // Coming up — next 3 selections by due date (NOT internal_notes). Honour client_visible so a
+      // register-promoted staged row (client_visible=false) with a due date can't surface here (mig
+      // 212). Tolerates a pre-212 DB via the 42703 fallback, like the Selections board.
+      const buildComingUp = (withVisible) => {
+        let q = sb
+          .from("client_selections")
+          .select("id, item_name, category, due_date, status")
+          .eq("project_id", projectId)
+          .in("status", ["not_started", "awaiting_client"])
+          .gte("due_date", today);
+        if (withVisible) q = q.eq("client_visible", true);
+        return q.order("due_date", { ascending: true }).limit(3);
+      };
+      let { data: comingUp, error: comingUpErr } = await buildComingUp(true);
+      if (comingUpErr?.code === "42703") ({ data: comingUp } = await buildComingUp(false));
 
       // Unread message count (messages from builder not yet read).
       const { count: unreadMessages } = await sb
@@ -638,13 +644,20 @@ export function registerPortalV2Routes(app) {
       const projectId = req.portalSession.projectId;
       const category = req.query.category ? String(req.query.category) : null;
 
-      let q = sb
-        .from("client_selections")
-        .select(CLIENT_SELECTION_FIELDS)
-        .eq("project_id", projectId)
-        .order("sort_order", { ascending: true });
-      if (category && category !== "all") q = q.eq("category", category);
-      const { data: selections } = await q;
+      // client_visible gate (migration 212): staged rows promoted from the Master Register are
+      // hidden until the office issues them. Tolerates a pre-212 DB — on undefined_column we fall
+      // back to the legacy all-rows behaviour (every pre-212 row is effectively visible).
+      const buildSelQuery = (withVisible) => {
+        let q = sb
+          .from("client_selections")
+          .select(CLIENT_SELECTION_FIELDS)
+          .eq("project_id", projectId);
+        if (withVisible) q = q.eq("client_visible", true);
+        if (category && category !== "all") q = q.eq("category", category);
+        return q.order("sort_order", { ascending: true });
+      };
+      let { data: selections, error: selErr } = await buildSelQuery(true);
+      if (selErr?.code === "42703") ({ data: selections } = await buildSelQuery(false));
 
       const out = [];
       for (const s of selections || []) {
@@ -675,12 +688,21 @@ export function registerPortalV2Routes(app) {
         const clientNotes = req.body?.notes ? String(req.body.notes) : null;
         if (!optionId) return err(res, 400, "optionId required");
 
-        const { data: selection } = await sb
-          .from("client_selections")
-          .select("id, project_id, item_name, allowance_amount, status")
-          .eq("id", selectionId)
-          .eq("project_id", projectId)
-          .maybeSingle();
+        // Gate on client_visible so a client can only act on a selection the office has issued — a
+        // staged register-promoted row (client_visible=false) must not be writable even if its id is
+        // known (mig 212). Mirrors the read path; tolerates a pre-212 DB via the 42703 fallback.
+        const buildSelLookup = (withVisible) => {
+          let q = sb
+            .from("client_selections")
+            .select("id, project_id, item_name, allowance_amount, status")
+            .eq("id", selectionId)
+            .eq("project_id", projectId);
+          if (withVisible) q = q.eq("client_visible", true);
+          return q.maybeSingle();
+        };
+        let hasVisibleCol = true;
+        let { data: selection, error: selLookupErr } = await buildSelLookup(true);
+        if (selLookupErr?.code === "42703") { hasVisibleCol = false; ({ data: selection } = await buildSelLookup(false)); }
         if (!selection) return err(res, 404, "Selection not found");
         // Terminal-status guard: once a selection is approved/ordered/installed it is
         // locked — the client must contact Blue Leaf to change it (avoids a client
@@ -703,7 +725,11 @@ export function registerPortalV2Routes(app) {
             : null;
 
         const nowIso = new Date().toISOString();
-        const { error: updErr } = await sb
+        // Race guard (Tab 25 issue 4): re-assert visibility, project and non-terminal status IN the UPDATE,
+        // not only the prior lookup — an office withdraw (client_visible→false) or finalise (status→
+        // approved/ordered/installed) landing between the lookup and this write must not let the client
+        // write a now-hidden or finalised row. Require exactly the one affected row, else 409.
+        let updQ = sb
           .from("client_selections")
           .update({
             selected_product: option.product_name,
@@ -714,8 +740,15 @@ export function registerPortalV2Routes(app) {
             status: "in_review",
             updated_at: nowIso
           })
-          .eq("id", selectionId);
+          .eq("id", selectionId)
+          .eq("project_id", projectId)
+          .not("status", "in", "(approved,ordered,installed)");
+        if (hasVisibleCol) updQ = updQ.eq("client_visible", true);
+        const { data: updatedRows, error: updErr } = await updQ.select("id");
         if (updErr) return err(res, 500, translateDbError(updErr));
+        if (!updatedRows || updatedRows.length === 0) {
+          return err(res, 409, "This selection is no longer available to change. Please refresh and try again.");
+        }
 
         await writePortalAudit(sb, {
           project,
@@ -737,6 +770,82 @@ export function registerPortalV2Routes(app) {
         return ok(res, { status: "in_review", costImpact });
       } catch (e) {
         return err(res, 500, e.message || "Failed to record selection");
+      }
+    }
+  );
+
+  // Single-proposal response (R04 P0-SEL): when the office has specified one product (no option set), the
+  // client Accepts it (→ in_review, Blue Leaf then formally approves) or Requests changes (→ a DISTINCT
+  // 'changes_requested' state Blue Leaf must resolve before approval — never a routine approval). Mirrors
+  // /select's visibility + race guards; writes only portal-owned columns (status/client_notes).
+  app.post(
+    `${base}/selections/:selectionId/respond`,
+    requirePortalLogin,
+    async (req, res) => {
+      try {
+        const sb = getServiceSupabase();
+        if (!sb) return err(res, 503, "DB not configured");
+        const { project, session } = { project: req.portalSession.project, session: req.portalSession };
+        const projectId = project.id;
+        const { selectionId } = req.params;
+        const action = String(req.body?.action || "");
+        const notes = req.body?.notes ? String(req.body.notes) : null;
+        if (!["accept", "request_change"].includes(action)) return err(res, 400, "action must be 'accept' or 'request_change'");
+        if (action === "request_change" && !notes) return err(res, 400, "Tell us what you'd like changed.");
+
+        const buildSelLookup = (withVisible) => {
+          let q = sb
+            .from("client_selections")
+            .select("id, project_id, item_name, allowance_amount, status, selected_product")
+            .eq("id", selectionId)
+            .eq("project_id", projectId);
+          if (withVisible) q = q.eq("client_visible", true);
+          return q.maybeSingle();
+        };
+        let hasVisibleCol = true;
+        let { data: selection, error: selLookupErr } = await buildSelLookup(true);
+        if (selLookupErr?.code === "42703") { hasVisibleCol = false; ({ data: selection } = await buildSelLookup(false)); }
+        if (!selection) return err(res, 404, "Selection not found");
+        if (selection.status !== "awaiting_client") return err(res, 409, "This selection isn't awaiting your decision anymore. Please refresh.");
+        if (!selection.selected_product) return err(res, 409, "This selection doesn't have a proposed product to respond to yet.");
+
+        const nowIso = new Date().toISOString();
+        const newStatus = action === "accept" ? "in_review" : "changes_requested";
+        // Race guard: re-assert visibility, project and awaiting_client IN the UPDATE so an office withdraw
+        // or finalise landing between lookup and write cannot be overwritten. Require exactly one row.
+        let updQ = sb
+          .from("client_selections")
+          .update({ status: newStatus, client_notes: notes, updated_at: nowIso })
+          .eq("id", selectionId)
+          .eq("project_id", projectId)
+          .eq("status", "awaiting_client");
+        if (hasVisibleCol) updQ = updQ.eq("client_visible", true);
+        const { data: updatedRows, error: updErr } = await updQ.select("id");
+        if (updErr) return err(res, 500, translateDbError(updErr));
+        if (!updatedRows || updatedRows.length === 0) {
+          return err(res, 409, "This selection is no longer available to respond to. Please refresh and try again.");
+        }
+
+        await writePortalAudit(sb, {
+          project,
+          session,
+          eventType: action === "accept" ? "selection.accepted" : "selection.change_requested",
+          entityType: "client_selection",
+          entityId: selectionId,
+          snapshot: { item: selection.item_name, product: selection.selected_product, notes },
+          req
+        });
+
+        await sb
+          .from("client_actions")
+          .update({ status: "responded", updated_at: nowIso })
+          .eq("project_id", projectId)
+          .eq("related_entity_type", "client_selection")
+          .eq("related_entity_id", selectionId);
+
+        return ok(res, { status: newStatus });
+      } catch (e) {
+        return err(res, 500, e.message || "Failed to record response");
       }
     }
   );

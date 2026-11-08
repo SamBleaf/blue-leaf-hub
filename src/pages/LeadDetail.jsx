@@ -34,6 +34,7 @@ import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.j
 import MeetingScheduler from "../components/sales/lead-detail/MeetingScheduler.jsx";
 import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementStrip.jsx";
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
+import RegisterWorkshop from "../components/sales/lead-detail/register/RegisterWorkshop.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
 import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.jsx";
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
@@ -124,7 +125,7 @@ const GATE_REQUIREMENTS = {
   ],
   fee_proposal:  [
     // Concept exit → PTSA / Plans: design approved + pathway explained + the pre-con fee set.
-    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Mark the concept design Approved once the client signs off" },
+    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Unlock the concept design first — mark the concept fee paid in Xero, or use Override in the Concept card — then mark it Approved once the client signs off" },
     { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained, hint: "Tick 'PTSA / Plans pathway explained' after walking the client through it" },
     { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null, hint: "Enter the pre-construction fee in the Concept card" },
   ],
@@ -2030,7 +2031,7 @@ export default function LeadDetail() {
   const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
                 <p className="text-xs font-bold text-primary uppercase tracking-wide">Architect Tender</p>
-                <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — qualifying and fee proposal skipped.</p>
+                <p className="text-xs text-muted mt-0.5">Enters at Tender — concept, PTSA and fee proposal skipped.</p>
               </div>
   );
 
@@ -2576,6 +2577,8 @@ export default function LeadDetail() {
         <DesignerSelect lead={lead} patch={patch} reload={load} />
         <DiscoveryActions lead={lead} reload={load} />
         <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
+        {/* Master Register — optional at Discovery (context is read from Sales, never re-asked) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="discovery" />
         <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
         {conversationsBlock}
@@ -2611,6 +2614,8 @@ export default function LeadDetail() {
           </p>
         </div>
         <MeetingScheduler lead={lead} meetingType="plan_presentation" reload={load} />
+        {/* Master Register — detailed work normally starts at a signed PTSA; staff may work ahead (D-038) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="fee_proposal" />
       </div>
     );
   } else if (lead.stage === "consultants") {
@@ -2638,6 +2643,8 @@ export default function LeadDetail() {
     focusContent = (
       <div className="space-y-4">
         <WonStage lead={lead} patch={patch} />
+        {/* Master Register — the same records carry into the project (contract baseline, outstanding decisions) */}
+        <RegisterWorkshop lead={lead} patch={patch} stage="won" />
         <ConsentSpine lead={lead} />
         <ApprovalRiskChip lead={lead} patch={patch} />
         <OpsScheduleHandoff lead={lead} />

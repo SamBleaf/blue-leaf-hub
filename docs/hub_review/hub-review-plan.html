@@ -59,11 +59,11 @@ a { color: var(--primary); }
 <div class="wrap">
   <header>
     <h1>Hub Review Plan</h1>
-    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 24 October 2026. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
+    <p class="lede">Where every fault from the review doc stands, what you need to do next, and what the 5am run has done. Updated 26 October 2026. Verdicts with the detail are in the <a href="https://docs.google.com/document/d/1vuv53UousdRcWyHcCzjxLu8IJg1L4p1_K3QyPQeDYec/edit" target="_blank" rel="noopener">review doc</a>.</p>
     <div class="counts" aria-label="Totals">
-      <div class="count"><b>27</b> live</div>
+      <div class="count"><b>30</b> live</div>
       <div class="count"><b>0</b> awaiting deploy</div>
-      <div class="count"><b>2</b> not started</div>
+      <div class="count"><b>1</b> not started</div>
       <div class="count"><b>0</b> verified by you</div>
     </div>
   </header>
@@ -74,7 +74,8 @@ a { color: var(--primary); }
             <li>Check on your iPhone in the Worker app. <span class="sub">Order on the recorded job shows 16 / 23 / 29 / 11 pieces; reopen FO-001003 and revise it; add Fielders with its branch address; add Axon 400 Smooth; the 6,573 × 3,600 wall gets its joint and 8 sheets; two Axon walls share offcuts and the cut list names each wall; the old recovery cards are gone; a plan reopens with Aeroplane Mode on.</span></li>
       <li>Decide HUB 016. <span class="sub">The factory-edge rule gives 8 sheets for the recorded wall, not 7. Confirm 8, or say which cut gets to 7.</span></li>
       <li>Try the wall-by-wall takeoff on your iPhone. <span class="sub">Set a height, trace a run, add a window and a door, check the battens, tape and H-flashing, then Review walls to the order. Also: save an aluminium company product, untick and re-tick an opening (it should say Saved), and pick a timber preset.</span></li>
-      <li>Answer the three HUB 028 questions. <span class="sub">Studs at ends, corners and junctions; whether doors and windows cut studs or plates; the stock length for plates and noggins.</span></li>
+      <li>Restore the Axon on job 413d9151 in 3 taps. <span class="sub">Open the Support battens item, tap Fibre cement, then Axon 400 smooth: its joint rows come back. Then tap "Wall 3: enter the Wall height" and type it. Review order › then opens a draft that needs only the chips.</span></li>
+      <li>Try Walls and the new order on your iPhone. <span class="sub">Add walls and trace a run (studs 90 × 35 LVL, plates MGP10 H2, nothing to fix); on a cladding, tap each blocker to its fix; at Orders tap the chips, and check the battens read 90 × 35 H3 pine.</span></li>
       <li>Work through the <a href="https://claude.ai/artifact/FzVt2eGBJfXVT9SAy5LQjW" target="_blank" rel="noopener">Railway secrets reset</a>. <span class="sub">Railway's 21 October incident means every key it held should be replaced.</span></li>
     </ol>
   </section>
@@ -82,7 +83,7 @@ a { color: var(--primary); }
   <section aria-labelledby="board-h">
     <h2 id="board-h">Faults</h2>
     <div class="filters" role="group" aria-label="Show">
-      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 29</button>
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All 31</button>
       <button type="button" id="f-wait" data-f="wait" aria-pressed="false">Awaiting deploy</button>
       <button type="button" id="f-live" data-f="live" aria-pressed="false">Live</button>
       <button type="button" id="f-none" data-f="none" aria-pressed="false">Not started</button>
@@ -128,6 +129,15 @@ a { color: var(--primary); }
   <section aria-labelledby="log-h">
     <h2 id="log-h">Log</h2>
     <div class="log">
+      <div class="entry"><time datetime="2026-10-26">26 Oct</time><ul>
+        <li>Deployed HUB 029 and HUB 030 (main 7f83954). Every blocker is a button to its fix, and Done comes back. A wall with no height holds its cladding. Orders has one box of chips that save at once, plus "Order without" for a held item.</li>
+        <li>Battens are 90 × 35 H3 pine in 300 mm steps to 6.0 m, bought once for the whole job. Support battens with nothing entered use 600 centres, fixings not counted.</li>
+        <li>Your Walls framing defaults are in, so a new Walls item has nothing to fix: studs 90 × 35 LVL Smart 10 H2, plates 90 × 45 MGP10 H2, noggins 90 × 35 MGP10 untreated.</li>
+        <li>All 40 test suites, 305 screen tests and both real-server journeys pass. Review order to a supplier PDF is 5 taps on the test job.</li>
+      </ul></div>
+      <div class="entry"><time datetime="2026-10-25">25 Oct</time><ul>
+        <li>Deployed HUB 028 Walls with your rules: studs at centres, ends and corners, 2 full studs beside openings, the bottom plate bought full length, 300 mm stock steps, plates over 6.0 m as one LVL up to 11.0 m.</li>
+      </ul></div>
       <div class="entry"><time datetime="2026-10-21">21 Oct, night</time><ul>
         <li>Your deploy is pushed, but Railway's outage has builds paused, so nothing is live yet.</li>
         <li>Built HUB 024–027: aluminium company products, the false Conflict fixed and explained, aluminium measuring first, timber presets (120 studs MGP10 as you confirmed). Not deployed yet.</li>
@@ -195,7 +205,9 @@ const FAULTS = [
   ["HUB 025", "Aluminium Conflict explained", "P1", "live", "Live", "Untick and re-tick an opening: it should say Saved"],
   ["HUB 026", "Aluminium: measure on the plan first", "P1", "live", "Live", "Measure a window side on a scaled elevation"],
   ["HUB 027", "Timber presets by purpose", "P1", "live", "Live", "Pick 90 × 45 MGP10 studs and reload"],
-  ["HUB 028", "Walls: trace once for studs, plates and noggins", "P1", "none", "Not started", "Your three answers"],
+  ["HUB 028", "Walls: trace once for studs, plates and noggins", "P1", "live", "Live", "Trace a run on your iPhone"],
+  ["HUB 029", "Every blocker a one-tap fix; an order you can place", "P0", "live", "Live", "3-tap Axon restore on job 413d9151"],
+  ["HUB 030", "Battens are always 90 × 35 H3 pine", "P1", "live", "Live", "Check the order shows pine battens"],
 ];
 const PILL = { live: "s-live", wait: "s-wait", none: "s-none", dec: "s-dec" };
 const board = document.getElementById("board");

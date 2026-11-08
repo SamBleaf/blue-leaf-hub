@@ -1,0 +1,86 @@
+{
+  "_description": "Short fixture: single-room powder-room + laundry refresh. Proves the deliberate ONE-PAGE architect layout and a compact client brief. De-identified fictional data. No clientPresentation block (tests the editorial fallback / no-palette path).",
+  "meta": { "ref": "0631", "revision": "1", "preparedDate": "2026-11-06", "issuedDate": "2026-11-06", "status": "Draft", "audience": "Architect / design team" },
+  "project": {
+    "clientName": "Priya Nair",
+    "clientSalutation": "Priya",
+    "projectDescription": "Powder room + laundry refresh",
+    "siteAddress": "7 Wren Lane, Hawthorn SA 5062",
+    "deliveryModel": "Design & Build (fixed scope)",
+    "drawingBasis": "Concept Sketch S-01, issued 2 Nov 2026",
+    "architect": "In-house (Blue Leaf)",
+    "preparedBy": "Blue Leaf Building",
+    "stageLabel": "Concept stage"
+  },
+  "clientBrief": {
+    "intentions": [
+      { "label": "Refresh", "text": "Lift a tired powder room and laundry without major structural change." },
+      { "label": "Simplify", "text": "Practical storage and hard-wearing, easy-clean finishes." },
+      { "label": "Match", "text": "Sit comfortably with the recently renovated kitchen." }
+    ],
+    "summaryParas": [
+      "Priya wants a clean, hard-wearing refresh of the existing powder room and adjoining laundry: new finishes, better storage and improved lighting, keeping the current wall and plumbing positions wherever practical to control cost."
+    ],
+    "scopeIn": [
+      "Strip and re-fit the powder room: new vanity, toilet suite, tiling and lighting.",
+      "Laundry refresh: new bench, cabinetry and tiled splashback; retain appliance positions."
+    ],
+    "scopeOut": [
+      "Moving walls or relocating plumbing stacks — excluded to keep the scope fixed."
+    ],
+    "preferenceGroups": [
+      { "name": "Finishes", "items": [
+        "Warm neutral tiles with a matte black tapware accent.",
+        "Timber-look laminate cabinetry to match the kitchen."
+      ] }
+    ],
+    "assumptions": [
+      "Existing waterproofing to be assessed; re-do assumed in the powder room.",
+      "No changes to the switchboard are expected."
+    ],
+    "questions": [
+      { "id": "A01", "action": "Confirm whether the laundry splashback is tiled or a single laminate panel.", "owner": "Client", "status": "OPEN" },
+      { "id": "A02", "action": "Confirm tapware finish (matte black vs brushed) against the kitchen.", "owner": "Client", "status": "OPEN" }
+    ],
+    "nextStepsParas": [
+      "With these two decisions confirmed, Blue Leaf prepares a fixed-scope quotation. As this is a small, defined refresh there is no separate pre-construction (PTSA) stage."
+    ]
+  },
+  "architectBrief": {
+    "actions": [
+      { "id": "A01", "action": "Confirm powder-room waterproofing extent and set-down against the existing slab.", "owner": "Blue Leaf", "status": "OPEN" },
+      { "id": "A02", "action": "Confirm laundry cabinetry run and bench depth against the appliance positions.", "owner": "Blue Leaf", "status": "OPEN" }
+    ],
+    "purposeParas": [
+      "A short internal brief for a fixed-scope powder-room and laundry refresh. Latest basis: Concept Sketch S-01. It separates the confirmed requirements from preferences still being developed."
+    ],
+    "confirmedReqs": [
+      "Retain existing wall and plumbing positions wherever practical.",
+      "Hard-wearing, easy-clean finishes throughout."
+    ],
+    "clientPrefs": [
+      "Warm neutral tiles with matte black tapware.",
+      "Timber-look laminate cabinetry to match the kitchen."
+    ],
+    "scheduleItems": [
+      { "itemId": "PR-01", "location": "Powder room", "requirement": "Wall & floor tiling, waterproofing", "status": "Proposed", "action": "Confirm tile + set-down", "dwgRef": "S-01" },
+      { "itemId": "LY-01", "location": "Laundry", "requirement": "Cabinetry run + benchtop", "status": "Client-approved", "action": "Confirm bench depth", "dwgRef": "S-01" }
+    ],
+    "coordination": [
+      "Coordinate laundry cabinetry with the retained appliance positions."
+    ],
+    "outstanding": [
+      "Splashback material (tile vs laminate) to be confirmed."
+    ],
+    "references": [
+      "Concept Sketch S-01 (2 Nov 2026).",
+      "BLB-BRIEF-0631 Rev 1 — Preliminary Client Project Brief."
+    ]
+  },
+  "selections": [
+    { "group": "Internal Finishes", "itemId": "PR-01", "category": "Powder room", "product": "Porcelain floor + wall tile", "finish": "Warm neutral, matte", "qty": "~9 m²", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Wet Areas", "itemId": "PR-02", "category": "Powder room", "product": "Wall-hung vanity + basin", "finish": "Timber-look, 600mm", "qty": "1", "status": "Proposed", "responsibility": "Client" },
+    { "group": "Joinery", "itemId": "LY-01", "category": "Laundry", "product": "Cabinetry + benchtop", "finish": "Laminate, stone-look top", "qty": "1", "status": "Client-approved", "responsibility": "BLB" },
+    { "group": "Services & Fixtures", "itemId": "SF-01", "category": "Powder room", "product": "Matte black tapware set", "finish": "Matte black", "qty": "1", "status": "TBC", "responsibility": "Client" }
+  ]
+}

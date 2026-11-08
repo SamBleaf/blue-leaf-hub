@@ -1,0 +1,134 @@
+{
+  "_description": "Typical fixture: ground-floor renovation + two-storey rear extension, construction-management overlay. De-identified fictional data.",
+  "meta": { "ref": "0417", "revision": "1", "preparedDate": "2026-11-05", "issuedDate": "2026-11-05", "status": "Draft", "audience": "Architect / design team" },
+  "project": {
+    "clientName": "Jordan & Mia Whitcombe",
+    "clientSalutation": "Jordan and Mia",
+    "projectDescription": "Ground-floor renovation + two-storey rear extension",
+    "siteAddress": "14 Kestrel Court, Stirling SA 5152",
+    "deliveryModel": "Design & Build (construction-management overlay)",
+    "drawingBasis": "Concept Set C-02, issued 28 Oct 2026",
+    "architect": "Harper Reece Architecture (Alex Harper)",
+    "preparedBy": "Blue Leaf Building",
+    "stageLabel": "Concept stage"
+  },
+  "clientBrief": {
+    "intentions": [
+      { "label": "Connect", "text": "Bring family living and outdoor entertaining together." },
+      { "label": "Simplify", "text": "Create practical circulation, storage and everyday use." },
+      { "label": "Perform", "text": "Plan comfort, glazing and moisture details early." }
+    ],
+    "summaryParas": [
+      "Jordan and Mia want to open up the dark, compartmentalised ground floor of their 1970s Stirling home and add a light-filled, two-storey rear extension for family living and a new main suite above. The brief is a warm, durable, low-maintenance home that sits quietly in its bushland setting and is comfortable year-round.",
+      "This brief captures the direction agreed at the Concept Presentation so everyone — client, designer and Blue Leaf — is working from one shared understanding before detailed design begins."
+    ],
+    "scopeIn": [
+      "New two-storey rear extension: open-plan kitchen / living / dining at ground, main bedroom + ensuite + walk-in robe above.",
+      "Renovation of the existing ground floor: reconfigured entry, laundry/mudroom, powder room, and two children's bedrooms refreshed.",
+      "New covered alfresco connecting living to the rear garden."
+    ],
+    "scopeOut": [
+      "Swimming pool and landscaping beyond the immediate alfresco apron — deferred to a later stage.",
+      "Detached studio / garage — excluded from this brief."
+    ],
+    "preferenceGroups": [
+      { "name": "External", "items": [
+        "Fibre-cement cladding (horizontal profile) to the extension, with timber-look battens as a feature to the entry — warm but low-maintenance.",
+        "Dark, slimline-framed windows and doors; generous glazing to the north living zone."
+      ] },
+      { "name": "Internal", "items": [
+        "Engineered oak / blackbutt-tone flooring through living areas; 2.7 m ceilings to the new ground floor.",
+        "Calm, neutral palette; honest materials (timber, stone-look benchtops, matte finishes)."
+      ] },
+      { "name": "Kitchen & wet areas", "items": [
+        "Walk-in butler's pantry; island bench as the social centre.",
+        "Ensuite with freestanding bath and a large walk-in shower; underfloor heating preferred (to be costed)."
+      ] }
+    ],
+    "assumptions": [
+      "Allowances are feasibility-level only and will be replaced by developed pricing at pre-construction.",
+      "Existing roof structure over the retained portion is assumed sound; subject to inspection.",
+      "Council and development-approval costs are excluded from the concept estimate."
+    ],
+    "questions": [
+      { "id": "A01", "action": "Confirm the extension footprint against the concept estimate band before detailed design proceeds.", "owner": "Blue Leaf", "status": "OPEN" },
+      { "id": "A02", "action": "Confirm the designer engagement and the certification pathway (building consent route).", "owner": "Client", "status": "OPEN" },
+      { "id": "A03", "action": "Confirm priority inclusions vs. deferred scope so the design is costed to budget.", "owner": "Client", "status": "OPEN" }
+    ],
+    "nextStepsParas": [
+      "The next paid step is the Pre-Construction / Developed Design & Specification agreement (PTSA). From that point Blue Leaf develops the design with the consultants, locks the specifications and selections, and produces developed pricing — the point at which this preliminary brief becomes a detailed, costed scope."
+    ],
+    "processSteps": [
+      { "num": "01", "label": "Concept", "note": "Direction agreed" },
+      { "num": "02", "label": "PTSA", "note": "Scope accepted" },
+      { "num": "03", "label": "Design", "note": "Consultant input" },
+      { "num": "04", "label": "Pricing", "note": "Tender / review" },
+      { "num": "05", "label": "Contract", "note": "Ready to build" }
+    ]
+  },
+  "architectBrief": {
+    "actions": [
+      { "id": "A01", "action": "Confirm the certification pathway (building consent route) before working drawings proceed.", "owner": "Architect", "status": "OPEN" },
+      { "id": "A02", "action": "Size the north living glazing for passive solar and design the eaves / shading to suit (WN-01).", "owner": "Architect / Energy", "status": "OPEN" },
+      { "id": "A03", "action": "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).", "owner": "Architect", "status": "OPEN" },
+      { "id": "A04", "action": "Confirm underfloor-heating inclusion to the ensuite so it can be coordinated with the slab and services.", "owner": "Blue Leaf", "status": "OPEN" }
+    ],
+    "purposeParas": [
+      "Issued to Harper Reece Architecture (Alex Harper) to progress the developed design of the rear extension and ground-floor renovation. Latest basis: Concept Set C-02, issued 28 Oct 2026. This brief separates confirmed client requirements from indicative preferences, and lists the items needing design coordination."
+    ],
+    "confirmedReqs": [
+      "Two-storey rear extension: open-plan living at ground, main suite above, as per Concept Set C-02.",
+      "North-facing living glazing for passive solar; eaves / shading to be designed to suit.",
+      "Minimum ground-floor ceiling height 2.7 m to new work."
+    ],
+    "clientPrefs": [
+      "Fibre-cement horizontal cladding with feature timber-look battens to entry.",
+      "Dark slimline window frames; engineered oak-tone flooring to living.",
+      "Freestanding bath to main ensuite; butler's pantry to kitchen."
+    ],
+    "scheduleItems": [
+      { "itemId": "EX-01", "location": "External walls", "requirement": "Fibre-cement horizontal cladding (ext.)", "status": "Proposed", "action": "Confirm profile + junction details", "dwgRef": "A-21" },
+      { "itemId": "EX-02", "location": "Entry", "requirement": "Timber-look batten feature screen", "status": "Proposed", "action": "Detail fixing + spacing", "dwgRef": "A-21" },
+      { "itemId": "WN-01", "location": "Living (north)", "requirement": "Slimline-framed glazing, dark finish", "status": "Client-approved", "action": "Size for passive solar + design shading", "dwgRef": "A-30" },
+      { "itemId": "ST-01", "location": "Extension frame", "requirement": "Steel beam over living opening", "status": "To verify", "action": "Engineer to size + certify", "dwgRef": "S-02" },
+      { "itemId": "RF-01", "location": "Extension roof", "requirement": "Skillion to rear, concealed gutters", "status": "Proposed", "action": "Confirm falls + overflow", "dwgRef": "A-40" }
+    ],
+    "coordination": [
+      "Coordinate the living-room steel opening with the façade glazing module (EX-01 / WN-01).",
+      "Confirm stair position against the first-floor main-suite layout."
+    ],
+    "outstanding": [
+      "Certification pathway (building consent route) to be confirmed before working drawings.",
+      "Underfloor heating to ensuite — confirm inclusion for coordination with slab / services."
+    ],
+    "references": [
+      "Concept Set C-02 (28 Oct 2026) — architectural concept.",
+      "BLB-BRIEF-0417 Rev 1 — Preliminary Client Project Brief.",
+      "Site survey SV-14 (received) — levels and boundaries."
+    ]
+  },
+  "selections": [
+    { "group": "External", "itemId": "EX-01", "category": "Walls", "product": "James Hardie Stria cladding", "finish": "Horizontal 325mm, painted", "qty": "—", "status": "Proposed", "responsibility": "BLB / A-21" },
+    { "group": "External", "itemId": "EX-02", "category": "Entry feature", "product": "Spotted gum batten screen", "finish": "42x42 @ 60 c/c, oiled", "qty": "1", "status": "TBC", "responsibility": "Designer" },
+    { "group": "External", "itemId": "EX-03", "category": "Windows", "product": "Slimline aluminium, dark", "finish": "Matte black frames", "qty": "—", "status": "Proposed", "responsibility": "BLB / A-30" },
+    { "group": "Internal Finishes", "itemId": "IN-01", "category": "Living / Dining", "product": "Engineered oak flooring", "finish": "Blackbutt tone, 190mm", "qty": "~62 m²", "status": "Client-approved", "responsibility": "Client" },
+    { "group": "Internal Finishes", "itemId": "IN-02", "category": "Throughout", "product": "Low-sheen wall paint", "finish": "Neutral off-white", "qty": "—", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "Joinery", "itemId": "JY-01", "category": "Kitchen", "product": "Island + butler's pantry", "finish": "Stone-look benchtop, matte doors", "qty": "1", "status": "Proposed", "responsibility": "Designer / BLB" },
+    { "group": "Wet Areas", "itemId": "WA-01", "category": "Main ensuite", "product": "Freestanding bath", "finish": "Matte white, 1700mm", "qty": "1", "status": "Client-approved", "responsibility": "Client" },
+    { "group": "Wet Areas", "itemId": "WA-02", "category": "Main ensuite", "product": "Walk-in shower screen", "finish": "Fixed panel, black trim", "qty": "1", "status": "TBC", "responsibility": "BLB" },
+    { "group": "Services & Fixtures", "itemId": "SF-01", "category": "Ensuite", "product": "Underfloor heating", "finish": "Electric, zoned", "qty": "1", "status": "TBC", "responsibility": "BLB" },
+    { "group": "Services & Fixtures", "itemId": "SF-02", "category": "Living", "product": "Reverse-cycle A/C", "finish": "Ducted, zoned", "qty": "1", "status": "Proposed", "responsibility": "BLB" },
+    { "group": "External Works", "itemId": "XW-01", "category": "Alfresco", "product": "Covered alfresco apron", "finish": "Concrete, broom finish", "qty": "~24 m²", "status": "Proposed", "responsibility": "BLB" }
+  ],
+  "clientPresentation": {
+    "approachParas": [
+      "A warm, durable home developed from a restrained, consistent palette: a low-maintenance exterior, honest interior materials and a few considered feature moments. These pages summarise the current direction in a format that is easy to review — supplier schedules and architectural drawings remain the technical reference."
+    ],
+    "palette": [
+      { "area": "Exterior", "name": "Fibre-cement + timber", "note": "Horizontal cladding, battened entry feature." },
+      { "area": "Glazing", "name": "Dark slimline frames", "note": "Generous glazing to the north living zone." },
+      { "area": "Floors", "name": "Engineered oak", "note": "Blackbutt tone through the living areas." },
+      { "area": "Joinery", "name": "Stone-look + matte", "note": "Island bench and butler's pantry." }
+    ]
+  }
+}

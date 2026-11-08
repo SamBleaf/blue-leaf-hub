@@ -7,7 +7,7 @@ deployed, and what is waiting on Sam. Newest entry first. The viewable plan page
 
 Status words follow the doc: Open → Implemented, awaiting deploy → Implemented, live → Verified (only Sam verifies).
 
-## Current state (updated 26 October 2026, HUB 029 and HUB 030 built)
+## Current state (updated 26 October 2026, HUB 029 and HUB 030 live)
 
 | Item | Status | Commit | Waiting on |
 |---|---|---|---|
@@ -40,8 +40,8 @@ Status words follow the doc: Open → Implemented, awaiting deploy → Implement
 | HUB 026 Aluminium plan measuring first | Implemented, live | 7e6759e | iPhone check |
 | HUB 027 Timber presets by purpose | Implemented, live | 7e6759e | iPhone check |
 | HUB 028 Walls: trace once, studs + plates + noggins together | Implemented, live (25 October, main 0b9d6dc) | 7fcc43a, 4d241a2, eb2edf5, f11bc21, ed2387f, 36ad816, cfaca0f, 9bf6138 | iPhone check |
-| HUB 029 Blockers you can tap; an order you can place | Implemented, awaiting deploy | f33c7b5, 6557910, 058186a, a3a7ee2 + docs | Deploy, then Sam's 3-tap restore on job 413d9151 and the Wall 3 height |
-| HUB 030 Battens are 90 × 35 H3 pine | Implemented, awaiting deploy | 678fedf | Deploy, then iPhone check |
+| HUB 029 Blockers you can tap; an order you can place | Implemented, live (26 October, main 7f83954) | f33c7b5, 6557910, 058186a, a3a7ee2, 849ccc2 | Sam's 3-tap restore on job 413d9151 and the Wall 3 height, then iPhone check |
+| HUB 030 Battens are 90 × 35 H3 pine | Implemented, live (26 October, main 7f83954) | 678fedf | iPhone check |
 
 **Migrations:** none waiting for the takeoff. 206–211 are all applied (210 and 211 confirmed read-only on 21 October). HUB 028, HUB 029 and HUB 030 need none.
 
@@ -58,7 +58,15 @@ drop the per-job saw-cut confirmation for a fixed 3 mm?). The 19 October doc com
 
 ## Log
 
-### 2026-10-26 — HUB 029 and HUB 030 built (steps 1–6), deploy on Sam's word once everything passes
+### 2026-10-26 — HUB 029 and HUB 030 live (main 7f83954)
+- Deployed on Sam's standing word ("yes keep going, deploy once everything passes"): merged origin/main (the HUB 028
+  retry 0b9d6dc) into takeoff-r03, pushed takeoff-r03 → main as a fast-forward. Railway status success; live bundle
+  main-CDDQT-yR.js (was main-Y2iXzoiN.js), and the live TakeoffApp-yrfDPOlF.js is byte-identical to the tested build.
+- Final checks before the push: npm run test:takeoff all 40 suites, lint 0, build, screens 305 passed / 1 skipped, both
+  real-stack journeys (desktop Chrome, iPhone 13 WebKit).
+- Review doc: HUB 029 and HUB 030 verdicts written, both "Status: Implemented". Plan page republished.
+
+### 2026-10-26 — HUB 029 and HUB 030 built (steps 1–6)
 - Plan: docs/hub_review/ORDER_BLOCKERS_PLAN.md with Sam's decisions of 25 October (a wall with no height holds the whole
   cladding; Support battens with nothing entered = 600 centres, fixings not counted; the mis-tapped Axon on job 413d9151
   is restored by Sam after the deploy in 3 taps; pine battens H3, 300 mm steps to 6.0 m, pooled for the whole job;

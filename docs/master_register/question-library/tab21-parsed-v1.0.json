@@ -1,0 +1,1031 @@
+[
+ {
+  "id": "P-001",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "FACT/C",
+  "pre": "",
+  "text": "Project identity and address. Prompt to staff only if missing: Are we working on the correct client and site? Show current Sales value."
+ },
+ {
+  "id": "P-002",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "FACT/C",
+  "pre": "",
+  "text": "Drawings. Which plan set, sheet list, issue date and revision are we reviewing? Link existing document record; no reupload if present."
+ },
+ {
+  "id": "P-003",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "FACT/C",
+  "pre": "",
+  "text": "Concept Meeting/Presentation record and key decisions already made. Surface existing meeting facts; never force re-entry."
+ },
+ {
+  "id": "P-004",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "FACT/C",
+  "pre": "",
+  "text": "Client budget target, timing expectations and design priorities. Show current dated Sales fact; ask only to confirm material changes."
+ },
+ {
+  "id": "P-005",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "What do you most want to improve: space, natural light, comfort, privacy, entertaining, storage, accessibility, low maintenance, energy use? Pick up to 3 priorities plus note."
+ },
+ {
+  "id": "P-006",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "What parts of the property are in this project, what are possible extras, and what is explicitly future work? Tag areas as Included / Optional / Excluded / Deferred."
+ },
+ {
+  "id": "P-007",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Physical project type: New Build / Renovation / Extension / Combined. Delivery model separately Design & Build / Build Only / Management / Other; never combine types in one ambiguous field."
+ },
+ {
+  "id": "P-008",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Will the property remain occupied or operational through work? Record temporary facility and access requirements only when relevant."
+ },
+ {
+  "id": "P-009",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Which decisions must be made before the next architect issue, budget check or PTSA? Owner, not necessarily due date."
+ },
+ {
+  "id": "P-010",
+  "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+  "tags": "FACT/C",
+  "pre": "",
+  "text": "Existing architects/consultants/suppliers and known agreements; link from Hub, not new text if authoritative contact already exists."
+ },
+ {
+  "id": "W-001",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "Site access: restricted driveway, narrow site, crane/delivery access, neighbour restrictions, steep slope or parking? Note known facts, inspection tasks."
+ },
+ {
+  "id": "W-002",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "TECH/D CORE",
+  "pre": "",
+  "text": "Survey, boundaries, easements, services, geotech and site levels: which reports exist and which are required? Internal consultant action, not client specification."
+ },
+ {
+  "id": "W-003",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C OPT",
+  "pre": "",
+  "text": "Trees, retaining walls, external structures and landscaping affected by construction? Include/retain/protect/remove/by others."
+ },
+ {
+  "id": "W-004",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C RENO",
+  "pre": "",
+  "text": "What is being demolished, retained, altered and made good in the existing building? Record by area, not one vague demolition line."
+ },
+ {
+  "id": "W-005",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "TECH/D RENO",
+  "pre": "",
+  "text": "Existing structural, moisture, termite, asbestos/contamination, roof and foundation conditions: inspected / assumed / needs test; source."
+ },
+ {
+  "id": "W-006",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C RENO",
+  "pre": "",
+  "text": "What existing finishes and fixtures must be protected and/or matched? Note acceptable variation or inability to match exact old products."
+ },
+ {
+  "id": "W-007",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C RENO",
+  "pre": "",
+  "text": "Will the family live on site? Work zones, temporary kitchen/bathroom, dust separation, service outages and safe access."
+ },
+ {
+  "id": "W-008",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "TECH/D RENO",
+  "pre": "",
+  "text": "Where do new and existing work connect: roof, wall, floor, drainage, electrical, thermal envelope? Add interface action and drawing ref."
+ },
+ {
+  "id": "W-009",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Overall project quality priorities: standard / upgraded / individually specified, and where is investment most important? Do not fabricate a universal inclusions package."
+ },
+ {
+  "id": "W-010",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "External works scope: driveway, landscaping, paths, fencing, retaining, pergola, pool or boundary work included/excluded/deferred?"
+ },
+ {
+  "id": "W-011",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "ACTION/C CORE",
+  "pre": "",
+  "text": "Unknown conditions likely to affect cost and design. Is investigation, contingency, exclusion or alternate scope appropriate?"
+ },
+ {
+  "id": "W-012",
+  "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+  "tags": "TECH/D CORE",
+  "pre": "",
+  "text": "Planning/building approval and consultant design responsibilities. Identify who verifies requirements, not legal assertions based on questionnaire."
+ },
+ {
+  "id": "W-013",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Overall architectural material direction: masonry, render, lightweight cladding, timber feature, metal roof? What should the home look and feel like?"
+ },
+ {
+  "id": "W-014",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Roof and gutter colour/material preference; roof profile/pitch/box gutter details to architect later."
+ },
+ {
+  "id": "W-015",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Windows and glazing priorities: frame appearance, opening use, sun/shading, privacy, thermal/acoustic performance, insect screens."
+ },
+ {
+  "id": "W-016",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Envelope quality: comfort/energy efficiency, insulation, airtightness and moisture management priority. Technical compliance by designers."
+ },
+ {
+  "id": "W-017",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "General interior floor palette by zone: timber/laminate/hybrid/tile/carpet/polished concrete, wet-area separate."
+ },
+ {
+  "id": "W-018",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Internal doors and trims: standard or feature doors, general door heights, skirting/architraves/cornice and hardware style."
+ },
+ {
+  "id": "W-019",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "General paint and ceiling finish direction: warm/cool palette, matte/sheen, square set/cornice, feature areas."
+ },
+ {
+  "id": "W-020",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Heating/cooling, ventilation and hot water preference; any required comfort zones or special rooms?"
+ },
+ {
+  "id": "W-021",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Electrical, smart home, data, solar/battery/EV charging ambitions; note special requirements, not layouts yet."
+ },
+ {
+  "id": "W-022",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "Window furnishings, appliances, loose furniture, fireplaces, landscaping, security and automation: included, by client, excluded or future?"
+ },
+ {
+  "id": "W-023",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "SCOPE/D CORE",
+  "pre": "",
+  "text": "Standard supply/installation responsibilities for selected products and any client-supplied items; warranty and lead time implications noted internally."
+ },
+ {
+  "id": "W-024",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "TECH/D CORE",
+  "pre": "",
+  "text": "Document current building performance goal and required consultant checks (energy, thermal, fire, acoustic, moisture, accessibility as applicable). No automatic certification label."
+ },
+ {
+  "id": "W-025",
+  "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+  "tags": "ACTION/C CORE",
+  "pre": "",
+  "text": "Identify outstanding whole-house decision that materially changes cost/design and allocate owner."
+ },
+ {
+  "id": "R-001",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "FACT/C CORE",
+  "pre": "",
+  "text": "Room/zone name, level, drawing sheet/revision, order on plans; type: kitchen, bathroom, bedroom, hall, external etc."
+ },
+ {
+  "id": "R-002",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "For THIS room: New / Renovate / Alter / Retain Existing / Remove / Make Good / By Others / Excluded / Deferred / N/A."
+ },
+ {
+  "id": "R-003",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "What is being done here? One clear sentence, then inclusions/exclusions, retaining elements and existing condition notes."
+ },
+ {
+  "id": "R-004",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "What's most important about how this room works? Storage, circulation, accessibility, light/privacy, entertaining or durability."
+ },
+ {
+  "id": "R-005",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Floor finish: inherit whole-house default or select room exception; check steps/transitions if relevant."
+ },
+ {
+  "id": "R-006",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Wall, ceiling and feature finish: use defaults or note different materials/ceiling height/cornices."
+ },
+ {
+  "id": "R-007",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SELECTION/C CORE",
+  "pre": "",
+  "text": "Internal/external doors, windows, screens or opening alterations specific to this room."
+ },
+ {
+  "id": "R-008",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "REQUIREMENT/C CORE",
+  "pre": "",
+  "text": "Lighting, power, data, comfort/ventilation needs as a broad prompt. Count/position in detailed electrical coordination."
+ },
+ {
+  "id": "R-009",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "Joinery, fixtures, appliances, equipment or loose furniture: included, owner supplied or by others?"
+ },
+ {
+  "id": "R-010",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "ACTION/C CORE",
+  "pre": "",
+  "text": "What's undecided, what changes the scope, and who follows up? Record only meaningful actions."
+ },
+ {
+  "id": "R-011",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "FACT/D CORE",
+  "pre": "",
+  "text": "Reference relevant drawing/consultant/supplier document and version; don't type from memory when source exists."
+ },
+ {
+  "id": "R-012",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "TECH/D CORE",
+  "pre": "",
+  "text": "Detail development and price/documentation status: design verified? trade quote/allowance? who is coordinating?"
+ },
+ {
+  "id": "R-013",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SCOPE/C RENO",
+  "pre": "",
+  "text": "Existing-to-new floor/wall/ceiling/service junction and matching/make-good requirements."
+ },
+ {
+  "id": "R-014",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "SCOPE/C CORE",
+  "pre": "",
+  "text": "Any scope item supplied or installed by the client, other trade or external consultant?"
+ },
+ {
+  "id": "R-015",
+  "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+  "tags": "REQUIREMENT/D OPT",
+  "pre": "",
+  "text": "Tolerances and installation constraints that drive joinery/fixture/structural coordination (not client engineering choices)."
+ },
+ {
+  "id": "K-001",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "New kitchen vs replace fronts vs partial retrofit? Existing kitchen demolition and make-good extent."
+ },
+ {
+  "id": "K-002",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Layout: island, peninsula, scullery, pantry, circulation and family use priorities. Link joinery drawings."
+ },
+ {
+  "id": "K-003",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Storage: full-height, walk-in, drawers, appliance garage, bins, pantry shelving, integrated appliances."
+ },
+ {
+  "id": "K-004",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Cabinetry standard/look: flat-panel, profile, timber veneer/laminate/paint, cabinet interior standard."
+ },
+ {
+  "id": "K-005",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Benchtop: preferred surface, appearance, thickness style; final product/edge/joints after PTSA."
+ },
+ {
+  "id": "K-006",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Splashback: tile, stone, glass or other; preferred extent/colour; detailed layout later."
+ },
+ {
+  "id": "K-007",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Sink and mixer: bowl arrangement, undermount/topmount, finish, water filter/hot tap; Routleys source later."
+ },
+ {
+  "id": "K-008",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Appliances: list cooktop, oven, rangehood, dishwasher, fridge, microwave, wine storage; who supplies/install and any specialty dimensions?"
+ },
+ {
+  "id": "K-009",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Cooking/exhaust requirements, induction/gas preference, outdoor connection and ventilation considerations."
+ },
+ {
+  "id": "K-010",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Power, feature lighting, LED strips and data/charging; location layout by electrician later."
+ },
+ {
+  "id": "K-011",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Joinery hardware/drawers, handles/push-to-open, panels, plinths, clearances, stone shop drawings, service setouts and quantities."
+ },
+ {
+  "id": "K-012",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Main budget drivers or unresolved choices: kitchen footprint, stone choice, appliance tier, specialty hardware, scullery scope."
+ },
+ {
+  "id": "K-013",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "SCOPE/D",
+  "pre": "",
+  "text": "Appliance procurement, supplier selections, long-lead items, installation and warranty responsibility."
+ },
+ {
+  "id": "K-014",
+  "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Coordinate supplier product dimensions with cabinetry, electrical, plumbing and drawings; verify, don't auto-approve."
+ },
+ {
+  "id": "B-001",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Existing bathroom retained, full renovation or new? Demolition, protection, access and make-good."
+ },
+ {
+  "id": "B-002",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Room layout and priorities: shower-only, bath, double vanity, separate WC, storage, accessibility."
+ },
+ {
+  "id": "B-003",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Toilet: back-to-wall, wall-hung, concealed cistern, existing retained; brand/model later."
+ },
+ {
+  "id": "B-004",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Vanity: wall-hung/floorstanding, size, top material, basin number/type, drawers/storage."
+ },
+ {
+  "id": "B-005",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Basin: inset/above-counter/undermount, shape/finish and likely plumbing constraint."
+ },
+ {
+  "id": "B-006",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Shower: walk-in or enclosed, overhead/hand shower, screen style, niche, seat, hobless preference."
+ },
+ {
+  "id": "B-007",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Bath: built-in/freestanding/none, location and quality; specific size/model later."
+ },
+ {
+  "id": "B-008",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Tapware/accessories: finish direction, mixer types, towel rails, hooks, toilet-roll holders and mirrors."
+ },
+ {
+  "id": "B-009",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Wall and floor finishes: tile type, size, full/partial tile heights, feature tile, grout colour and trim approach."
+ },
+ {
+  "id": "B-010",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Heating and ventilation: exhaust fan, window, underfloor heating, heated towel rail."
+ },
+ {
+  "id": "B-011",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Mirror/shaving cabinet, lighting, power outlets and electrical zones."
+ },
+ {
+  "id": "B-012",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Waterproofing scope, drainage/waste, falls, thresholds, shower recess/screen/niche setouts for designer/trade verification."
+ },
+ {
+  "id": "B-013",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Confirm product rough-in dimensions and approvals against Routleys selection pack and plumbing drawings."
+ },
+ {
+  "id": "B-014",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Client-supplied fixtures vs Blue Leaf procurement and installation; any appliance or specialist installer."
+ },
+ {
+  "id": "B-015",
+  "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Significant decisions unresolved before wet-area setout, tender and ordering."
+ },
+ {
+  "id": "L-001",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "New or retained laundry, demolition, appliance relocation, cupboard and floor/wall making-good."
+ },
+ {
+  "id": "L-002",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Washing machine/dryer layout: stacked/side-by-side; underbench; ventilation."
+ },
+ {
+  "id": "L-003",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Cabinetry, bench, trough, mixer, splashback, storage/broom cupboard and drying rail."
+ },
+ {
+  "id": "L-004",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Flooring, skirting, tiled splash protection and door/wet-zone finish."
+ },
+ {
+  "id": "L-005",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Waste, taps, hot-water provision, external access, power/GPO and appliance clearances."
+ },
+ {
+  "id": "L-006",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Appliance supply responsibilities and any built-in whitegoods; client-owned equipment."
+ },
+ {
+  "id": "L-007",
+  "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Product size unknowns, existing drainage and retained service constraints."
+ },
+ {
+  "id": "V-001",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "New/altered/retained space; walls/openings to remove, flooring and ceiling transitions."
+ },
+ {
+  "id": "V-002",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Seating/dining layout, indoor-outdoor connection, TV/wall position, storage and acoustics."
+ },
+ {
+  "id": "V-003",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Floor finish, threshold details, feature wall, ceiling finish/height, cornice/trim exception."
+ },
+ {
+  "id": "V-004",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Window/slider/stacker style, glazing/shading, flyscreens, privacy and window-covering scope."
+ },
+ {
+  "id": "V-005",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Fireplace/gas/electric appliance, built-in cabinetry, TV wall, shelving; included/by client?"
+ },
+ {
+  "id": "V-006",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Lighting modes, power/data/AV, fans, heating/cooling and daylight control."
+ },
+ {
+  "id": "V-007",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Structural openings, beams, lintels, access and glazing coordination to architect/engineer."
+ },
+ {
+  "id": "V-008",
+  "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Confirm furniture/layout-driven electrical and procurement decisions."
+ },
+ {
+  "id": "D-001",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "New, existing retained or refurbished; any partitions or built-in removals?"
+ },
+ {
+  "id": "D-002",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Bed/desk placement, access, future furniture, storage and privacy."
+ },
+ {
+  "id": "D-003",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Floor finish, general paint, feature wall, trim, doors and hardware."
+ },
+ {
+  "id": "D-004",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Wardrobe layout: robe doors, shelves, drawers, hanging and lighting; standard or custom."
+ },
+ {
+  "id": "D-005",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Windows/glazing/screens, blackout/window furnishings, acoustic privacy."
+ },
+ {
+  "id": "D-006",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Ceiling fan, reverse-cycle zone, GPO/data and lighting needs."
+ },
+ {
+  "id": "D-007",
+  "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Outstanding robe layout/fitting and electrical decisions."
+ },
+ {
+  "id": "H-001",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Stair type/location, change to existing stair, new stair or no stair; engineering/design responsibility."
+ },
+ {
+  "id": "H-002",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Stair treads/risers, balustrade/handrail material, finish and lighting intent."
+ },
+ {
+  "id": "H-003",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Hall/entry flooring transitions, feature cladding, joinery, door and hardware."
+ },
+ {
+  "id": "H-004",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Front entry door: material, glazing, pivot/hinged, hardware, security and thresholds."
+ },
+ {
+  "id": "H-005",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Entry storage, coats/shoes and visitor movement/lighting."
+ },
+ {
+  "id": "H-006",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Garage: size, door motor/finish, storage, access door, slab/finish, insulation and services."
+ },
+ {
+  "id": "H-007",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "EV charger, workshop power, hot/cold water, garage floor coating, security and ventilation."
+ },
+ {
+  "id": "H-008",
+  "group": "STAIRS / HALLS / ENTRY / GARAGE",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Stair geometry/balustrade compliance, structural and fire/acoustic design to responsible consultant."
+ },
+ {
+  "id": "O-001",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Is alfresco/deck/verandah/pergola/balcony included, future, by client or excluded? Areas and levels."
+ },
+ {
+  "id": "O-002",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Covered vs open, all-season use, BBQ/outdoor kitchen, privacy, orientation and shade."
+ },
+ {
+  "id": "O-003",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "External flooring: concrete/pavers/deck/tiles, levels, steps, drainage and slip resistance requirement."
+ },
+ {
+  "id": "O-004",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "SELECTION/C",
+  "pre": "",
+  "text": "Roof, soffit, posts, screens, ceiling fan/heater and cladding finish direction."
+ },
+ {
+  "id": "O-005",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "REQUIREMENT/C",
+  "pre": "",
+  "text": "Outdoor lighting, power, gas/water/drain connections, sink/fridge/BBQ provisions."
+ },
+ {
+  "id": "O-006",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Driveway, paths, fences, gates, boundary wall, retaining, landscaping, turf and irrigation included?"
+ },
+ {
+  "id": "O-007",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Pool, outdoor shower, sauna, fire pit, shed or future additions by others?"
+ },
+ {
+  "id": "O-008",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "TECH/D",
+  "pre": "",
+  "text": "Balustrades, waterproofed balconies, drainage, structural spans, roof connections and consents to engineer/designer."
+ },
+ {
+  "id": "O-009",
+  "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+  "tags": "ACTION/C",
+  "pre": "",
+  "text": "Boundary, drainage, existing-to-new and staging/contract exclusion issues."
+ },
+ {
+  "id": "E-001",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "SITEWORKS",
+  "text": "Confirm survey, geotechnical assumptions, setout, cut/fill, retaining, spoil, truck/access, stormwater, contaminated material/trees; owner, document reference."
+ },
+ {
+  "id": "E-002",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "FOUNDATIONS",
+  "text": "Confirm footing/slab design, reinforcement, waterproofing, termite management, subfloor ventilation and ground levels; engineer/certifier responsibilities."
+ },
+ {
+  "id": "E-003",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "STRUCTURE",
+  "text": "Confirm framing material, roof/floor systems, engineered beams, steel, bracing, tie-down and temporary support; designer approval and issue revision."
+ },
+ {
+  "id": "E-004",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "WALLS",
+  "text": "Confirm brick/masonry/blocks, cladding substrate, fixing details, movement joints, cavity/ventilation, weep holes, lintel/flashings."
+ },
+ {
+  "id": "E-005",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "ROOFS",
+  "text": "Confirm pitch, sheet/tile type, roof drainage, penetrations, eaves, gutters/box gutters, downpipes, sarking/membrane and condensation strategy."
+ },
+ {
+  "id": "E-006",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "WINDOWS",
+  "text": "Confirm window ID, opening sizes, handing, frame/material/finish, energy/glass, safety/acoustic/BAL where applicable, screens, reveals, water management, schedule revisions."
+ },
+ {
+  "id": "E-007",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "DOORS",
+  "text": "Confirm internal/external door schedule, heights, widths, leaf type, jamb, seal, fire/acoustic where applicable, hardware/locksets, handles, garage motors."
+ },
+ {
+  "id": "E-008",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "ENVELOPE",
+  "text": "Confirm insulation continuity, vapour/water-control layers, thermal bridges, airtightness, ventilation and window/roof/slab junction detailing, performance evidence."
+ },
+ {
+  "id": "E-009",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "INTERNAL LININGS",
+  "text": "Confirm plasterboard/cement sheet, ceiling profiles, feature substrate, wet-area lining, cornice/setout, acoustic requirements."
+ },
+ {
+  "id": "E-010",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "WATERPROOFING",
+  "text": "Confirm wet-area substrate/falls, membrane, hobs, wastes, wet-area joinery junctions and balcony/external waterproofing system."
+ },
+ {
+  "id": "E-011",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "FLOOR FINISHES",
+  "text": "Confirm substrate preparation, moisture, level transitions, tile/stone/timber/hybrid/carpet product, underlay and installation requirements."
+ },
+ {
+  "id": "E-012",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "PAINT / FINISHES",
+  "text": "Confirm paint system, substrate, number of coats/colour/sheens and feature/timber/metal finishes."
+ },
+ {
+  "id": "E-013",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "JOINERY",
+  "text": "Confirm cabinet/shop drawings, panel/hinge/runner types, laminates, stone, tolerances, fixtures, service cutouts and approvals."
+ },
+ {
+  "id": "E-014",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "PLUMBING",
+  "text": "Confirm hot/cold water, roof/stormwater, sanitary/drainage, fixture rough-ins, hot water system and specialist supplier schedule revisions."
+ },
+ {
+  "id": "E-015",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "ELECTRICAL",
+  "text": "Confirm general power, RCD/switchboard, lighting legend, switches, data/AV, solar/EV/smart/security and exact fixture positions."
+ },
+ {
+  "id": "E-016",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "HVAC/VENT",
+  "text": "Confirm mechanical sizing, zones, duct/penetration routes, bathrooms/kitchen exhaust, makeup air and controls."
+ },
+ {
+  "id": "E-017",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "ENERGY/COMPLIANCE",
+  "text": "Confirm relevant NCC version, design energy assessment, approvals, special site conditions, thermal/glazing/fire/BAL ratings where applicable (all require qualified review, no guessed compliance)."
+ },
+ {
+  "id": "E-018",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D",
+  "pre": "EXTERNAL",
+  "text": "Confirm decking/substructure, external paving/slopes, balconies, decks/pergolas, retaining/fences, drainage and landscaping interfaces."
+ },
+ {
+  "id": "E-019",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D RENO",
+  "pre": "DEMOLITION",
+  "text": "Confirm strip-out extents, isolation/protection, temporary works, waste and disposal, latent hazard investigation, service alterations."
+ },
+ {
+  "id": "E-020",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/D RENO",
+  "pre": "EXISTING-TO-NEW",
+  "text": "Confirm roof/floor/wall/slab interface, levels, material matching or transition, damp/air/thermal continuity, structural differential movement and remedial making-good."
+ },
+ {
+  "id": "E-021",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/T",
+  "pre": "PROCUREMENT",
+  "text": "Identify long lead materials, owner supply versus Blue Leaf/trade supply and install, procurement schedule and warranty liabilities."
+ },
+ {
+  "id": "E-022",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/T",
+  "pre": "COST",
+  "text": "Confirm scope item priced/allowed/excluded against current drawings; source quote/date, quantity confidence, GST and contract-specific allowance classification."
+ },
+ {
+  "id": "E-023",
+  "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+  "tags": "TECH/T",
+  "pre": "DOC CONTROL",
+  "text": "Reconcile specification, supplier schedule, drawings and approved register versions to prevent cross-version tender errors."
+ },
+ {
+  "id": "M-001",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Who owns design coordination: client architect, Blue Leaf, other? Design deliverables and communication route."
+ },
+ {
+  "id": "M-002",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Who engages and pays each consultant, surveyor, certifier and authority? Record contract responsibility, not just contact."
+ },
+ {
+  "id": "M-003",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "SCOPE/D",
+  "pre": "",
+  "text": "Who sources, orders, stores and warrants each fixture/finish/major component? Who installs it? Avoid 'client supplied' ambiguity."
+ },
+ {
+  "id": "M-004",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "SCOPE/D",
+  "pre": "",
+  "text": "Which items are direct client costs, construction management fees, trade packages or excluded? Link commercial terms; do not invent pricing."
+ },
+ {
+  "id": "M-005",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "ACTION/D",
+  "pre": "",
+  "text": "What approvals/decisions can Blue Leaf give versus those requiring client/designer signature?"
+ },
+ {
+  "id": "M-006",
+  "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+  "tags": "SCOPE/C",
+  "pre": "",
+  "text": "Programme and interface responsibility between other trades and Blue Leaf; site access/occupation risks."
+ }
+]

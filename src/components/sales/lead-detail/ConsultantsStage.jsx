@@ -19,6 +19,7 @@ import ConsentSpine from "./ConsentSpine.jsx";
 import ConsultantComms from "./ConsultantComms.jsx";
 import PreconstructionPortalCard from "./PreconstructionPortalCard.jsx";
 import MeetingScheduler from "./MeetingScheduler.jsx";
+import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
 const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key) || { label: key, feeds: "none" };
@@ -33,7 +34,6 @@ Object.values(CONSULTANT_DELIVERABLES).flat().forEach((d) => { DELIVERABLE_LABEL
 export default function ConsultantsStage({ lead, patch, reload }) {
   const [contacts, setContacts] = useState([]);
   const [roster, setRoster] = useState(Array.isArray(lead.consultant_roster) ? lead.consultant_roster : []);
-  const [ff, setFf] = useState(Array.isArray(lead.selections_schedule) ? lead.selections_schedule : []);
   const [comms, setComms] = useState([]);
 
   useEffect(() => { apiFetch("/api/sales/consultants").then(({ ok, data }) => { if (ok) setContacts(data?.consultants || []); }); }, []);
@@ -81,12 +81,6 @@ export default function ConsultantsStage({ lead, patch, reload }) {
     saveRoster(roster.map((r) => ({ ...r, deliverables: delsOf(r).map((d) => (downstream.has(d.key) && isDoneStatus(d.status || "pending") ? { ...d, reissue: true } : d)) })));
   };
   const contactLabel = (c) => `${[c.firstName, c.lastName].filter(Boolean).join(" ")}${c.company ? ` — ${c.company}` : ""}`;
-
-  // ── Provisional F&F schedule (schedule thread v2) ─────────────────────────
-  function saveFf(next) { setFf(next); patch({ selections_schedule: next }); }
-  const addFf = () => saveFf([...ff, { area: "", item: "", supplier: "", notes: "" }]);
-  const editFf = (i, k, v) => saveFf(ff.map((r, ix) => (ix === i ? { ...r, [k]: v } : r)));
-  const delFf = (i) => saveFf(ff.filter((_, ix) => ix !== i));
 
   return (
     <div className="space-y-4">
@@ -185,31 +179,12 @@ export default function ConsultantsStage({ lead, patch, reload }) {
       {/* Planning Consent — lodged here (pre-contract), while Building Consent + DA wait for Won */}
       <ConsentSpine lead={lead} scope="planning" />
 
-      {/* Provisional F&F schedule (schedule thread v2) */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="section-label">Provisional fittings &amp; fixtures schedule</h3>
-          <button type="button" onClick={addFf} className="text-xs font-semibold text-primary hover:underline">+ Add row</button>
-        </div>
-        {ff.length === 0 ? (
-          <p className="text-xs text-muted">Carries the finishes from Concept. Issue the provisional F&amp;F to suppliers, then tick &ldquo;issued&rdquo; below.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {ff.map((r, i) => (
-              <div key={i} className="flex gap-1.5">
-                <input value={r.area || ""} onChange={(e) => editFf(i, "area", e.target.value)} placeholder="Area" className="w-24 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <input value={r.item || ""} onChange={(e) => editFf(i, "item", e.target.value)} placeholder="Item" className="flex-1 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <input value={r.supplier || ""} onChange={(e) => editFf(i, "supplier", e.target.value)} placeholder="Supplier" className="w-28 rounded-lg border border-hairline px-2 py-1 text-xs" />
-                <button type="button" onClick={() => delFf(i)} className="px-1.5 text-xs text-red-500 hover:text-red-700">×</button>
-              </div>
-            ))}
-          </div>
-        )}
-        <label className="mt-3 flex items-center gap-2 text-sm text-ink">
-          <input type="checkbox" className="w-4 h-4 accent-primary" checked={!!lead.provisional_ff_issued} onChange={(e) => patch({ provisional_ff_issued: e.target.checked })} />
-          Provisional F&amp;F schedule issued to suppliers
-        </label>
-      </div>
+      {/* Register — the same room-by-room records from Concept, now expanded for consultants (schedule thread) */}
+      <RegisterWorkshop lead={lead} patch={patch} stage="consultants" />
+      <label className="flex items-center gap-2 rounded-card border border-hairline bg-surface p-4 text-sm text-ink">
+        <input type="checkbox" className="h-4 w-4 accent-primary" checked={!!lead.provisional_ff_issued} onChange={(e) => patch({ provisional_ff_issued: e.target.checked })} />
+        Provisional F&amp;F schedule issued to suppliers
+      </label>
 
       {/* Exit → Tender: documents in · proposal generated · final presentation booked */}
       <div className="rounded-card border border-hairline bg-surface p-4 space-y-2">

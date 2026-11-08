@@ -139,7 +139,7 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
     if (!form.site_address.trim()) { setErr("Site address is required."); return; }
     setBusy(true); setErr("");
     try {
-      const body = { ...form, lead_type: "architect_tender", stage: "accepted", lead_source: "referral" };
+      const body = { ...form, lead_type: "architect_tender", stage: LEAD_STAGES.TENDER, lead_source: "referral" };
       if (body.estimated_value) body.estimated_value = parseFloat(body.estimated_value) || null;
       else delete body.estimated_value;
       const r = await authFetch("/api/sales/leads", {
@@ -167,7 +167,7 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
         <div className="flex items-center justify-between border-b border-hairline px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-ink">Architect Tender</h2>
-            <p className="mt-0.5 text-xs text-muted">Fast-tracked to Accepted — skips qualifying &amp; fee proposal</p>
+            <p className="mt-0.5 text-xs text-muted">Enters at Tender — skips concept, PTSA &amp; fee proposal</p>
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-muted hover:text-ink">×</button>
         </div>

@@ -37,6 +37,10 @@ export const FACT_REGISTRY = [
     store: { table: "jobs", column: "client_name" }, consumers: ["finance", "portal", "marketing"] },
   { key: "project_type", label: "Project type", family: "identity", spine: "job", type: "versioned", tier: "consequential",
     store: { table: "jobs", column: "project_type" }, consumers: ["whs", "schedule", "cost", "reporting"] },
+  // Commercial delivery (design & build / build only / construction management / other) — separate from
+  // the physical project_type. Drives responsibility wording + the management overlay (Master Register, mig 213).
+  { key: "delivery_model", label: "Delivery model", family: "identity", spine: "job", type: "versioned", tier: "consequential",
+    store: { table: "jobs", column: "delivery_model" }, consumers: ["register", "documents", "contract"] },
   { key: "architect_name", label: "Architect", family: "relationships", spine: "job", type: "versioned", tier: "internal",
     store: { table: "jobs", column: "architect_name" }, consumers: ["fee_proposal", "whs", "marketing"] },
   { key: "client_email", label: "Client email", family: "relationships", spine: "job", type: "versioned", tier: "consequential",
