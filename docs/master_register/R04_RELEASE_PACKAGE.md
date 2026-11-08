@@ -11,6 +11,26 @@ client email or portal invite happens without your explicit approval of the spec
 
 ---
 
+## 0. Second independent-review response (2026-11-09)
+ChatGPT's follow-up review of the branch at `aaf2b82` raised six correction items. All addressed on the branch
+(separate commits, pushed); nothing merged/deployed/migrated.
+1. **[P1 — fixed] Document actions must require a successful save.** `openPreview`/`issue`/`openPack` ignored
+   `flush()`'s result — a failed/conflicted save could still preview or **issue a controlled document from
+   stale data**. Fixed both client-side (`flushAll` awaits in-flight save + confirms clean; actions stop on
+   failure with a clear message, edits kept) and server-side (preview returns a content fingerprint; issue
+   refuses `409 ISSUE_STALE` before any write if the register changed). New `register-issue-stale` 7/7.
+2. **[done] Slice 5 browser verification** — Kitchen + Bathroom observed live; all room families covered by the
+   33/33 unit test. See `R04_BROWSER_VERIFICATION.md`.
+3. **[partial — honestly scoped] Independent client/staff pilot** — single-operator staff checks done + issued
+   PDF/DOCX retrieval incl. superseded revisions observed; two-party client flows left for the independent
+   pilot and named as such (not claimed as done).
+4. **[done] Migration reconciliation** — `PRODUCTION_PREFLIGHT_SQL_EDITOR.sql` (no `\echo`; pg_catalog column
+   checks so a non-owner role can't mis-read), `R04_MIGRATION_EXECUTION.md` (ordered 212–216 table), PILOT_SEQUENCE
+   now includes 215/216. Migration status is "to confirm via preflight", never asserted without prod access.
+5. **[documented] Backup & production readiness** — `R04_PRODUCTION_READINESS.md` (PITR/restore, Railway/Vercel/
+   Supabase, env + flags, known-good version, rollback, smoke tests); the backup/PITR confirmation is owner-only.
+6. **This package + the PR description** updated to the actual state.
+
 ## 1. Scope of this release
 Master Register R02→R04 + the document engine, as one PR. It adds a room-by-room project brief inside the
 existing Sales pipeline, promotes it once into canonical project records (`client_selections` /
@@ -46,16 +66,19 @@ employee UX, document classification, handover state) — **corrections, not a r
   (214 standalone first; 212→213 on staging then prod; 215/216 with 212/213). Production prerequisite state
   is unverified — see §12.
 
-## 4. Test evidence (actually executed, 2026-11-08, against the isolated sandbox)
+## 4. Test evidence (actually executed, 2026-11-08/09, against the isolated sandbox)
 | Suite | Kind | Result |
 |---|---|---|
 | `register-room-prompts` | pure unit (Slice 5) | **33 / 33** |
+| `register-issue-stale` | DB failure-injection (review §1) | **7 / 7** |
 | `register-selection-readiness` | DB (Slice 1) | **23 / 23** |
 | `register-handover-status` | DB (Slice 6) | **15 / 15** |
 | `register-e2e` | DB end-to-end (3 seeded projects, 9+ flows) | **70 / 70** |
 - `npm run lint` — clean (zero-warnings policy). `npm run build` — production build succeeds, PWA generated.
 - All suites were **run**, not inspected. The sandbox has no mail/Xero/Cal/Dropbox keys → all external side
   effects are inert.
+- Browser-observed outcomes (separate from the above) are recorded in **`R04_BROWSER_VERIFICATION.md`** — a
+  single-operator staff walkthrough, explicitly **not** a full two-party pilot.
 
 ## 5. Independent review (Phase 2+4) — not self-certified
 A separate multi-agent pass reviewed the 96-file diff (one reviewer per slice + a migrations/standards
@@ -111,8 +134,10 @@ destructive — prefer the kill-switch.
    e2e flows). Independent human/ChatGPT walkthrough still recommended before Gate 4.
 
 ## 13. GO / NO-GO
-- **No NO-GO blocker in the code:** no P0, no data-integrity defect, no isolation/security gap outstanding; all
-  7 review findings fixed and tested; lint + build green; scope clean; ships dark.
+- **No NO-GO blocker in the code:** the first review's 7 findings **and** the second review's §1 data-integrity
+  P1 (issue-from-stale-data) are all fixed and tested; no P0, data-integrity or isolation/security defect remains
+  outstanding; lint + build green; scope clean; ships dark. (The §1 P1 is a reminder the review loop is working —
+  it was a real defect my own pass missed; it is now closed with a failure-injection test.)
 - **GO is conditional on two owner-only preconditions (§12.1, §12.2):** the production preflight passes, and a
   restore-tested backup is in place. Until both are confirmed, migrations must not be applied.
 
