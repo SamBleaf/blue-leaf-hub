@@ -1107,7 +1107,17 @@ export function registerSalesRoutes(app) {
       if (!error) return ok(res, { project: proj ? rowToCamel(proj) : null, columnMissing: true });
     }
     if (error) return err(res, 400, translateDbError(error));
-    ok(res, { project: proj ? rowToCamel(proj) : null });
+    // Separate the portal lifecycle: a configured project / client email is NOT the same as an INVITE
+    // having been sent, nor the client having ONBOARDED. Invite = project_client_users.invited_at;
+    // onboarded = invite_accepted_at. (No auto-invite anywhere; invites are sent deliberately from Portal Admin.)
+    let clientLink = null;
+    if (proj?.id) {
+      const { data: link } = await sb.from("project_client_users")
+        .select("invited_at, invite_accepted_at").eq("project_id", proj.id).eq("is_active", true)
+        .order("invite_accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      clientLink = link || null;
+    }
+    ok(res, { project: proj ? rowToCamel(proj) : null, clientInvited: !!clientLink?.invited_at, clientOnboarded: !!clientLink?.invite_accepted_at });
   });
 
   app.post("/api/sales/leads/:id/preconstruction-portal", requireAuth, async (req, res) => {

@@ -13,12 +13,19 @@ import { Chip, Section } from "./ui.jsx";
 
 export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseline }) {
   const [baseline, setBaseline] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [picked, setPicked] = useState(null);
   const load = useCallback(async () => {
-    const r = await apiFetch(`/api/register/leads/${lead.id}/baseline`);
-    if (r.ok) { setBaseline(r.data.baseline); onBaseline?.(r.data.baseline); }
+    const [b, s] = await Promise.all([
+      apiFetch(`/api/register/leads/${lead.id}/baseline`),
+      apiFetch(`/api/register/leads/${lead.id}/handover-status`),
+    ]);
+    if (b.ok) { setBaseline(b.data.baseline); onBaseline?.(b.data.baseline); }
+    if (s.ok) setStatus(s.data.status);
+    setLoaded(true);
   }, [lead.id, onBaseline]);
   useEffect(() => { load(); }, [load]);
 
@@ -55,12 +62,36 @@ export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseli
   return (
     <div className="space-y-3">
       {msg && <p className={`rounded border p-2 text-[11px] ${msg.tone === "green" ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-700"}`} data-testid="handover-message">{msg.text}</p>}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
-        <Tile label="Building contract" value={contractSigned ? "Signed" : lead.contract_status || "Not signed"} ok={contractSigned} />
-        <Tile label="Project record" value={info.mode === "project" ? (info.isPreconstruction ? "Pre-construction" : "Live (Operations)") : "Not yet created"} ok={info.mode === "project"} />
-        <Tile label="Contract baseline" value={baseline ? `${baseline.revision} · ${new Date(baseline.issuedAt).toLocaleDateString("en-AU")}` : "Not recorded"} ok={!!baseline} />
-        <Tile label="Open items carried forward" value={String(open.length)} ok />
-      </div>
+      {!loaded ? (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+          {["Building contract", "Project record", "Contract baseline", "Ops handover"].map((l) => <Tile key={l} label={l} value="Checking…" loading />)}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+            <Tile label="Building contract" value={status?.contract.signed ? "Signed" : (status?.contract.status || "Not signed")} ok={!!status?.contract.signed} />
+            <Tile label="Project record"
+              value={status?.project.status === "live" ? "Live (Operations)" : status?.project.status === "preconstruction" ? "Pre-construction" : "Not yet created"}
+              ok={status?.project.status === "live"} />
+            <Tile label="Contract baseline" value={status?.baseline.recorded ? `${status.baseline.revision} · ${new Date(status.baseline.at).toLocaleDateString("en-AU")}` : "Not recorded"} ok={!!status?.baseline.recorded} />
+            <Tile label="Ops handover" value={status?.opsHandover.ready ? "Ops Ready" : status?.opsHandover.applicable ? `${status.opsHandover.done}/${status.opsHandover.total}` : "—"} ok={!!status?.opsHandover.ready} />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+            <span className="uppercase tracking-wide text-muted">Client portal:</span>
+            <StateChip on={status?.portal.configured} label="configured" />
+            <StateChip on={status?.portal.v2Enabled} label="v2 enabled" />
+            <StateChip on={status?.portal.clientLinked} label={status?.portal.clientEmail ? `client linked (${status.portal.clientEmail})` : "client linked"} />
+            <StateChip on={status?.portal.invited} label="invited" />
+            <StateChip on={status?.portal.onboarded} label="onboarded" />
+            <span className="ml-auto text-muted">{open.length} open item(s) carried forward</span>
+          </div>
+          {status?.nextAction && (
+            <p className="rounded border border-primary/20 bg-primary/[0.04] px-2 py-1 text-[11px] text-primary" data-testid="handover-next">
+              <span className="font-semibold">Next: </span>{status.nextAction.label} <span className="text-primary/70">({status.nextAction.owner})</span>
+            </p>
+          )}
+        </>
+      )}
 
       <Section title="1 · Record the contract baseline" defaultOpen>
         <p className="text-[11px] text-muted">Snapshots the agreed scope, applicable selections, exclusions, drawing basis, reviewed allowances and current issued documents. It is permanent; later changes go through variations and show here as changes since the baseline.</p>
@@ -94,11 +125,19 @@ export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseli
   );
 }
 
-function Tile({ label, value, ok }) {
+function Tile({ label, value, ok, loading }) {
   return (
-    <div className={`rounded-lg border px-3 py-2 ${ok ? "border-hairline bg-page" : "border-amber-200 bg-amber-50"}`}>
+    <div className={`rounded-lg border px-3 py-2 ${loading ? "border-hairline bg-page animate-pulse" : ok ? "border-hairline bg-page" : "border-amber-200 bg-amber-50"}`}>
       <p className="text-[10px] uppercase tracking-wide text-muted">{label}</p>
-      <p className="text-xs font-semibold text-ink">{value}</p>
+      <p className={`text-xs font-semibold ${loading ? "text-muted" : "text-ink"}`}>{value}</p>
     </div>
+  );
+}
+
+function StateChip({ on, label }) {
+  return (
+    <span className={`rounded-full px-1.5 py-0.5 font-semibold ${on ? "bg-green-100 text-green-700" : "border border-hairline bg-page text-muted"}`}>
+      {on ? "✓ " : "○ "}{label}
+    </span>
   );
 }

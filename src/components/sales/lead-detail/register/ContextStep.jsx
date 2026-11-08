@@ -5,7 +5,7 @@
 import { useState } from "react";
 import {
   makeRoom, ROOM_TYPES, ROOM_SCOPES, DELIVERY_MODELS, PROJECT_TYPE_LABELS, isRenovationProject, promptsFor,
-  questionById, resolvePromptId,
+  questionById, resolvePromptId, siteLine,
 } from "../../../../lib/register.js";
 import { PROJECT_TYPES, STAGES } from "../../../../lib/salesPipeline.js";
 import { Chip, Field, Section, Select } from "./ui.jsx";
@@ -79,7 +79,7 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
           <>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
               <Fact label="Client" id="P-001" value={context.identity.clientName} />
-              <Fact label="Site" id="P-001" value={[context.identity.siteAddress, context.identity.suburb].filter(Boolean).join(", ")} />
+              <Fact label="Site" id="P-001" value={siteLine(context.identity.siteAddress, context.identity.suburb)} />
               <Fact label="Project type" id="P-007">
                 {projectType ? PROJECT_TYPE_LABELS[projectType] || projectType : (
                   <select value="" disabled={readOnly} onChange={(e) => patchLead({ project_type: e.target.value || null })} className="inp text-[11px]">

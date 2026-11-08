@@ -376,6 +376,14 @@ export function makeItem(partial = {}) {
 }
 
 /** A fresh register meta block. */
+/** Site line that never repeats the suburb when the address already contains it (R04 P2). */
+export function siteLine(address, suburb) {
+  const a = String(address || "").trim();
+  const s = String(suburb || "").trim();
+  if (!s || a.toLowerCase().includes(s.toLowerCase())) return a;
+  return a ? `${a}, ${s}` : s;
+}
+
 export function emptyMeta(partial = {}) {
   return {
     kind: "meta",

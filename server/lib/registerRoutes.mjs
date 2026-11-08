@@ -23,7 +23,7 @@ import { loadRegisterContext, setDeliveryModel } from "./registerContext.mjs";
 import {
   previewDocument, issueDocument, listDocuments, documentUrl, supplierPack, addSourceDocument, updateSourceDocument,
 } from "./registerDocuments.mjs";
-import { tenderSummary, latestBaseline, recordBaseline } from "./registerHandover.mjs";
+import { tenderSummary, latestBaseline, recordBaseline, handoverStatus } from "./registerHandover.mjs";
 
 async function actorFor(sb, caller) {
   if (!caller) return null;
@@ -200,6 +200,15 @@ export function registerRegisterRoutes(app) {
     if (!sb) return err(res, 503, "Database not configured.");
     try { ok(res, { baseline: await latestBaseline(sb, req.params.leadId) }); }
     catch (e) { sendRegisterError(res, e, "Could not read the baseline."); }
+  });
+
+  // One server-grounded handover/portal status (contract · baseline · project · Ops handover · portal) +
+  // the single next action. The UI reads this instead of re-inferring the states from scattered fields.
+  app.get(`${base}/handover-status`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try { ok(res, { status: await handoverStatus(sb, req.params.leadId) }); }
+    catch (e) { sendRegisterError(res, e, "Could not load the handover status."); }
   });
 
   app.post(`${base}/baseline`, requireAuth, async (req, res) => {

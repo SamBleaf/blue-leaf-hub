@@ -16,6 +16,7 @@ import { createHash, randomBytes } from "crypto";
 import { loadRegister } from "./registerStore.mjs";
 import { loadRegisterContext } from "./registerContext.mjs";
 import { DocumentError } from "./registerDocuments.mjs";
+import { OPS_READY_ITEMS } from "../../src/lib/constants.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, INCLUDED_DISPOSITIONS, dispositionLabel, categoryLabel,
   QUESTION_LIBRARY_VERSION,
@@ -89,6 +90,76 @@ export async function latestBaseline(sb, leadId) {
   if (error || !data) return null;
   return { id: data.id, version: data.version, revision: data.revision_label, issuedAt: data.issued_at, issuedBy: data.issued_by_name,
     itemVersions: data.source_snapshot?.itemVersions || {}, contractStatus: data.source_snapshot?.contractStatus || null };
+}
+
+/**
+ * handoverStatus — the ONE server-grounded derivation of the distinct handover / portal states, so no UI
+ * component re-infers a business state from scattered fields. Everything is DERIVED from the canonical
+ * records (leads.contract_status / won_substatus / ops_ready_checklist, the projects row, the register
+ * baseline, project_client_users) — no new status table. The five states are independent and never
+ * interchangeable: a signed CONTRACT ≠ a recorded BASELINE ≠ project OPERATIONAL status ≠ OPS-READY
+ * handover ≠ the PORTAL lifecycle (configured → v2-enabled → client-linked → invited → onboarded).
+ */
+export async function handoverStatus(sb, leadId) {
+  const { data: lead } = await sb.from("leads")
+    .select("id, job_id, stage, contract_status, won_substatus, ops_ready_checklist")
+    .eq("id", leadId).maybeSingle();
+  if (!lead) return null;
+
+  let project = null, clientLink = null;
+  if (lead.job_id) {
+    const cols = "id, is_preconstruction, portal_v2_enabled, portal_enabled, portal_client_email, portal_client_name, build_phase";
+    let { data: p, error } = await sb.from("projects").select(cols).eq("job_id", lead.job_id).maybeSingle();
+    if (error && error.code === "42703") { ({ data: p } = await sb.from("projects").select("id, portal_client_email").eq("job_id", lead.job_id).maybeSingle()); }
+    project = p || null;
+    if (project) {
+      const { data: link } = await sb.from("project_client_users")
+        .select("user_id, is_active, invited_at, invite_accepted_at")
+        .eq("project_id", project.id).eq("is_active", true)
+        .order("invite_accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      clientLink = link || null;
+    }
+  }
+  const baseline = await latestBaseline(sb, leadId);
+
+  const contractSigned = lead.contract_status === "signed";
+  const checklist = (lead.ops_ready_checklist && typeof lead.ops_ready_checklist === "object") ? lead.ops_ready_checklist : {};
+  const autoDone = { job_created: !!lead.job_id, contract_signed: contractSigned };
+  const opsItems = OPS_READY_ITEMS.map((it) => ({ key: it.key, label: it.label, done: it.auto ? !!autoDone[it.auto] : !!checklist[it.key] }));
+  const opsReady = lead.won_substatus === "ops_ready";
+  const projectStatus = !project ? "none" : (project.is_preconstruction === false ? "live" : "preconstruction");
+
+  const portal = {
+    configured: !!project,
+    v2Enabled: !!project?.portal_v2_enabled,
+    clientLinked: !!(project?.portal_client_email || clientLink),
+    clientEmail: project?.portal_client_email || null,
+    invited: !!clientLink?.invited_at,
+    onboarded: !!clientLink?.invite_accepted_at,
+  };
+
+  // The single next action when the handover is incomplete (owner in parens). Policy: never auto-invite;
+  // the portal invite is a deliberate, staff-approved step AFTER the contract and handover, from Portal Admin.
+  let nextAction = null;
+  if (projectStatus === "none") nextAction = { label: "Create the project record (win the lead, or set up the pre-construction portal)", owner: "Blue Leaf" };
+  else if (!contractSigned) nextAction = { label: "Record the signed building contract", owner: "Blue Leaf" };
+  else if (!baseline) nextAction = { label: "Record the contract baseline", owner: "Blue Leaf" };
+  else if (lead.stage === "won" && !opsReady) {
+    const remaining = opsItems.filter((i) => !i.done).map((i) => i.label);
+    nextAction = remaining.length
+      ? { label: `Finish the Ops-Ready handoff — ${remaining.length} left (${remaining.slice(0, 2).join("; ")}${remaining.length > 2 ? "…" : ""})`, owner: "Blue Leaf" }
+      : { label: "Mark the handoff Ops Ready to hand over to Operations", owner: "Blue Leaf" };
+  } else if (!portal.invited) nextAction = { label: "Invite the client from Portal Admin (deliberate, after staff approval)", owner: "Blue Leaf" };
+  else if (!portal.onboarded) nextAction = { label: "Client to accept the invitation and sign in to the portal", owner: "Client" };
+
+  return {
+    contract: { signed: contractSigned, status: lead.contract_status || null },
+    baseline: baseline ? { recorded: true, revision: baseline.revision, at: baseline.issuedAt } : { recorded: false },
+    project: { exists: !!project, status: projectStatus },        // none | preconstruction | live
+    opsHandover: { applicable: lead.stage === "won", ready: opsReady, done: opsItems.filter((i) => i.done).length, total: opsItems.length, remaining: opsItems.filter((i) => !i.done).map((i) => i.label) },
+    portal,
+    nextAction,
+  };
 }
 
 /**

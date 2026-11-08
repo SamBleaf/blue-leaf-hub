@@ -8,7 +8,7 @@
  * Sales facts (client, site, type, budget, consultants, drawings) are shown read-only and never re-asked.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { resumePointer, outstandingItems, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
+import { resumePointer, outstandingItems, siteLine, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
 import { STAGES } from "../../../../lib/salesPipeline.js";
 import { apiFetch, apiPut } from "../../../../lib/apiFetch.js";
 import { useAuth } from "../../../../lib/useAuth.js";
@@ -119,9 +119,12 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   }
 
   const rooms = reg?.meta.rooms || [];
+  // The badge states the OPERATIONAL status of the record only — never "under contract" (that's a separate
+  // state derived from the signed contract + baseline, shown truthfully in the Handover step). A Won-flipped
+  // live project is not necessarily under a signed contract, so we don't imply it here.
   const modeBadge = info.mode === "project"
-    ? (info.isPreconstruction ? { t: "Project record", c: "bg-primary/10 text-primary", h: "Saved to the canonical project records (pre-construction). Selections stay internal until issued." }
-      : { t: "Project record · under contract", c: "bg-green-100 text-green-700", h: "Live project — approved selections change through variations." })
+    ? (info.isPreconstruction ? { t: "Project record · pre-construction", c: "bg-primary/10 text-primary", h: "Saved to the canonical project records (pre-construction). Selections stay internal until issued. Contract / baseline / handover status is in the Handover step." }
+      : { t: "Project record · live (Operations)", c: "bg-primary/10 text-primary", h: "Live Operations project — approved selections change through variations. Contract, baseline, Ops-ready handover and portal status are shown in the Handover step." })
     : { t: "Lead brief", c: "bg-page text-muted", h: "Saved on the lead until a project record exists, then moved onto it automatically." };
   const saveText = { idle: "", dirty: "Unsaved…", saving: "Saving…", saved: save.at ? `Saved ${save.at.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}` : "Saved", error: save.message || "Save failed", rejected: save.message || "Change rejected — not saved", conflict: save.message || "Changed elsewhere — review" }[save.state];
 
@@ -135,7 +138,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
       {expanded && (
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-hairline bg-surface px-4 py-2 text-[11px]">
           <span className="font-semibold text-ink">{context?.identity?.clientName || lead.name || "This project"}</span>
-          {context?.identity?.siteAddress && <span className="text-muted">{[context.identity.siteAddress, context.identity.suburb].filter(Boolean).join(", ")}</span>}
+          {context?.identity?.siteAddress && <span className="text-muted">{siteLine(context.identity.siteAddress, context.identity.suburb)}</span>}
           <span className="text-muted">Stage: {STAGES.find((s) => s.id === context?.stage)?.label || stage}</span>
           <span className="text-muted">Drawings: {reg?.meta.planRev || "—"}</span>
           <button type="button" onClick={() => setExpanded(false)} className="ml-auto rounded border border-hairline px-2 py-0.5 text-ink hover:bg-page" data-testid="register-exit-expand">Exit full width ✕</button>
