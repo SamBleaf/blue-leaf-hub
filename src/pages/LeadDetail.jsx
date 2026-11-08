@@ -2031,7 +2031,7 @@ export default function LeadDetail() {
   const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
                 <p className="text-xs font-bold text-primary uppercase tracking-wide">Architect Tender</p>
-                <p className="text-xs text-muted mt-0.5">Fast-tracked to Accepted — qualifying and fee proposal skipped.</p>
+                <p className="text-xs text-muted mt-0.5">Enters at Tender — concept, PTSA and fee proposal skipped.</p>
               </div>
   );
 

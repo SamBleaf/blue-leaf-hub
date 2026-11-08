@@ -83,8 +83,14 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   }
 
   async function openFile(id, exportDocx) {
+    // Reserve the tab synchronously (popup-safe) BEFORE the await, then root the signed URL at the ORIGIN
+    // (not the current /sales/leads/<id> route) so a root-relative storage path resolves to https://host/sb/…
+    // and never falls into the SPA catch-all that would show Hub Home. An absolute URL passes through unchanged.
+    const win = window.open("about:blank", "_blank", "noopener");
     const r = await apiFetch(`/api/register/leads/${lead.id}/documents/${id}/url${exportDocx ? "?export=docx" : ""}`);
-    if (r.ok) window.open(r.data.url, "_blank", "noopener"); else setMsg({ tone: "red", text: r.error });
+    if (!r.ok) { win?.close(); setMsg({ tone: "red", text: r.error || "Could not open the document." }); return; }
+    let href; try { href = new URL(r.data.url, window.location.origin).href; } catch { href = r.data.url; }
+    if (win) win.location.href = href; else window.open(href, "_blank", "noopener");
   }
   async function openPack(discipline) {
     setBusy(true); setMsg(null);
