@@ -76,15 +76,22 @@ async function main() {
   const { data: loweLink } = await svc.from("project_client_users").select("user_id").eq("project_id", "f4de74e9-26ce-4ae4-b45e-3991d3e36256").limit(1).maybeSingle();
   const clientId = loweLink?.user_id;
   await svc.from("projects").update({ portal_client_email: "client.sandbox@blueleaf.test" }).eq("id", proj.id);
-  await svc.from("project_client_users").insert({ project_id: proj.id, user_id: clientId, role: "primary", is_active: true, invited_at: new Date().toISOString() });
+  // Invite SENT = a non-revoked client `invitations` row — and, crucially, NO project_client_users row yet
+  // (that is only created when the client accepts). This mirrors authRoutes.mjs's real invite-send path and
+  // is the state the previous test wrongly simulated with a project_client_users.invited_at row.
+  const inviteToken = `tok-${MARK}`;
+  await svc.from("invitations").insert({ email: "client.sandbox@blueleaf.test", role: "client", token: inviteToken, project_id: proj.id, expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString() });
   s = await status(staff, L);
-  ok("invited (but not onboarded) → next = client to accept", s?.portal.invited === true && s.portal.onboarded === false && s.nextAction?.owner === "Client", JSON.stringify(s?.nextAction));
+  ok("invited via invitations row (no project_client_users yet) → invited=true, not onboarded, next = client to accept", s?.portal.invited === true && s.portal.onboarded === false && s.nextAction?.owner === "Client", JSON.stringify({ invited: s?.portal.invited, onboarded: s?.portal.onboarded, next: s?.nextAction }));
 
-  await svc.from("project_client_users").update({ invite_accepted_at: new Date().toISOString() }).eq("project_id", proj.id).eq("user_id", clientId);
+  // Client accepts → the accept path creates the project_client_users row and stamps the invitation accepted.
+  await svc.from("invitations").update({ accepted_at: new Date().toISOString() }).eq("token", inviteToken);
+  await svc.from("project_client_users").insert({ project_id: proj.id, user_id: clientId, role: "primary", is_active: true, invited_at: new Date().toISOString(), invite_accepted_at: new Date().toISOString() });
   s = await status(staff, L);
-  ok("onboarded → no outstanding next action (fully handed over)", s?.portal.onboarded === true && !s.nextAction, JSON.stringify(s?.nextAction));
+  ok("onboarded → invited stays true + no outstanding next action (fully handed over)", s?.portal.invited === true && s.portal.onboarded === true && !s.nextAction, JSON.stringify(s?.nextAction));
 
   // ── cleanup ─────────────────────────────────────────────────────────────────────────────────────
+  await svc.from("invitations").delete().eq("project_id", proj.id);
   await svc.from("project_client_users").delete().eq("project_id", proj.id);
   await svc.from("lead_documents").delete().eq("lead_id", L);
   await svc.from("client_selections").delete().eq("project_id", proj.id);

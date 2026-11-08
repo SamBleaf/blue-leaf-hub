@@ -1108,16 +1108,22 @@ export function registerSalesRoutes(app) {
     }
     if (error) return err(res, 400, translateDbError(error));
     // Separate the portal lifecycle: a configured project / client email is NOT the same as an INVITE
-    // having been sent, nor the client having ONBOARDED. Invite = project_client_users.invited_at;
-    // onboarded = invite_accepted_at. (No auto-invite anywhere; invites are sent deliberately from Portal Admin.)
-    let clientLink = null;
+    // having been sent, nor the client having ONBOARDED. "Invite sent" = a non-revoked client `invitations`
+    // row (a project_client_users row is only created when the client ACCEPTS, so it is NOT an invited-sent
+    // signal). Onboarded = project_client_users.invite_accepted_at. (No auto-invite; invites are deliberate.)
+    let clientLink = null, inviteLive = false;
     if (proj?.id) {
       const { data: link } = await sb.from("project_client_users")
         .select("invited_at, invite_accepted_at").eq("project_id", proj.id).eq("is_active", true)
         .order("invite_accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       clientLink = link || null;
+      const { data: inv } = await sb.from("invitations")
+        .select("accepted_at, revoked_at, expires_at").eq("project_id", proj.id).eq("role", "client").is("revoked_at", null)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      inviteLive = !!inv && (!!inv.accepted_at || (inv.expires_at ? new Date(inv.expires_at) > new Date() : true));
     }
-    ok(res, { project: proj ? rowToCamel(proj) : null, clientInvited: !!clientLink?.invited_at, clientOnboarded: !!clientLink?.invite_accepted_at });
+    const onboarded = !!clientLink?.invite_accepted_at;
+    ok(res, { project: proj ? rowToCamel(proj) : null, clientInvited: onboarded || inviteLive, clientOnboarded: onboarded });
   });
 
   app.post("/api/sales/leads/:id/preconstruction-portal", requireAuth, async (req, res) => {

@@ -106,7 +106,7 @@ export async function handoverStatus(sb, leadId) {
     .eq("id", leadId).maybeSingle();
   if (!lead) return null;
 
-  let project = null, clientLink = null;
+  let project = null, clientLink = null, inviteLive = false;
   if (lead.job_id) {
     const cols = "id, is_preconstruction, portal_v2_enabled, portal_enabled, portal_client_email, portal_client_name, build_phase";
     let { data: p, error } = await sb.from("projects").select(cols).eq("job_id", lead.job_id).maybeSingle();
@@ -118,6 +118,15 @@ export async function handoverStatus(sb, leadId) {
         .eq("project_id", project.id).eq("is_active", true)
         .order("invite_accepted_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       clientLink = link || null;
+      // "Invited" = an invite was actually SENT. The real signal is a client `invitations` row — a
+      // `project_client_users` row is only created when the client ACCEPTS, so it is NOT an invited-sent signal
+      // (reading it as one makes every invited-but-not-yet-signed-in client look "not invited"). A live invite
+      // is a non-revoked client invite that is still valid (not expired) or already accepted.
+      const { data: inv } = await sb.from("invitations")
+        .select("accepted_at, revoked_at, expires_at")
+        .eq("project_id", project.id).eq("role", "client").is("revoked_at", null)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      inviteLive = !!inv && (!!inv.accepted_at || (inv.expires_at ? new Date(inv.expires_at) > new Date() : true));
     }
   }
   const baseline = await latestBaseline(sb, leadId);
@@ -129,13 +138,14 @@ export async function handoverStatus(sb, leadId) {
   const opsReady = lead.won_substatus === "ops_ready";
   const projectStatus = !project ? "none" : (project.is_preconstruction === false ? "live" : "preconstruction");
 
+  const onboarded = !!clientLink?.invite_accepted_at;   // the client has actually signed in / accepted
   const portal = {
     configured: !!project,
     v2Enabled: !!project?.portal_v2_enabled,
     clientLinked: !!(project?.portal_client_email || clientLink),
     clientEmail: project?.portal_client_email || null,
-    invited: !!clientLink?.invited_at,
-    onboarded: !!clientLink?.invite_accepted_at,
+    invited: onboarded || inviteLive,                   // sent (live invite) OR already onboarded — never read from project_client_users alone
+    onboarded,
   };
 
   // The single next action when the handover is incomplete (owner in parens). Policy: never auto-invite;
