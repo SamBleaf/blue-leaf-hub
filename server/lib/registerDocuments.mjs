@@ -125,10 +125,12 @@ function clientBriefFixture(input) {
     sentence(context.goals.description || context.goals.vision || `${fx.project.projectDescription} for ${fx.project.clientName}`),
     clean([context.deliveryModel ? `Delivery model: ${DELIVERY_MODELS[context.deliveryModel]}.` : "", occupancy].join(" ")),
   ].filter(Boolean);
-  const scopeIn = items.filter((i) => i.itemKind === "scope" && (INCLUDED_DISPOSITIONS.has(i.disposition) || i.disposition === "retain") && (i.description || i.disposition !== "undecided"))
-    .map((i) => `${area(i)}: ${clean(i.description) || dispositionLabel(i.disposition)}${i.disposition === "retain" ? " (existing to remain)" : i.disposition === "remove" ? " (remove)" : i.disposition === "make_good" ? " (make good)" : ""}`);
-  const scopeOut = items.filter((i) => ["excluded", "by_others", "deferred"].includes(i.disposition))
-    .map((i) => `${area(i)}: ${clean(i.description) || itemShort(i)} — ${dispositionLabel(i.disposition)}`);
+  // DOC1b (R04): "Included" is scope of WORKS only. Retained fabric ("existing to remain") is a scope
+  // BOUNDARY, so it belongs under "Not in the current scope", not conflated with demolition under Included.
+  const scopeIn = items.filter((i) => i.itemKind === "scope" && INCLUDED_DISPOSITIONS.has(i.disposition) && (i.description || i.disposition !== "undecided"))
+    .map((i) => `${area(i)}: ${clean(i.description) || dispositionLabel(i.disposition)}${i.disposition === "remove" ? " (remove)" : i.disposition === "make_good" ? " (make good)" : ""}`);
+  const scopeOut = items.filter((i) => ["excluded", "by_others", "deferred", "retain"].includes(i.disposition))
+    .map((i) => `${area(i)}: ${clean(i.description) || itemShort(i)} — ${i.disposition === "retain" ? "existing to remain" : dispositionLabel(i.disposition)}`);
   const groups = new Map();
   for (const i of items.filter((x) => isClientSelection(x) && ["preference", "proposed", "client_approved"].includes(x.certainty) && (x.description || x.product))) {
     const g = docGroupFor(i.category) === "General" ? "Internal Finishes" : docGroupFor(i.category);
@@ -139,6 +141,14 @@ function clientBriefFixture(input) {
   if (perf.length) groups.set("Performance & comfort", perf.slice(0, 8));
   const open = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
     .filter((i) => !["architect", "consultant", "trade"].includes(i.responsibility))
+    // DOC1a (R04): a selection already captured as a design DIRECTION (preference / proposed / approved)
+    // is NOT a required client action — it belongs in §02 "Design direction", not §03 "Key questions" —
+    // UNLESS it carries an explicit, unresolved next action (e.g. the genuine "confirm the appliance" ask).
+    .filter((i) => {
+      const hasDirection = isClientSelection(i) && ["preference", "proposed", "client_approved"].includes(i.certainty) && (i.description || i.product);
+      const openAction = !!(i.nextAction && i.nextAction.trim()) && !i.resolved;
+      return !hasDirection || openAction;
+    })
     .sort((a, b) => (a.responsibility === "client" ? -1 : 0) - (b.responsibility === "client" ? -1 : 0)).slice(0, 7);
   const risks = items.filter((i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site"))
     .map((i) => `${area(i)}: ${clean(i.description) || itemShort(i)} — to be confirmed by ${responsibilityLabel(i.responsibility || "consultant").toLowerCase()}`).slice(0, 8);

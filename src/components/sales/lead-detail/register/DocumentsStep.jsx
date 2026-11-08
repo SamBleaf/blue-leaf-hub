@@ -63,7 +63,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     setBusy(false);
     if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
     if (preview?.url) URL.revokeObjectURL(preview.url);
-    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision });
+    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name });
   }
 
   async function issue() {
@@ -77,7 +77,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
       setMsg({ tone: "red", text: checks?.errors?.length ? `${r.error} ${checks.errors.join(" ")}` : r.error });
       return;
     }
-    setMsg({ tone: "green", text: `Issued ${r.data.document.revision_label} to ${recipient.name}. The PDF is stored permanently — download it below to send.` });
+    setMsg({ tone: "green", text: `Recorded ${r.data.document.revision_label} for ${recipient.name} — not emailed. The controlled PDF is stored permanently; download it below to send.` });
     setPreview(null); setActive(null);
     load();
   }
@@ -164,10 +164,13 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                 <div className="flex flex-wrap items-end gap-2">
                   <Mini label="Issue to (name)"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} className="inp w-48 text-[11px]" /></Mini>
                   <Mini label="Email (record only — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} className="inp w-56 text-[11px]" /></Mini>
-                  <button type="button" disabled={busy || preview.checks.errors.length > 0 || !recipient.name.trim()} onClick={issue}
+                  <button type="button" disabled={busy || preview.checks.errors.length > 0 || !recipient.name.trim() || (preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim())} onClick={issue}
                     className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision P{String(preview.revision).padStart(2, "0")}</button>
                   <button type="button" onClick={() => { setActive(null); setPreview(null); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
                 </div>
+                {preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim() && (
+                  <p className="text-[11px] text-amber-700">Recipient changed since this preview — <button type="button" onClick={() => openPreview(d.key)} className="font-semibold underline">preview again</button> to re-check the release blockers before issuing.</p>
+                )}
               </div>
             )}
 
