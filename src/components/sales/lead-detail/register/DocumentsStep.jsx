@@ -58,23 +58,32 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     setMsg(null); setBusy(true); setActive(key);
     const rec = recipient.name && active === key ? recipient : defaultRecipient(key);
     setRecipient(rec);
-    await flush();                                           // render from what is on screen, saved first
+    // Render from what is on screen — but SAVE it first. If the save does not land (conflict / guard / offline)
+    // the preview would show stale data, so stop and tell the employee; their edits are kept for a retry.
+    const saved = await flush();
+    if (!saved) { setBusy(false); setMsg({ tone: "red", text: "Your latest changes haven’t saved yet, so there’s nothing new to preview. Check the save status above the register (a conflict or a failed save), then preview again — your edits are kept." }); return; }
     const r = await apiPost(`/api/register/leads/${lead.id}/documents/${key}/preview`, { layout: key === "selections_schedule" ? layout : undefined, recipientName: rec.name });
     setBusy(false);
     if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
     if (preview?.url) URL.revokeObjectURL(preview.url);
-    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name });
+    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name, itemVersions: r.data.itemVersions });
   }
 
   async function issue() {
     if (!active) return;
+    // You must have a current preview to issue: it carries the content fingerprint the server re-checks, so an
+    // issue can never record a controlled document from data that changed (or never saved) since the preview.
+    if (!preview?.itemVersions) { setMsg({ tone: "red", text: "Preview the document first — issuing records the exact version you previewed." }); return; }
     setBusy(true); setMsg(null);
-    await flush();
-    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/issue`, { recipientName: recipient.name, recipientEmail: recipient.email, layout: active === "selections_schedule" ? layout : undefined });
+    const saved = await flush();
+    if (!saved) { setBusy(false); setMsg({ tone: "red", text: "Your latest changes haven’t saved yet — the document was NOT issued. Resolve the save status above the register (a conflict or a failed save), then preview and issue again. Your edits are kept." }); return; }
+    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/issue`, { recipientName: recipient.name, recipientEmail: recipient.email, layout: active === "selections_schedule" ? layout : undefined, expectedVersions: preview.itemVersions });
     setBusy(false);
     if (!r.ok) {
       const checks = r.body?.checks;
+      const stale = r.code === "ISSUE_STALE";
       setMsg({ tone: "red", text: checks?.errors?.length ? `${r.error} ${checks.errors.join(" ")}` : r.error });
+      if (stale) { setPreview(null); }      // force a fresh preview of the current version before re-issuing
       return;
     }
     setMsg({ tone: "green", text: `Recorded ${r.data.document.revision_label} for ${recipient.name} — not emailed. The controlled PDF is stored permanently; download it below to send.` });
@@ -102,7 +111,10 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     const win = window.open("about:blank", "_blank");
     if (win) win.opener = null;
     setBusy(true); setMsg(null);
-    await flush();
+    // The pack is built from the register, so persist it first — a coordination pack must not be generated
+    // from data that failed to save.
+    const saved = await flush();
+    if (!saved) { win?.close(); setBusy(false); setMsg({ tone: "red", text: "Your latest changes haven’t saved yet — the pack was not generated. Resolve the save status above the register, then try again." }); return; }
     const r = await apiFetch(`/api/register/leads/${lead.id}/packs/${discipline}`);
     setBusy(false);
     if (!r.ok) { win?.close(); setMsg({ tone: "amber", text: r.error }); return; }

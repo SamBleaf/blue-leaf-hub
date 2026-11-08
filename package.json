@@ -95,6 +95,7 @@
     "test:register-portal-race": "node scripts/tests/register-portal-race.test.mjs",
     "test:register-doc-failinject": "node scripts/tests/register-doc-issue-failinject.test.mjs",
     "test:register-selection-readiness": "node scripts/tests/register-selection-readiness.test.mjs",
+    "test:register-issue-stale": "node scripts/tests/register-issue-stale.test.mjs",
     "test:register-flag": "node scripts/tests/register-flag.test.mjs",
     "test:register": "node scripts/tests/master-register-r02.test.mjs && node scripts/tests/register-r03-model.test.mjs && node scripts/tests/register-flag.test.mjs && node scripts/tests/register-promotion.test.mjs && node scripts/tests/register-migration-212.test.mjs && node scripts/tests/register-migration-213.test.mjs",
     "register:questions": "node scripts/register/build-question-library.mjs",

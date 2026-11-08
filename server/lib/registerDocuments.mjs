@@ -286,9 +286,24 @@ async function nextVersion(sb, leadId, docType) {
   return (data?.[0]?.version || 0) + 1;
 }
 
+// A stable fingerprint of the register content a document is rendered from: item id → version (updatedAt as
+// the fallback for an unversioned row). Round-tripped from preview to issue so that if the brief changed
+// between the two, the issue is refused and no stale controlled document is recorded (Tab 27 R04 review §1).
+export function registerItemVersions(register) {
+  return Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
+}
+function versionsDiffer(expected, current) {
+  if (!expected || typeof expected !== "object") return false;        // no expectation sent → guard is inert
+  const ek = Object.keys(expected), ck = Object.keys(current);
+  if (ek.length !== ck.length) return true;
+  for (const k of ek) if (String(expected[k]) !== String(current[k])) return true;   // changed or vanished item
+  for (const k of ck) if (!(k in expected)) return true;                             // a new item appeared
+  return false;
+}
+
 // ── public API ───────────────────────────────────────────────────────────────────────────────────
 
-/** Render a DRAFT (not stored). Returns the PDF and the pre-issue check result. */
+/** Render a DRAFT (not stored). Returns the PDF, the pre-issue check result, and the content fingerprint. */
 export async function previewDocument(sb, leadId, docType, { layout, recipientName, actor } = {}) {
   if (!DOC_TYPE_KEYS.has(docType)) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
@@ -300,17 +315,23 @@ export async function previewDocument(sb, leadId, docType, { layout, recipientNa
   const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }), { register, recipientName, mode: "issue" });
   const out = await renderRegisterDocument(docType, fx, { layout });
   if (out.leaks.length) checks.errors.push(`Rendering problem: ${out.leaks.join(", ")}.`);
-  return { pdf: out.pdf, checks, revision };
+  return { pdf: out.pdf, checks, revision, itemVersions: registerItemVersions(register) };
 }
 
 /**
  * Issue an immutable revision. Blocks on any pre-issue error (nothing stored). Retries once if someone
  * else issued the same document at the same moment (the PDF carries its revision number).
  */
-export async function issueDocument(sb, leadId, docType, { recipientName, recipientEmail, layout, actor } = {}) {
+export async function issueDocument(sb, leadId, docType, { recipientName, recipientEmail, layout, actor, expectedVersions } = {}) {
   if (!DOC_TYPE_KEYS.has(docType)) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   for (let attempt = 0; attempt < 2; attempt++) {
     const { lead, loaded, register, context } = await loadInputs(sb, leadId, actor);
+    // R04 review §1: refuse to issue a controlled document from data that changed since it was previewed.
+    // `expectedVersions` is the fingerprint the preview returned (round-tripped by the client). If the
+    // register moved on — a concurrent edit, or the client's own edits never persisted — nothing is issued.
+    if (versionsDiffer(expectedVersions, registerItemVersions(register))) {
+      throw new DocumentError(409, "The brief changed since you previewed it — nothing was issued. Re-open the preview to see the current version, then issue again.", "ISSUE_STALE");
+    }
     const revision = await nextVersion(sb, leadId, docType);
     const issuedDate = isoDate();
     const fx = buildRegisterFixture(docType, { lead, context, register, revision, status: "Issued", issuedDate, issuer: actor?.name });
@@ -342,7 +363,7 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
 
     const label = REGISTER_DOC_TYPES[docType].label;
     const filename = `${label} — ${fx.project.clientName} — P${String(revision).padStart(2, "0")}.pdf`.replace(/[\\/]/g, "-");
-    const versions = Object.fromEntries(register.items.map((i) => [i.id, i.sync?.version || i.updatedAt]));
+    const versions = registerItemVersions(register);
     let data, error;
     try { ({ data, error } = await sb.rpc("register_issue_document", {
       p_lead_id: leadId, p_document_type: docType, p_expected_version: revision,

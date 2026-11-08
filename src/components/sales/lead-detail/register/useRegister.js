@@ -255,6 +255,20 @@ export function useRegister(leadId, { enabled = true } = {}) {
   }, [leadId, adopt, schedule]);
   flushRef.current = flush;
 
+  // Fully persist before a document action (preview / issue / pack). Awaits any in-flight autosave, then
+  // flushes remaining edits; returns true ONLY when everything is saved clean. A guard rejection, version
+  // conflict or save error returns false so the caller does not proceed on stale/unsaved data (R04 review §1).
+  const flushAll = useCallback(async () => {
+    for (let i = 0; i < 100; i++) {
+      const ok = await flush();
+      const clean = !dirty.current.size && !deleted.current.size && metaSeq.current === metaSaved.current;
+      if (ok && clean) return true;
+      if (!ok && !saving.current) return false;          // real conflict/error, not merely an in-flight save
+      await new Promise((r) => setTimeout(r, 80));         // a save is in flight (or still dirty) — wait, retry
+    }
+    return false;
+  }, [flush]);
+
   async function resolveConflicts(conflicts, code, message) {
     const fresh = await apiFetch(`/api/register/leads/${leadId}`);
     if (!fresh.ok || !mounted.current) { setSave({ state: "error", at: null, message: message || "Conflict — reload the page." }); return; }
@@ -349,6 +363,6 @@ export function useRegister(leadId, { enabled = true } = {}) {
   return {
     loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
-    reload: load, flush, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
+    reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
   };
 }

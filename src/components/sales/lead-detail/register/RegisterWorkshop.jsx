@@ -234,7 +234,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
               <HandoverPanel lead={lead} reg={reg} info={info} flush={store.flush} portal={store.portal} onBaseline={setBaseline} />
             )}
             {reg && step === "documents" && (
-              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flush} updateItem={store.updateItem} />
+              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flushAll} updateItem={store.updateItem} />
             )}
           </div>
         </>

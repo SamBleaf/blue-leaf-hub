@@ -135,7 +135,7 @@ export function registerRegisterRoutes(app) {
     try {
       const actor = await actorFor(sb, req.caller);
       const out = await previewDocument(sb, req.params.leadId, req.params.docType, { layout: req.body?.layout, recipientName: req.body?.recipientName, actor });
-      ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision });
+      ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision, itemVersions: out.itemVersions });
     } catch (e) { sendRegisterError(res, e, "Could not render the draft."); }
   });
 
@@ -145,7 +145,7 @@ export function registerRegisterRoutes(app) {
     try {
       const actor = await actorFor(sb, req.caller);
       const b = req.body || {};
-      const out = await issueDocument(sb, req.params.leadId, req.params.docType, { recipientName: b.recipientName, recipientEmail: b.recipientEmail, layout: b.layout, actor });
+      const out = await issueDocument(sb, req.params.leadId, req.params.docType, { recipientName: b.recipientName, recipientEmail: b.recipientEmail, layout: b.layout, actor, expectedVersions: b.expectedVersions });
       ok(res, { document: out.document, supersededId: out.supersededId, checks: out.checks });
     } catch (e) {
       if (e?.code === "PREFLIGHT") return res.status(422).json({ ok: false, error: e.message, code: e.code, checks: e.checks });
