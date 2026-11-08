@@ -84,3 +84,46 @@ FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
 WHERE n.nspname='public' AND p.proname IN ('register_apply','register_issue_document')
 ORDER BY p.proname;
 -- EXPECT (after 213): both rows  f | f | f | t.
+
+\echo
+\echo ===== §7 R04 / 215 — client_selections status CHECK (changes_requested) =====
+-- 215 only WIDENS the status CHECK to allow one more value ('changes_requested'); it adds no column and
+-- removes no value, so NO existing row can be invalidated by it — zero data risk. This block just
+-- confirms the CHECK that 215 rewrites is present and what it currently allows.
+SELECT c.conname,
+       pg_get_constraintdef(c.oid)                          AS status_check_def,
+       pg_get_constraintdef(c.oid) ILIKE '%changes_requested%' AS already_has_215_EXPECT_f
+FROM pg_constraint c
+WHERE c.conrelid = 'public.client_selections'::regclass AND c.contype='c'
+  AND pg_get_constraintdef(c.oid) ILIKE '%in_review%'
+  AND pg_get_constraintdef(c.oid) ILIKE '%awaiting_client%';
+-- EXPECT on prod BEFORE 215: exactly one row, already_has_215 = f (the mig-103 status CHECK, no
+--   'changes_requested'). After 215: already_has_215 = t. If ZERO rows: the mig-103 status CHECK is
+--   missing/renamed — stop and reconcile, because 215's definition-matched DROP would then no-op and the
+--   new value would be unconstrained (harmless but not what 215 intends).
+
+\echo
+\echo ===== §8 R04 / 216 — stranded Architect-Tender leads (accepted -> tender) =====
+-- 216 is a SCOPED one-row-class UPDATE: only leads with lead_type='architect_tender' sitting on the
+-- retired 'accepted' stage. It touches nothing else. These two SELECTs show (a) the column 216 guards on
+-- and (b) exactly which rows it will move, so the count can be confirmed before and after.
+SELECT EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema='public' AND table_name='leads' AND column_name='lead_type') AS has_lead_type_EXPECT_t;
+SELECT count(*) FILTER (WHERE stage='accepted' AND lead_type='architect_tender') AS stranded_architect_tenders_EXPECT_moved_then_0,
+       count(*) FILTER (WHERE stage='accepted')                                   AS all_accepted_rows_LEFT_UNTOUCHED
+FROM public.leads;
+-- EXPECT on prod BEFORE 216: has_lead_type=t; stranded = N (the architect-tender leads the old intake
+--   created on 'accepted'); all_accepted_rows = N + any genuine pre-restructure design-build leads 216
+--   must NOT touch. After 216: stranded = 0; all_accepted_rows drops by exactly N (the non-architect
+--   'accepted' rows are deliberately left for mig-187's fold / manual review — 216 never moves them).
+-- Confirm 'tender' is an accepted stage value before applying (post mig-187 it is; this is the target):
+SELECT EXISTS (
+  SELECT 1 FROM pg_constraint
+  WHERE conrelid='public.leads'::regclass AND contype='c'
+    AND pg_get_constraintdef(oid) ILIKE '%stage%' AND pg_get_constraintdef(oid) ILIKE '%tender%'
+) OR NOT EXISTS (
+  SELECT 1 FROM pg_constraint
+  WHERE conrelid='public.leads'::regclass AND contype='c' AND pg_get_constraintdef(oid) ILIKE '%stage%'
+) AS tender_is_an_allowed_stage_EXPECT_t;
+-- EXPECT: t — either a stage CHECK exists and lists 'tender', or there is no stage CHECK at all (free text).
+--   If f: a stage CHECK exists that does NOT allow 'tender' — 216 would fail; reconcile mig-187 first.
