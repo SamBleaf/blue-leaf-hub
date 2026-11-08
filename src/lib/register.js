@@ -384,6 +384,43 @@ export function siteLine(address, suburb) {
   return a ? `${a}, ${s}` : s;
 }
 
+// ── R04 Slice 5: guided room prompts ────────────────────────────────────────────────────────────────
+// The curated "primary" prompts shown first in a room so a meeting reads as a guided discussion, plus a
+// de-dup rule: a room-specific prompt supersedes the matching generic shared-room (R-) prompt for SCOPE and
+// LAYOUT (where they genuinely ask the same thing — finishes/fixtures/services stay distinct). Purely
+// presentational + additive: NO prompt, saved answer, disposition, inheritance, source ref or id is removed;
+// everything not primary moves to "Explore more", one click away. Office staff keep full technical editing.
+const ROOM_FAMILY_PREFIXES = new Set(["K", "B", "V", "L", "H", "D", "O"]);
+const DEDUP_TOPICS = new Set(["scope", "layout"]);
+const famOf = (id) => String(id || "").split("-")[0];
+export const ROOM_PRIMARY_PROMPT_IDS = new Set([
+  "R-003", "R-004", "R-005", "R-006", "R-008", "R-010",            // generic shared-room (fallback for any room)
+  "K-001", "K-002", "K-003", "K-005", "K-007", "K-009", "K-012",   // kitchen
+  "B-001", "B-002", "B-006", "B-008", "B-009", "B-015",            // bathroom / ensuite
+  "V-001", "V-002", "V-003", "V-004", "V-008",                     // bedroom / robe (V family)
+  "L-001", "L-002", "L-003", "L-004", "L-007",                     // laundry / utility
+  "H-001", "H-002", "H-004", "H-005", "H-006", "H-007",            // hall / entry / stairs / garage
+  "D-001", "D-002", "D-003", "D-004", "D-007",                     // bedroom / robe (D family)
+]);
+/** The Set of question ids that are PRIMARY for a room (the rest render under "Explore more"). */
+export function partitionRoomPrompts(questions) {
+  const list = questions || [];
+  const coveredByRoomSpecific = new Set(
+    list.filter((q) => ROOM_FAMILY_PREFIXES.has(famOf(q.id)) && DEDUP_TOPICS.has(q.topic)).map((q) => `${q.topic}|${q.itemKind}`),
+  );
+  const primary = new Set();
+  for (const q of list) {
+    if (q.detail) continue;                                                                          // detail/technical → Explore more
+    if (famOf(q.id) === "R" && DEDUP_TOPICS.has(q.topic) && coveredByRoomSpecific.has(`${q.topic}|${q.itemKind}`)) continue; // superseded by a room-specific prompt
+    if (ROOM_PRIMARY_PROMPT_IDS.has(q.id)) primary.add(q.id);
+  }
+  if (!primary.size) {  // unknown roomType / no curated set → keep the scope anchor + first non-detail prompt per topic
+    const seen = new Set();
+    for (const q of list) { if (q.detail) continue; if (q.topic === "scope" || !seen.has(q.topic)) { primary.add(q.id); seen.add(q.topic); } }
+  }
+  return primary;
+}
+
 export function emptyMeta(partial = {}) {
   return {
     kind: "meta",

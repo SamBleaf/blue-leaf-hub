@@ -147,7 +147,8 @@
     "hardening:watch": "node scripts/hardening-watch.mjs",
     "hardening:watch:once": "node scripts/hardening-watch.mjs --run-once",
     "hardening:watch:interval": "node scripts/hardening-watch.mjs --interval=30",
-    "test:register-handover-status": "node scripts/tests/register-handover-status.test.mjs"
+    "test:register-handover-status": "node scripts/tests/register-handover-status.test.mjs",
+    "test:register-room-prompts": "node scripts/tests/register-room-prompts.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

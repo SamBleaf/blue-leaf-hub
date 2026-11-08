@@ -6,6 +6,7 @@
 import { useEffect } from "react";
 import {
   promptsFor, resolvePromptId, defaultItemFor, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
+  partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS,
 } from "../../../../lib/register.js";
 import { Section, Select } from "./ui.jsx";
 import PromptRow from "./PromptRow.jsx";
@@ -22,6 +23,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const idx = rooms.findIndex((r) => r.id === room.id);
   const projectType = context?.projectType || "";
   const qs = promptsFor("room", { roomType: room.roomType, roomScope: room.scope, projectType, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail });
+  const primarySet = partitionRoomPrompts(qs);   // R04 Slice 5: which prompts lead the guided conversation
   const roomItems = reg.items.filter((i) => i.roomId === room.id);
   const itemFor = (qid) => roomItems.find((i) => resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId) || null;
   const exceptionFor = (defaultId) => roomItems.find((i) => i.overridesDefaultId === defaultId) || null;
@@ -31,6 +33,20 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const setRoom = (partial) => mutateMeta({ rooms: rooms.map((r) => (r.id === room.id ? { ...r, ...partial } : r)) });
   const seedFor = (q) => ({ itemKind: q.itemKind, category: q.category, promptKey: q.id, roomId: room.id, level: room.level, room: room.name,
     technicalStatus: q.technical, responsibility: q.owner || "", source: room.sheet || "" });
+  const renderRow = (q) => {
+    const def = q.inherits ? defaultItemFor(reg, q.inherits) : null;
+    const exc = def ? exceptionFor(def.id) : null;
+    const item = exc || itemFor(q.id);
+    return (
+      <PromptRow key={q.id} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
+        readOnlyReason={readOnly ? "Read-only" : null}
+        onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
+          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id })}
+        onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
+        onDelete={item ? () => deleteItem(item.id) : null}
+        onPortal={item ? (action, ev) => onPortalItem(item, action, ev) : null} />
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -63,26 +79,37 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
       ) : ROOM_TOPICS.map((t) => {
         const list = qs.filter((q) => q.topic === t.key);
         if (!list.length) return null;
+        const prim = list.filter((q) => primarySet.has(q.id));
+        const more = list.filter((q) => !primarySet.has(q.id));
         const started = list.filter((q) => itemFor(q.id) || (q.inherits && exceptionFor(defaultItemFor(reg, q.inherits)?.id))).length;
         return (
-          <Section key={t.key} title={t.label} count={started ? `${started}/${list.length}` : null} defaultOpen={t.key !== "technical"}>
-            {list.map((q) => {
-              const def = q.inherits ? defaultItemFor(reg, q.inherits) : null;
-              const exc = def ? exceptionFor(def.id) : null;
-              const item = exc || itemFor(q.id);
-              return (
-                <PromptRow key={q.id} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
-                  readOnlyReason={readOnly ? "Read-only" : null}
-                  onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
-                    manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id })}
-                  onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
-                  onDelete={item ? () => deleteItem(item.id) : null}
-                  onPortal={item ? (action, ev) => onPortalItem(item, action, ev) : null} />
-              );
-            })}
+          <Section key={t.key} title={t.label} count={started ? `${started}/${list.length}` : null} defaultOpen={prim.length > 0}>
+            {prim.map(renderRow)}
+            {more.length > 0 && (prim.length > 0
+              ? <Section title="Explore more" count={more.length} defaultOpen={false}>{more.map(renderRow)}</Section>
+              : more.map(renderRow))}
           </Section>
         );
       })}
+
+      {room.scope !== "not_in_scope" && roomItems.length > 0 && (() => {
+        // Derived end-of-room summary (no new data): what's agreed, what's still to confirm, and who owns the next move.
+        const agreed = roomItems.filter((i) => i.certainty === "client_approved" || SETTLED_DISPOSITIONS.has(i.disposition)).length;
+        const unresolved = roomItems.filter((i) => outstandingReasons(i).length > 0);
+        const owners = roomItems.filter((i) => i.responsibility && i.nextAction);
+        return (
+          <Section title="This room at a glance" count={`${agreed} agreed · ${unresolved.length} to confirm`} defaultOpen={false}>
+            {unresolved.length ? (
+              <div><p className="mb-0.5 text-[11px] font-semibold text-amber-800">Still to confirm</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink">{unresolved.slice(0, 8).map((i) => <li key={i.id}>{i.description || i.category}{i.responsibility ? ` — ${i.responsibility}` : ""}</li>)}</ul></div>
+            ) : <p className="text-[11px] text-muted">Nothing outstanding recorded in this room.</p>}
+            {owners.length ? (
+              <div className="mt-1.5"><p className="mb-0.5 text-[11px] font-semibold text-muted">Next action / owner</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink">{owners.slice(0, 8).map((i) => <li key={i.id}>{i.nextAction} — {i.responsibility}</li>)}</ul></div>
+            ) : null}
+          </Section>
+        );
+      })()}
 
       {custom.length > 0 && (
         <Section title="Other items in this room" count={custom.length} defaultOpen>
