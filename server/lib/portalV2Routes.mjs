@@ -774,6 +774,82 @@ export function registerPortalV2Routes(app) {
     }
   );
 
+  // Single-proposal response (R04 P0-SEL): when the office has specified one product (no option set), the
+  // client Accepts it (→ in_review, Blue Leaf then formally approves) or Requests changes (→ a DISTINCT
+  // 'changes_requested' state Blue Leaf must resolve before approval — never a routine approval). Mirrors
+  // /select's visibility + race guards; writes only portal-owned columns (status/client_notes).
+  app.post(
+    `${base}/selections/:selectionId/respond`,
+    requirePortalLogin,
+    async (req, res) => {
+      try {
+        const sb = getServiceSupabase();
+        if (!sb) return err(res, 503, "DB not configured");
+        const { project, session } = { project: req.portalSession.project, session: req.portalSession };
+        const projectId = project.id;
+        const { selectionId } = req.params;
+        const action = String(req.body?.action || "");
+        const notes = req.body?.notes ? String(req.body.notes) : null;
+        if (!["accept", "request_change"].includes(action)) return err(res, 400, "action must be 'accept' or 'request_change'");
+        if (action === "request_change" && !notes) return err(res, 400, "Tell us what you'd like changed.");
+
+        const buildSelLookup = (withVisible) => {
+          let q = sb
+            .from("client_selections")
+            .select("id, project_id, item_name, allowance_amount, status, selected_product")
+            .eq("id", selectionId)
+            .eq("project_id", projectId);
+          if (withVisible) q = q.eq("client_visible", true);
+          return q.maybeSingle();
+        };
+        let hasVisibleCol = true;
+        let { data: selection, error: selLookupErr } = await buildSelLookup(true);
+        if (selLookupErr?.code === "42703") { hasVisibleCol = false; ({ data: selection } = await buildSelLookup(false)); }
+        if (!selection) return err(res, 404, "Selection not found");
+        if (selection.status !== "awaiting_client") return err(res, 409, "This selection isn't awaiting your decision anymore. Please refresh.");
+        if (!selection.selected_product) return err(res, 409, "This selection doesn't have a proposed product to respond to yet.");
+
+        const nowIso = new Date().toISOString();
+        const newStatus = action === "accept" ? "in_review" : "changes_requested";
+        // Race guard: re-assert visibility, project and awaiting_client IN the UPDATE so an office withdraw
+        // or finalise landing between lookup and write cannot be overwritten. Require exactly one row.
+        let updQ = sb
+          .from("client_selections")
+          .update({ status: newStatus, client_notes: notes, updated_at: nowIso })
+          .eq("id", selectionId)
+          .eq("project_id", projectId)
+          .eq("status", "awaiting_client");
+        if (hasVisibleCol) updQ = updQ.eq("client_visible", true);
+        const { data: updatedRows, error: updErr } = await updQ.select("id");
+        if (updErr) return err(res, 500, translateDbError(updErr));
+        if (!updatedRows || updatedRows.length === 0) {
+          return err(res, 409, "This selection is no longer available to respond to. Please refresh and try again.");
+        }
+
+        await writePortalAudit(sb, {
+          project,
+          session,
+          eventType: action === "accept" ? "selection.accepted" : "selection.change_requested",
+          entityType: "client_selection",
+          entityId: selectionId,
+          snapshot: { item: selection.item_name, product: selection.selected_product, notes },
+          req
+        });
+
+        await sb
+          .from("client_actions")
+          .update({ status: "responded", updated_at: nowIso })
+          .eq("project_id", projectId)
+          .eq("related_entity_type", "client_selection")
+          .eq("related_entity_id", selectionId);
+
+        return ok(res, { status: newStatus });
+      } catch (e) {
+        return err(res, 500, e.message || "Failed to record response");
+      }
+    }
+  );
+
   // ── Documents (client_visible only) ────────────────────────────────────────
   app.get(`${base}/documents`, async (req, res) => {
     try {

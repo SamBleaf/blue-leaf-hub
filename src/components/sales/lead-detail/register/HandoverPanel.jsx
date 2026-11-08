@@ -43,8 +43,12 @@ export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseli
     if (!items.length) return;
     setBusy(true); setMsg(null);
     const r = await portal("issue", items);
+    const heldN = (r.held || []).length;
+    const releasedN = items.length - heldN;
     setBusy(false);
-    setMsg(r.ok ? { tone: "green", text: `${items.length} selection(s) are now on the client portal for the client to review.` } : { tone: "red", text: r.error });
+    setMsg(!r.ok ? { tone: "red", text: r.error }
+      : heldN ? { tone: "green", text: `${releasedN} selection(s) released to the client portal. ${heldN} held — not ready to release yet (add an option or a specified product first).` }
+      : { tone: "green", text: `${items.length} selection(s) are now on the client portal for the client to review.` });
     setPicked(null);
   }
 

@@ -7,6 +7,7 @@ const STATUS_LABEL = {
   not_started: "Not started",
   awaiting_client: "Awaiting your decision",
   in_review: "With Blue Leaf",
+  changes_requested: "Change requested — with Blue Leaf",
   approved: "Approved",
   ordered: "Ordered",
   installed: "Installed",
@@ -76,10 +77,16 @@ export default function ClientSelections() {
 function SelectionCard({ projectId, selection, onChange }) {
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
-  const decided = ["approved", "ordered", "installed", "in_review"].includes(selection.status);
+  const [changeMode, setChangeMode] = useState(false);
+  const [note, setNote] = useState("");
+  const finalised = ["approved", "ordered", "installed"].includes(selection.status);
+  const inReview = selection.status === "in_review";
+  const changeReq = selection.status === "changes_requested";
+  const decided = finalised || inReview || changeReq;   // chip styling + hides the order-by nudge; no client action
   const overdue = selection.status === "overdue";
   const orderBy = selection.orderByDate;
   const orderDays = daysUntil(orderBy);
+  const options = selection.options || [];
 
   async function choose(optionId) {
     setBusy(optionId); setErr(null);
@@ -87,6 +94,14 @@ function SelectionCard({ projectId, selection, onChange }) {
     setBusy(null);
     if (!ok) { setErr(error); return; }
     onChange();
+  }
+
+  async function respond(action, notes) {
+    setBusy(action); setErr(null);
+    const { ok, error } = await portalPost(projectId, `selections/${selection.id}/respond`, { action, notes });
+    setBusy(null);
+    if (!ok) { setErr(error); return; }
+    setChangeMode(false); setNote(""); onChange();
   }
 
   return (
@@ -110,7 +125,7 @@ function SelectionCard({ projectId, selection, onChange }) {
         </p>
       ) : null}
 
-      {decided ? (
+      {finalised || inReview ? (
         <div className="border-t border-hairline px-5 py-4 text-sm">
           <span className="text-muted">Chosen: </span>
           <span className="font-semibold text-ink">{selection.selectedProduct || "—"}</span>
@@ -119,13 +134,44 @@ function SelectionCard({ projectId, selection, onChange }) {
               {selection.costImpact > 0 ? "+" : ""}{fmtAud(selection.costImpact)} vs allowance
             </span>
           ) : null}
+          {inReview ? <p className="mt-1 text-xs text-muted">Choice received — Blue Leaf is reviewing it.</p> : null}
+        </div>
+      ) : changeReq ? (
+        <div className="border-t border-hairline px-5 py-4 text-sm">
+          <p className="text-ink">You asked us to review this — Blue Leaf is updating it and will be back in touch.</p>
+          {selection.clientNotes ? <p className="mt-1 text-xs text-muted">Your note: “{selection.clientNotes}”</p> : null}
+        </div>
+      ) : options.length === 0 && selection.selectedProduct ? (
+        <div className="border-t border-hairline px-5 py-4 space-y-3">
+          <div>
+            <p className="text-xs text-muted">Blue Leaf proposes:</p>
+            <p className="text-sm font-semibold text-ink">{selection.selectedProduct}</p>
+            {selection.costImpact != null && selection.costImpact !== 0 ? (
+              <p className={`text-xs ${selection.costImpact > 0 ? "text-amber-700" : "text-accent"}`}>{selection.costImpact > 0 ? "+" : ""}{fmtAud(selection.costImpact)} vs allowance</p>
+            ) : null}
+          </div>
+          {changeMode ? (
+            <div className="space-y-2">
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Tell us what you'd like changed…" className="w-full rounded-xl border border-hairline bg-page px-3 py-2 text-sm text-ink" />
+              <div className="flex gap-2">
+                <button type="button" disabled={busy || !note.trim()} onClick={() => respond("request_change", note.trim())} className="min-h-[40px] rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50">{busy === "request_change" ? "Sending…" : "Send request"}</button>
+                <button type="button" onClick={() => { setChangeMode(false); setNote(""); }} className="min-h-[40px] rounded-xl border border-hairline px-4 py-2 text-xs font-semibold text-muted hover:bg-page">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button type="button" disabled={!!busy} onClick={() => respond("accept")} className="min-h-[40px] rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50">{busy === "accept" ? "Saving…" : "Accept"}</button>
+              <button type="button" disabled={!!busy} onClick={() => setChangeMode(true)} className="min-h-[40px] rounded-xl border border-hairline px-4 py-2 text-xs font-semibold text-ink hover:bg-page">Request changes</button>
+            </div>
+          )}
+          {err ? <p className="text-xs text-red-700">{err}</p> : null}
         </div>
       ) : (
         <div className="border-t border-hairline px-5 py-4 space-y-2.5">
-          {(selection.options || []).length === 0 ? (
+          {options.length === 0 ? (
             <p className="text-sm text-muted">Options are being prepared for this item.</p>
           ) : (
-            (selection.options || []).map((opt) => {
+            options.map((opt) => {
               const over = opt.priceIncGst != null && selection.allowanceAmount != null ? Number(opt.priceIncGst) - Number(selection.allowanceAmount) : null;
               return (
                 <div

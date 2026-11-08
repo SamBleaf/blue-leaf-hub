@@ -309,7 +309,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
     const next = adopt(r.data);
     dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
-    return { ok: true };
+    return { ok: true, held: r.data?.held || [] };
   }, [leadId, adopt]);
 
   return {

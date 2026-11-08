@@ -237,12 +237,14 @@ async function main() {
   // Client portal: explicit issue → client choice → staff approval (#12 #13 #22)
   const regP = await getReg(staff, leadA.id);
   const bench = find(regP, (i) => i.promptKey === "K-005"), sink = find(regP, (i) => i.promptKey === "K-007");
+  // R04 P0-SEL: configure the benchtop's options BEFORE releasing it — an unready selection (no option and
+  // no specified product) is now held back from the portal. (The sink already carries a specified product.)
+  const { data: optB } = await svc.from("selection_options").insert([{ selection_id: bench.sync.rowId, label: "Option A", product_name: "Caesarstone Cloudburst", supplier: "Stone Co" },
+    { selection_id: bench.sync.rowId, label: "Option B", product_name: "Smartstone Arcadia", supplier: "Stone Co" }]).select();
   const issue = await api(staff, "POST", `/api/register/leads/${leadA.id}/portal/issue`, { items: [bench, sink].map((i) => ({ id: i.id, sync: i.sync })) });
   const { data: benchRow } = await svc.from("client_selections").select("*").eq("id", bench.sync.rowId).single();
   check("#12", "staff deliberately issued two selections → visible + 'Select …' tasks created", issue.ok && benchRow.client_visible && benchRow.status === "awaiting_client");
   await svc.from("project_client_users").insert({ project_id: projectId, user_id: creds.client.id, role: "primary", is_active: true });
-  const { data: optB } = await svc.from("selection_options").insert([{ selection_id: bench.sync.rowId, label: "Option A", product_name: "Caesarstone Cloudburst", supplier: "Stone Co" },
-    { selection_id: bench.sync.rowId, label: "Option B", product_name: "Smartstone Arcadia", supplier: "Stone Co" }]).select();
   const board = await api(clientTok, "GET", `/api/portal/app/${projectId}/selections`);
   const boardItems = board.body?.selections || board.body?.items || [];
   check("#22", "client portal board shows ONLY the two issued selections (staged + scope invisible)", board.ok && boardItems.length === 2, JSON.stringify(board.body).slice(0, 300));
@@ -307,9 +309,14 @@ async function main() {
   check("#21", "explicit staff action recorded contract baseline B01 and ticked the Ops-Ready transfer item", base1.ok && base1.body.baseline.revision === "B01" && leadW.ops_ready_checklist?.selections_transfer === true, JSON.stringify(base1.body).slice(0, 200));
   const regB = await getReg(staff, leadA.id);
   const stagedLeft = regB.register.items.filter((i) => i.sync?.table === "client_selections" && !i.sync.clientVisible);
-  const rel = await api(staff, "POST", `/api/register/leads/${leadA.id}/portal/issue`, { items: stagedLeft.map((i) => ({ id: i.id, sync: i.sync })) });
+  // R04 P0-SEL: the office specifies a product on each remaining selection before releasing it — a
+  // description-only preference is design direction, not yet a client-actionable task (it would be held).
+  for (const i of stagedLeft) await svc.from("client_selections").update({ selected_product: `${(i.description || "Selection").slice(0, 60)} — as specified` }).eq("id", i.sync.rowId);
+  const regB2 = await getReg(staff, leadA.id);
+  const stagedReady = regB2.register.items.filter((i) => i.sync?.table === "client_selections" && !i.sync.clientVisible);
+  const rel = await api(staff, "POST", `/api/register/leads/${leadA.id}/portal/issue`, { items: stagedReady.map((i) => ({ id: i.id, sync: i.sync })) });
   const { count: invites } = await svc.from("project_client_users").select("*", { count: "exact", head: true }).eq("project_id", projectId);
-  check("#21", "remaining selections released to the portal by staff; no extra client invitation created", rel.ok && invites === 1);
+  check("#21", "remaining (now-specified) selections released to the portal by staff; none held; no extra client invitation created", rel.ok && (rel.body?.held || []).length === 0 && invites === 1);
 
   // Whole-lifecycle integrity (#25)
   const { data: selsEnd } = await svc.from("client_selections").select("id, source_register_item_id").eq("project_id", projectId);

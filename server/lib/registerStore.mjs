@@ -56,7 +56,8 @@ export function storeFor(item) { return isClientSelection(item) ? SEL : RSI; }
 function deriveCertainty(row) {
   if (["approved", "ordered", "installed"].includes(row.status)) return "client_approved";
   if (row.certainty) return row.certainty === "client_approved" ? "proposed" : row.certainty;
-  return row.status === "in_review" ? "proposed" : "not_considered";
+  if (row.status === "in_review" || row.status === "changes_requested") return "proposed";
+  return "not_considered";
 }
 
 export function selRowToItem(row, { isPreconstruction } = {}) {
@@ -103,6 +104,9 @@ export function selRowToItem(row, { isPreconstruction } = {}) {
       approvedOnBoard: approved && !row.approval_evidence,
       clientChoice: row.status === "in_review"
         ? { product: row.selected_product, model: row.selected_model_code, supplier: row.selected_supplier, notes: row.client_notes, costImpact: row.cost_impact }
+        : null,
+      changeRequest: row.status === "changes_requested"
+        ? { notes: row.client_notes || null, product: row.selected_product || null }
         : null,
       costImpact: row.cost_impact, allowanceAmount: row.allowance_amount, linkedVariationId: row.linked_variation_id,
       locked: ["ordered", "installed"].includes(row.status) || (!isPreconstruction && row.status === "approved"),
@@ -486,6 +490,7 @@ const REASON_TEXT = {
   not_in_review: "has no client choice waiting for review",
   reapproval_required: "changed after client approval — step it back to Proposed or record the client's re-approval",
   meta_stale: "room list was changed elsewhere",
+  selection_not_ready: "has no options or a specified product yet — add one before releasing it to the client",
 };
 function conflictMessage(conflicts) {
   const first = conflicts[0];
@@ -502,6 +507,14 @@ async function projectTargetOrThrow(sb, leadId) {
   return target;
 }
 
+// A selection is only client-answerable when it carries a specified, non-placeholder product. Reject the
+// common placeholders so "TBC" / "—" / "select…" can never satisfy the release-readiness gate.
+const SEL_PLACEHOLDER_RE = /^(tbc|tba|tbd|n\/?a|na|nil|none|\?+|-+|–|—|\.+|pending|select(ed)?|choose|options?|to be (confirmed|advised|decided|selected))$/i;
+function hasGenuineProduct(p) {
+  const v = String(p ?? "").trim();
+  return v.length >= 2 && !SEL_PLACEHOLDER_RE.test(v);
+}
+
 /**
  * Issue / withdraw / return selections on the client portal. Issue creates the client's "Select …" task
  * and notifies through the existing portal chokepoint (which only fires for an enabled, onboarded portal).
@@ -510,9 +523,32 @@ export async function portalAction(sb, leadId, action, items, { actor, note } = 
   const target = await projectTargetOrThrow(sb, leadId);
   const opName = { issue: "sel_issue", withdraw: "sel_withdraw", return: "sel_return" }[action];
   if (!opName) throw new RegisterError(400, "Unknown action.", "BAD_ACTION");
-  const ops = (items || []).filter((i) => i?.sync?.table === SEL && i.sync.rowId)
+  let ops = (items || []).filter((i) => i?.sync?.table === SEL && i.sync.rowId)
     .map((i) => ({ op: opName, item_id: i.id, row_id: i.sync.rowId, base_version: i.sync.version, note: note || null }));
   if (!ops.length) throw new RegisterError(400, "Only client selections on the project can be issued to the portal.", "NOT_SELECTION");
+
+  // Release-readiness gate (R04 P0-SEL): a selection only becomes an actionable client task when it is
+  // genuinely answerable — it carries >=1 configured option OR a specified, non-placeholder product.
+  // Unready selections stay staged (client_visible=false): never issued, counted or notified. Ready ones
+  // are released; any held are reported so staff know to configure them first.
+  let held = [];
+  if (action === "issue") {
+    const rowIds = ops.map((o) => o.row_id);
+    const [{ data: sels }, { data: opts }] = await Promise.all([
+      sb.from(SEL).select("id, selected_product").in("id", rowIds),
+      sb.from("selection_options").select("selection_id").in("selection_id", rowIds),
+    ]);
+    const optCount = {};
+    for (const o of opts || []) optCount[o.selection_id] = (optCount[o.selection_id] || 0) + 1;
+    const productById = Object.fromEntries((sels || []).map((s) => [s.id, s.selected_product]));
+    const ready = (rowId) => optCount[rowId] > 0 || hasGenuineProduct(productById[rowId]);
+    held = ops.filter((o) => !ready(o.row_id)).map((o) => ({ itemId: o.item_id, reason: "selection_not_ready" }));
+    ops = ops.filter((o) => ready(o.row_id));
+    if (!ops.length) {
+      throw new RegisterError(409, "Not ready to release: add at least one option, or a specified product (not a placeholder like TBC), to the selection first. Nothing was issued.", "SELECTION_NOT_READY", { conflicts: held });
+    }
+  }
+
   const result = await callApply(sb, target, ops, actor);
   if (action === "issue" || action === "return") {
     for (const r of result?.results || []) {
@@ -525,7 +561,7 @@ export async function portalAction(sb, leadId, action, items, { actor, note } = 
       });
     }
   }
-  return { result, register: await loadCanonical(sb, target.project) };
+  return { result, held, register: await loadCanonical(sb, target.project) };
 }
 
 /** Item history (append-only job_events written in the same transaction as each change). */

@@ -164,6 +164,14 @@ export default function PromptRow({
             </div>
           )}
 
+          {it.sync?.status === "changes_requested" && (
+            <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
+              <span className="font-semibold">Client requested a change</span>
+              {it.sync.changeRequest?.notes ? <> — “{it.sync.changeRequest.notes}”</> : null}
+              <p className="mt-0.5 text-[10px] text-amber-800">Resolve it before approving: update the proposed product above, then release it to the client again.</p>
+            </div>
+          )}
+
           {issues.length > 0 && <p className="mt-1 text-[10px] text-amber-700">{issues.join(" ")}</p>}
           {readOnlyReason && <p className="mt-1 text-[10px] text-muted">{readOnlyReason}</p>}
           {locked && <p className="mt-1 text-[10px] text-muted">Approved under the contract — product changes go through a variation.</p>}

@@ -36,7 +36,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
     if (f.price) items = items.filter((i) => i.pricingStatus === f.price);
     if (f.owner) items = items.filter((i) => i.responsibility === f.owner);
     if (f.portal) items = items.filter((i) => (f.portal === "staged" ? i.sync?.table === "client_selections" && !i.sync.clientVisible
-      : f.portal === "live" ? i.sync?.clientVisible : f.portal === "review" ? i.sync?.status === "in_review" : true));
+      : f.portal === "live" ? i.sync?.clientVisible : f.portal === "review" ? (i.sync?.status === "in_review" || i.sync?.status === "changes_requested") : true));
     if (f.q.trim()) {
       const q = f.q.trim().toLowerCase();
       items = items.filter((i) => [i.description, i.product, i.model, i.source, i.nextAction, i.supplier, refCode(i)].some((v) => String(v || "").toLowerCase().includes(q)));
@@ -49,7 +49,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
     const c = { total: reg.items.length, decision: 0, verification: 0, action: 0, staged: 0, live: 0, review: 0 };
     for (const i of reg.items) {
       for (const r of outstandingReasons(i)) c[r] += 1;
-      if (i.sync?.table === "client_selections") { if (i.sync.clientVisible) c.live += 1; else c.staged += 1; if (i.sync.status === "in_review") c.review += 1; }
+      if (i.sync?.table === "client_selections") { if (i.sync.clientVisible) c.live += 1; else c.staged += 1; if (i.sync.status === "in_review" || i.sync.status === "changes_requested") c.review += 1; }
     }
     return c;
   }, [reg]);

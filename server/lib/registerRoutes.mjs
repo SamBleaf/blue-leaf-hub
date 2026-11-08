@@ -117,7 +117,7 @@ export function registerRegisterRoutes(app) {
       const actor = await actorFor(sb, req.caller);
       const { items, note } = req.body || {};
       const out = await portalAction(sb, req.params.leadId, req.params.action, Array.isArray(items) ? items : [], { actor, note });
-      ok(res, { register: out.register, mode: "project" });
+      ok(res, { register: out.register, mode: "project", held: out.held || [] });
     } catch (e) { sendRegisterError(res, e, "Could not update the client portal."); }
   });
 
