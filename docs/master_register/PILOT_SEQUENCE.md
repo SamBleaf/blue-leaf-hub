@@ -3,7 +3,9 @@
 The minimum path from "reviewed on a branch" to "a few staff using it on real leads", with the **exact
 approvals** that are yours to give at each gate. Nothing here runs automatically. Each **[APPROVAL]** is a
 separate decision — one does not imply the next. Default state today: code is on `master-register-r02`
-(PR #1, not merged); **feature switch OFF**; migrations 212/213/214 **prepared, not applied**.
+(PR #1, not merged); **feature switch OFF**; migrations **212–216 prepared**; their live state is **to be
+confirmed by the production preflight** (this project applies migrations by manual SQL paste, so "applied" =
+schema/data state, not a CLI ledger — see `R04_MIGRATION_EXECUTION.md`).
 
 Design intent that makes this safe: the code ships **dark**. With the switch off, `/api/register` returns
 404, the register card is hidden, auto-promotion is skipped, and Concept/Consultants fall back to the old
@@ -29,11 +31,16 @@ on for **named leads only**.
 - **Rollback:** `DROP POLICY IF EXISTS deny_clients ON public.internal_categories;`
 - **[APPROVAL B]** — apply 214 to production.
 
-## Gate 2 — Apply 212 → 213 on a STAGING / branch database first
-- **Do (staging only):** apply `212` then `213` (order matters — 213's ON CONFLICT targets 212's indexes).
+## Gate 2 — Apply 212 → 213 → 215 → 216 on a STAGING / branch database first
+- **Do (staging only), in this order:**
+  1. `212` then `213` (order matters — 213's ON CONFLICT targets 212's indexes; 213 fail-closes without 104).
+  2. `215` — widens the `client_selections.status` CHECK for `changes_requested` (adds a value only; no row
+     can be invalidated).
+  3. `216` — the scoped data correction that moves stranded `architect_tender` leads `accepted → tender`
+     (preflight §8 shows the count first; re-running moves 0).
   Run each migration's VERIFICATION block (every row `true`) → `NOTIFY pgrst, 'reload schema';`.
-- **Verify on staging:** re-run the full PREFLIGHT (now `has_212/213=t`, §2a all six tables carry
-  `deny_clients`, function-privilege check `f|f|f|t`).
+- **Verify on staging:** re-run the full PREFLIGHT (§0 now `has_212/213/214/215=true`; §2a all six tables
+  carry `deny_clients`; §7 `already_has_215=true`; §8 `stranded=0`; §9 function-privilege `false|false|false|true`).
 - **Exercise the UN-GATED paths that touch the altered tables** (these are NOT behind `registerEnabledFor`, so
   they go live the moment 212/213 + the code land, even with the switch off):
   - run `runPortalNightlySync()` (server/lib/portalSync.mjs) end-to-end on the 212/213 staging DB and confirm it
@@ -42,8 +49,8 @@ on for **named leads only**.
   - load an existing (pre-212-shaped) client portal and confirm the Selections board + "coming up" list show the
     same rows as before — the portal read/write filter now adds `.eq('client_visible', true)` (portalV2Routes.mjs),
     un-gated. Both are expected behaviour-neutral; this step is what proves it.
-- **[APPROVAL C]** — apply 212+213 to **production** (same order, same VERIFICATION), with the switch still OFF.
-  No user sees any change yet.
+- **[APPROVAL C]** — apply 212+213+215+216 to **production** (same order, same VERIFICATION), with the switch
+  still OFF. No user sees any change yet.
 
 ## Gate 3 — Merge the code behind the OFF switch
 - **Do:** merge PR #1 to `main` and deploy (Vercel + Railway) with **`REGISTER_ENABLED` unset / false** and
@@ -84,8 +91,8 @@ on for **named leads only**.
 ---
 
 ### Remaining approvals, in order
-**A** preflight sign-off · **B** apply 214 · **C** apply 212+213 (staging→prod) · **D** merge+deploy dark ·
-**E** turn on pilot leads · **F** general availability.
+**A** preflight sign-off · **B** apply 214 · **C** apply 212+213+215+216 (staging→prod) · **D** merge+deploy
+dark · **E** turn on pilot leads · **F** general availability.
 
 ### Hard stops (unchanged this phase)
 No merge, no deploy, no production migration, no real client document or portal invite **until you approve the

@@ -16,13 +16,20 @@
 \echo ===== §1 DEPENDENCY PRESENCE — all seven columns must be  t  =====
 -- If has_104_auth_is_staff is f, STOP: 213 will abort at the room_scope_items deny_clients step (by design,
 -- fail-closed) and 214 will also raise. Apply migration 104 first. has_103/188/199/200/212 gate 212/213 too.
+-- Column checks use pg_catalog (pg_attribute), not information_schema.columns, which is privilege-filtered
+-- and can give a non-owner role a false "column absent" → a wrong "migration not applied" reading.
+WITH col AS (
+  SELECT c.relname AS tbl, a.attname AS col
+  FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname='public' AND a.attnum>0 AND NOT a.attisdropped
+)
 SELECT to_regclass('public.client_selections') IS NOT NULL                                           AS has_103_client_selections,
        to_regprocedure('public.auth_is_staff()') IS NOT NULL                                         AS has_104_auth_is_staff,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads'    AND column_name='selections_schedule') AS has_188_selections_schedule,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='projects' AND column_name='is_preconstruction')  AS has_199_is_preconstruction,
+       EXISTS (SELECT 1 FROM col WHERE tbl='leads'    AND col='selections_schedule')                 AS has_188_selections_schedule,
+       EXISTS (SELECT 1 FROM col WHERE tbl='projects' AND col='is_preconstruction')                  AS has_199_is_preconstruction,
        to_regclass('public.internal_categories') IS NOT NULL                                         AS has_200_internal_categories,
        to_regclass('public.room_scope_items') IS NOT NULL                                            AS has_212_room_scope_items,
-       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='projects' AND column_name='register_meta')       AS has_213_register_meta;
+       EXISTS (SELECT 1 FROM col WHERE tbl='projects' AND col='register_meta')                       AS has_213_register_meta;
 -- EXPECT on prod BEFORE this release: has_103=t has_104=t has_188=t has_199=t has_200=t, and
 --        has_212=f has_213=f  (212/213 not yet applied). After applying 212+213 they become t.
 
@@ -107,8 +114,8 @@ WHERE c.conrelid = 'public.client_selections'::regclass AND c.contype='c'
 -- 216 is a SCOPED one-row-class UPDATE: only leads with lead_type='architect_tender' sitting on the
 -- retired 'accepted' stage. It touches nothing else. These two SELECTs show (a) the column 216 guards on
 -- and (b) exactly which rows it will move, so the count can be confirmed before and after.
-SELECT EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_schema='public' AND table_name='leads' AND column_name='lead_type') AS has_lead_type_EXPECT_t;
+SELECT EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+               WHERE n.nspname='public' AND c.relname='leads' AND a.attname='lead_type' AND a.attnum>0 AND NOT a.attisdropped) AS has_lead_type_EXPECT_t;
 SELECT count(*) FILTER (WHERE stage='accepted' AND lead_type='architect_tender') AS stranded_architect_tenders_EXPECT_moved_then_0,
        count(*) FILTER (WHERE stage='accepted')                                   AS all_accepted_rows_LEFT_UNTOUCHED
 FROM public.leads;
