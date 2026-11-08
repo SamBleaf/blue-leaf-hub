@@ -125,7 +125,7 @@ const GATE_REQUIREMENTS = {
   ],
   fee_proposal:  [
     // Concept exit → PTSA / Plans: design approved + pathway explained + the pre-con fee set.
-    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Mark the concept design Approved once the client signs off" },
+    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Unlock the concept design first — mark the concept fee paid in Xero, or use Override in the Concept card — then mark it Approved once the client signs off" },
     { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained, hint: "Tick 'PTSA / Plans pathway explained' after walking the client through it" },
     { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null, hint: "Enter the pre-construction fee in the Concept card" },
   ],

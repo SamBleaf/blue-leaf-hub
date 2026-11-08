@@ -250,19 +250,20 @@ export function useRegister(leadId, { enabled = true } = {}) {
     const byReason = new Map(conflicts.map((c) => [c.itemId, c.reason]));
     const out = [];
     const notes = [];
+    let guardRejected = false, versionConflict = false;
     const theirs = new Map(server.items.map((i) => [i.id, i]));
     for (const t of server.items) {
       const mine = local.items.find((i) => i.id === t.id);
       if (!dirty.current.has(t.id) || !mine) { out.push(t); continue; }
       const reason = byReason.get(t.id);
       if (reason && GUARD_REASONS[reason]) {
-        out.push(t); dirty.current.delete(t.id);
+        out.push(t); dirty.current.delete(t.id); guardRejected = true;
         notes.push(`“${mine.description || "Item"}” ${GUARD_REASONS[reason]}.`);
         continue;
       }
       const { item, conflicts: fields } = mergeItem(baseItems.get(t.id), mine, t);
       out.push(item);
-      if (fields.length) notes.push(`“${mine.description || "Item"}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`);
+      if (fields.length) { versionConflict = true; notes.push(`“${mine.description || "Item"}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`); }
     }
     for (const mine of local.items) {
       if (theirs.has(mine.id)) continue;
@@ -275,7 +276,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
     for (const c of conflicts) {
       if (GUARD_REASONS[c.reason] && deleted.current.has(c.itemId)) {
         const it = deleted.current.get(c.itemId);
-        deleted.current.delete(c.itemId);
+        deleted.current.delete(c.itemId); guardRejected = true;
         notes.push(`“${it?.description || "Item"}” was not removed — it ${GUARD_REASONS[c.reason]}.`);
       }
     }
@@ -285,8 +286,18 @@ export function useRegister(leadId, { enabled = true } = {}) {
     if (code === "MODE_CHANGED") notes.unshift("This brief has moved onto the project record — your unsaved changes were kept and saved there.");
     if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
     const anything = dirty.current.size || deleted.current.size || metaSeq.current !== metaSaved.current;
-    setSave({ state: anything ? "dirty" : "saved", at: anything ? null : new Date(), message: null });
-    if (anything) { timer.current = setTimeout(() => { flushRef.current(); }, 50); }
+    if (anything) {
+      setSave({ state: "dirty", at: null, message: null });
+      timer.current = setTimeout(() => { flushRef.current(); }, 50);
+    } else if (guardRejected) {
+      // A guard refused a change (baseline / post-contract / issued / approval evidence). Surface a distinct
+      // Rejected state with what to do next — never a misleading green "Saved" over a rejection.
+      setSave({ state: "rejected", at: null, message: notes[0] || "A change was rejected and not saved." });
+    } else if (versionConflict) {
+      setSave({ state: "conflict", at: null, message: notes[0] || "An item changed elsewhere — the latest value is shown." });
+    } else {
+      setSave({ state: "saved", at: new Date(), message: null });
+    }
   }
 
   // Warn before leaving with unsaved work; flush when the tab is hidden.

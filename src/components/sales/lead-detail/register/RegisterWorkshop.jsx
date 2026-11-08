@@ -123,7 +123,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     ? (info.isPreconstruction ? { t: "Project record", c: "bg-primary/10 text-primary", h: "Saved to the canonical project records (pre-construction). Selections stay internal until issued." }
       : { t: "Project record · under contract", c: "bg-green-100 text-green-700", h: "Live project — approved selections change through variations." })
     : { t: "Lead brief", c: "bg-page text-muted", h: "Saved on the lead until a project record exists, then moved onto it automatically." };
-  const saveText = { idle: "", dirty: "Unsaved…", saving: "Saving…", saved: save.at ? `Saved ${save.at.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}` : "Saved", error: save.message || "Save failed" }[save.state];
+  const saveText = { idle: "", dirty: "Unsaved…", saving: "Saving…", saved: save.at ? `Saved ${save.at.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}` : "Saved", error: save.message || "Save failed", rejected: save.message || "Change rejected — not saved", conflict: save.message || "Changed elsewhere — review" }[save.state];
 
   // Switched off for this lead (REGISTER_ENABLED / REGISTER_PILOT_LEADS): the pre-register lists, exactly as before.
   if (store.disabled) return <div ref={rootRef}>{LEGACY_BY_STAGE[stage] && <LegacyScheduleRows lead={lead} patch={patch} variant={LEGACY_BY_STAGE[stage]} />}</div>;
@@ -156,7 +156,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {saveText && <span className={`text-[11px] ${save.state === "error" ? "text-red-600" : save.state === "saved" ? "text-green-600" : "text-amber-600"}`} data-testid="register-save-state">{saveText}</span>}
+          {saveText && <span className={`text-[11px] ${save.state === "error" || save.state === "rejected" ? "text-red-600" : save.state === "saved" ? "text-green-600" : "text-amber-600"}`} data-testid="register-save-state">{saveText}</span>}
           {open && <button type="button" onClick={() => store.flush()} disabled={save.state === "saving"} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40">Save</button>}
           {open && !expanded && <button type="button" onClick={() => setExpanded(true)} className="hidden rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page sm:inline-block" data-testid="register-expand" title="Open the register in a full-width workspace">⤢ Expand</button>}
           {!open
@@ -211,10 +211,12 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
                 mutateMeta={store.mutateMeta} gotoContext={() => gotoStep("context")} onPortalItem={onPortalItem}
                 onPrev={() => { const i = rooms.findIndex((r) => r.id === activeRoomId); if (i > 0) selectRoom(rooms[i - 1].id); }}
                 onSaveNext={async () => {
+                  // Flush BEFORE advancing: on a 409/500 the save fails (flush -> false) and we stay on the
+                  // room so the rejected/conflict indicator is seen in context — no silent loss, no stale green.
+                  const okSaved = await store.flush();
                   const i = rooms.findIndex((r) => r.id === activeRoomId);
                   const next = rooms[i + 1];
-                  if (next) selectRoom(next.id);
-                  await store.flush();
+                  if (okSaved && next) selectRoom(next.id);
                 }} />
             )}
             {reg && step === "register" && (
