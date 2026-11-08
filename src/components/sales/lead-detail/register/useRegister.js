@@ -132,6 +132,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
 
   // ── mutations (local first) ───────────────────────────────────────────────────────────────────
   const commit = useCallback((next, touchedIds = [], metaTouched = false) => {
+    outcome.current = null;   // a fresh user edit starts a new save cycle — drop any latched rejection/conflict badge
     regRef.current = next; setReg(next);
     for (const id of touchedIds) dirty.current.set(id, ++seq.current);
     if (metaTouched) metaSeq.current += 1;
@@ -183,6 +184,10 @@ export function useRegister(leadId, { enabled = true } = {}) {
   }, [commit]);
 
   // ── save ──────────────────────────────────────────────────────────────────────────────────────
+  // A latched {state,message} for a guard REJECTION / version CONFLICT that happened in a batch which ALSO
+  // had valid items still to save. The valid items are re-flushed, but their green "Saved" must not repaint
+  // over the rejection/conflict — flush() restores this latched badge instead. Cleared on the next user edit.
+  const outcome = useRef(null);
   const flushRef = useRef(async () => {});
   const flush = useCallback(async () => {
     clearTimeout(timer.current);
@@ -223,8 +228,18 @@ export function useRegister(leadId, { enabled = true } = {}) {
       const next = { meta, items };
       regRef.current = next; setReg(next);
       const stillDirty = dirty.current.size || deleted.current.size || metaChangedInFlight;
-      setSave({ state: stillDirty ? "dirty" : "saved", at: new Date(), message: null });
-      if (stillDirty || pending.current) { pending.current = false; schedule(); }
+      if (stillDirty) {
+        setSave({ state: "dirty", at: null, message: null });
+        pending.current = false; schedule();
+      } else if (outcome.current) {
+        // the valid items saved, but a guard rejection / version conflict in this cycle must stay visible
+        setSave({ state: outcome.current.state, at: null, message: outcome.current.message });
+        outcome.current = null;
+        if (pending.current) { pending.current = false; schedule(); }
+      } else {
+        setSave({ state: "saved", at: new Date(), message: null });
+        if (pending.current) { pending.current = false; schedule(); }
+      }
       return true;
     }
 
@@ -286,15 +301,23 @@ export function useRegister(leadId, { enabled = true } = {}) {
     if (code === "MODE_CHANGED") notes.unshift("This brief has moved onto the project record — your unsaved changes were kept and saved there.");
     if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
     const anything = dirty.current.size || deleted.current.size || metaSeq.current !== metaSaved.current;
+    // A guard refused a change (baseline / post-contract / issued / approval evidence) or an item changed
+    // elsewhere. Surface a distinct Rejected/Conflict state — never a misleading green "Saved" over it.
+    const pendingOutcome = guardRejected
+      ? { state: "rejected", message: notes[0] || "A change was rejected and not saved." }
+      : versionConflict
+      ? { state: "conflict", message: notes[0] || "An item changed elsewhere — the latest value is shown." }
+      : null;
     if (anything) {
-      setSave({ state: "dirty", at: null, message: null });
+      // Valid items in the same batch still need saving. Latch the rejection/conflict so the re-flush's
+      // success restores this truthful badge instead of painting green — and show it now rather than "dirty".
+      outcome.current = pendingOutcome;
+      setSave(pendingOutcome
+        ? { state: pendingOutcome.state, at: null, message: pendingOutcome.message }
+        : { state: "dirty", at: null, message: null });
       timer.current = setTimeout(() => { flushRef.current(); }, 50);
-    } else if (guardRejected) {
-      // A guard refused a change (baseline / post-contract / issued / approval evidence). Surface a distinct
-      // Rejected state with what to do next — never a misleading green "Saved" over a rejection.
-      setSave({ state: "rejected", at: null, message: notes[0] || "A change was rejected and not saved." });
-    } else if (versionConflict) {
-      setSave({ state: "conflict", at: null, message: notes[0] || "An item changed elsewhere — the latest value is shown." });
+    } else if (pendingOutcome) {
+      setSave({ state: pendingOutcome.state, at: null, message: pendingOutcome.message });
     } else {
       setSave({ state: "saved", at: new Date(), message: null });
     }
