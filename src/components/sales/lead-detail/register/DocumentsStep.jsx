@@ -86,19 +86,28 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     // Reserve the tab synchronously (popup-safe) BEFORE the await, then root the signed URL at the ORIGIN
     // (not the current /sales/leads/<id> route) so a root-relative storage path resolves to https://host/sb/…
     // and never falls into the SPA catch-all that would show Hub Home. An absolute URL passes through unchanged.
-    const win = window.open("about:blank", "_blank", "noopener");
+    // NB: do NOT pass "noopener" to this pre-reservation open — per the HTML spec that makes window.open()
+    // return null, which would kill the reservation and force the open to after the await (popup-blocked on
+    // Safari). Keep a real handle and sever the opener manually for tab-nabbing safety.
+    const win = window.open("about:blank", "_blank");
+    if (win) win.opener = null;
     const r = await apiFetch(`/api/register/leads/${lead.id}/documents/${id}/url${exportDocx ? "?export=docx" : ""}`);
     if (!r.ok) { win?.close(); setMsg({ tone: "red", text: r.error || "Could not open the document." }); return; }
     let href; try { href = new URL(r.data.url, window.location.origin).href; } catch { href = r.data.url; }
-    if (win) win.location.href = href; else window.open(href, "_blank", "noopener");
+    if (win) win.location.href = href; else window.open(href, "_blank");
   }
   async function openPack(discipline) {
+    // Same popup-safe pattern as openFile: reserve the tab on the click BEFORE the flush/fetch awaits, or
+    // Safari's popup blocker suppresses the post-await open and the pack silently never appears.
+    const win = window.open("about:blank", "_blank");
+    if (win) win.opener = null;
     setBusy(true); setMsg(null);
     await flush();
     const r = await apiFetch(`/api/register/leads/${lead.id}/packs/${discipline}`);
     setBusy(false);
-    if (!r.ok) { setMsg({ tone: "amber", text: r.error }); return; }
-    window.open(b64ToBlobUrl(r.data.pdf), "_blank", "noopener");
+    if (!r.ok) { win?.close(); setMsg({ tone: "amber", text: r.error }); return; }
+    const url = b64ToBlobUrl(r.data.pdf);
+    if (win) win.location.href = url; else window.open(url, "_blank");
   }
 
   const byType = useMemo(() => {
