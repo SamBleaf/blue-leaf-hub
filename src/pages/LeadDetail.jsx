@@ -7,6 +7,7 @@ import {
   LEAD_ACTION_TYPE_LABELS,
   LEAD_SOURCE_CATEGORY_LABELS,
 } from "../lib/constants.js";
+import { STAGE_GATES, STAGE_ORDER } from "../lib/stageGates.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -45,13 +46,6 @@ import StageEmailBox from "../components/sales/lead-detail/StageEmailBox.jsx";
 import ApprovalRiskChip from "../components/sales/lead-detail/ApprovalRiskChip.jsx";
 import OpsScheduleHandoff from "../components/sales/lead-detail/OpsScheduleHandoff.jsx";
 
-// CW-2: the Consultants→Tender exit needs the full consultant document set in (every roster
-// deliverable received/issued). Empty roster = not ready.
-function consultantDocsReady(roster) {
-  const r = Array.isArray(roster) ? roster : [];
-  return r.length > 0 && r.every((e) => (Array.isArray(e.deliverables) ? e.deliverables : []).every((d) => d.status === "received" || d.status === "issued"));
-}
-
 const STAGES = [
   { id: "enquiry",       label: "Enquiry",       color: "bg-slate-100 text-slate-700" },
   { id: "qualify",       label: "Qualify",       color: "bg-blue-50 text-blue-800" },
@@ -80,8 +74,6 @@ const DESIGN_STAGES = [
 
 // ACTIVITY_ICONS relocated into LeadActivityTimeline (Pass 3A).
 
-const STAGE_ORDER = ["enquiry","qualify","discovery","winning_offer","fee_proposal","consultants","tender","won"];
-
 const PTSA_SERVICES = [
   { value: "site_analysis",       label: "Site Analysis and Survey Review" },
   { value: "cost_planning",       label: "Detailed Preliminary Cost Planning by Trade Category" },
@@ -106,44 +98,9 @@ const PTSA_STATUS_LABELS = {
 // provisions the job folder. The dropdown offers draft / sent / declined only.
 const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 
-// Each gate row: { field, label (the requirement), check, hint (plain-English HOW to satisfy it — shown
-// under an unmet row + surfaced as the header "Next:" step) }.
-const GATE_REQUIREMENTS = {
-  qualify:       [],
-  discovery:     [
-    { field: "qualify_score", label: "Qualifying score ≥ 5", check: l => (l.qualify_score || 0) >= 5, hint: "Score the qualifying questions in the scorecard above" },
-    // Sales OS Slice 1 hard gate — a booked build conversation. Only enforced once migration 174 is
-    // applied (the column is present on the lead); pre-migration it passes so nothing is blocked early.
-    { field: "discovery_meeting_booked_at", label: "Build conversation booked", check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at, hint: "Send the qualify email; the client books via the link (or Check for booking)" },
-  ],
-  winning_offer: [
-    // Sales OS Discovery hard gate — only enforced once mig 179 is applied (column present); pre-mig it passes.
-    { field: "concept_agreement_status", label: "Concept agreement accepted", check: l => !("concept_agreement_status" in l) || l.concept_agreement_status === "accepted", hint: "Generate the concept agreement, then Mark accepted" },
-    { field: "discovery_notes",   label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim(), hint: "Capture the discovery notes below" },
-    { field: "design_stage",      label: "Design stage set",        check: l => !!l.design_stage, hint: "Set the Design stage (Concept readiness in the focus card)" },
-    { field: "desired_start_date",label: "Desired start date set",  check: l => !!l.desired_start_date, hint: "Set the client's desired start date (Concept readiness)" },
-  ],
-  fee_proposal:  [
-    // Concept exit → PTSA / Plans: design approved + pathway explained + the pre-con fee set.
-    { field: "concept_design_status", label: "Concept design approved", check: l => !("concept_design_status" in l) || l.concept_design_status === "approved", hint: "Unlock the concept design first — mark the concept fee paid in Xero, or use Override in the Concept card — then mark it Approved once the client signs off" },
-    { field: "concept_pathway_explained", label: "PTSA / Plans pathway explained", check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained, hint: "Tick 'PTSA / Plans pathway explained' after walking the client through it" },
-    { field: "preconstruction_fee", label: "Pre-construction fee set", check: l => l.preconstruction_fee != null, hint: "Enter the pre-construction fee in the Concept card" },
-  ],
-  consultants:   [{ field: "ptsa_status", label: "PTSA signed", check: l => !("ptsa_status" in l) || l.ptsa_status === "signed", hint: "Send the PTSA, then Mark PTSA as signed (uploads the signed PDF)" }],
-  tender:        [
-    // Consultants exit → Tender (CW-2): full document set in + Fixed-Price proposal generated
-    // (+ final presentation booked, surfaced advisorily in the stage). Certification moved to Won.
-    { field: "consultant_roster", label: "Consultant documents complete", check: l => consultantDocsReady(l.consultant_roster), hint: "Advance each consultant's deliverables to received/issued" },
-    { field: "fee_proposal_id", label: "Fixed-Price proposal generated", check: l => !!l.fee_proposal_id, hint: "Generate the Fixed-Price proposal (button in the Consultants stage)" },
-    { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued, hint: "Issue the provisional F&F schedule to suppliers, then tick 'issued'" },
-    { field: "site_address", label: "Site address set", check: l => !!l.site_address?.trim(), hint: "Add the site address in Lead details" },
-    { field: "job_id", label: "Job created from this lead", check: l => !!l.job_id, hint: "Create the job from this lead (button below)" },
-  ],
-  // Tender exit → Won: a signed building contract is the hard requirement (no more one-click finish).
-  won:           [
-    { field: "contract_status", label: "Building contract signed", check: l => !("contract_status" in l) || l.contract_status === "signed", hint: "Capture the signed building contract in the Tender stage" },
-  ],
-};
+// Stage gate requirements are defined ONCE in the shared canonical module src/lib/stageGates.js
+// (imported above as STAGE_GATES) and rendered read-only here. The server enforces the same
+// definitions, so this display can never drift from what is actually enforced (S-013 / ARCH-01).
 
 function nextStage(current) {
   const idx = STAGE_ORDER.indexOf(current);
@@ -1744,7 +1701,7 @@ export default function LeadDetail() {
 
   const stageMeta = STAGES.find(s => s.id === lead.stage);
   const next = nextStage(lead.stage);
-  const gateChecks = next ? (GATE_REQUIREMENTS[next] || []) : [];
+  const gateChecks = next ? (STAGE_GATES[next] || []) : [];
   const gatePass = gateChecks.every(g => g.check(lead));
   const nextLabel = STAGES.find(s => s.id === next)?.label;
   // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)

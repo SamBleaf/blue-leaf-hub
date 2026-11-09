@@ -28,6 +28,8 @@ import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
 import { promoteRegisterToProject } from "./registerPromotion.mjs";
 import { leadScratchpadLocked, registerEnabledFor } from "./registerStore.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
+import { isForwardMove, evaluateGate, hardBlockReason } from "../../src/lib/stageGates.js";
+import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { enrichSite } from "./siteEnrichmentService.mjs";
@@ -49,42 +51,11 @@ const _GEO_QUALIFY_PLUS = new Set([
   "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won", "accepted",
 ]);
 
-// W01-DRIFT-003 (SAM-W02-002): stage gates are ADVISORY during hardening — never
-// hard-blocked server-side, but a bypass is logged + surfaced (non-breaking) so it is
-// observable. Mirror of the frontend GATE_REQUIREMENTS in LeadDetail.jsx.
-const STAGE_GATES = {
-  discovery:     [{ label: "Qualifying score ≥ 5",      check: l => (l.qualify_score || 0) >= 5 }],
-  winning_offer: [
-    { label: "Discovery notes filled",  check: l => !!l.discovery_notes?.trim() },
-    { label: "Design stage set",        check: l => !!l.design_stage },
-    { label: "Desired start date set",  check: l => !!l.desired_start_date },
-  ],
-  fee_proposal:  [
-    { label: "Concept design approved",           check: l => !("concept_design_status" in l) || l.concept_design_status === "approved" },
-    { label: "PTSA / Plans pathway explained",    check: l => !("concept_pathway_explained" in l) || !!l.concept_pathway_explained },
-    { label: "Pre-construction fee set",          check: l => l.preconstruction_fee != null },
-  ],
-  tender:        [
-    { label: "Consultant documents complete", check: l => { const r = Array.isArray(l.consultant_roster) ? l.consultant_roster : []; return r.length > 0 && r.every(e => (Array.isArray(e.deliverables) ? e.deliverables : []).every(d => d.status === "received" || d.status === "issued")); } },
-    { label: "Fixed-Price proposal generated",          check: l => !!l.fee_proposal_id },
-    { label: "Provisional F&F schedule issued",         check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued },
-    { label: "Site address set",        check: l => !!l.site_address?.trim() },
-    { label: "Job created from lead",   check: l => !!l.job_id },
-  ],
-};
-
-function evaluateStageGate(targetStage, mergedLead) {
-  const gates = STAGE_GATES[targetStage] || [];
-  return gates.filter(g => !g.check(mergedLead)).map(g => g.label);
-}
-
-// APB pipeline order (off-pipeline nurture/lost excluded). Used to tell a FORWARD advance from a
-// corrective BACKWARD move: hard gates apply only to forward moves on real (non-test) leads.
-const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won"];
-function isForwardMove(from, to) {
-  const fi = STAGE_ORDER.indexOf(from), ti = STAGE_ORDER.indexOf(to);
-  return fi >= 0 && ti >= 0 && ti > fi;
-}
+// Stage gates (hard-block + advisory) are defined ONCE in the shared canonical module
+// src/lib/stageGates.js and imported above — the server enforces them and the client renders the
+// same definitions, so there is no second copy to drift (S-013 / ARCH-01). STAGE_ORDER /
+// isForwardMove / evaluateGate / hardBlockReason all come from there. A previous stale STAGE_GATES
+// "advisory mirror" lived here and had drifted from the enforced hard gates.
 
 // Sales OS Slice 1 — advisory nurture recommendation (Lost stays a manual choice, never automatic).
 // A qualify-stage lead scoring below 5 should be nurtured, not lost. Returns null when not applicable.
@@ -1567,9 +1538,12 @@ export function registerSalesRoutes(app) {
       updates.fit_set_by = req.caller?.id || null;
       updates.fit_set_at = new Date().toISOString();
     }
+    // Fetch the whole row: the canonical gate evaluator (src/lib/stageGates.js) reads many columns,
+    // and select("*") is deploy-ahead safe — an unmigrated gate column is simply absent from the row
+    // so its `"col" in lead` guard passes, instead of a scoped select erroring on a missing column.
     const { data: current } = await sb
       .from("leads")
-      .select("stage, won_at, lost_at, qualify_score, discovery_notes, design_stage, desired_start_date, preconstruction_fee, site_address, suburb, job_id, geo_geocoded_at, geo_precision")
+      .select("*")
       .eq("id", req.params.id)
       .single();
     // Master Register R03: once the brief has been promoted onto the project record, the lead scratchpad
@@ -1581,49 +1555,20 @@ export function registerSalesRoutes(app) {
     if (updates.stage && current?.stage && updates.stage !== current.stage) {
       // Test/dev harness (mig 178): a TEST lead bypasses every hard gate and can jump to any stage in
       // any direction; and for ANY lead a BACKWARD move is corrective and never gated. So hard gates
-      // apply only to a FORWARD advance on a real lead. Defensive fetch keeps it deploy-ahead-safe —
-      // pre-migration-178 is_test reads as false, preserving today's behaviour.
-      let isTestLead = false;
-      try {
-        const { data: t, error: tErr } = await sb.from("leads").select("is_test").eq("id", req.params.id).maybeSingle();
-        if (!tErr && t) isTestLead = !!t.is_test;
-      } catch { /* pre-migration-178 */ }
+      // apply only to a FORWARD advance on a real lead. is_test comes from the select("*") above —
+      // pre-migration-178 it is simply absent (reads as falsy), preserving today's behaviour.
+      const isTestLead = !!current.is_test;
       const enforceHardGates = !isTestLead && isForwardMove(current.stage, updates.stage);
+      const merged = { ...current, ...updates };
 
-      // Sales OS Slice 1 — the deliberate HARD gate (a documented exception to the advisory-gate
-      // policy, W01-DRIFT-003): advancing INTO Discovery requires a qualifying score ≥ 5 AND a booked
-      // build conversation. Enforced only once migration 174 is applied (the meeting column exists),
-      // so deploying ahead of the paste never blocks the pipeline. Every OTHER gate stays advisory.
-      if (enforceHardGates && updates.stage === "discovery") {
-        const { data: m, error: mErr } = await sb.from("leads")
-          .select("discovery_meeting_booked_at").eq("id", req.params.id).maybeSingle();
-        if (!mErr) {
-          const missing = [];
-          if ((current?.qualify_score || 0) < 5) missing.push("a qualifying score of at least 5");
-          if (!m?.discovery_meeting_booked_at) missing.push("a booked build conversation");
-          if (missing.length) {
-            return err(res, 422, `Can't advance to Discovery yet — needs ${missing.join(" and ")}.`, "GATE_BLOCKED");
-          }
-        }
-      }
-      // Sales OS Discovery — the winning_offer HARD gate: the concept agreement must be accepted.
-      // Enforced only once mig 179 is applied (column present) + only on a forward advance of a real
-      // lead (enforceHardGates); bypassed for test leads. Every other winning_offer gate stays advisory.
-      if (enforceHardGates && updates.stage === "winning_offer") {
-        const { data: ca, error: caErr } = await sb.from("leads")
-          .select("concept_agreement_status").eq("id", req.params.id).maybeSingle();
-        if (!caErr && ca && ca.concept_agreement_status !== "accepted") {
-          return err(res, 422, "Can't advance to Winning Offer yet — the concept agreement must be accepted.", "GATE_BLOCKED");
-        }
-      }
-      // Sales Pipeline Phase 6 — the WON HARD gate: the building contract must be signed. Enforced
-      // only once mig 194 is applied (contract_status present); pre-mig it passes so nothing blocks.
-      if (enforceHardGates && updates.stage === "won") {
-        const { data: cc, error: ccErr } = await sb.from("leads")
-          .select("contract_status").eq("id", req.params.id).maybeSingle();
-        if (!ccErr && cc && "contract_status" in cc && cc.contract_status !== "signed") {
-          return err(res, 422, "Can't move to Won yet — the building contract must be signed.", "GATE_BLOCKED");
-        }
+      // ONE canonical gate evaluation (src/lib/stageGates.js) — the single source of truth the client
+      // renders too. A forward advance on a real lead is HARD-blocked when a hard requirement is unmet
+      // (Discovery: score + booked conversation; Concept: concept agreement accepted; Won: contract
+      // signed). Every other unmet requirement is advisory (logged + surfaced below, never blocks).
+      // Deploy-ahead safe via the requirements' `"col" in lead` guards (see the select("*") note above).
+      if (enforceHardGates) {
+        const reason = hardBlockReason(updates.stage, merged, LEAD_STAGE_LABELS[updates.stage] || updates.stage);
+        if (reason) return err(res, 422, reason, "GATE_BLOCKED");
       }
       const outcomeDate = new Date().toISOString().slice(0, 10);
       updates.stage_entered_at = new Date().toISOString();
@@ -1643,8 +1588,9 @@ export function registerSalesRoutes(app) {
         if (defaults) { updates.action_type = defaults.action_type; updates.action_due_at = defaults.action_due_at; }
         else { updates.action_type = null; updates.action_due_at = null; }
       }
-      // W01-DRIFT-003 (SAM-W02-002): advisory gate check — log + surface, never block.
-      gateWarnings = evaluateStageGate(updates.stage, { ...current, ...updates });
+      // Advisory requirements (everything not hard-blocked above) — log + surface, never block. On a
+      // backward or test move nothing is hard-enforced, so this still records what was skipped.
+      gateWarnings = evaluateGate(updates.stage, merged).missing.map(r => r.label);
       if (gateWarnings.length) {
         console.warn(`[gate-bypass] lead ${req.params.id} ${current.stage}→${updates.stage} missing: ${gateWarnings.join("; ")}`);
       }
