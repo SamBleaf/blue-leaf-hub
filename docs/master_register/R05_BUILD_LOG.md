@@ -511,3 +511,52 @@ The reviewer's own probes (`SP/probes/p4a/unit1.mjs`, `browser1.mjs`, `browser4.
 ### Next dependency
 
 P4b adds the baseline config, gutters as a linked item, zone-driven defaults and performance suggestions, on `toggleOption`, `chooseZone` and `RepeatRows`. P4c merges W-004, W-006 and W-008 presentation and uses `areaIds` and `sourceQuestionIds`, which the card doesn't write yet. P4d uses `confirmRoomDefaults` and the inherited summary. P5 reads answers through `clientSafeAnswer`.
+
+### Second independent review (2026-11-10)
+
+Four majors and three minors, all reproduced by the reviewer in the sandbox. All are fixed. None was wrong, though the suggested Needs pricing fix needed a guard: copied as written it would have priced recorded site facts (W-001, W-007, M-001, M-002 and M-006 are `itemKind: scope`).
+
+**What the earlier entries said, and what is true.**
+
+| Earlier claim | Correction |
+|---|---|
+| Technical guide: on `element` questions "the chosen option or action is the disposition". `registerChoice.js`: a tap can't reset an old record | On six supply-only questions (K-008, K-013, W-023, B-014, L-006, M-003) and the supply-only options of W-022, R-009, V-005 and M-004, no option has a disposition, and the first tap reset a recorded Included to Undecided. Fixed, and both now describe what the code does. |
+| Decisions: "Recorded `supplyBy` isn't an open decision", and the report's "a recorded By client answers who supplies" | The code exempted every `supplyBy`. Blue Leaf and Trade answers were then in no Tender list at all. The exemption was also a rule nobody had decided while Tab 27 Q4 is open, which the brief forbids. Removed. |
+| Caveats: until P5, a card-only answer "shows nothing" in the briefs, "only priorities do" | Incomplete. It left out the staff Tender view, where card-only items dropped off Needs pricing and the panel said every item had a reviewed price source. P5 doesn't cover that panel. Fixed here. Also inexact for the Client Brief: a card-only Included item prints there as a bare status line (`registerDocuments.mjs`). P5 still has to fix that. |
+| SOP 21-01 step 3: "Nothing disappears by itself" | Not true of words typed on an Other zone or element. It is now. |
+
+**Commits.** `988c540` (rules and config), `0248aac` (the card, the Tender view, per-item save label), and the docs commit carrying this section.
+
+**What changed.**
+
+| Finding | Severity | Fix |
+|---|---|---|
+| A who-supplies tap overwrote a recorded status | Major | `itemPatch` changes the disposition only when the option chosen carries one, or the option left set the one still on the item. Same test as `supplyBy` already used. N/A still writes and clears `na`. The card shows a status its pressed option doesn't say as Earlier work status, with Clear. |
+| Any `supplyBy` closed the open decision | Major | Removed. A scope item still `undecided` stays `decision` whatever supply answer it holds, as at the base commit. It is listed in `decisions_needed`. No rule invented. |
+| Needs pricing dropped card answers | Major | `hasPricingContent`: typed words, or a scope or choice answer. A fact (`contractInclusionOf` is `not_scope`) and N/A never count. The empty text now reads "No in-scope item is waiting for a price source." |
+| Deferred, Existing to remain, finish and product invisible after reload | Major | `settleOptions` takes `current` and always offers the pill on the record, so it shows and a second tap undoes it. + More detail stays shut. Finish and product have their own line. A locked card can't show pills, so it writes the status out, with no Clear. |
+| H-001 No stair lit a second N/A | Minor | `no_stair` now carries `state: not_applicable`, as R-003's N/A does, so there is no separate pill. Option ids unchanged. The map check refuses an option that means N/A without that state. An older N/A on a question with its own N/A option now stays readable. |
+| Words on an Other zone or element lost on replace | Minor | Kept flagged in `answer.selected`, under a `_zone` or `_element` path that no option has. Listed under Check these with Remove and no Use again, and the item counts as outstanding. W-013 has an `other` zone and an `other` option, which is why the path isn't the bare id. |
+| Every touched card showed the register-wide save state | Minor | `saveStateOf(id)` in `useRegister`: refused or changed elsewhere for that item until it is edited again, otherwise waiting if it has unsaved edits, otherwise saved. The header badge is unchanged. |
+
+**Schema and API.** No migration. No route changed. `GET /tender` returns the same shape and lists more items under `needsPricing` and `unresolved`. The option-id lock is unchanged: one state flag added to the map.
+
+**Tests changed on purpose.** One. `register-progressive-choice` "By client is an answer to who supplies, not an open question" encoded the rule the reviewer showed was invented. It is now "who supplies doesn't close the scope decision while Tab 27 Q4 is open", for all four supply answers. No other assertion changed.
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-progressive-choice.test.mjs`: all 29 no-status options against a recorded status, moving between suppliers, N/A and undo, leaving an answer that set the status, a status changed by hand, the settle pill on the record, words on Other zones and elements, H-001 and the map check, supply answers and the open decision | 240 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-progressive-render.test.mjs`: Deferred and Existing to remain lit with More detail shut, a status the option doesn't say, finish and product line, H-001 with no second N/A, a locked card's status, words kept under Check these | 65 passed, 0 failed |
+| BROWSER, DB | `node scripts/tests/sandbox-register-guided.test.mjs`, headless Chromium, real SPA, API, PostgREST, Postgres. Added: one tap on Client keeps Included through a read-back; Deferred and a finish after a real reload and the undo; H-001; every Tender list for each of the four supply answers, card answers, a site fact and N/A through the real API, and the Tender step on screen; a refused save on an issued selection labelling only its own card. Evidence: `~/blh-register-evidence/r05/p4a/` | 128 passed, 0 failed, 0 page errors |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`, on the final code: 29 suites (log `SP/p4afix/final-tests-r2.txt`) | 1815 checks, 0 failing |
+| AUTOMATED | Each logic and card defect put back in turn against the unit suites, files restored and confirmed by checksum. Ad hoc, not committed (`SP/p4afix/mutate2.py unit`) | 15 of 15 caught |
+| BROWSER, DB | The same for the Needs pricing filter, the save label and the fact guard against the browser suite. Ad hoc (`SP/p4afix/mutate2.py browser`) | 2 runs, 3 defects, all caught |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint`, `node --check` on `registerHandover.mjs` and `build-answer-map-doc.mjs`, and both generator `--check` runs pass. The production build was run the same way as above, from the sandbox working directory into the scratchpad, and passes. None of these say anything about behaviour.
+
+**Caveats added.**
+
+- An item answered only with who supplies stays on the outstanding list and under Unresolved until someone sets Scope / disposition in Office fields, and the card has no control for that. It is the base behaviour, and it will read longer than staff expect on appliance-heavy rooms. A client- or others-supplied item appears under both By others and Unresolved.
+- Until P5, the Selections Schedule and most of the briefs don't print card-only answers, and a card-only Included item prints in the Client Brief as a bare status line. Nothing should be issued from card answers before P5. The staff Tender view does read them now.
+- Words kept from an Other zone or element can be removed but not brought back with a tap. To use them again, tap Other and retype.

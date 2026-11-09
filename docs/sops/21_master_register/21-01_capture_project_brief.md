@@ -1,5 +1,5 @@
 ---
-sop_version: 1.2
+sop_version: 1.3
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -43,13 +43,14 @@ It records what the client wants, room by room, in one place. Each answer become
    5. Tap the client's top priorities (P-005, up to three) and add the areas of work (P-006). The box under the priorities is a **note for the client brief**: the client reads it, so write it for them. Use **+ Note** for anything staff-only.
 4. **Whole house** step: set each standard once for the whole home. Tap, don't type.
    1. Tap the choice the client describes, for example **Render**. Only the choices that follow from it appear next, for example **Rendered AAC**. Stop whenever the conversation stops: you don't need an exact product.
-   2. A tick and the line **Recorded:** show what is held. The card then says **Saving…** and **Saved**.
-   3. To change your mind, tap the choice again, or tap a different one. If an earlier answer changes and something chosen under it no longer fits, a yellow box lists it. Tap **Use again** or **Remove**. Nothing disappears by itself.
+   2. A tick and the line **Recorded:** show what is held. The card then says **Saving…** and **Saved**. That word is about this card only. If a change on another item is refused, only that card says **Not saved**.
+   3. To change your mind, tap the choice again, or tap a different one. If an earlier answer changes and something chosen under it no longer fits, a yellow box lists it. Tap **Use again** or **Remove**. Words typed on an **Other** area or element stay in that box too if you tap a different one, with **Remove** only. Nothing disappears by itself.
    4. No answer yet? Tap **Not decided**. You can add why (**Client unsure**, **Decide later**, **Blue Leaf to advise**, **Designer / consultant to confirm**, **Awaiting drawings / info**) and who has it. Neither is required, and no note is required.
    5. Tap **N/A** if the question doesn't apply. On product and finish choices you can also tap **By others** or **Excluded**. N/A doesn't clear a technical check: an item marked **Needs verification** stays on the outstanding list until someone changes it in **Office fields**.
-   6. **Other** opens a small box for the client's own words. **+ Note** adds a short staff-only note. **+ More detail** shows the rarer options, **Deferred**, **Existing to remain**, and finish and product boxes.
+   6. **Other** opens a small box for the client's own words. **+ Note** adds a short staff-only note. **+ More detail** shows the rarer options, **Deferred**, **Existing to remain**, and finish and product boxes. Once set, **Deferred** or **Existing to remain** stays lit on the card, and a finish or product has its own line, so you can see them next meeting without opening anything.
    7. Where a question can have more than one answer on its own line (several wall systems, a floor for each zone), tap **+ Add another**. Each row is saved once you answer it and belongs to the room you are in. Tap **×** to remove a row.
-   8. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
+   8. Questions about **who supplies** (appliances, tapware, fixtures and the like): tapping **Client**, **Blue Leaf**, **Trade** or **Others** records who supplies and nothing else. It doesn't say whether the work is in the contract, so a status already set stays as it was, and an item with no status stays on the outstanding list until someone sets **Scope / disposition** in **Office fields**.
+   9. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
 5. **Site & existing** step: answer access, occupancy, existing-building condition and unknowns for the whole project (not per room). Answers here are recorded as what they are. A steep driveway is a site fact, not building work.
 6. **Rooms** step:
    1. Pick a room from the room list at the top (or step with ← and →; it shows "Room 4 of 8"). Check its name, level and type, and set its scope: **New**, **Renovated**, **Existing — Remain** or **Not in scope**. Add the drawing sheet if you are working from one.
@@ -246,6 +247,36 @@ Next review date: 2027-05-07
 1. On an item marked **Needs verification** (open **Office fields**), tap **N/A**.
 2. Expected: the **Needs verification** chip stays and the item is still on the outstanding list.
 3. Reject path: in **Office fields**, set **Technical verification** to Not required. Expected: the item leaves the list.
+- [ ] Pass  [ ] Fail
+
+**TC-19 — Who supplies is only who supplies**
+1. On a kitchen appliance (K-008), open **Office fields** and set **Scope / disposition** to Included.
+2. Tap **Client**. Expected: **Earlier work status: Included** still shows and the Register still says Included.
+3. On a second K-008 row with no status, tap **Blue Leaf**. Expected: the item stays on the outstanding list, and in **Tender** it is under **Unresolved** and **Needs pricing**.
+4. Reject path: tap **Client** on a third row with no status. Expected: in **Tender** it is under **By others / client supplied** and **Unresolved**, and not under **Needs pricing**.
+- [ ] Pass  [ ] Fail
+
+**TC-20 — A settled answer and a finish are still there next meeting**
+1. K-005: tap **+ More detail**, then **Deferred**. K-004: tap **+ More detail** and type a finish.
+2. Reload the page and open the same room. Expected: **Deferred** is lit with **+ More detail** still shut, and the finish shows on the K-004 card.
+3. Reject path: tap **Deferred** again. Expected: it goes off and the item is outstanding again.
+- [ ] Pass  [ ] Fail
+
+**TC-21 — Words on an Other area or element stay**
+1. W-017: tap **Other zone** and type words. Tap a different zone.
+2. Expected: the words are in the yellow **Check these** box with **Remove** and no **Use again**. The item counts as outstanding.
+3. Reject path: tap **Remove**. Expected: the words go, only because you asked.
+- [ ] Pass  [ ] Fail
+
+**TC-22 — No stair is the one N/A**
+1. H-001 on a Stairs room: tap **No stair**.
+2. Expected: it is selected, the card says **Not applicable**, and there is no separate **N/A** button.
+3. Reject path: tap it again. Expected: nothing is selected and the item is outstanding.
+- [ ] Pass  [ ] Fail
+
+**TC-23 — A refused save says so on its own card only**
+1. On a project record, answer one card and wait for **Saved**. On a selection already issued to the portal, tap **N/A**.
+2. Expected: a notice explains the refusal, the issued card says **Not saved** and goes back, and the first card still says **Saved**.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

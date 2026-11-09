@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-11-07
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director
@@ -35,8 +35,8 @@ The **Tender** step reads the same register rows and shows the scope boundary fo
 
 **Tender summary**
 1. Open the lead → **Project brief & register** → **Tender**.
-2. Read the sections: **Included work**, **Excluded / deferred**, **By others / client supplied**, **Unresolved — decide before pricing is final**, **Products specified**, **Needs pricing — link to the existing estimate**, **Technical risks to verify**.
-3. For each item under **Needs pricing**, go to the Register (21-02) and add its estimate / RFQ / quote link. When every in-scope item has a reviewed price source, the section says so.
+2. Read the sections: **Included work**, **Excluded / deferred**, **By others / client supplied**, **Unresolved — decide before pricing is final**, **Products specified**, **Needs pricing — link to the existing estimate**, **Technical risks to verify**. An item answered only with who supplies stays under **Unresolved** until its status is set in the Register. If the client or others supply it, it is also under **By others / client supplied**.
+3. For each item under **Needs pricing**, go to the Register (21-02) and add its estimate / RFQ / quote link. An answer given on a card counts the same as typed words. A recorded site fact never appears here. When no in-scope item is waiting for a price source, the section says so.
 4. Click **Refresh** after changes.
 
 **Contract baseline and handover**
@@ -152,6 +152,12 @@ Next review date: 2027-05-07
 **TC-07 — No prices in the tender view**
 1. Open the Tender step on a lead whose fee proposal has PC / PS items.
 2. Expected: labels such as "PC sum — tapware" appear; no dollar amount appears anywhere in the step or its API response.
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Card answers reach the Tender view**
+1. On a Tender-stage lead, answer a selection (K-005) on its card with no typing, and tap **Blue Leaf** on an appliance (K-008). Open **Tender**.
+2. Expected: both are under **Needs pricing** showing what was chosen. The appliance is also under **Unresolved**.
+3. Reject path: answer a site fact (W-001). Expected: it is not under **Needs pricing** or **Unresolved**.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
