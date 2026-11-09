@@ -772,3 +772,36 @@ The guided suite caught a regression while this was built: the row key included 
 **Corrections.** `02-02` test cases added in P6 were renumbered TC-12 and TC-13, because TC-10 and TC-11 already existed. Parity is checked for hard refusals and advisory warnings across five transitions. Scenario 1 creates its job at Tender, because that's where the real flow creates it. A Won lead with no job reports `reason: no job` and creates nothing.
 
 **Process note.** From P4b's review onward the build ran in the main session at the owner's request, so P4c to P7 did not get the separate independent review that P1 to P4b had.
+
+## Independent audit fixes (2026-11-10)
+
+ChatGPT tested the build through the ngrok staging link. Each finding was reproduced before anything changed. Commit `3508676`.
+
+| ID | Finding | Cause | Fix | Evidence |
+|---|---|---|---|---|
+| R05-01 | PDF buttons opened Hub Home | The service worker's navigation fallback answered `/sb/...` file links. Only a single-origin staging copy serves files from the app's own address | `/sb/` added to `navigateFallbackDenylist` | BROWSER on a local production build with the worker controlling the page: P01 and P02 each return their own PDF and the hash matches the record. The files were never damaged |
+| R05-02 | Any valid PDF counted as the contract | Only the file type was checked | Reference and named confirmation required, stored on the evidence row and in the lead's history | DB through API, BROWSER |
+| R05-03 | Plans-supplied screen still gave concept instructions | Discovery content ignored the pathway | Script, design meeting, designer and fee, concept agreement, concept invoice and design-stage emails follow the pathway | BROWSER |
+| R05-04 | "Site address missing" with an address on file | PTSA signed with no job was always reported as a missing address, on screen and in the API flag | Address and job are separate cases, with a Create job button and the real failure reason on the page | BROWSER, DB |
+| R05-05 | Assumption wording described a chosen benchtop | One sentence per tier | Each part and priced zone has its own wording, copied when the tier is chosen. Version bumped to v1.1 | AUTOMATED, DB, real PDF |
+| R05-06 | D-003 repeated floor and paint | | `coveredBy` on those options. Hidden where the room's own question covers them. Anything already recorded still shows | AUTOMATED, BROWSER |
+| R05-07 | Summary showed the default beside Different here | | The room's value leads, with the default underneath | BROWSER |
+| R05-08a | Tender Notes preview and toast read as a client document | | Internal wording | SOURCE |
+| R05-08b | Schedule loses column headings on page 2 | LibreOffice doesn't repeat them from this template. Seven template variants tried, none worked | **Not fixed.** Needs the table split per page, which changes a client-facing layout | Reproduced |
+
+**Coverage gaps closed.** The board Move menu was a real defect: the column's scroll area clipped it, so stage names couldn't be clicked. It now sits above the board, lists only stages that apply, and reports the outcome on the page. Re-issue was a thin test fixture, and now has a browser test with a real dependent document. Client login checked on a local production build: no internal wording, and a staff lead link doesn't open.
+
+**Not reproduced.** Sign-out hanging on Loading session, including with a second tab open, on a local production build. Not reproducible does not mean fixed. It should be retested on the public link in a fresh browser.
+
+**Suggestion taken.** A flagged room now shows what was confirmed before. The other suggestion, an owner beside each readiness check, wasn't built.
+
+**Tests changed on purpose.** `sandbox-register-documents` expected the whole tier sentence in Tender Notes, and now expects only the open parts. Every contract upload in the suites now carries the confirmation.
+
+**Mistake caught by the suite.** The first R05-04 edit used a variable that doesn't exist in the PTSA route, which turned PTSA signing into a 500. `sandbox-r05-scenarios` caught it before commit.
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED, BROWSER, DB | `bash SP/run-tests.sh all` | 37 suites, 2,496 checks, 0 failing |
+| BROWSER | Production-build check, SP/staging/verify-prod.mjs | Pass |
+| BROWSER | Playwright walkthrough at 1440 and 375 | 28 of 28 |
+| PRODUCTION | Not available | Not verified |

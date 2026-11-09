@@ -1,5 +1,5 @@
 ---
-sop_version: 1.2
+sop_version: 1.3
 last_reviewed: 2026-11-09
 app_version: main
 screenshot_status: placeholders_only
@@ -89,6 +89,12 @@ Everything is stored on the lead record, so any staff member opening the lead se
 14. When the client returns the signed contract, choose the PDF in the **Building contract** block, optionally set the date signed, and click **✓ Mark contract as signed**. The Hub stores the PDF, marks the contract signed and shows the file as a link. If the lead was marked signed earlier with no date on record, the **Date signed** box appears: enter the date if you know it, or leave it empty and the Hub won't guess one.
 
 15. You can now move the lead to **Won** (see 02-02). The move is blocked until the contract is signed **and** the signed PDF is on file.
+
+### Marking the contract signed (added 2026-11-10)
+
+1. Choose the client-signed PDF under **Building contract**.
+2. Open it and check it really is this client's contract for this job, signed by everyone. The Hub can tell a file is a PDF. It can't tell whose contract it is.
+3. Enter the contract reference or revision, tick the confirmation, then tap **Mark contract as signed**. Your name, the reference and the date go on the record.
 
 ## 6. What happens next
 
@@ -194,7 +200,7 @@ Every automated action triggered from this stage:
 2. In the Tender progress strip, click **Estimate review**.
 3. In the Blue Leaf Proposal Checklist, tick **Scope of works complete**.
 4. In the Building contract block, click **Sent**.
-5. Choose a PDF in the Building contract block and click **✓ Mark contract as signed**.
+5. Choose a PDF in the Building contract block, enter its reference, tick the confirmation and click **✓ Mark contract as signed**.
 - Expected UI: **Estimate review** turns blue with earlier steps ticked; the checklist badge increments (e.g. 1/10 · 10%); the Building contract shows "✓ Signed [today]" with the file name as a link, and the upload is gone.
 - Expected DB: `leads.tender_substatus = 'estimate_review'`; `leads.proposal_checklist->>'scope' = 'true'`; `leads.contract_status = 'signed'`; `leads.contract_sent_date` and `leads.contract_signed_date` are today's date (`YYYY-MM-DD`); one `lead_documents` row with `document_type = 'construction_contract'` and a `storage_path`.
 - [ ] Pass  [ ] Fail
@@ -278,3 +284,10 @@ Every automated action triggered from this stage:
 - Expected UI: at 7/10 (70%) the badge is amber with the "Under 80% — not ready to present" warning; at 8/10 (80%) the warning clears and the badge turns green.
 - Expected DB: `leads.proposal_checklist` holds 7 then 8 item keys set to `true` (readiness = keys ÷ 10; `PROPOSAL_READY_THRESHOLD = 0.8`).
 - [ ] Pass  [ ] Fail
+
+**TC-08 — A valid PDF isn't enough**
+1. Choose a real PDF. Expected: the button stays off until a reference is entered and the confirmation is ticked.
+2. Send the request with no confirmation or no reference. Expected: refused with `VERIFICATION_REQUIRED`, nothing stored, Won still refused.
+3. Confirm and mark signed. Expected: the record shows the client, reference, who checked it and when, and the same detail is in the lead's history.
+- [ ] Pass  [ ] Fail
+

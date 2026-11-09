@@ -54,6 +54,7 @@ What a future read-only adapter can rely on: `lead_id`, `job_id` and `project_id
 ## 5. Behaviour changes staff will notice
 
 - A contract can only be marked signed by uploading the signed PDF. A lead showing signed with no PDF needs one attached before Won.
+- Marking a contract signed needs a reference and a named confirmation that the PDF is this client's executed contract.
 - A consultant document at Received no longer counts as ready. The normal Move to Tender button waits for Reviewed and In the set.
 - Rooms list what they inherit, with one confirm, instead of asking again.
 - Client Brief scope lines now carry a small item reference.
@@ -70,6 +71,8 @@ What a future read-only adapter can rely on: `lead_id`, `job_id` and `project_id
 | W-013, W-014 rows saved before this keep their old technical status | SOURCE | Not rewritten, by design |
 | Partial audit items not built | SOURCE | PTS-01 numbering, CON-01 step sequencing, TEN-03 and TEN-05 contract pack states, DIS-03, QUA-02 and QUA-05, release metrics |
 | General joinery standard isn't read by a room prompt | SOURCE | Recorded on Whole House only |
+| Selections Schedule loses its column headings on page 2 | BROWSER | LibreOffice doesn't repeat them from this template. Needs the table split per page |
+| A reported sign-out hang through the public staging link | Not reproduced | Tried on a local production build with a second tab open |
 
 ## 7. Test evidence
 
@@ -88,7 +91,7 @@ Screenshots: `~/blh-register-evidence/r05/` (p4b, p4cd, p5, p6, p7). Per-phase d
 
 ## 8. Exact files changed from `759b8e7`
 
-A = added, M = modified, D = deleted. This list stops at the commit before this section was added.
+A = added, M = modified, D = deleted. This list stops at the commit before this section was added, so it predates the audit fixes in commit `3508676`.
 
 ```
 M	docs/agent_knowledge/MASTER_DATA_DICTIONARY.md
