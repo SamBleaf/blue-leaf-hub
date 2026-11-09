@@ -357,6 +357,9 @@ section("A note written for the client (P-005)");
   ok("it survives a reload", makeItem(JSON.parse(JSON.stringify({ answer: a }))).answer.clientNote === "Growing family");
   ok("the client reads it, so changing it counts as a change", answerMaterialChanged(a, setClientNote(c, a, "Empty nesters")));
   ok("changing the staff note still doesn't", !answerMaterialChanged(a, setAnswerNote(c, a, "Staff only")));
+  const approvedBrief = seedOf("P-005", { certainty: "client_approved", evidence: { at: "2026-11-01", by: "Staff", method: "meeting" }, answer: a });
+  ok("so editing it after client approval steps the approval back", editOutrunsApproval(approvedBrief, itemPatch(approvedBrief, c, setClientNote(c, a, "Empty nesters"))));
+  ok("a staff note on the approved record doesn't", !editOutrunsApproval(approvedBrief, itemPatch(approvedBrief, c, setAnswerNote(c, a, "Staff only"))));
   ok("the view reads it back", choiceView(c, a).clientNote === "Growing family");
   ok("only P-005 asks for one", Object.entries(ANSWER_CONFIG).filter(([, x]) => x.clientNote).map(([id]) => id).join() === "P-005");
 }
