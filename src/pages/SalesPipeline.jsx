@@ -384,6 +384,7 @@ function ListView({ leads, onQuickNote, onNav }) {
 
 /* ─────────────────────────── Page ─────────────────────────── */
 export default function SalesPipeline() {
+  const [moveNotice, setMoveNotice] = useState(null);
   const nav = useNavigate();
   const location = useLocation();
   const { setScreenContext } = useBlueprintContext() || {};
@@ -451,8 +452,14 @@ export default function SalesPipeline() {
   useEffect(() => { load(); }, [load]);
 
   async function moveStage(lead, newStage) {
-    const { ok, error } = await apiPatch(`/api/sales/leads/${lead.id}`, { stage: newStage });
-    if (!ok) alert(error || "Couldn't change the stage.");
+    const { ok, data, error } = await apiPatch(`/api/sales/leads/${lead.id}`, { stage: newStage });
+    const name = lead.name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "This lead";
+    const stageName = STAGES.find((s) => s.id === newStage)?.label || { nurture: "Nurture", lost: "Lost" }[newStage] || newStage;
+    if (!ok) setMoveNotice({ ok: false, text: error || "Couldn't change the stage." });
+    else {
+      const skipped = data?.gateWarnings || [];
+      setMoveNotice({ ok: true, text: `${name} moved to ${stageName}.${skipped.length ? ` Skipped and logged: ${skipped.join(", ")}.` : ""}` });
+    }
     load();
   }
 
@@ -507,6 +514,12 @@ export default function SalesPipeline() {
 
   return (
     <div>
+      {moveNotice && (
+        <div role={moveNotice.ok ? "status" : "alert"} data-testid="board-move-notice" className={`mb-3 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${moveNotice.ok ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-700"}`}>
+          <span>{moveNotice.text}</span>
+          <button type="button" onClick={() => setMoveNotice(null)} aria-label="Dismiss" className="shrink-0 font-semibold">×</button>
+        </div>
+      )}
       <SalesPipelineHeader
         activeCount={activeLeads.length}
         totalValue={totalValue}

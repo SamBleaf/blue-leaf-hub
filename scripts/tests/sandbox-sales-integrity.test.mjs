@@ -91,7 +91,7 @@ const getLead = async (id) => (await api(admin, "GET", `/api/sales/leads/${id}`)
 const stageEvents = async (id) => (await svc.from("lead_activities").select("summary, detail").eq("lead_id", id).eq("activity_type", "stage_change")).data || [];
 const notes = async (id) => (await svc.from("lead_activities").select("summary, detail").eq("lead_id", id).eq("activity_type", "note")).data || [];
 const evidenceRows = async (id) => (await svc.from("lead_documents").select("*").eq("lead_id", id).eq("document_type", "construction_contract")).data || [];
-const markSigned = (id, tok = admin, extra = {}) => api(tok, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { signedPdfBase64: pdf(), filename: "Signed Contract.pdf", ...extra });
+const markSigned = (id, tok = admin, extra = {}) => api(tok, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { signedPdfBase64: pdf(), filename: "Signed Contract.pdf", executedConfirmed: true, contractRef: "HIA 2026 Rev A", ...extra });
 const patchLead = (id, body, tok = admin) => api(tok, "PATCH", `/api/sales/leads/${id}`, body);
 const projectsFor = async (jobId) => (await svc.from("projects").select("id, is_preconstruction").eq("job_id", jobId)).data || [];
 
@@ -119,6 +119,25 @@ async function main() {
     check("QualifyActions' manual build-conversation logging still works through PATCH", score.ok && logged.ok, JSON.stringify(logged.body));
     const real = await patchLead(id, { stage: "discovery" });
     check("once the facts are stored, the advance passes", real.ok && real.body.lead.stage === "discovery", JSON.stringify(real.body));
+  }
+
+  section("A valid PDF isn't enough: a person has to say it's this client's contract (audit R05-02)");
+  {
+    const id = await mkLead("tender", PAST_CONCEPT);
+    const noCheck = await markSigned(id, admin, { executedConfirmed: undefined });
+    check("a real PDF with no confirmation is refused", noCheck.status === 400 && noCheck.body?.code === "VERIFICATION_REQUIRED", JSON.stringify(noCheck.body));
+    const noRef = await markSigned(id, admin, { contractRef: "   " });
+    check("no reference is refused", noRef.status === 400 && noRef.body?.code === "VERIFICATION_REQUIRED", JSON.stringify(noRef.body));
+    const truthy = await markSigned(id, admin, { executedConfirmed: "true" });
+    check("only an explicit true counts", truthy.status === 400);
+    check("nothing was stored or marked", (await evidenceRows(id)).length === 0 && (await lead(id)).contract_status !== "signed");
+    check("Won is still refused", (await patchLead(id, { stage: "won" })).status === 422);
+    const good = await markSigned(id, admin, { contractRef: "HIA 2026 Rev B" });
+    check("confirmed, it's accepted", good.ok, JSON.stringify(good.body));
+    const [row] = await evidenceRows(id);
+    const rowLead = await lead(id);
+    check("the record says whose contract, which reference and who checked it", row.revision_label === "HIA 2026 Rev B" && row.review_status === "reconciled" && row.review_notes.includes(rowLead.name) && row.review_notes.includes("HIA 2026 Rev B") && row.review_notes.includes(creds.staff.email), row.review_notes);
+    check("and so does the lead's history", (await notes(id)).some((n) => (n.detail || "").includes("HIA 2026 Rev B") && (n.detail || "").includes(creds.staff.email)));
   }
 
   section("Forward jumps check every hard gate crossed (D3)");

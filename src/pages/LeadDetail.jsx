@@ -1551,6 +1551,7 @@ export default function LeadDetail() {
   }, [lead?.id, lead?.stage, bpWanted]);
 
   const [creatingJob, setCreatingJob] = useState(false);
+  const [jobError, setJobError] = useState(null);
   async function createJobFromLead() {
     if (creatingJob || lead.job_id) return;
     if (!lead.site_address?.trim()) {
@@ -1558,6 +1559,7 @@ export default function LeadDetail() {
       return;
     }
     setCreatingJob(true);
+    setJobError(null);
     try {
       // Phase 2: server-side, non-lossy conversion. The endpoint creates the job,
       // stamps every carried lead fact via the facts service (provenance), links the
@@ -1566,7 +1568,7 @@ export default function LeadDetail() {
       if (ok && data?.job) {
         await load();
       } else {
-        alert("Failed to create job: " + (error || "Unknown error"));
+        setJobError(error || "The job couldn't be created. Please try again.");
       }
     } finally {
       setCreatingJob(false);
@@ -1721,7 +1723,9 @@ export default function LeadDetail() {
   const gates = next ? gateRows(next, lead) : null;
   const nextLabel = STAGES.find(s => s.id === next)?.label;
   // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)
-  const showSiteAddressWarning = !lead.job_id && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
+  const hasSiteAddress = !!lead.site_address?.trim();
+  const showSiteAddressWarning = !lead.job_id && !hasSiteAddress && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
+  const showJobMissing = !lead.job_id && hasSiteAddress && lead.ptsa_status === "signed";
   const isArchTender = lead.lead_type === "architect_tender";
   const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
   const plansSupplied = resolveEngagementPathway(lead) === "plans_supplied";
@@ -2530,13 +2534,14 @@ export default function LeadDetail() {
     // agreement, accept → client folder), then the notes/transcript workspace.
     focusContent = (
       <div className="space-y-4">
-        <DiscoveryMeetingScript />
-        <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
-        <DesignerSelect lead={lead} patch={patch} reload={load} />
-        <DiscoveryActions lead={lead} reload={load} />
+        <DiscoveryMeetingScript plansSupplied={plansSupplied} />
+        {/* Plans already complete: there is no concept package, agreement or fee to run here. */}
+        {!plansSupplied && <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />}
+        {!plansSupplied && <DesignerSelect lead={lead} patch={patch} reload={load} />}
+        {!plansSupplied && <DiscoveryActions lead={lead} reload={load} />}
         {/* Master Register — optional at Discovery (context is read from Sales, never re-asked) */}
         <RegisterWorkshop lead={lead} patch={patch} stage="discovery" />
-        <XeroInvoiceCard lead={lead} reload={load} />
+        {!plansSupplied && <XeroInvoiceCard lead={lead} reload={load} />}
         {discoveryBlock}
         <div className="rounded-card border border-hairline bg-page p-3 text-xs" data-testid="discovery-facts">
           <p className="section-label mb-1">Before moving on</p>
@@ -2550,6 +2555,9 @@ export default function LeadDetail() {
         {conversationsBlock}
       </div>
     );
+  } else if (plansSupplied && ["winning_offer", "fee_proposal"].includes(lead.stage)) {
+    // Recorded while the lead sat at a design stage. Those stages' work no longer applies, so only the brief stays.
+    focusContent = <RegisterWorkshop lead={lead} patch={patch} stage={lead.stage} />;
   } else if (lead.stage === "winning_offer") {
     focusContent = (
       <div className="space-y-4">
@@ -2646,6 +2654,17 @@ export default function LeadDetail() {
     </LeadNextActionCard>
   ) : null;
 
+  const jobMissingBanner = showJobMissing || jobError ? (
+    <div className="mt-4 rounded-card border border-orange-300 bg-orange-50 px-4 py-3" data-next-target="job_id" data-testid="job-missing">
+      {showJobMissing && <>
+        <p className="text-sm font-semibold text-orange-800">Job not created yet</p>
+        <p className="mt-0.5 text-xs text-orange-700">The PTSA is signed and the site address is on file, but no job exists for this lead.</p>
+        <button type="button" onClick={createJobFromLead} disabled={creatingJob} data-next-focus className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">{creatingJob ? "Creating…" : "Create job from this lead"}</button>
+      </>}
+      {jobError && <p role="alert" className="mt-1 text-xs font-medium text-red-700">{jobError}</p>}
+    </div>
+  ) : null;
+
   const samBanner = showSiteAddressWarning ? (
     <div className="mt-4 rounded-card border border-orange-400 bg-orange-50 px-4 py-3 flex items-start gap-3">
       <span className="text-orange-500 text-lg leading-none flex-shrink-0">⚠</span>
@@ -2719,6 +2738,7 @@ export default function LeadDetail() {
       />
 
       {samBanner}
+      {jobMissingBanner}
 
       {/* DESKTOP command-centre (main workspace + sticky right rail) */}
       <LeadCommandCentreLayout

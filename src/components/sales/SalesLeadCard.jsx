@@ -4,14 +4,50 @@
  * Note + Move on desktop; on touch (< lg) the actions are always visible (no hover-only).
  * Move targets = all other stages + Nurture + Mark Lost (unchanged).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { resolveEngagementPathway, stageApplies } from "../../lib/stageGates.js";
 import { displayLeadName } from "../../lib/leadUtils.js";
 import { STAGES, daysInStage, projectTypeLabel } from "../../lib/salesPipeline.js";
 import { RotDot, ScoreBadge, MoneyBadge } from "./SalesBits.jsx";
 import { APPROVAL_RISK, APPROVAL_RISK_COLORS } from "../../lib/constants.js";
 
+const MENU_WIDTH = 176;
+const MENU_MAX_HEIGHT = 340;
+
+/** The stage menu sits on the page, above the board, so a column's scroll area can't clip it. */
 function CardActions({ lead, onMoveStage, onQuickNote }) {
-  const [moveOpen, setMoveOpen] = useState(false);
+  const [menuAt, setMenuAt] = useState(null);
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
+  const close = () => setMenuAt(null);
+  useEffect(() => {
+    if (!menuAt) return undefined;
+    const shut = () => setMenuAt(null);
+    const onKey = (e) => { if (e.key === "Escape") shut(); };
+    document.addEventListener("mousedown", shut);
+    document.addEventListener("keydown", onKey);
+    const onScroll = (e) => { if (!menuRef.current?.contains(e.target)) shut(); };
+    window.addEventListener("resize", shut);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", shut);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", shut);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [menuAt]);
+  function toggle() {
+    if (menuAt) return close();
+    const r = buttonRef.current.getBoundingClientRect();
+    const roomBelow = window.innerHeight - r.bottom;
+    const height = Math.min(MENU_MAX_HEIGHT, Math.max(roomBelow, r.top) - 16);
+    setMenuAt({ left: Math.max(8, r.right - MENU_WIDTH), height, ...(roomBelow >= r.top ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }) });
+  }
+  const pick = (stage) => { close(); onMoveStage(lead, stage); };
+  // Only the stages this lead can actually go to: a plans-supplied lead has no Concept or PTSA.
+  const stages = STAGES.filter((s) => s.id !== lead.stage && (resolveEngagementPathway(lead) !== "plans_supplied" || stageApplies(s.id, lead)));
+  const item = "block w-full px-3 py-2 text-left text-xs hover:bg-page lg:py-1.5";
   return (
     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
       <button
@@ -20,27 +56,27 @@ function CardActions({ lead, onMoveStage, onQuickNote }) {
       >
         Note
       </button>
-      <div className="relative">
-        <button
-          onClick={() => setMoveOpen((v) => !v)}
-          className="rounded border border-hairline bg-page px-2 py-0.5 text-[11px] font-medium text-ink hover:bg-surface"
-        >
-          Move ▾
-        </button>
-        {moveOpen && (
-          <div className="absolute bottom-7 right-0 z-30 w-40 rounded-lg border border-hairline bg-surface py-1 shadow-lg">
-            {STAGES.filter((s) => s.id !== lead.stage).map((s) => (
-              <button key={s.id} className="block w-full px-3 py-1.5 text-left text-xs text-ink hover:bg-page" onClick={() => { setMoveOpen(false); onMoveStage(lead, s.id); }}>
-                {s.label}
-              </button>
-            ))}
-            <div className="mt-1 border-t border-hairline pt-1">
-              <button className="block w-full px-3 py-1.5 text-left text-xs text-muted hover:bg-page" onClick={() => { setMoveOpen(false); onMoveStage(lead, "nurture"); }}>→ Nurture</button>
-              <button className="block w-full px-3 py-1.5 text-left text-xs text-red-500 hover:bg-page" onClick={() => { setMoveOpen(false); onMoveStage(lead, "lost"); }}>Mark Lost</button>
-            </div>
+      <button
+        ref={buttonRef}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={toggle}
+        aria-expanded={!!menuAt}
+        className="rounded border border-hairline bg-page px-2 py-0.5 text-[11px] font-medium text-ink hover:bg-surface"
+      >
+        Move ▾
+      </button>
+      {menuAt && createPortal(
+        <div ref={menuRef} role="menu" data-testid="board-move-menu" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
+          style={{ position: "fixed", width: MENU_WIDTH, left: menuAt.left, top: menuAt.top, bottom: menuAt.bottom, maxHeight: menuAt.height }}
+          className="z-50 overflow-y-auto rounded-lg border border-hairline bg-surface py-1 shadow-lg">
+          {stages.map((s) => <button key={s.id} role="menuitem" className={`${item} text-ink`} onClick={() => pick(s.id)}>{s.label}</button>)}
+          <div className="mt-1 border-t border-hairline pt-1">
+            <button role="menuitem" className={`${item} text-muted`} onClick={() => pick("nurture")}>→ Nurture</button>
+            <button role="menuitem" className={`${item} text-red-500`} onClick={() => pick("lost")}>Mark Lost</button>
           </div>
-        )}
-      </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

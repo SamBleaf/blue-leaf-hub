@@ -50,11 +50,11 @@ const tidyWords = (v) => statedText(v.trim());
 
 const SAVE_TEXT = { dirty: "Saving…", saving: "Saving…", saved: "Saved", error: "Not saved", rejected: "Not saved", conflict: "Changed elsewhere" };
 
-export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState, fixedZone, usedZones, areaOptions }) {
+export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState, fixedZone, usedZones, areaOptions, coveredQuestions }) {
   const [more, setMore] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [touched, setTouched] = useState(false);
-  const view = choiceView(config, item.answer, { showDetail: more, usedZones });
+  const view = choiceView(config, item.answer, { showDetail: more, usedZones, coveredQuestions });
   const qid = config.linkedKey ? `${question?.id}-${config.linkedKey}` : question?.id || item.id;
   const send = (patch) => { setTouched(true); onPatch(patch); };
   const write = (next, extra) => send(itemPatch(item, config, next, extra));

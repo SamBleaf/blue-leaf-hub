@@ -75,7 +75,7 @@ export default function BaselineGuide({ reg, actor, mutateMeta, readOnly }) {
                 ))}
               </div>
               {c.held && (c.status === "open" || c.status === "part") && (
-                <p className="mt-1 text-[11px] text-ink" data-testid={`baseline-text-${c.key}`}><span className="font-semibold">Blue Leaf pricing assumption ({BASELINE_TIERS[c.held.tier]}{assumptionIsDraft(c.held) ? ", draft wording" : ""}):</span> {c.held.text}</p>
+                <p className="mt-1 text-[11px] text-ink" data-testid={`baseline-text-${c.key}`}><span className="font-semibold">Blue Leaf pricing assumption ({BASELINE_TIERS[c.held.tier]}{assumptionIsDraft(c.held) ? ", draft wording" : ""}):</span> {c.assumptionText}</p>
               )}
             </div>
           ))}

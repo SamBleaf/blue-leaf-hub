@@ -1886,7 +1886,7 @@ export function registerSalesRoutes(app) {
     } catch (e) {
       console.warn("[provisionSignedLeadJob] orchestration skipped:", e?.message || e);
     }
-    if (!provisioning.jobId) provisioning.siteAddressWarning = true;
+    if (!provisioning.jobId) provisioning.siteAddressWarning = !String(fallbackLead?.site_address || "").trim();
     return provisioning;
   }
 
@@ -2047,10 +2047,10 @@ export function registerSalesRoutes(app) {
 
       // When job creation failed (missing site_address), flag it so the frontend can
       // show a hard warning and block tender handoff (SAM-W03-001 Option B).
-      if (!provisioning.jobId) provisioning.siteAddressWarning = true;
 
       // Return the freshly-stamped lead + a soft provisioning summary.
       const { data: finalLead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (!provisioning.jobId) provisioning.siteAddressWarning = !String(finalLead?.site_address || "").trim();
       return ok(res, { lead: rowToCamel(finalLead || lead), provisioning });
     } catch (e) {
       console.error("[ptsa/mark-signed]", e);
@@ -2067,12 +2067,15 @@ export function registerSalesRoutes(app) {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     const leadId = String(req.params.id || "").trim();
-    const { signedPdfBase64, filename, signedDate } = req.body || {};
+    const { signedPdfBase64, filename, signedDate, executedConfirmed, contractRef } = req.body || {};
     if (!signedPdfBase64) return err(res, 400, "The signed contract PDF is required.", "PDF_REQUIRED");
     const displayName = typeof filename === "string" ? filename.trim() : "";
     if (!displayName) return err(res, 400, "The signed contract needs a file name.", "PDF_REQUIRED");
     const buffer = decodePdfUpload(signedPdfBase64);
     if (!buffer) return err(res, 400, "That file isn't a complete PDF. Upload the client-signed contract as a PDF.", "NOT_A_PDF");
+    // The Hub can tell a file is a PDF. Only a person can tell it is this client's executed contract, so someone has to say so, by name, on the record.
+    const reference = typeof contractRef === "string" ? contractRef.trim() : "";
+    if (executedConfirmed !== true || !reference) return err(res, 400, "Confirm this is the fully signed contract for this client and job, and give its reference or revision. Nothing was saved.", "VERIFICATION_REQUIRED");
 
     let signedDateStr = new Date().toISOString().slice(0, 10);
     const dateGiven = signedDate !== undefined && signedDate !== null && signedDate !== "";
@@ -2107,11 +2110,16 @@ export function registerSalesRoutes(app) {
       const removeFile = () => sb.storage.from("lead-documents").remove([storagePath]).catch(() => {});
 
       // (2) The evidence row. Without it the upload proves nothing, so this step is not best-effort.
-      const { data: doc, error: docErr } = await sb.from("lead_documents").insert({
+      const checkedBy = req.caller?.email || "Unknown";
+      const clientName = lead.name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "this client";
+      const verification = `Checked as the fully signed building contract for ${clientName}${lead.site_address ? ` at ${lead.site_address}` : ""}. Reference: ${reference}. Checked by ${checkedBy} on ${new Date().toISOString().slice(0, 10)}.`;
+      const evidenceRow = {
         lead_id: leadId, filename: displayName, file_size: buffer.length, mime_type: "application/pdf",
         storage_path: storagePath, document_type: CONTRACT_DOC_TYPE,
-        uploaded_by: req.caller?.email || "Unknown", created_at: new Date().toISOString(),
-      }).select().single();
+        uploaded_by: checkedBy, created_at: new Date().toISOString(),
+      };
+      let { data: doc, error: docErr } = await sb.from("lead_documents").insert({ ...evidenceRow, revision_label: reference, review_status: "reconciled", review_notes: verification }).select().single();
+      if (docErr && ["42703", "PGRST204"].includes(docErr.code)) ({ data: doc, error: docErr } = await sb.from("lead_documents").insert(evidenceRow).select().single()); // migration 213 not applied yet: the activity log below still holds it
       if (docErr) {
         await removeFile();
         return err(res, 400, translateDbError(docErr));
@@ -2134,7 +2142,7 @@ export function registerSalesRoutes(app) {
       await logLeadActivity(sb, leadId, {
         activity_type: "note",
         summary: alreadySigned ? "Signed building contract PDF attached" : "Building contract marked signed",
-        detail: `${displayName} — uploaded by ${req.caller?.email || "unknown"}`,
+        detail: `${displayName}. ${verification}`,
       });
       return ok(res, { lead: rowToCamel({ ...updated, contract_evidence_present: true }), document: rowToCamel(doc) });
     } catch (e) {

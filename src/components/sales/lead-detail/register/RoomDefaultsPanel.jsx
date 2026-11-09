@@ -42,7 +42,11 @@ export default function RoomDefaultsPanel({ lines, onConfirm, onException, readO
           return (
             <li key={key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-[11px]" data-testid={`room-default-${key}`}>
               <span className="w-28 shrink-0 font-medium text-ink">{l.surface || l.question.short}</span>
-              <span className="min-w-[8rem] flex-1 text-ink">{words(l.def)}</span>
+              <span className="min-w-[8rem] flex-1 text-ink">
+                {l.exception ? words(l.exception) : words(l.def)}
+                {l.exception && <span className="block text-[10px] text-muted">Whole house: {words(l.def)}</span>}
+                {l.status === "changed" && l.confirmedWords && <span className="block text-[10px] text-muted">Was: {l.confirmedWords}</span>}
+              </span>
               <Chip tone={STATUS[l.status].tone}>{STATUS[l.status].label}</Chip>
               {!l.exception && !readOnly && <button type="button" onClick={() => onException(l)} className={textBtn} data-testid={`room-exception-${key}`}>Different here</button>}
             </li>

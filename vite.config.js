@@ -39,7 +39,8 @@ export default defineConfig(({ mode }) => {
           // worker routes resolve to worker.html (the Worker manifest + apple icons) via the
           // Vercel rewrite — otherwise an active SW would serve the Hub index.html for /worker
           // and an install there would pick up the wrong icon/identity.
-          navigateFallbackDenylist: [/^\/api/, /^\/worker/],
+          // /sb is the single-origin staging path to storage: a signed file link must reach the file, not the app shell.
+          navigateFallbackDenylist: [/^\/api/, /^\/worker/, /^\/sb\//],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024 // 4 MiB — main bundle grows with deps
         },
         devOptions: {

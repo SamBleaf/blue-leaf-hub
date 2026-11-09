@@ -319,7 +319,7 @@ export function normaliseRoomConfirmations(raw) {
   const out = {};
   for (const id of Object.keys(raw).sort()) {
     const c = raw[id];
-    if (c && typeof c === "object" && c.at) out[id] = { at: text(c.at), by: text(c.by), fingerprint: text(c.fingerprint) };
+    if (c && typeof c === "object" && c.at) out[id] = { at: text(c.at), by: text(c.by), fingerprint: text(c.fingerprint), ...(text(c.words) ? { words: text(c.words) } : {}) };
   }
   return out;
 }
@@ -334,7 +334,7 @@ export function confirmRoomDefaults(room, defaults, { at, by, exceptionFor } = {
   for (const def of defaults || []) {
     if (exceptionFor?.(def.id)) continue;
     if (["unresolved", "client_unsure"].includes(def.answer?.state)) continue;
-    next[def.id] = { at: text(at), by: text(by), fingerprint: answerFingerprint(def) };
+    next[def.id] = { at: text(at), by: text(by), fingerprint: answerFingerprint(def), words: text(def.description) || answerSummary(def) || text(def.product) };
   }
   return { ...room, defaultConfirmations: normaliseRoomConfirmations(next) };
 }

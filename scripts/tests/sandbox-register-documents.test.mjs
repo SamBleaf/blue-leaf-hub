@@ -124,7 +124,7 @@ async function main() {
   const squeezed = reading.replace(/\s+/g, "");
   check("preview renders with no blocking checks", pv.ok && pv.body.checks.errors.length === 0, JSON.stringify(pv.body?.checks || pv.body).slice(0, 300));
   check("it says internal only", /Internal only/i.test(previewText) && /Blue Leaf estimating only/.test(previewText));
-  check("the assumption is there and labelled", squeezed.includes(tierText.replace(/\s+/g, "")) && /draftwording/.test(squeezed), reading.slice(-700));
+  check("the assumption covers only what's still open, and is labelled", squeezed.includes("Laminateflat-panelcabinetry.") && squeezed.includes("Tilesplashback.") && !/entry-levelengineeredstone/.test(squeezed) && /draftwording/.test(squeezed), reading.slice(-700));
   check("facts are recorded as facts", /Site and household facts/.test(previewText) && /Steep access/.test(previewText));
   check("staff notes are here and only here", squeezed.includes(NOTE), reading.slice(reading.indexOf("Construction systems"), reading.indexOf("Construction systems") + 500));
   check("there is no dollar sign", !previewText.includes("$"));

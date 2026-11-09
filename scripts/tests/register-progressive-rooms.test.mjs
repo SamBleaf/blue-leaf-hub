@@ -73,6 +73,22 @@ section("Confirming records that a default applies, and nothing else");
   ok("only the changed one is offered again", roomLinesToConfirm(changedView).length === 1);
 }
 
+section("Audit fixes: what a room shows");
+{
+  const c = cfg("D-003");
+  const shown = (opts) => choiceView(c, null, opts).levels[0].options.map((o) => o.id).join();
+  ok("D-003 offers everything when nothing else covers it", shown({}).includes("floor_finish") && shown({}).includes("general_paint"));
+  ok("floor and paint go when the room's own questions cover them (R05-06)", shown({ coveredQuestions: new Set(["R-005", "R-006"]) }) === "feature_wall,trim,doors_and_hardware");
+  const older = toggleOption(c, null, ["floor_finish"]);
+  ok("an answer already on the record still shows", choiceView(c, older, { coveredQuestions: new Set(["R-005", "R-006"]) }).levels[0].options.some((o) => o.id === "floor_finish"));
+  const qs = [q("R-006")];
+  const confirmed = confirmRoomDefaults(bed, [walls], STAMP);
+  ok("confirming keeps what the default said", confirmed.defaultConfirmations[walls.id].words.includes("Warm"));
+  const moved = { ...walls, answer: { ...walls.answer, selected: [{ optionId: "cool", path: ["palette", "cool"], label: "Palette · Cool" }] } };
+  const line = roomInheritedLines(reg([moved, ceiling], [confirmed]), confirmed, qs).find((l) => l.surface === "Walls");
+  ok("a flagged room can show what it was", line.status === "changed" && line.confirmedWords.includes("Warm") && !line.confirmedWords.includes("Cool"));
+}
+
 section("An exception belongs to one room and one surface");
 {
   const fields = exceptionFieldsFrom(ceiling, { keepZone: true });

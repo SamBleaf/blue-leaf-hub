@@ -5847,11 +5847,13 @@
    "options": [
     {
      "id": "floor_finish",
-     "label": "Floor finish"
+     "label": "Floor finish",
+     "coveredBy": "R-005"
     },
     {
      "id": "general_paint",
-     "label": "General paint"
+     "label": "General paint",
+     "coveredBy": "R-006"
     },
     {
      "id": "feature_wall",

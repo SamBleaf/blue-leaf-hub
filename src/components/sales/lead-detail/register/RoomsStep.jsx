@@ -54,7 +54,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
     const exceptions = exceptionsFor(q);
     const items = exceptions.length ? exceptions : [itemFor(q.id)];
     return items.map((item) => (
-      <PromptRow key={item?.overridesDefaultId ? item.id : `${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} meeting rowTitle={item?.overridesDefaultId ? item.answer?.zone?.label : undefined}
+      <PromptRow key={item?.overridesDefaultId ? item.id : `${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} meeting coveredQuestions={promptIds} rowTitle={item?.overridesDefaultId ? item.answer?.zone?.label : undefined}
         readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
         onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
         onDelete={item ? () => deleteItem(item.id) : null}

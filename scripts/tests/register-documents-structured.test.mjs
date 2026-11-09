@@ -72,7 +72,7 @@ const suggestions = Object.values(PERFORMANCE_SUGGESTIONS).flat().map((s) => s.t
 for (const [name, doc] of [["client brief", brief], ["architect brief", arch], ["schedule", sel]]) ok(`no review suggestion in the ${name}`, !suggestions.some((t) => flat(doc).includes(t)));
 
 section("Nothing internal reaches a client or consultant (B12)");
-const tierWords = BASELINE_CATEGORIES.flatMap((c) => Object.values(c.tiers));
+const tierWords = BASELINE_CATEGORIES.flatMap((c) => [...Object.values(c.tiers), ...(c.parts || []).flatMap((p) => Object.values(p.tiers || {})), ...Object.values(c.zoneTiers || {}).flatMap((t) => Object.values(t))]);
 for (const [name, doc] of [["client brief", brief], ["architect brief", arch], ["schedule", sel]]) {
   ok(`no tier wording in the ${name}`, !tierWords.some((t) => flat(doc).includes(t)));
   ok(`no staff note in the ${name}`, !flat(doc).includes(INTERNAL_NOTE));
@@ -97,6 +97,12 @@ ok("register rows carry source item ids", sectionOf("Construction systems and ma
 ok("the staff note is available here", flat(notes.tenderNotes).includes(INTERNAL_NOTE));
 ok("no quantity, even when one was measured", !/\b42\b|m2/.test(flat(notes.tenderNotes)));
 ok("no amounts", !/\$\s?\d/.test(flat(notes.tenderNotes)));
+
+section("Audit fixes");
+const kitchenLine = assumptions.rows.find((r) => /Kitchen/.test(r.area));
+ok("the assumption doesn't describe the benchtop that was chosen (R05-05)", !/bench/i.test(kitchenLine.text) && /cabinetry/i.test(kitchenLine.text), kitchenLine.text);
+const viteConfig = fs.readFileSync(join(REPO, "vite.config.js"), "utf8");
+ok("the service worker leaves stored-file links alone (R05-01)", /navigateFallbackDenylist:[^\n]*\\\/sb/.test(viteConfig));
 
 section("Pre-issue checks");
 const check = (doc, reg = register, extra = {}) => registerDocChecks("tender_scope_notes", doc, { register: reg, recipientName: "Blue Leaf estimating", mode: "issue", ...extra });

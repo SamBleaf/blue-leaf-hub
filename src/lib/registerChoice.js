@@ -417,7 +417,7 @@ function openRows(live, path) {
 }
 
 /** The rows to draw for this answer. No decisions are left to the component. */
-export function choiceView(cfg, answer, { showDetail = false, usedZones = null } = {}) {
+export function choiceView(cfg, answer, { showDetail = false, usedZones = null, coveredQuestions = null } = {}) {
   const a = normaliseAnswer(answer);
   const selected = a?.selected || [];
   const live = selected.filter((e) => !e.stale);
@@ -432,9 +432,11 @@ export function choiceView(cfg, answer, { showDetail = false, usedZones = null }
   };
   // A group that belongs to one surface (a ceiling type, a finish level) shows on that surface only. Whatever is on the record always shows.
   const inZone = (o, path) => isOn(live, path) || !o.onlyZones || (ctx.zoneKey ? o.onlyZones.includes(ctx.zoneKey) : !o.needsZone);
+  // An option another question on this screen already answers isn't offered twice. Whatever is on the record always shows.
+  const notCovered = (o, path) => isOn(live, path) || !o.coveredBy || !coveredQuestions?.has(o.coveredBy);
   const walk = (list, parent, heading) => {
     const headingsOnly = cfg.select === "groups" && !parent.length;
-    const rows = (headingsOnly ? list.filter((o) => !childrenOf(cfg, o, ctx)) : list).filter((o) => inZone(o, [...parent, o.id]) && showing(o, [...parent, o.id]));
+    const rows = (headingsOnly ? list.filter((o) => !childrenOf(cfg, o, ctx)) : list).filter((o) => notCovered(o, [...parent, o.id]) && inZone(o, [...parent, o.id]) && showing(o, [...parent, o.id]));
     if (rows.length) {
       levels.push({
         key: parent.join("/") || "root", path: parent, heading: heading || (cfg.optionLevel === "action" && cfg.elements ? "What's happening" : null), mode: modeAt(cfg, parent, ctx),

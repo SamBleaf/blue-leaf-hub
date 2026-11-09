@@ -259,6 +259,34 @@ section("Pricing guide: one answer is not the whole category");
   ok("draft wording is marked until Blue Leaf confirms it", assumptionIsDraft(tiered("roof").categories.roof) && assumptionIsDraft({ tier: "standard", text: "copied earlier" }) && !assumptionIsDraft({ tier: "standard", text: "x", wordingStatus: "confirmed" }));
 }
 
+section("Pricing guide: the words only describe what is still open (audit R05-05)");
+{
+  const held = setCategoryTier(null, "kitchen", "standard", STAMP);
+  const stone = whole("K-005", { answer: pick(cfg("K-005"), ["engineered_stone"]), isDefault: true });
+  const r = reg([stone], { baseline: held });
+  const line = baselineAssumptions(r).find((a) => a.key === "kitchen");
+  ok("the benchtop is chosen, so the assumption doesn't mention one", !/bench/i.test(line.text), line.text);
+  ok("it describes the cabinetry and splashback", /cabinetry/i.test(line.text) && /splashback/i.test(line.text), line.text);
+  ok("the guide reads the same", baselineView(r).find((c) => c.key === "kitchen").assumptionText === line.text);
+  const blank = whole("K-004");
+  ok("a blank cabinetry row reads only cabinetry", /^Laminate flat-panel cabinetry\.$/.test(assumptionFor(r, blank)?.text || ""), assumptionFor(r, blank)?.text);
+  const nothing = baselineAssumptions(reg([], { baseline: held })).find((a) => a.key === "kitchen");
+  ok("with nothing chosen it is the whole wording", nothing.text === BASELINE_CATEGORIES.find((c) => c.key === "kitchen").tiers.standard);
+  const older = { ...held, categories: { kitchen: { ...held.categories.kitchen } } };
+  delete older.categories.kitchen.pieces;
+  ok("wording copied before parts existed keeps its text", baselineAssumptions(reg([stone], { baseline: older })).find((a) => a.key === "kitchen").text === held.categories.kitchen.text);
+  const floors = setCategoryTier(null, "floors", "upgraded", STAMP);
+  const main = whole("W-017", { answer: { ...pick(cfg("W-017"), ["timber"]), zone: { key: "main_floor", label: "Main floor" } } });
+  const fl = baselineAssumptions(reg([main], { baseline: floors })).find((a) => a.key === "floors");
+  ok("a floor zone that is chosen drops out of the words", !/living/i.test(fl.text) && /bedrooms/i.test(fl.text) && /wet areas/i.test(fl.text), fl.text);
+  const metal = whole("W-014", { answer: pick(cfg("W-014"), ["metal_roofing", "pitched", "corrugated"]) });
+  ok("the row's part wording matches its gaps", /gutters/i.test(partAssumptionFor(reg([metal], { baseline: setCategoryTier(null, "roof", "standard", STAMP) }), metal)?.text || "") && !/Corrugated/.test(partAssumptionFor(reg([metal], { baseline: setCategoryTier(null, "roof", "standard", STAMP) }), metal)?.text || ""));
+  ok("every part has all three tiers in words", BASELINE_CATEGORIES.every((c) => (c.parts || []).every((p) => p.tiers?.standard && p.tiers?.upgraded && p.tiers?.premium)));
+  ok("every priced zone does too", BASELINE_CATEGORIES.every((c) => (c.pricedZones || []).every((z) => c.zoneTiers?.[z]?.standard && c.zoneTiers?.[z]?.premium)));
+  const pieceText = JSON.stringify(BASELINE_CATEGORIES.map((c) => [(c.parts || []).map((p) => p.tiers), c.zoneTiers]));
+  ok("no amounts in the part wording either", !/[$]|\baud\b|per (m|square)/i.test(pieceText));
+}
+
 section("Pricing guide: two people at once");
 {
   const base = setCategoryTier(null, "windows", "standard", STAMP);

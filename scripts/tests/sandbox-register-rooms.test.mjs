@@ -139,7 +139,10 @@ async function main() {
   check("the exception names the surface it changes", exception?.overridesDefaultId === ceilingDefault.id && exception.answer.zone.key === "ceiling");
   check("the whole-house ceiling didn't move", ceilingDefault.answer.selected[0].optionId === "square_set");
   check("the walls are still confirmed", /Confirmed/.test(await by(p, "room-default-R-006-walls").innerText()));
-  check("the ceiling reads as different here", /Different here/.test(await by(p, "room-default-R-006-ceiling").innerText()));
+  const ceilingLine = await by(p, "room-default-R-006-ceiling").innerText();
+  check("the ceiling reads as different here", /Different here/.test(ceilingLine));
+  check("it shows what the room actually has, with the default underneath (audit R05-07)", /Cornice/.test(ceilingLine.split("Whole house:")[0]) && /Whole house:[^]*Square set/.test(ceilingLine), ceilingLine);
+  check("floor and paint aren't offered again on the bedroom's finishes (audit R05-06)", (await by(p, "choice-D-003-floor_finish").count()) === 0 && (await by(p, "choice-D-003-general_paint").count()) === 0 && (await by(p, "choice-D-003-trim").count()) === 1);
   await pickRoom(p, rooms.bed2);
   await by(p, "room-default-R-006-ceiling").waitFor();
   check("the next bedroom still reads the whole-house ceiling", /Square set/.test(await by(p, "room-default-R-006-ceiling").innerText()) && /To confirm/.test(await by(p, "room-default-R-006-ceiling").innerText()));
@@ -155,6 +158,7 @@ async function main() {
   await pickRoom(p, rooms.bed);
   await by(p, "room-default-R-006-walls").waitFor();
   check("the confirmed room is flagged", /Changed since confirmed/.test(await by(p, "room-default-R-006-walls").innerText()));
+  check("and it shows what was confirmed before", /Was:[^]*Warm/.test(await by(p, "room-default-R-006-walls").innerText()), await by(p, "room-default-R-006-walls").innerText());
   check("the summary counts it", /1 changed/.test(await by(p, "room-defaults").innerText()));
   check("the floor is still confirmed", /Confirmed/.test(await by(p, "room-default-R-005").innerText()));
   check("confirm offers just that one", /\(1\)/.test(await by(p, "confirm-room-defaults").innerText()));

@@ -12,6 +12,7 @@
  */
 import { MEETING_TYPE_LABELS, TENDER_SUBSTATUS_ORDER } from "./constants.js";
 import { currentTenderStep } from "./leadNextAction.js";
+import { resolveEngagementPathway } from "./stageGates.js";
 
 // `flag` is the key in the mailbox response's `sending` object. `sentField` is the lead stamp, where the family has one.
 const QUALIFY = { key: "qualify_intro", label: "Qualify email", endpoint: "qualify-email", flag: "qualify", idPrefix: "qualify-intro", sentField: "qualify_intro_sent_at", note: "Company profile attached on send", defaultsAt: "Settings → General → Qualify emails" };
@@ -50,13 +51,16 @@ export const STAGE_EMAIL_TEMPLATES = {
   lost: [pipeline("lost", "Lost close-off")],
 };
 
-export const stageEmailTemplates = (stage) => STAGE_EMAIL_TEMPLATES[stage] || [];
+// With plans already supplied there is no concept package to invite the client to, so the design-stage emails are left out.
+const NO_DESIGN_EMAILS = new Set(["discovery", "winning_offer", "fee_proposal"]);
+export const stageEmailTemplates = (stage, lead) => (resolveEngagementPathway(lead) === "plans_supplied" && NO_DESIGN_EMAILS.has(stage) ? [] : STAGE_EMAIL_TEMPLATES[stage] || []);
 
 /** Where this template previews and sends, relative to the lead. */
 export const templateSendPath = (template) => (template.meetingType ? `meetings/${template.meetingType}/invite-email` : `${template.endpoint}/send`);
 
 /** A short explanation for the stages that deliberately have no client template. */
-export function stageCorrespondenceNote(stage) {
+export function stageCorrespondenceNote(stage, lead) {
+  if (resolveEngagementPathway(lead) === "plans_supplied" && NO_DESIGN_EMAILS.has(stage)) return "The design-stage emails are about the concept package, so they don't apply when the client's plans are already complete.";
   if (stage === "enquiry") return "The first contact is normally a call, so no email is needed yet.";
   if (stage === "consultants") return "Consultant messages go through each consultant's own thread above.";
   return null;

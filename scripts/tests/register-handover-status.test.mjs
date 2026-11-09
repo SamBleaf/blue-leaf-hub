@@ -59,7 +59,7 @@ async function main() {
   ok("Ops handover applicable (won) and not ready; job_created auto-done", s?.opsHandover.applicable === true && s.opsHandover.ready === false && s.opsHandover.done >= 1);
 
   const signedPdf = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n").toString("base64");
-  const signResp = await fetch(`${API}/api/sales/leads/${L}/contract/mark-signed`, { method: "POST", headers: { authorization: `Bearer ${staff}`, "content-type": "application/json" }, body: JSON.stringify({ signedPdfBase64: signedPdf, filename: "signed-contract.pdf" }) });
+  const signResp = await fetch(`${API}/api/sales/leads/${L}/contract/mark-signed`, { method: "POST", headers: { authorization: `Bearer ${staff}`, "content-type": "application/json" }, body: JSON.stringify({ signedPdfBase64: signedPdf, filename: "signed-contract.pdf", executedConfirmed: true, contractRef: "HIA 2026 Rev A" }) });
   ok("the signed contract is recorded through the upload writer", signResp.ok, String(signResp.status));
   s = await status(staff, L);
   ok("contract signed → baseline still not recorded → next = record baseline", s?.contract.signed === true && s.baseline.recorded === false && /baseline/i.test(s.nextAction?.label || ""), JSON.stringify(s?.nextAction));

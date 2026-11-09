@@ -3,7 +3,7 @@
  * Points the salesperson to the existing Conversations panel to paste the transcript, which Blueprint
  * analyses and applies onto the lead + logs the timeline (no new transcript code).
  */
-export default function DiscoveryMeetingScript() {
+export default function DiscoveryMeetingScript({ plansSupplied = false }) {
   return (
     <div className="rounded-card border border-primary/20 bg-primary/[0.03] p-4">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-primary mb-1">Discovery meeting — the deep dive (60+ min)</h3>
@@ -18,8 +18,13 @@ export default function DiscoveryMeetingScript() {
         <li>Timeline + any pressures (family, finance, lease, approvals)</li>
         <li>Decision-makers — who signs off, and are they all bought in</li>
         <li>Biggest excitement and biggest worry (so we can address it)</li>
-        <li>Design pathway — the right designer / consultant stack for this project</li>
-        <li>Confirm the next step: the concept design package + its fee</li>
+        {plansSupplied ? <>
+          <li>The plans — who prepared them, which revision is current, and what consultant work is still needed</li>
+          <li>Confirm the next step: review the supplied plans, then consultants and tender</li>
+        </> : <>
+          <li>Design pathway — the right designer / consultant stack for this project</li>
+          <li>Confirm the next step: the concept design package + its fee</li>
+        </>}
       </ul>
     </div>
   );

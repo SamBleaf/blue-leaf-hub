@@ -103,7 +103,7 @@ async function main() {
     const job1 = await api(admin, "POST", `/api/sales/leads/${id}/convert-to-job`);
     check("the job is created from the lead", job1.ok, JSON.stringify(job1.body).slice(0, 200));
     check("Won refused without a contract", (await patchLead(id, { stage: "won" })).status === 422);
-    check("Contract signed with its PDF", (await api(admin, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { signedPdfBase64: PDF, filename: "Signed Contract.pdf" })).ok);
+    check("Contract signed with its PDF", (await api(admin, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { executedConfirmed: true, contractRef: "HIA 2026 Rev A", signedPdfBase64: PDF, filename: "Signed Contract.pdf" })).ok);
     const won = await patchLead(id, { stage: "won" });
     check("Won", won.ok && won.body.lead.stage === "won", JSON.stringify(won.body).slice(0, 200));
     const row = await lead(id);
@@ -221,7 +221,7 @@ async function main() {
   {
     const id = await mkLead("tender", ACCEPTED);
     check("a status alone can't be set", (await patchLead(id, { contract_status: "signed" })).status === 400);
-    check("a file that isn't a PDF is refused", (await api(admin, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { signedPdfBase64: Buffer.from("not a pdf").toString("base64"), filename: "x.pdf" })).status === 400);
+    check("a file that isn't a PDF is refused", (await api(admin, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { executedConfirmed: true, contractRef: "HIA 2026 Rev A", signedPdfBase64: Buffer.from("not a pdf").toString("base64"), filename: "x.pdf" })).status === 400);
     check("no PDF is refused", (await api(admin, "POST", `/api/sales/leads/${id}/contract/mark-signed`, { filename: "x.pdf" })).status === 400);
     check("Won is refused", (await patchLead(id, { stage: "won" })).status === 422);
     check("nothing was stored (DB)", (await svc.from("lead_documents").select("id").eq("lead_id", id).eq("document_type", "construction_contract")).data.length === 0);
@@ -232,7 +232,7 @@ async function main() {
     await patchLead(reno, { stage: "tender" });
     const beforeWon = await api(admin, "GET", `/api/register/leads/${reno}/handover-status`);
     check("before signing, the next step is the contract", /contract/i.test(beforeWon.body.status.nextAction?.label || ""), JSON.stringify(beforeWon.body.status?.nextAction));
-    check("contract signed with its PDF", (await api(admin, "POST", `/api/sales/leads/${reno}/contract/mark-signed`, { signedPdfBase64: PDF, filename: "Signed.pdf" })).ok);
+    check("contract signed with its PDF", (await api(admin, "POST", `/api/sales/leads/${reno}/contract/mark-signed`, { executedConfirmed: true, contractRef: "HIA 2026 Rev A", signedPdfBase64: PDF, filename: "Signed.pdf" })).ok);
     const won = await patchLead(reno, { stage: "won" });
     check("Won", won.ok, JSON.stringify(won.body).slice(0, 300));
     const row = await lead(reno);

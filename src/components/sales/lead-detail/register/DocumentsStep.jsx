@@ -88,7 +88,9 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
       if (stale) { setPreview(null); }      // force a fresh preview of the current version before re-issuing
       return;
     }
-    setMsg({ tone: "green", text: `Recorded ${r.data.document.revision_label} for ${recipient.name} — not emailed. The controlled PDF is stored permanently; download it below to send.` });
+    setMsg({ tone: "green", text: DOCS.find((d) => d.key === active)?.internal
+      ? `Recorded ${r.data.document.revision_label} for ${recipient.name}. It's stored permanently for internal pricing. Don't send it to the client, consultants or trades.`
+      : `Recorded ${r.data.document.revision_label} for ${recipient.name} — not emailed. The controlled PDF is stored permanently; download it below to send.` });
     setPreview(null); setActive(null);
     load();
   }
@@ -141,6 +143,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
       const tech = reg.items.filter((i) => i.itemKind === "action" || i.technicalStatus === "needs_verification").length;
       return `Client intent and scope plus ${tech} technical item${tech === 1 ? "" : "s"} to verify, across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No prices.`;
     }
+    if (DOCS.find((d) => d.key === key)?.internal) return `Internal. Scope, systems, risks, Blue Leaf assumptions and staff notes across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No prices or quantities.`;
     return `Scope and client preferences across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No internal notes or prices.`;
   }
 

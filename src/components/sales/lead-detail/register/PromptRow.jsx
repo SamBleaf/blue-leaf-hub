@@ -38,7 +38,7 @@ function portalBadge(item) {
 }
 
 export default function PromptRow({
-  question: questionProp, item, seed, onChange, onDelete, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf, meeting, areaOptions,
+  question: questionProp, item, seed, onChange, onDelete, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf, meeting, areaOptions, coveredQuestions,
 }) {
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState(null);          // 'approve' | 'verify' | 'portal_approve'
@@ -103,7 +103,7 @@ export default function PromptRow({
           )}
 
           {guided && (
-            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} fixedZone={fixedZone} usedZones={usedZones} areaOptions={areaOptions} />
+            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} fixedZone={fixedZone} usedZones={usedZones} areaOptions={areaOptions} coveredQuestions={coveredQuestions} />
           )}
           {assumed && (
             <p className="mt-1.5 rounded border border-dashed border-hairline px-2 py-1 text-[11px] text-muted" data-testid={`assumption-${qid}`}>

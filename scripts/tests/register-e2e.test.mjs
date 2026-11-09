@@ -293,7 +293,7 @@ async function main() {
 
   // Signed contract + staff approval → one handover (#21)
   const signedPdf = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n").toString("base64");
-  const signedContract = await api(staff, "POST", `/api/sales/leads/${leadA.id}/contract/mark-signed`, { signedPdfBase64: signedPdf, filename: "Signed building contract.pdf", signedDate: day });
+  const signedContract = await api(staff, "POST", `/api/sales/leads/${leadA.id}/contract/mark-signed`, { executedConfirmed: true, contractRef: "HIA 2026 Rev A", signedPdfBase64: signedPdf, filename: "Signed building contract.pdf", signedDate: day });
   check("#21", "the signed contract is recorded by uploading the signed PDF", signedContract.ok && signedContract.body.lead.contractStatus === "signed", JSON.stringify(signedContract.body).slice(0, 300));
   const won = await api(staff, "PATCH", `/api/sales/leads/${leadA.id}`, { stage: "won" });
   const { data: projs } = await svc.from("projects").select("id, is_preconstruction").eq("job_id", jobId);

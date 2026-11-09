@@ -576,7 +576,7 @@ export function roomInheritedLines(register, room, questions) {
     const bySurface = !!ANSWER_CONFIG[q.inherits]?.roomReadsAll;
     for (const def of defs) {
       const exception = (bySurface ? own.find((i) => i.overridesDefaultId === def.id) : own.find((i) => i.overridesDefaultId)) || null;
-      lines.push({ question: q, def, exception, surface: bySurface ? def.answer?.zone?.label || "" : "", status: roomDefaultStatus(room, def, exception) });
+      lines.push({ question: q, def, exception, surface: bySurface ? def.answer?.zone?.label || "" : "", status: roomDefaultStatus(room, def, exception), confirmedWords: normaliseRoomConfirmations(room.defaultConfirmations)[def.id]?.words || "" });
     }
   }
   return lines;
@@ -859,12 +859,26 @@ export function setCategoryTier(raw, key, tier, { at = "", by = "" } = {}) {
   if (!cat || !BASELINE_TIERS[tier]) return b;
   const categories = { ...b.categories };
   if (categories[key]?.tier === tier) delete categories[key];
-  else categories[key] = { origin: "blue_leaf_baseline", tier, baselineVersion: BASELINE_VERSION, wordingStatus: BASELINE_WORDING_STATUS, categoryKey: key, text: cat.tiers[tier], at, by };
+  else {
+    const pieces = Object.fromEntries([...(cat.parts || []).map((p) => [p.key, p.tiers?.[tier]]), ...Object.entries(cat.zoneTiers || {}).map(([z, t]) => [z, t[tier]])].filter(([, words]) => words));
+    categories[key] = { origin: "blue_leaf_baseline", tier, baselineVersion: BASELINE_VERSION, wordingStatus: BASELINE_WORDING_STATUS, categoryKey: key, text: cat.tiers[tier], ...(Object.keys(pieces).length ? { pieces } : {}), at, by };
+  }
   return normaliseBaseline({ ...b, categories });
 }
 
 const settledOut = (i) => i.answer?.state === "not_applicable" || SETTLED_DISPOSITIONS.has(i.disposition);
 const zoneKeyOf = (i) => i.answer?.zone?.key || "";
+
+/**
+ * The assumption's words for just these parts or zones, so it never describes something the client has already chosen.
+ * Wording copied before parts had their own keeps its full text, and the coverage label does the limiting.
+ */
+export function assumptionWords(held, keys) {
+  const pieces = held?.pieces;
+  if (!pieces || !keys?.length) return held?.text || "";
+  const words = keys.map((k) => pieces[k]);
+  return words.every(Boolean) ? words.join(" ") : held.text;
+}
 
 /** Was this wording still unconfirmed when it was copied? Anything copied before the status was stamped was. */
 export const assumptionIsDraft = (a) => !!a && (a.wordingStatus || "draft") !== "confirmed";
@@ -907,11 +921,14 @@ export function baselineView(register) {
     const decided = [...chosen, ...settled];
     const zoneCfg = ANSWER_CONFIG[c.questions[0]]?.zones || [];
     const gaps = decided.some((i) => !zoneKeyOf(i)) ? [] : (c.pricedZones || []).filter((z) => !decided.some((i) => zoneKeyOf(i) === z));
-    const partGaps = partGapsOf(c, chosen, decided).map((p) => p.label);
+    const missingParts = partGapsOf(c, chosen, decided);
+    const partGaps = missingParts.map((p) => p.label);
+    const gapKeys = [...gaps, ...missingParts.map((p) => p.key)];
     const hasGaps = open.length > 0 || gaps.length > 0 || partGaps.length > 0;
     const status = !decided.length ? "open" : hasGaps ? "part" : chosen.length ? "chosen" : "settled";
+    const held = b.categories[c.key] || null;
     return {
-      key: c.key, label: c.label, status, held: b.categories[c.key] || null, tiers: c.tiers,
+      key: c.key, label: c.label, status, held, tiers: c.tiers, gapKeys, assumptionText: held ? (status === "part" ? assumptionWords(held, gapKeys) : held.text) : "",
       chosen: chosen.map((i) => ({ id: i.id, title: itemTitle(i) })), openItemIds: open.map((i) => i.id),
       zoneGaps: gaps.map((z) => zoneCfg.find((o) => o.id === z)?.label || z), partGaps,
     };
@@ -958,7 +975,12 @@ export function assumptionFor(register, item) {
   const id = resolvePromptId(item.promptKey);
   const cat = BASELINE_CATEGORIES.find((c) => c.questions.includes(id));
   const held = cat ? normaliseBaseline(register?.meta?.baseline).categories[cat.key] : null;
-  return held ? activeAssumption(applyPricingAssumption(item, held)) : null;
+  const active = held ? activeAssumption(applyPricingAssumption(item, held)) : null;
+  if (!active) return null;
+  // A row that is one part or one zone of the category reads only that part's words.
+  const zone = item.answer?.zone?.key;
+  const piece = cat.parts?.find((p) => p.question === id)?.key || (active.pieces?.[zone] ? zone : null);
+  return piece ? { ...active, text: assumptionWords(active, [piece]) } : active;
 }
 
 /**
@@ -971,14 +993,14 @@ export function partAssumptionFor(register, item) {
   const cat = BASELINE_CATEGORIES.find((c) => c.questions.includes(id));
   if (!cat?.parts) return null;
   const view = baselineView(register).find((c) => c.key === cat.key);
-  const onRow = cat.parts.filter((p) => !p.question && view.partGaps.includes(p.label)).map((p) => p.label);
-  return view.held && onRow.length ? { ...view.held, coversOnly: onRow } : null;
+  const onRow = cat.parts.filter((p) => !p.question && view.partGaps.includes(p.label));
+  return view.held && onRow.length ? { ...view.held, coversOnly: onRow.map((p) => p.label), text: assumptionWords(view.held, onRow.map((p) => p.key)) } : null;
 }
 
 /** The assumptions in force, for the staff Tender view and internal Tender Notes. Staff-only by construction: no client code reads this. */
 export function baselineAssumptions(register) {
   return baselineView(register).filter((c) => c.held && (c.status === "open" || c.status === "part")).map((c) => ({
-    key: c.key, label: c.label, tier: c.held.tier, tierLabel: BASELINE_TIERS[c.held.tier], text: c.held.text, baselineVersion: c.held.baselineVersion,
+    key: c.key, label: c.label, tier: c.held.tier, tierLabel: BASELINE_TIERS[c.held.tier], text: c.assumptionText, baselineVersion: c.held.baselineVersion,
     status: c.status, zoneGaps: c.zoneGaps, partGaps: c.partGaps, gaps: [...c.zoneGaps, ...c.partGaps], chosen: c.chosen, openItemIds: c.openItemIds, draft: assumptionIsDraft(c.held),
   }));
 }

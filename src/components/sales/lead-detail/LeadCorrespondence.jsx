@@ -33,10 +33,10 @@ export default function LeadCorrespondence({ lead, patch, reload }) {
     return () => document.removeEventListener(CHOOSE_STAGE_EMAIL, choose);
   }, []);
 
-  const templates = stageEmailTemplates(lead.stage);
+  const templates = stageEmailTemplates(lead.stage, lead);
   const selected = templates.find((t) => t.key === pickedKey) || defaultStageTemplate(templates, box.messages, lead);
   const status = correspondenceStatus(box);
-  const stageNote = stageCorrespondenceNote(lead.stage);
+  const stageNote = stageCorrespondenceNote(lead.stage, lead);
   const selectedSentAt = selected ? recordedSendAt(selected, box.messages, lead) : null;
   const selectedOff = selected ? isSendingOff(selected.flag, box.sending) : false;
   const blockedReason = selected ? templateBlockedReason(selected, lead) : null;

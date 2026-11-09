@@ -44,6 +44,9 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [evidence, setEvidence] = useState(null);
+  const [contractRef, setContractRef] = useState("");
+  const [checked, setChecked] = useState(false);
+  const clientName = lead.name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "this client";
 
   useEffect(() => {
     if (!hasEvidence) { setEvidence(null); return undefined; }
@@ -66,10 +69,10 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
     try {
       const signedPdfBase64 = await readAsBase64(file);
       const { ok, error: uploadError } = await apiPost(`/api/sales/leads/${lead.id}/contract/mark-signed`, {
-        signedPdfBase64, filename: file.name, signedDate: signedDate || undefined,
+        signedPdfBase64, filename: file.name, signedDate: signedDate || undefined, executedConfirmed: true, contractRef: contractRef.trim(),
       });
       if (!ok) { setError(uploadError || "Couldn't save the signed contract."); return; }
-      setFile(null); setSignedDate("");
+      setFile(null); setSignedDate(""); setContractRef(""); setChecked(false);
       await reload();
     } catch (e) {
       setError(e?.message || "Couldn't read that file.");
@@ -92,6 +95,7 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
       {signed && hasEvidence && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5">
           <p className="text-sm font-semibold text-green-700">✓ Signed{lead.contract_signed_date ? ` ${lead.contract_signed_date}` : ""}</p>
+          {evidence?.review_notes && <p className="mt-0.5 text-[11px] text-green-800" data-testid="contract-check-record">{evidence.review_notes}</p>}
           {evidence?.download_url
             ? <a href={evidence.download_url} target="_blank" rel="noreferrer" className="mt-0.5 block break-all text-xs font-medium text-primary hover:underline">{evidence.filename}</a>
             : <p className="mt-0.5 text-xs text-muted">Signed PDF on file</p>}
@@ -128,7 +132,7 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
             {signed ? "Upload the client-signed PDF." : "When the client has signed, upload the PDF. That marks the contract signed. It's required to move to Won."}
           </p>
           <input type="file" data-next-focus accept="application/pdf,.pdf" aria-label="Signed building contract PDF"
-            onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); }}
+            onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); setChecked(false); }}
             className="mb-2 block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink" />
           {(!signed || !lead.contract_signed_date) && (
             <label className="mb-2 flex items-center justify-between gap-2 text-xs text-muted">
@@ -136,7 +140,20 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
               <input type="date" value={signedDate} onChange={(e) => setSignedDate(e.target.value)} className="rounded border border-hairline bg-surface px-2 py-1 text-xs text-ink" />
             </label>
           )}
-          <button type="button" onClick={upload} disabled={busy || !file}
+          {file && (
+            <div className="mb-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900" data-testid="contract-verify">
+              <p>The Hub can tell this is a PDF. It can&apos;t tell whose contract it is, so please check it before marking it signed.</p>
+              <label className="block">
+                <span className="mb-0.5 block font-medium">Contract reference or revision</span>
+                <input value={contractRef} onChange={(e) => setContractRef(e.target.value)} placeholder="e.g. HIA 2026 Rev B" className="w-full rounded border border-hairline bg-surface px-2 py-1.5 text-xs text-ink" data-testid="contract-ref" />
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" data-testid="contract-confirm" />
+                <span>This is the fully signed building contract for <b>{clientName}</b>{lead.site_address ? <> at <b>{lead.site_address}</b></> : null}. My name goes on the record.</span>
+              </label>
+            </div>
+          )}
+          <button type="button" onClick={upload} disabled={busy || !file || !checked || !contractRef.trim()}
             className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {busy ? "Saving…" : signed ? "Attach signed PDF" : "✓ Mark contract as signed"}
           </button>
