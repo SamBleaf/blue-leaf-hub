@@ -1,0 +1,6932 @@
+{
+ "version": "tab21-answer-map-v1.0",
+ "libraryVersion": "tab21-v1.0",
+ "status": "Proposed mapping (Tab 27 Gate 0.2), R05 P3. No screen reads this yet: P4a turns it into the versioned choice trees. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable once P4a ships.",
+ "legend": {
+  "mapping": {
+   "fact_prefill": "Read from Sales or the project. Never re-asked.",
+   "single_select": "One answer.",
+   "multi_select": "Several answers.",
+   "progressive_branch": "Choose, then only the choices that follow from it. May stop at any level.",
+   "repeatable_scope": "One item per element or area.",
+   "requirement": "A required outcome, not a product.",
+   "action_risk": "A follow-up or a risk, with an owner.",
+   "technical_only": "Designer, consultant or trade check. Not a client question."
+  },
+  "nature": {
+   "fact": "A fact about the site or household. Never construction scope.",
+   "choice": "A client product or finish choice.",
+   "scope": "Work Blue Leaf does or does not do.",
+   "requirement": "A required outcome.",
+   "risk": "A risk or investigation.",
+   "action": "A follow-up.",
+   "technical": "A technical check."
+  },
+  "tier": {
+   "essential": "Shown first.",
+   "more_detail": "Behind + More detail or Explore more.",
+   "office_only": "Office Register only. Not shown in a client meeting."
+  },
+  "control": {
+   "readonly": "Shown, not edited here.",
+   "single": "One button.",
+   "multi": "Several buttons.",
+   "tree": "Progressive choice.",
+   "repeat": "+ Add another.",
+   "note": "Short note with owner."
+  },
+  "disposition": {
+   "none": "The generic work disposition is not a valid answer to this question.",
+   "element": "Each repeated element carries its own disposition.",
+   "answer": "The chosen option is the disposition.",
+   "settled_only": "Disposition is only used to settle an item out: excluded, by others, deferred, N/A or retained."
+  },
+  "optionSource": {
+   "tab21": "Lifted from the question wording.",
+   "mr-ux-01a": "Tab 27 MR-UX-01A.",
+   "mr-ux-01b": "Tab 27 MR-UX-01B.",
+   "mr-ux-01c": "Tab 27 MR-UX-01C.",
+   "mr-ux-01d": "Tab 27 MR-UX-01D.",
+   "mr-ux-01e": "Tab 27 MR-UX-01E.",
+   "mr-ux-01f": "Tab 27 MR-UX-01F.",
+   "mr-ux-01g": "Tab 27 MR-UX-01G.",
+   "mr-ux-02": "Tab 27 MR-UX-02.",
+   "existing": "The value already stored by the Hub.",
+   "proposed": "Not in the source documents. For Blue Leaf to confirm in P4."
+  }
+ },
+ "presentationGroups": [
+  {
+   "key": "existing_works",
+   "primary": "W-004",
+   "aliases": [
+    "W-006",
+    "W-008",
+    "R-013"
+   ],
+   "why": "Tab 27 B06 and Gate 0.2: one area-linked path. Source ids are kept on the items, so nothing merges at the data level."
+  },
+  {
+   "key": "external_works",
+   "primary": "W-010",
+   "aliases": [
+    "W-003",
+    "O-006",
+    "O-007"
+   ],
+   "why": "Tab 27 B07: one scope-first path. W-003 keeps its own promptKey."
+  },
+  {
+   "key": "room_scope",
+   "primary": "R-003",
+   "aliases": [
+    "R-002"
+   ],
+   "why": "R-002 is the disposition of R-003 today (render disposition_of:R-003)."
+  }
+ ],
+ "questions": [
+  {
+   "id": "P-001",
+   "family": "P",
+   "short": "Client & site",
+   "text": "Project identity and address. Prompt to staff only if missing: Are we working on the correct client and site? Show current Sales value.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "Sales lead identity"
+  },
+  {
+   "id": "P-002",
+   "family": "P",
+   "short": "Drawings & revision",
+   "text": "Drawings. Which plan set, sheet list, issue date and revision are we reviewing? Link existing document record; no reupload if present.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "meta.planRev + lead documents"
+  },
+  {
+   "id": "P-003",
+   "family": "P",
+   "short": "Concept meetings",
+   "text": "Concept Meeting/Presentation record and key decisions already made. Surface existing meeting facts; never force re-entry.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "more_detail",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "lead_meetings"
+  },
+  {
+   "id": "P-004",
+   "family": "P",
+   "short": "Budget, timing & priorities",
+   "text": "Client budget target, timing expectations and design priorities. Show current dated Sales fact; ask only to confirm material changes.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "Sales budget and timing fields"
+  },
+  {
+   "id": "P-005",
+   "family": "P",
+   "short": "Top priorities",
+   "text": "What do you most want to improve: space, natural light, comfort, privacy, entertaining, storage, accessibility, low maintenance, energy use? Pick up to 3 priorities plus note.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "space",
+     "label": "Space"
+    },
+    {
+     "id": "natural_light",
+     "label": "Natural light"
+    },
+    {
+     "id": "comfort",
+     "label": "Comfort"
+    },
+    {
+     "id": "privacy",
+     "label": "Privacy"
+    },
+    {
+     "id": "entertaining",
+     "label": "Entertaining"
+    },
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "accessibility",
+     "label": "Accessibility"
+    },
+    {
+     "id": "low_maintenance",
+     "label": "Low maintenance"
+    },
+    {
+     "id": "energy_use",
+     "label": "Energy use"
+    }
+   ],
+   "max": 3,
+   "notes": "Existing records hold a comma string in description: read as legacy text, never parsed."
+  },
+  {
+   "id": "P-006",
+   "family": "P",
+   "short": "Areas in the project",
+   "text": "What parts of the property are in this project, what are possible extras, and what is explicitly future work? Tag areas as Included / Optional / Excluded / Deferred.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "project_area",
+    "by": "area"
+   },
+   "actions": [
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "optional",
+     "label": "Optional",
+     "disposition": "undecided"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "deferred",
+     "label": "Deferred",
+     "disposition": "deferred"
+    }
+   ],
+   "notes": "Keeps the existing one-item-per-area pattern from ContextStep."
+  },
+  {
+   "id": "P-007",
+   "family": "P",
+   "short": "Project type & delivery",
+   "text": "Physical project type: New Build / Renovation / Extension / Combined. Delivery model separately Design & Build / Build Only / Management / Other; never combine types in one ambiguous field.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "leads.project_type + delivery_model",
+   "notes": "Delivery model and physical type stay two separate facts."
+  },
+  {
+   "id": "P-008",
+   "family": "P",
+   "short": "Occupied during works?",
+   "text": "Will the property remain occupied or operational through work? Record temporary facility and access requirements only when relevant.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "existing",
+   "options": [
+    {
+     "id": "occupied",
+     "label": "Occupied"
+    },
+    {
+     "id": "partly",
+     "label": "Partly"
+    },
+    {
+     "id": "vacant",
+     "label": "Vacant"
+    }
+   ],
+   "storage": "meta.occupancy",
+   "notes": "Option ids equal the stored meta.occupancy values."
+  },
+  {
+   "id": "P-009",
+   "family": "P",
+   "short": "Decisions before next milestone",
+   "text": "Which decisions must be made before the next architect issue, budget check or PTSA? Owner, not necessarily due date.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "decision",
+    "by": "record"
+   },
+   "notes": "One action per decision, with an owner. Due date optional."
+  },
+  {
+   "id": "P-010",
+   "family": "P",
+   "short": "Consultants & suppliers on file",
+   "text": "Existing architects/consultants/suppliers and known agreements; link from Hub, not new text if authoritative contact already exists.",
+   "group": "ENTRY: PROJECT CONTEXT (MOSTLY PREFILLED FROM SALES)",
+   "section": "project",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "more_detail",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "Hub consultant and supplier contacts"
+  },
+  {
+   "id": "W-001",
+   "family": "W",
+   "short": "Site access",
+   "text": "Site access: restricted driveway, narrow site, crane/delivery access, neighbour restrictions, steep slope or parking? Note known facts, inspection tasks.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "multi_select",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-02",
+   "options": [
+    {
+     "id": "standard_driveway",
+     "label": "Standard driveway"
+    },
+    {
+     "id": "narrow_or_restricted_access",
+     "label": "Narrow or restricted access"
+    },
+    {
+     "id": "steep_access",
+     "label": "Steep access"
+    },
+    {
+     "id": "limited_parking",
+     "label": "Limited parking"
+    },
+    {
+     "id": "crane_or_plant_access",
+     "label": "Crane or plant access"
+    },
+    {
+     "id": "delivery_constraints",
+     "label": "Delivery constraints"
+    },
+    {
+     "id": "shared_or_neighbour_access",
+     "label": "Shared or neighbour access"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "notes": "A recorded constraint is a fact. Never construction Included. Scope only if a physical access change is explicitly added as its own item."
+  },
+  {
+   "id": "W-002",
+   "family": "W",
+   "short": "Survey, services & geotech",
+   "text": "Survey, boundaries, easements, services, geotech and site levels: which reports exist and which are required? Internal consultant action, not client specification.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "survey",
+     "label": "Survey"
+    },
+    {
+     "id": "boundaries",
+     "label": "Boundaries"
+    },
+    {
+     "id": "easements",
+     "label": "Easements"
+    },
+    {
+     "id": "services",
+     "label": "Services"
+    },
+    {
+     "id": "geotech",
+     "label": "Geotech"
+    },
+    {
+     "id": "site_levels",
+     "label": "Site levels"
+    }
+   ],
+   "perOption": [
+    {
+     "id": "on_file",
+     "label": "On file"
+    },
+    {
+     "id": "required",
+     "label": "Required"
+    }
+   ],
+   "notes": "Internal consultant action, not a client specification."
+  },
+  {
+   "id": "W-003",
+   "family": "W",
+   "short": "Trees, retaining & external structures",
+   "text": "Trees, retaining walls, external structures and landscaping affected by construction? Include/retain/protect/remove/by others.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": true,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "site_element",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "trees",
+     "label": "Trees"
+    },
+    {
+     "id": "retaining_walls",
+     "label": "Retaining walls"
+    },
+    {
+     "id": "external_structures",
+     "label": "External structures"
+    },
+    {
+     "id": "landscaping",
+     "label": "Landscaping"
+    }
+   ],
+   "actions": [
+    {
+     "id": "include",
+     "label": "Include",
+     "disposition": "included"
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "protect",
+     "label": "Protect",
+     "disposition": "retain"
+    },
+    {
+     "id": "remove",
+     "label": "Remove",
+     "disposition": "remove"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    }
+   ]
+  },
+  {
+   "id": "W-004",
+   "family": "W",
+   "short": "Demolish / retain / alter / make good",
+   "text": "What is being demolished, retained, altered and made good in the existing building? Record by area, not one vague demolition line.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-02",
+   "repeat": {
+    "key": "existing_work",
+    "by": "element"
+   },
+   "flow": [
+    "area",
+    "action",
+    "element",
+    "details"
+   ],
+   "elements": [
+    {
+     "id": "walls",
+     "label": "Walls"
+    },
+    {
+     "id": "roof",
+     "label": "Roof"
+    },
+    {
+     "id": "floors",
+     "label": "Floors"
+    },
+    {
+     "id": "ceilings",
+     "label": "Ceilings"
+    },
+    {
+     "id": "windows_and_doors",
+     "label": "Windows and doors"
+    },
+    {
+     "id": "joinery",
+     "label": "Joinery"
+    },
+    {
+     "id": "fixtures",
+     "label": "Fixtures"
+    },
+    {
+     "id": "services",
+     "label": "Services"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "actions": [
+    {
+     "id": "demolish",
+     "label": "Demolish",
+     "disposition": "remove"
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter"
+    },
+    {
+     "id": "make_good",
+     "label": "Make good",
+     "disposition": "make_good"
+    },
+    {
+     "id": "protect",
+     "label": "Protect",
+     "disposition": "retain",
+     "aliasOf": "W-006"
+    },
+    {
+     "id": "match",
+     "label": "Match",
+     "disposition": "make_good",
+     "aliasOf": "W-006"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    }
+   ],
+   "notes": "One path for W-004, W-006 and W-008. No meeting-stage measurement. Each entry is its own item with its own id."
+  },
+  {
+   "id": "W-005",
+   "family": "W",
+   "short": "Existing condition risks",
+   "text": "Existing structural, moisture, termite, asbestos/contamination, roof and foundation conditions: inspected / assumed / needs test; source.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "risk",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "structural",
+     "label": "Structural"
+    },
+    {
+     "id": "moisture",
+     "label": "Moisture"
+    },
+    {
+     "id": "termite",
+     "label": "Termite"
+    },
+    {
+     "id": "asbestos_or_contamination",
+     "label": "Asbestos or contamination"
+    },
+    {
+     "id": "roof",
+     "label": "Roof"
+    },
+    {
+     "id": "foundations",
+     "label": "Foundations"
+    }
+   ],
+   "repeat": {
+    "key": "existing_condition",
+    "by": "element"
+   },
+   "perOption": [
+    {
+     "id": "inspected",
+     "label": "Inspected"
+    },
+    {
+     "id": "assumed",
+     "label": "Assumed"
+    },
+    {
+     "id": "needs_test",
+     "label": "Needs test"
+    }
+   ],
+   "notes": "Risk and investigation with an owner and source."
+  },
+  {
+   "id": "W-006",
+   "family": "W",
+   "short": "Protect / match existing finishes",
+   "text": "What existing finishes and fixtures must be protected and/or matched? Note acceptable variation or inability to match exact old products.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "existing_work",
+    "by": "element"
+   },
+   "presentedWith": "W-004",
+   "notes": "Reached through the Protect and Match actions on the W-004 path. Items keep promptKey W-006, so the source id survives."
+  },
+  {
+   "id": "W-007",
+   "family": "W",
+   "short": "Living on site during works",
+   "text": "Will the family live on site? Work zones, temporary kitchen/bathroom, dust separation, service outages and safe access.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "progressive_branch",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "none",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-02",
+   "options": [
+    {
+     "id": "yes",
+     "label": "Yes",
+     "children": [
+      {
+       "id": "work_zones",
+       "label": "Work zones"
+      },
+      {
+       "id": "temporary_kitchen",
+       "label": "Temporary kitchen"
+      },
+      {
+       "id": "temporary_bathroom",
+       "label": "Temporary bathroom"
+      },
+      {
+       "id": "dust_and_noise_separation",
+       "label": "Dust and noise separation"
+      },
+      {
+       "id": "service_outages",
+       "label": "Service outages"
+      },
+      {
+       "id": "safe_access",
+       "label": "Safe access"
+      }
+     ]
+    },
+    {
+     "id": "no",
+     "label": "No"
+    },
+    {
+     "id": "unsure",
+     "label": "Unsure"
+    }
+   ],
+   "notes": "A client answer is never New or Remove. Yes opens the branch."
+  },
+  {
+   "id": "W-008",
+   "family": "W",
+   "short": "New-to-existing connections",
+   "text": "Where do new and existing work connect: roof, wall, floor, drainage, electrical, thermal envelope? Add interface action and drawing ref.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "roof",
+     "label": "Roof"
+    },
+    {
+     "id": "wall",
+     "label": "Wall"
+    },
+    {
+     "id": "floor",
+     "label": "Floor"
+    },
+    {
+     "id": "drainage",
+     "label": "Drainage"
+    },
+    {
+     "id": "electrical",
+     "label": "Electrical"
+    },
+    {
+     "id": "thermal_envelope",
+     "label": "Thermal envelope"
+    }
+   ],
+   "presentedWith": "W-004",
+   "notes": "Optional driver on the W-004 path. Records an interface action and a drawing reference, not a demolition measurement."
+  },
+  {
+   "id": "W-009",
+   "family": "W",
+   "short": "Quality priorities",
+   "text": "Overall project quality priorities: standard / upgraded / individually specified, and where is investment most important? Do not fabricate a universal inclusions package.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "standard",
+     "label": "Standard"
+    },
+    {
+     "id": "upgraded",
+     "label": "Upgraded"
+    },
+    {
+     "id": "individually_specified",
+     "label": "Individually specified"
+    }
+   ],
+   "notes": "The client's own quality priority. Not the Blue Leaf baseline pricing tier (P4b), which is a separate labelled assumption and is never read from this answer."
+  },
+  {
+   "id": "W-010",
+   "family": "W",
+   "short": "External works scope",
+   "text": "External works scope: driveway, landscaping, paths, fencing, retaining, pergola, pool or boundary work included/excluded/deferred?",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "external_work",
+    "by": "element"
+   },
+   "flow": [
+    "element",
+    "action",
+    "construction_type",
+    "finish"
+   ],
+   "elements": [
+    {
+     "id": "driveway",
+     "label": "Driveway"
+    },
+    {
+     "id": "landscaping",
+     "label": "Landscaping"
+    },
+    {
+     "id": "paths",
+     "label": "Paths"
+    },
+    {
+     "id": "fencing",
+     "label": "Fencing"
+    },
+    {
+     "id": "retaining",
+     "label": "Retaining"
+    },
+    {
+     "id": "pergola",
+     "label": "Pergola"
+    },
+    {
+     "id": "pool",
+     "label": "Pool"
+    },
+    {
+     "id": "boundary_work",
+     "label": "Boundary work"
+    }
+   ],
+   "actions": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "replace",
+     "label": "Replace",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter",
+     "details": true
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "deferred",
+     "label": "Deferred",
+     "disposition": "deferred"
+    }
+   ],
+   "constructionTypes": {
+    "driveway": [
+     {
+      "id": "exposed_aggregate",
+      "label": "Exposed aggregate"
+     },
+     {
+      "id": "plain_concrete",
+      "label": "Plain concrete"
+     },
+     {
+      "id": "pavers",
+      "label": "Pavers"
+     },
+     {
+      "id": "other",
+      "label": "Other"
+     }
+    ],
+    "paths": [
+     {
+      "id": "concrete",
+      "label": "Concrete"
+     },
+     {
+      "id": "pavers",
+      "label": "Pavers"
+     },
+     {
+      "id": "gravel",
+      "label": "Gravel"
+     },
+     {
+      "id": "other",
+      "label": "Other"
+     }
+    ],
+    "fencing": [
+     {
+      "id": "timber",
+      "label": "Timber"
+     },
+     {
+      "id": "steel",
+      "label": "Steel"
+     },
+     {
+      "id": "masonry",
+      "label": "Masonry"
+     },
+     {
+      "id": "other",
+      "label": "Other"
+     }
+    ],
+    "retaining": [
+     {
+      "id": "masonry",
+      "label": "Masonry"
+     },
+     {
+      "id": "sleeper",
+      "label": "Sleeper"
+     },
+     {
+      "id": "other",
+      "label": "Other"
+     }
+    ]
+   },
+   "notes": "Construction type and finish are asked only for New, Replace and Alter. No material burden for retained or excluded elements. No quantities. The construction-type lists are proposed for Blue Leaf to confirm."
+  },
+  {
+   "id": "W-011",
+   "family": "W",
+   "short": "Unknown conditions (cost/design risk)",
+   "text": "Unknown conditions likely to affect cost and design. Is investigation, contingency, exclusion or alternate scope appropriate?",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "risk",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "investigation",
+     "label": "Investigation"
+    },
+    {
+     "id": "contingency",
+     "label": "Contingency"
+    },
+    {
+     "id": "exclusion",
+     "label": "Exclusion"
+    },
+    {
+     "id": "alternate_scope",
+     "label": "Alternate scope"
+    }
+   ],
+   "repeat": {
+    "key": "unknown_condition",
+    "by": "record"
+   },
+   "notes": "Risk item with description, source, responsible party, status and next action. Never a generic disposition."
+  },
+  {
+   "id": "W-012",
+   "family": "W",
+   "short": "Approvals & consultant responsibilities",
+   "text": "Planning/building approval and consultant design responsibilities. Identify who verifies requirements, not legal assertions based on questionnaire.",
+   "group": "WHOLE-PROJECT SITE / EXISTING CONDITIONS",
+   "section": "site",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "notes": "Identifies who verifies. Makes no legal assertion."
+  },
+  {
+   "id": "W-013",
+   "family": "W",
+   "short": "Architectural material direction",
+   "text": "Overall architectural material direction: masonry, render, lightweight cladding, timber feature, metal roof? What should the home look and feel like?",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01a",
+   "options": [
+    {
+     "id": "masonry",
+     "label": "Masonry",
+     "children": [
+      {
+       "id": "face_brick",
+       "label": "Face brick"
+      },
+      {
+       "id": "painted_brick",
+       "label": "Painted brick"
+      },
+      {
+       "id": "block",
+       "label": "Block"
+      }
+     ]
+    },
+    {
+     "id": "render",
+     "label": "Render",
+     "children": [
+      {
+       "id": "rendered_masonry",
+       "label": "Rendered masonry"
+      },
+      {
+       "id": "rendered_aac",
+       "label": "Rendered AAC"
+      },
+      {
+       "id": "rendered_lightweight_sheet",
+       "label": "Rendered lightweight sheet"
+      }
+     ]
+    },
+    {
+     "id": "lightweight_cladding",
+     "label": "Lightweight cladding",
+     "children": [
+      {
+       "id": "aac",
+       "label": "AAC"
+      },
+      {
+       "id": "fibre_cement_sheet",
+       "label": "Fibre cement sheet"
+      },
+      {
+       "id": "weatherboard",
+       "label": "Weatherboard"
+      },
+      {
+       "id": "other_cement_sheet_system",
+       "label": "Other cement-sheet system"
+      }
+     ]
+    },
+    {
+     "id": "timber_feature",
+     "label": "Timber feature",
+     "children": [
+      {
+       "id": "timber_cladding",
+       "label": "Timber cladding"
+      },
+      {
+       "id": "timber_look_cladding",
+       "label": "Timber-look cladding"
+      }
+     ]
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "repeat": {
+    "key": "wall_system",
+    "by": "zone"
+   },
+   "flow": [
+    "system",
+    "type",
+    "finish",
+    "product"
+   ],
+   "zones": [
+    {
+     "id": "main_walls",
+     "label": "Main walls"
+    },
+    {
+     "id": "upper_level",
+     "label": "Upper level"
+    },
+    {
+     "id": "feature",
+     "label": "Feature"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "notes": "Each system is its own item with zone and status (DEC-MRUX-01). 'Metal roof' in the Tab 21 wording is captured under W-014. Technical suitability stays a review action."
+  },
+  {
+   "id": "W-014",
+   "family": "W",
+   "short": "Roof & gutter colour / material",
+   "text": "Roof and gutter colour/material preference; roof profile/pitch/box gutter details to architect later.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01b",
+   "options": [
+    {
+     "id": "metal_roofing",
+     "label": "Metal roofing",
+     "children": [
+      {
+       "id": "flat_or_low_pitch",
+       "label": "Flat or low pitch",
+       "children": [
+        {
+         "id": "standing_seam",
+         "label": "Standing seam"
+        },
+        {
+         "id": "deck_profile",
+         "label": "Deck profile"
+        },
+        {
+         "id": "other",
+         "label": "Other"
+        }
+       ]
+      },
+      {
+       "id": "pitched",
+       "label": "Pitched",
+       "children": [
+        {
+         "id": "corrugated",
+         "label": "Corrugated"
+        },
+        {
+         "id": "standing_seam",
+         "label": "Standing seam"
+        },
+        {
+         "id": "trapezoidal",
+         "label": "Trapezoidal"
+        },
+        {
+         "id": "other",
+         "label": "Other"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "tile_roofing",
+     "label": "Tile roofing",
+     "children": [
+      {
+       "id": "concrete_tile",
+       "label": "Concrete tile"
+      },
+      {
+       "id": "terracotta_tile",
+       "label": "Terracotta tile"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "repeat": {
+    "key": "roof_system",
+    "by": "zone"
+   },
+   "flow": [
+    "material",
+    "pitch",
+    "profile",
+    "finish"
+   ],
+   "linked": {
+    "key": "gutters",
+    "label": "Gutters",
+    "options": [
+     {
+      "id": "quad",
+      "label": "Quad"
+     },
+     {
+      "id": "half_round",
+      "label": "Half round"
+     },
+     {
+      "id": "fascia_integrated",
+      "label": "Fascia integrated"
+     },
+     {
+      "id": "box_gutter",
+      "label": "Box gutter"
+     },
+     {
+      "id": "other",
+      "label": "Other"
+     }
+    ]
+   },
+   "notes": "Gutters are a separate linked item, not hidden in the roof colour. Pitch and profile compatibility verified against plans and manufacturer data."
+  },
+  {
+   "id": "W-015",
+   "family": "W",
+   "short": "Windows & glazing priorities",
+   "text": "Windows and glazing priorities: frame appearance, opening use, sun/shading, privacy, thermal/acoustic performance, insect screens.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01c",
+   "options": [
+    {
+     "id": "glazing",
+     "label": "Glazing",
+     "children": [
+      {
+       "id": "double_glazing",
+       "label": "Double glazing"
+      },
+      {
+       "id": "single_glazing",
+       "label": "Single glazing"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "frame",
+     "label": "Frame",
+     "children": [
+      {
+       "id": "aluminium",
+       "label": "Aluminium"
+      },
+      {
+       "id": "thermally_broken_aluminium",
+       "label": "Thermally broken aluminium"
+      },
+      {
+       "id": "timber",
+       "label": "Timber"
+      },
+      {
+       "id": "upvc",
+       "label": "uPVC"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "priorities",
+     "label": "Priorities",
+     "children": [
+      {
+       "id": "frame_appearance",
+       "label": "Frame appearance"
+      },
+      {
+       "id": "opening_use",
+       "label": "Opening use"
+      },
+      {
+       "id": "sun_and_shading",
+       "label": "Sun and shading"
+      },
+      {
+       "id": "privacy",
+       "label": "Privacy"
+      },
+      {
+       "id": "thermal_performance",
+       "label": "Thermal performance"
+      },
+      {
+       "id": "acoustic_performance",
+       "label": "Acoustic performance"
+      },
+      {
+       "id": "insect_screens",
+       "label": "Insect screens"
+      }
+     ]
+    }
+   ],
+   "flow": [
+    "group",
+    "option"
+   ],
+   "notes": "A preference claims no compliance with energy, acoustic, bushfire or consent requirements."
+  },
+  {
+   "id": "W-016",
+   "family": "W",
+   "short": "Envelope quality (comfort, energy, moisture)",
+   "text": "Envelope quality: comfort/energy efficiency, insulation, airtightness and moisture management priority. Technical compliance by designers.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01d",
+   "options": [
+    {
+     "id": "weather_tightness_system",
+     "label": "Weather-tightness system"
+    },
+    {
+     "id": "airtightness",
+     "label": "Airtightness"
+    },
+    {
+     "id": "comfort_and_energy_efficiency",
+     "label": "Comfort and energy efficiency"
+    },
+    {
+     "id": "passive_house_target",
+     "label": "Passive House target"
+    }
+   ],
+   "notes": "Independent goals, not certification decisions. Later suggestions are staff-only and marked review required (DEC-MRUX-03). No product is specified by selecting a goal."
+  },
+  {
+   "id": "W-017",
+   "family": "W",
+   "short": "Floor palette by zone",
+   "text": "General interior floor palette by zone: timber/laminate/hybrid/tile/carpet/polished concrete, wet-area separate.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01e",
+   "options": [
+    {
+     "id": "timber",
+     "label": "Timber"
+    },
+    {
+     "id": "laminate",
+     "label": "Laminate"
+    },
+    {
+     "id": "hybrid",
+     "label": "Hybrid"
+    },
+    {
+     "id": "tile",
+     "label": "Tile"
+    },
+    {
+     "id": "carpet",
+     "label": "Carpet"
+    },
+    {
+     "id": "polished_concrete",
+     "label": "Polished concrete"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "repeat": {
+    "key": "floor_zone",
+    "by": "zone"
+   },
+   "flow": [
+    "zone",
+    "family",
+    "finish",
+    "product"
+   ],
+   "zones": [
+    {
+     "id": "main_floor",
+     "label": "Main floor"
+    },
+    {
+     "id": "bedroom_floor",
+     "label": "Bedroom floor"
+    },
+    {
+     "id": "wet_area_floor",
+     "label": "Wet-area floor"
+    },
+    {
+     "id": "other_zone",
+     "label": "Other zone"
+    }
+   ],
+   "notes": "One default item per zone. Rooms inherit by zone. Exceptions are explicit."
+  },
+  {
+   "id": "W-018",
+   "family": "W",
+   "short": "Internal doors, trims & hardware",
+   "text": "Internal doors and trims: standard or feature doors, general door heights, skirting/architraves/cornice and hardware style.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01f",
+   "options": [
+    {
+     "id": "door_height",
+     "label": "Door height",
+     "children": [
+      {
+       "id": "2040",
+       "label": "2040"
+      },
+      {
+       "id": "2340",
+       "label": "2340"
+      },
+      {
+       "id": "floor_to_ceiling",
+       "label": "Floor to ceiling"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "door_type",
+     "label": "Door type",
+     "children": [
+      {
+       "id": "standard",
+       "label": "Standard"
+      },
+      {
+       "id": "feature",
+       "label": "Feature"
+      }
+     ]
+    },
+    {
+     "id": "jamb_or_edge_detail",
+     "label": "Jamb or edge detail",
+     "children": [
+      {
+       "id": "architrave",
+       "label": "Architrave"
+      },
+      {
+       "id": "p50_shadowline",
+       "label": "P50 shadowline"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "skirting",
+     "label": "Skirting",
+     "children": [
+      {
+       "id": "standard",
+       "label": "Standard"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "architraves",
+     "label": "Architraves",
+     "children": [
+      {
+       "id": "standard",
+       "label": "Standard"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "cornice",
+     "label": "Cornice",
+     "children": [
+      {
+       "id": "yes",
+       "label": "Yes"
+      },
+      {
+       "id": "no",
+       "label": "No"
+      }
+     ]
+    },
+    {
+     "id": "hardware_style",
+     "label": "Hardware style",
+     "children": [
+      {
+       "id": "standard",
+       "label": "Standard"
+      },
+      {
+       "id": "feature",
+       "label": "Feature"
+      }
+     ]
+    }
+   ],
+   "repeat": {
+    "key": "door_trim_standard",
+    "by": "element"
+   },
+   "flow": [
+    "element",
+    "option"
+   ],
+   "notes": "Separate defaults per element. Fire, acoustic and door-height exceptions stay possible per room."
+  },
+  {
+   "id": "W-019",
+   "family": "W",
+   "short": "Paint & ceiling direction",
+   "text": "General paint and ceiling finish direction: warm/cool palette, matte/sheen, square set/cornice, feature areas.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "mr-ux-01g",
+   "options": [
+    {
+     "id": "palette",
+     "label": "Palette",
+     "children": [
+      {
+       "id": "warm",
+       "label": "Warm"
+      },
+      {
+       "id": "cool",
+       "label": "Cool"
+      }
+     ]
+    },
+    {
+     "id": "ceiling",
+     "label": "Ceiling",
+     "children": [
+      {
+       "id": "square_set",
+       "label": "Square set"
+      },
+      {
+       "id": "cornice",
+       "label": "Cornice"
+      }
+     ]
+    },
+    {
+     "id": "feature_areas",
+     "label": "Feature areas"
+    }
+   ],
+   "repeat": {
+    "key": "paint_surface",
+    "by": "zone"
+   },
+   "flow": [
+    "surface",
+    "option"
+   ],
+   "zones": [
+    {
+     "id": "walls",
+     "label": "Walls"
+    },
+    {
+     "id": "ceiling",
+     "label": "Ceiling"
+    },
+    {
+     "id": "trim",
+     "label": "Trim"
+    },
+    {
+     "id": "wet_area",
+     "label": "Wet area"
+    }
+   ],
+   "notes": "No generic sheen chip. Sheen follows the surface with an editable default rule."
+  },
+  {
+   "id": "W-020",
+   "family": "W",
+   "short": "Heating, cooling, ventilation & hot water",
+   "text": "Heating/cooling, ventilation and hot water preference; any required comfort zones or special rooms?",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "proposed",
+   "options": [
+    {
+     "id": "heating_and_cooling",
+     "label": "Heating and cooling",
+     "children": [
+      {
+       "id": "ducted",
+       "label": "Ducted"
+      },
+      {
+       "id": "split_system",
+       "label": "Split system"
+      },
+      {
+       "id": "hydronic",
+       "label": "Hydronic"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "ventilation",
+     "label": "Ventilation",
+     "children": [
+      {
+       "id": "mechanical_ventilation",
+       "label": "Mechanical ventilation"
+      },
+      {
+       "id": "natural",
+       "label": "Natural"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "hot_water",
+     "label": "Hot water",
+     "children": [
+      {
+       "id": "heat_pump",
+       "label": "Heat pump"
+      },
+      {
+       "id": "gas_continuous",
+       "label": "Gas continuous"
+      },
+      {
+       "id": "electric_storage",
+       "label": "Electric storage"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "comfort_zones_or_special_rooms",
+     "label": "Comfort zones or special rooms"
+    }
+   ],
+   "notes": "Preference only. Sizing and design by the trade."
+  },
+  {
+   "id": "W-021",
+   "family": "W",
+   "short": "Electrical, smart home, solar & EV",
+   "text": "Electrical, smart home, data, solar/battery/EV charging ambitions; note special requirements, not layouts yet.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "smart_home",
+     "label": "Smart home"
+    },
+    {
+     "id": "data",
+     "label": "Data"
+    },
+    {
+     "id": "solar",
+     "label": "Solar"
+    },
+    {
+     "id": "battery",
+     "label": "Battery"
+    },
+    {
+     "id": "ev_charging",
+     "label": "EV charging"
+    }
+   ]
+  },
+  {
+   "id": "W-022",
+   "family": "W",
+   "short": "Furnishings, appliances & extras — who?",
+   "text": "Window furnishings, appliances, loose furniture, fireplaces, landscaping, security and automation: included, by client, excluded or future?",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "inclusion",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "window_furnishings",
+     "label": "Window furnishings"
+    },
+    {
+     "id": "appliances",
+     "label": "Appliances"
+    },
+    {
+     "id": "loose_furniture",
+     "label": "Loose furniture"
+    },
+    {
+     "id": "fireplaces",
+     "label": "Fireplaces"
+    },
+    {
+     "id": "landscaping",
+     "label": "Landscaping"
+    },
+    {
+     "id": "security",
+     "label": "Security"
+    },
+    {
+     "id": "automation",
+     "label": "Automation"
+    }
+   ],
+   "actions": [
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "by_client",
+     "label": "By client",
+     "disposition": "by_others",
+     "supplyBy": "client"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "future",
+     "label": "Future",
+     "disposition": "deferred"
+    }
+   ],
+   "notes": "Separate line per element with + Add another (MR-UX-01H). Never one sentence."
+  },
+  {
+   "id": "W-023",
+   "family": "W",
+   "short": "Supply & install responsibilities",
+   "text": "Standard supply/installation responsibilities for selected products and any client-supplied items; warranty and lead time implications noted internally.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "supply_install",
+    "by": "element"
+   },
+   "notes": "Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided."
+  },
+  {
+   "id": "W-024",
+   "family": "W",
+   "short": "Performance goal & consultant checks",
+   "text": "Document current building performance goal and required consultant checks (energy, thermal, fire, acoustic, moisture, accessibility as applicable). No automatic certification label.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "energy",
+     "label": "Energy"
+    },
+    {
+     "id": "thermal",
+     "label": "Thermal"
+    },
+    {
+     "id": "fire",
+     "label": "Fire"
+    },
+    {
+     "id": "acoustic",
+     "label": "Acoustic"
+    },
+    {
+     "id": "moisture",
+     "label": "Moisture"
+    },
+    {
+     "id": "accessibility",
+     "label": "Accessibility"
+    }
+   ],
+   "notes": "No automatic certification label."
+  },
+  {
+   "id": "W-025",
+   "family": "W",
+   "short": "Outstanding whole-house decision",
+   "text": "Identify outstanding whole-house decision that materially changes cost/design and allocate owner.",
+   "group": "WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS",
+   "section": "project",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "R-001",
+   "family": "R",
+   "short": "Room, level & drawing",
+   "text": "Room/zone name, level, drawing sheet/revision, order on plans; type: kitchen, bathroom, bedroom, hall, external etc.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "essential",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "storage": "meta.rooms"
+  },
+  {
+   "id": "R-002",
+   "family": "R",
+   "short": "Scope for this room",
+   "text": "For THIS room: New / Renovate / Alter / Retain Existing / Remove / Make Good / By Others / Excluded / Deferred / N/A.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "renovate",
+     "label": "Renovate",
+     "disposition": "alter"
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter"
+    },
+    {
+     "id": "retain_existing",
+     "label": "Retain existing",
+     "disposition": "retain"
+    },
+    {
+     "id": "remove",
+     "label": "Remove",
+     "disposition": "remove"
+    },
+    {
+     "id": "make_good",
+     "label": "Make good",
+     "disposition": "make_good"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "deferred",
+     "label": "Deferred",
+     "disposition": "deferred"
+    },
+    {
+     "id": "n_a",
+     "label": "N/A",
+     "disposition": "na"
+    }
+   ],
+   "presentedWith": "R-003",
+   "notes": "Here the disposition is genuinely the answer. Shown on the R-003 card."
+  },
+  {
+   "id": "R-003",
+   "family": "R",
+   "short": "What is being done here?",
+   "text": "What is being done here? One clear sentence, then inclusions/exclusions, retaining elements and existing condition notes.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionsFrom": "R-002",
+   "notes": "R-002 supplies the options, with an optional short note. Superseded by a room-specific scope prompt where one leads (partitionRoomPrompts)."
+  },
+  {
+   "id": "R-004",
+   "family": "R",
+   "short": "How the room must work",
+   "text": "What's most important about how this room works? Storage, circulation, accessibility, light/privacy, entertaining or durability.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry",
+     "bathroom",
+     "ensuite",
+     "wc",
+     "laundry",
+     "mudroom",
+     "living",
+     "dining",
+     "family",
+     "theatre",
+     "bedroom",
+     "wir",
+     "study",
+     "stairs",
+     "hall",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "circulation",
+     "label": "Circulation"
+    },
+    {
+     "id": "accessibility",
+     "label": "Accessibility"
+    },
+    {
+     "id": "light_and_privacy",
+     "label": "Light and privacy"
+    },
+    {
+     "id": "entertaining",
+     "label": "Entertaining"
+    },
+    {
+     "id": "durability",
+     "label": "Durability"
+    }
+   ]
+  },
+  {
+   "id": "R-005",
+   "family": "R",
+   "short": "Floor finish",
+   "text": "Floor finish: inherit whole-house default or select room exception; check steps/transitions if relevant.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry",
+     "living",
+     "dining",
+     "family",
+     "theatre",
+     "bedroom",
+     "wir",
+     "study",
+     "stairs",
+     "hall",
+     "garage",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "inherits": "W-017",
+   "notes": "Tree comes from W-017 by zone. Shows the inherited default; an exception is a separate item linked by overridesDefaultId."
+  },
+  {
+   "id": "R-006",
+   "family": "R",
+   "short": "Wall, ceiling & feature finish",
+   "text": "Wall, ceiling and feature finish: use defaults or note different materials/ceiling height/cornices.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry",
+     "laundry",
+     "mudroom",
+     "living",
+     "dining",
+     "family",
+     "theatre",
+     "bedroom",
+     "wir",
+     "study",
+     "stairs",
+     "hall",
+     "garage",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "inherits": "W-019",
+   "notes": "Tree comes from W-019."
+  },
+  {
+   "id": "R-007",
+   "family": "R",
+   "short": "Doors, windows & openings",
+   "text": "Internal/external doors, windows, screens or opening alterations specific to this room.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "multi_select",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry",
+     "bathroom",
+     "ensuite",
+     "wc",
+     "laundry",
+     "mudroom",
+     "living",
+     "dining",
+     "family",
+     "theatre",
+     "bedroom",
+     "wir",
+     "study",
+     "stairs",
+     "hall",
+     "garage",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "internal_door",
+     "label": "Internal door"
+    },
+    {
+     "id": "external_door",
+     "label": "External door"
+    },
+    {
+     "id": "window",
+     "label": "Window"
+    },
+    {
+     "id": "screen",
+     "label": "Screen"
+    },
+    {
+     "id": "opening_alteration",
+     "label": "Opening alteration"
+    }
+   ]
+  },
+  {
+   "id": "R-008",
+   "family": "R",
+   "short": "Lighting, power & comfort",
+   "text": "Lighting, power, data, comfort/ventilation needs as a broad prompt. Count/position in detailed electrical coordination.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "hall",
+     "stairs",
+     "laundry",
+     "mudroom",
+     "pantry",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "lighting",
+     "label": "Lighting"
+    },
+    {
+     "id": "power",
+     "label": "Power"
+    },
+    {
+     "id": "data",
+     "label": "Data"
+    },
+    {
+     "id": "comfort_or_ventilation",
+     "label": "Comfort or ventilation"
+    }
+   ],
+   "notes": "Broad needs only. Counts and positions belong to detailed coordination."
+  },
+  {
+   "id": "R-009",
+   "family": "R",
+   "short": "Joinery, fixtures & equipment — who?",
+   "text": "Joinery, fixtures, appliances, equipment or loose furniture: included, owner supplied or by others?",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "study",
+     "hall",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "room_supply",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "joinery",
+     "label": "Joinery"
+    },
+    {
+     "id": "fixtures",
+     "label": "Fixtures"
+    },
+    {
+     "id": "appliances",
+     "label": "Appliances"
+    },
+    {
+     "id": "equipment",
+     "label": "Equipment"
+    },
+    {
+     "id": "loose_furniture",
+     "label": "Loose furniture"
+    }
+   ],
+   "actions": [
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "owner_supplied",
+     "label": "Owner supplied",
+     "supplyBy": "client"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    }
+   ],
+   "notes": "Owner supplied records who supplies. Who installs it is Tab 27 Q4, still open."
+  },
+  {
+   "id": "R-010",
+   "family": "R",
+   "short": "Undecided / follow-up",
+   "text": "What's undecided, what changes the scope, and who follows up? Record only meaningful actions.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "room_decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "R-011",
+   "family": "R",
+   "short": "Source document",
+   "text": "Reference relevant drawing/consultant/supplier document and version; don't type from memory when source exists.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "FACT",
+   "itemKind": null,
+   "mapping": "fact_prefill",
+   "nature": "fact",
+   "tier": "office_only",
+   "control": "readonly",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   },
+   "storage": "item.source + sourceDocId"
+  },
+  {
+   "id": "R-012",
+   "family": "R",
+   "short": "Detail, price & documentation status",
+   "text": "Detail development and price/documentation status: design verified? trade quote/allowance? who is coordinating?",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "R-013",
+   "family": "R",
+   "short": "Existing-to-new junctions & make good",
+   "text": "Existing-to-new floor/wall/ceiling/service junction and matching/make-good requirements.",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry",
+     "bathroom",
+     "ensuite",
+     "wc",
+     "laundry",
+     "mudroom",
+     "living",
+     "dining",
+     "family",
+     "theatre",
+     "bedroom",
+     "wir",
+     "study",
+     "stairs",
+     "hall",
+     "garage",
+     "generic"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "existing_work",
+    "by": "element"
+   },
+   "presentedWith": "W-004",
+   "elements": [
+    {
+     "id": "floor_junction",
+     "label": "Floor junction"
+    },
+    {
+     "id": "wall_junction",
+     "label": "Wall junction"
+    },
+    {
+     "id": "ceiling_junction",
+     "label": "Ceiling junction"
+    },
+    {
+     "id": "service_junction",
+     "label": "Service junction"
+    }
+   ],
+   "notes": "Same physical items as the W-004 path, edited by item id from either view."
+  },
+  {
+   "id": "R-014",
+   "family": "R",
+   "short": "Supplied / installed by others?",
+   "text": "Any scope item supplied or installed by the client, other trade or external consultant?",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "room_supply",
+    "by": "element"
+   },
+   "actions": [
+    {
+     "id": "client",
+     "label": "Client",
+     "disposition": "by_others",
+     "supplyBy": "client"
+    },
+    {
+     "id": "other_trade",
+     "label": "Other trade",
+     "disposition": "by_others"
+    },
+    {
+     "id": "external_consultant",
+     "label": "External consultant",
+     "disposition": "by_others"
+    }
+   ]
+  },
+  {
+   "id": "R-015",
+   "family": "R",
+   "short": "Tolerances & installation constraints",
+   "text": "Tolerances and installation constraints that drive joinery/fixture/structural coordination (not client engineering choices).",
+   "group": "SHARED ROOM CARD (APPLIES TO EVERY ROOM OR AREA)",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": true,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "bathroom",
+     "ensuite",
+     "laundry",
+     "stairs"
+    ],
+    "stage": "D",
+    "overlay": null
+   },
+   "notes": "Tab 21: not client engineering choices."
+  },
+  {
+   "id": "K-001",
+   "family": "K",
+   "short": "New kitchen or retrofit?",
+   "text": "New kitchen vs replace fronts vs partial retrofit? Existing kitchen demolition and make-good extent.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new_kitchen",
+     "label": "New kitchen",
+     "disposition": "new"
+    },
+    {
+     "id": "replace_fronts",
+     "label": "Replace fronts",
+     "disposition": "alter"
+    },
+    {
+     "id": "partial_retrofit",
+     "label": "Partial retrofit",
+     "disposition": "alter"
+    }
+   ]
+  },
+  {
+   "id": "K-002",
+   "family": "K",
+   "short": "Layout & family use",
+   "text": "Layout: island, peninsula, scullery, pantry, circulation and family use priorities. Link joinery drawings.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "island",
+     "label": "Island"
+    },
+    {
+     "id": "peninsula",
+     "label": "Peninsula"
+    },
+    {
+     "id": "scullery",
+     "label": "Scullery"
+    },
+    {
+     "id": "pantry",
+     "label": "Pantry"
+    },
+    {
+     "id": "circulation",
+     "label": "Circulation"
+    },
+    {
+     "id": "family_use",
+     "label": "Family use"
+    }
+   ]
+  },
+  {
+   "id": "K-003",
+   "family": "K",
+   "short": "Storage",
+   "text": "Storage: full-height, walk-in, drawers, appliance garage, bins, pantry shelving, integrated appliances.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "full_height",
+     "label": "Full-height"
+    },
+    {
+     "id": "walk_in",
+     "label": "Walk-in"
+    },
+    {
+     "id": "drawers",
+     "label": "Drawers"
+    },
+    {
+     "id": "appliance_garage",
+     "label": "Appliance garage"
+    },
+    {
+     "id": "bins",
+     "label": "Bins"
+    },
+    {
+     "id": "pantry_shelving",
+     "label": "Pantry shelving"
+    },
+    {
+     "id": "integrated_appliances",
+     "label": "Integrated appliances"
+    }
+   ]
+  },
+  {
+   "id": "K-004",
+   "family": "K",
+   "short": "Cabinetry look",
+   "text": "Cabinetry standard/look: flat-panel, profile, timber veneer/laminate/paint, cabinet interior standard.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "flat_panel",
+     "label": "Flat-panel",
+     "children": [
+      {
+       "id": "timber_veneer",
+       "label": "Timber veneer"
+      },
+      {
+       "id": "laminate",
+       "label": "Laminate"
+      },
+      {
+       "id": "paint",
+       "label": "Paint"
+      }
+     ]
+    },
+    {
+     "id": "profile",
+     "label": "Profile",
+     "children": [
+      {
+       "id": "timber_veneer",
+       "label": "Timber veneer"
+      },
+      {
+       "id": "laminate",
+       "label": "Laminate"
+      },
+      {
+       "id": "paint",
+       "label": "Paint"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "K-005",
+   "family": "K",
+   "short": "Benchtop",
+   "text": "Benchtop: preferred surface, appearance, thickness style; final product/edge/joints after PTSA.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "proposed",
+   "options": [
+    {
+     "id": "engineered_stone",
+     "label": "Engineered stone"
+    },
+    {
+     "id": "natural_stone",
+     "label": "Natural stone"
+    },
+    {
+     "id": "porcelain",
+     "label": "Porcelain"
+    },
+    {
+     "id": "timber",
+     "label": "Timber"
+    },
+    {
+     "id": "laminate",
+     "label": "Laminate"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "notes": "Final product, edge and joints after PTSA."
+  },
+  {
+   "id": "K-006",
+   "family": "K",
+   "short": "Splashback",
+   "text": "Splashback: tile, stone, glass or other; preferred extent/colour; detailed layout later.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "tile",
+     "label": "Tile"
+    },
+    {
+     "id": "stone",
+     "label": "Stone"
+    },
+    {
+     "id": "glass",
+     "label": "Glass"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ]
+  },
+  {
+   "id": "K-007",
+   "family": "K",
+   "short": "Sink & mixer",
+   "text": "Sink and mixer: bowl arrangement, undermount/topmount, finish, water filter/hot tap; Routleys source later.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "undermount",
+     "label": "Undermount",
+     "children": [
+      {
+       "id": "single_bowl",
+       "label": "Single bowl"
+      },
+      {
+       "id": "double_bowl",
+       "label": "Double bowl"
+      }
+     ]
+    },
+    {
+     "id": "topmount",
+     "label": "Topmount",
+     "children": [
+      {
+       "id": "single_bowl",
+       "label": "Single bowl"
+      },
+      {
+       "id": "double_bowl",
+       "label": "Double bowl"
+      }
+     ]
+    },
+    {
+     "id": "water_filter",
+     "label": "Water filter"
+    },
+    {
+     "id": "hot_tap",
+     "label": "Hot tap"
+    }
+   ]
+  },
+  {
+   "id": "K-008",
+   "family": "K",
+   "short": "Appliances — who supplies?",
+   "text": "Appliances: list cooktop, oven, rangehood, dishwasher, fridge, microwave, wine storage; who supplies/install and any specialty dimensions?",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "appliance",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "cooktop",
+     "label": "Cooktop"
+    },
+    {
+     "id": "oven",
+     "label": "Oven"
+    },
+    {
+     "id": "rangehood",
+     "label": "Rangehood"
+    },
+    {
+     "id": "dishwasher",
+     "label": "Dishwasher"
+    },
+    {
+     "id": "fridge",
+     "label": "Fridge"
+    },
+    {
+     "id": "microwave",
+     "label": "Microwave"
+    },
+    {
+     "id": "wine_storage",
+     "label": "Wine storage"
+    }
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ]
+  },
+  {
+   "id": "K-009",
+   "family": "K",
+   "short": "Cooking & exhaust",
+   "text": "Cooking/exhaust requirements, induction/gas preference, outdoor connection and ventilation considerations.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "induction",
+     "label": "Induction"
+    },
+    {
+     "id": "gas",
+     "label": "Gas"
+    },
+    {
+     "id": "outdoor_connection",
+     "label": "Outdoor connection"
+    },
+    {
+     "id": "ventilation",
+     "label": "Ventilation"
+    }
+   ]
+  },
+  {
+   "id": "K-010",
+   "family": "K",
+   "short": "Power, lighting & data",
+   "text": "Power, feature lighting, LED strips and data/charging; location layout by electrician later.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery",
+     "pantry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "power",
+     "label": "Power"
+    },
+    {
+     "id": "feature_lighting",
+     "label": "Feature lighting"
+    },
+    {
+     "id": "led_strips",
+     "label": "LED strips"
+    },
+    {
+     "id": "data_or_charging",
+     "label": "Data or charging"
+    }
+   ]
+  },
+  {
+   "id": "K-011",
+   "family": "K",
+   "short": "Joinery hardware & setouts",
+   "text": "Joinery hardware/drawers, handles/push-to-open, panels, plinths, clearances, stone shop drawings, service setouts and quantities.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "K-012",
+   "family": "K",
+   "short": "Budget drivers & unresolved choices",
+   "text": "Main budget drivers or unresolved choices: kitchen footprint, stone choice, appliance tier, specialty hardware, scullery scope.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "kitchen_footprint",
+     "label": "Kitchen footprint"
+    },
+    {
+     "id": "stone_choice",
+     "label": "Stone choice"
+    },
+    {
+     "id": "appliance_tier",
+     "label": "Appliance tier"
+    },
+    {
+     "id": "specialty_hardware",
+     "label": "Specialty hardware"
+    },
+    {
+     "id": "scullery_scope",
+     "label": "Scullery scope"
+    }
+   ]
+  },
+  {
+   "id": "K-013",
+   "family": "K",
+   "short": "Appliance procurement & warranty",
+   "text": "Appliance procurement, supplier selections, long-lead items, installation and warranty responsibility.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "office_only",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "D",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "procurement",
+    "by": "element"
+   }
+  },
+  {
+   "id": "K-014",
+   "family": "K",
+   "short": "Coordinate product dimensions",
+   "text": "Coordinate supplier product dimensions with cabinetry, electrical, plumbing and drawings; verify, don't auto-approve.",
+   "group": "ROOM-SPECIFIC: KITCHEN / SCULLERY / PANTRY",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "kitchen",
+     "scullery"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "B-001",
+   "family": "B",
+   "short": "Retain, renovate or new?",
+   "text": "Existing bathroom retained, full renovation or new? Demolition, protection, access and make-good.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "retained",
+     "label": "Retained",
+     "disposition": "retain"
+    },
+    {
+     "id": "full_renovation",
+     "label": "Full renovation",
+     "disposition": "alter"
+    },
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    }
+   ]
+  },
+  {
+   "id": "B-002",
+   "family": "B",
+   "short": "Layout & priorities",
+   "text": "Room layout and priorities: shower-only, bath, double vanity, separate WC, storage, accessibility.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "shower_only",
+     "label": "Shower only"
+    },
+    {
+     "id": "bath",
+     "label": "Bath"
+    },
+    {
+     "id": "double_vanity",
+     "label": "Double vanity"
+    },
+    {
+     "id": "separate_wc",
+     "label": "Separate WC"
+    },
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "accessibility",
+     "label": "Accessibility"
+    }
+   ]
+  },
+  {
+   "id": "B-003",
+   "family": "B",
+   "short": "Toilet",
+   "text": "Toilet: back-to-wall, wall-hung, concealed cistern, existing retained; brand/model later.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "single_select",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "single",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "back_to_wall",
+     "label": "Back-to-wall"
+    },
+    {
+     "id": "wall_hung",
+     "label": "Wall-hung"
+    },
+    {
+     "id": "concealed_cistern",
+     "label": "Concealed cistern"
+    },
+    {
+     "id": "existing_retained",
+     "label": "Existing retained"
+    }
+   ]
+  },
+  {
+   "id": "B-004",
+   "family": "B",
+   "short": "Vanity",
+   "text": "Vanity: wall-hung/floorstanding, size, top material, basin number/type, drawers/storage.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "wall_hung",
+     "label": "Wall-hung",
+     "children": [
+      {
+       "id": "one_basin",
+       "label": "One basin"
+      },
+      {
+       "id": "two_basins",
+       "label": "Two basins"
+      }
+     ]
+    },
+    {
+     "id": "floorstanding",
+     "label": "Floorstanding",
+     "children": [
+      {
+       "id": "one_basin",
+       "label": "One basin"
+      },
+      {
+       "id": "two_basins",
+       "label": "Two basins"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "B-005",
+   "family": "B",
+   "short": "Basin",
+   "text": "Basin: inset/above-counter/undermount, shape/finish and likely plumbing constraint.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "single_select",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "single",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "inset",
+     "label": "Inset"
+    },
+    {
+     "id": "above_counter",
+     "label": "Above-counter"
+    },
+    {
+     "id": "undermount",
+     "label": "Undermount"
+    }
+   ]
+  },
+  {
+   "id": "B-006",
+   "family": "B",
+   "short": "Shower",
+   "text": "Shower: walk-in or enclosed, overhead/hand shower, screen style, niche, seat, hobless preference.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "walk_in",
+     "label": "Walk-in",
+     "children": [
+      {
+       "id": "niche",
+       "label": "Niche"
+      },
+      {
+       "id": "seat",
+       "label": "Seat"
+      },
+      {
+       "id": "hobless",
+       "label": "Hobless"
+      }
+     ]
+    },
+    {
+     "id": "enclosed",
+     "label": "Enclosed",
+     "children": [
+      {
+       "id": "niche",
+       "label": "Niche"
+      },
+      {
+       "id": "seat",
+       "label": "Seat"
+      },
+      {
+       "id": "hobless",
+       "label": "Hobless"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "B-007",
+   "family": "B",
+   "short": "Bath",
+   "text": "Bath: built-in/freestanding/none, location and quality; specific size/model later.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "single_select",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "single",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "built_in",
+     "label": "Built-in"
+    },
+    {
+     "id": "freestanding",
+     "label": "Freestanding"
+    },
+    {
+     "id": "none",
+     "label": "None"
+    }
+   ]
+  },
+  {
+   "id": "B-008",
+   "family": "B",
+   "short": "Tapware & accessories",
+   "text": "Tapware/accessories: finish direction, mixer types, towel rails, hooks, toilet-roll holders and mirrors.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "proposed",
+   "options": [
+    {
+     "id": "chrome",
+     "label": "Chrome"
+    },
+    {
+     "id": "brushed_nickel",
+     "label": "Brushed nickel"
+    },
+    {
+     "id": "matte_black",
+     "label": "Matte black"
+    },
+    {
+     "id": "brushed_brass",
+     "label": "Brushed brass"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ]
+  },
+  {
+   "id": "B-009",
+   "family": "B",
+   "short": "Wall & floor tiles",
+   "text": "Wall and floor finishes: tile type, size, full/partial tile heights, feature tile, grout colour and trim approach.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "full_height",
+     "label": "Full height"
+    },
+    {
+     "id": "partial_height",
+     "label": "Partial height"
+    },
+    {
+     "id": "feature_tile",
+     "label": "Feature tile"
+    }
+   ],
+   "notes": "Aesthetic choice only. Waterproofing stays in B-012 (B03)."
+  },
+  {
+   "id": "B-010",
+   "family": "B",
+   "short": "Heating & ventilation",
+   "text": "Heating and ventilation: exhaust fan, window, underfloor heating, heated towel rail.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "exhaust_fan",
+     "label": "Exhaust fan"
+    },
+    {
+     "id": "window",
+     "label": "Window"
+    },
+    {
+     "id": "underfloor_heating",
+     "label": "Underfloor heating"
+    },
+    {
+     "id": "heated_towel_rail",
+     "label": "Heated towel rail"
+    }
+   ]
+  },
+  {
+   "id": "B-011",
+   "family": "B",
+   "short": "Mirror, lighting & power",
+   "text": "Mirror/shaving cabinet, lighting, power outlets and electrical zones.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "mirror",
+     "label": "Mirror"
+    },
+    {
+     "id": "shaving_cabinet",
+     "label": "Shaving cabinet"
+    },
+    {
+     "id": "lighting",
+     "label": "Lighting"
+    },
+    {
+     "id": "power_outlets",
+     "label": "Power outlets"
+    }
+   ]
+  },
+  {
+   "id": "B-012",
+   "family": "B",
+   "short": "Waterproofing, falls & setouts",
+   "text": "Waterproofing scope, drainage/waste, falls, thresholds, shower recess/screen/niche setouts for designer/trade verification.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "D",
+    "overlay": null
+   },
+   "notes": "Kept separate from wet-area look (B03)."
+  },
+  {
+   "id": "B-013",
+   "family": "B",
+   "short": "Rough-in vs Routleys pack",
+   "text": "Confirm product rough-in dimensions and approvals against Routleys selection pack and plumbing drawings.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "B-014",
+   "family": "B",
+   "short": "Client-supplied vs Blue Leaf supply",
+   "text": "Client-supplied fixtures vs Blue Leaf procurement and installation; any appliance or specialist installer.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "room_supply",
+    "by": "element"
+   },
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ]
+  },
+  {
+   "id": "B-015",
+   "family": "B",
+   "short": "Unresolved before setout",
+   "text": "Significant decisions unresolved before wet-area setout, tender and ordering.",
+   "group": "ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bathroom",
+     "ensuite",
+     "wc"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "room_decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "L-001",
+   "family": "L",
+   "short": "New or retained laundry?",
+   "text": "New or retained laundry, demolition, appliance relocation, cupboard and floor/wall making-good.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry",
+     "mudroom"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "retained",
+     "label": "Retained",
+     "disposition": "retain"
+    }
+   ]
+  },
+  {
+   "id": "L-002",
+   "family": "L",
+   "short": "Washer / dryer layout",
+   "text": "Washing machine/dryer layout: stacked/side-by-side; underbench; ventilation.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "stacked",
+     "label": "Stacked"
+    },
+    {
+     "id": "side_by_side",
+     "label": "Side-by-side"
+    },
+    {
+     "id": "underbench",
+     "label": "Underbench"
+    }
+   ]
+  },
+  {
+   "id": "L-003",
+   "family": "L",
+   "short": "Cabinetry, bench & trough",
+   "text": "Cabinetry, bench, trough, mixer, splashback, storage/broom cupboard and drying rail.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "multi_select",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry",
+     "mudroom"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "cabinetry",
+     "label": "Cabinetry"
+    },
+    {
+     "id": "bench",
+     "label": "Bench"
+    },
+    {
+     "id": "trough",
+     "label": "Trough"
+    },
+    {
+     "id": "mixer",
+     "label": "Mixer"
+    },
+    {
+     "id": "splashback",
+     "label": "Splashback"
+    },
+    {
+     "id": "broom_cupboard",
+     "label": "Broom cupboard"
+    },
+    {
+     "id": "drying_rail",
+     "label": "Drying rail"
+    }
+   ]
+  },
+  {
+   "id": "L-004",
+   "family": "L",
+   "short": "Flooring & splash protection",
+   "text": "Flooring, skirting, tiled splash protection and door/wet-zone finish.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry",
+     "mudroom"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "timber",
+     "label": "Timber"
+    },
+    {
+     "id": "laminate",
+     "label": "Laminate"
+    },
+    {
+     "id": "hybrid",
+     "label": "Hybrid"
+    },
+    {
+     "id": "tile",
+     "label": "Tile"
+    },
+    {
+     "id": "carpet",
+     "label": "Carpet"
+    },
+    {
+     "id": "polished_concrete",
+     "label": "Polished concrete"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "notes": "Default suggestion comes from the W-017 wet-area zone once P4d links it."
+  },
+  {
+   "id": "L-005",
+   "family": "L",
+   "short": "Waste, taps, hot water & power",
+   "text": "Waste, taps, hot-water provision, external access, power/GPO and appliance clearances.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "L-006",
+   "family": "L",
+   "short": "Appliance supply responsibility",
+   "text": "Appliance supply responsibilities and any built-in whitegoods; client-owned equipment.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "appliance",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "washing_machine",
+     "label": "Washing machine"
+    },
+    {
+     "id": "dryer",
+     "label": "Dryer"
+    },
+    {
+     "id": "built_in_whitegoods",
+     "label": "Built-in whitegoods"
+    }
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ]
+  },
+  {
+   "id": "L-007",
+   "family": "L",
+   "short": "Unknowns & retained services",
+   "text": "Product size unknowns, existing drainage and retained service constraints.",
+   "group": "ROOM-SPECIFIC: LAUNDRY / MUDROOM",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "laundry",
+     "mudroom"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "room_decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "V-001",
+   "family": "V",
+   "short": "New, altered or retained?",
+   "text": "New/altered/retained space; walls/openings to remove, flooring and ceiling transitions.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "altered",
+     "label": "Altered",
+     "disposition": "alter"
+    },
+    {
+     "id": "retained",
+     "label": "Retained",
+     "disposition": "retain"
+    }
+   ]
+  },
+  {
+   "id": "V-002",
+   "family": "V",
+   "short": "Layout, outlook & acoustics",
+   "text": "Seating/dining layout, indoor-outdoor connection, TV/wall position, storage and acoustics.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "seating_layout",
+     "label": "Seating layout"
+    },
+    {
+     "id": "dining_layout",
+     "label": "Dining layout"
+    },
+    {
+     "id": "indoor_outdoor_connection",
+     "label": "Indoor-outdoor connection"
+    },
+    {
+     "id": "tv_position",
+     "label": "TV position"
+    },
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "acoustics",
+     "label": "Acoustics"
+    }
+   ]
+  },
+  {
+   "id": "V-003",
+   "family": "V",
+   "short": "Floor, feature wall & ceiling",
+   "text": "Floor finish, threshold details, feature wall, ceiling finish/height, cornice/trim exception.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "floor_finish",
+     "label": "Floor finish"
+    },
+    {
+     "id": "feature_wall",
+     "label": "Feature wall"
+    },
+    {
+     "id": "ceiling_finish",
+     "label": "Ceiling finish"
+    },
+    {
+     "id": "cornice_or_trim_exception",
+     "label": "Cornice or trim exception"
+    }
+   ]
+  },
+  {
+   "id": "V-004",
+   "family": "V",
+   "short": "Windows, sliders & coverings",
+   "text": "Window/slider/stacker style, glazing/shading, flyscreens, privacy and window-covering scope.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "slider",
+     "label": "Slider",
+     "children": [
+      {
+       "id": "flyscreens",
+       "label": "Flyscreens"
+      },
+      {
+       "id": "window_coverings",
+       "label": "Window coverings"
+      }
+     ]
+    },
+    {
+     "id": "stacker",
+     "label": "Stacker",
+     "children": [
+      {
+       "id": "flyscreens",
+       "label": "Flyscreens"
+      },
+      {
+       "id": "window_coverings",
+       "label": "Window coverings"
+      }
+     ]
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ]
+  },
+  {
+   "id": "V-005",
+   "family": "V",
+   "short": "Fireplace, built-ins & TV wall",
+   "text": "Fireplace/gas/electric appliance, built-in cabinetry, TV wall, shelving; included/by client?",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "room_supply",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "fireplace",
+     "label": "Fireplace"
+    },
+    {
+     "id": "built_in_cabinetry",
+     "label": "Built-in cabinetry"
+    },
+    {
+     "id": "tv_wall",
+     "label": "TV wall"
+    },
+    {
+     "id": "shelving",
+     "label": "Shelving"
+    }
+   ],
+   "actions": [
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "by_client",
+     "label": "By client",
+     "disposition": "by_others",
+     "supplyBy": "client"
+    }
+   ]
+  },
+  {
+   "id": "V-006",
+   "family": "V",
+   "short": "Lighting, AV & comfort",
+   "text": "Lighting modes, power/data/AV, fans, heating/cooling and daylight control.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "lighting_modes",
+     "label": "Lighting modes"
+    },
+    {
+     "id": "power_data_or_av",
+     "label": "Power, data or AV"
+    },
+    {
+     "id": "fans",
+     "label": "Fans"
+    },
+    {
+     "id": "heating_or_cooling",
+     "label": "Heating or cooling"
+    },
+    {
+     "id": "daylight_control",
+     "label": "Daylight control"
+    }
+   ]
+  },
+  {
+   "id": "V-007",
+   "family": "V",
+   "short": "Structural openings & glazing coordination",
+   "text": "Structural openings, beams, lintels, access and glazing coordination to architect/engineer.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "V-008",
+   "family": "V",
+   "short": "Furniture-driven decisions",
+   "text": "Confirm furniture/layout-driven electrical and procurement decisions.",
+   "group": "ROOM-SPECIFIC: LIVING / DINING / FAMILY / THEATRE",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "living",
+     "dining",
+     "family",
+     "theatre"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "room_decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "D-001",
+   "family": "D",
+   "short": "New, retained or refurbished?",
+   "text": "New, existing retained or refurbished; any partitions or built-in removals?",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "wir",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "existing_retained",
+     "label": "Existing retained",
+     "disposition": "retain"
+    },
+    {
+     "id": "refurbished",
+     "label": "Refurbished",
+     "disposition": "alter"
+    }
+   ]
+  },
+  {
+   "id": "D-002",
+   "family": "D",
+   "short": "Furniture, access & storage",
+   "text": "Bed/desk placement, access, future furniture, storage and privacy.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "bed_placement",
+     "label": "Bed placement"
+    },
+    {
+     "id": "desk_placement",
+     "label": "Desk placement"
+    },
+    {
+     "id": "access",
+     "label": "Access"
+    },
+    {
+     "id": "future_furniture",
+     "label": "Future furniture"
+    },
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "privacy",
+     "label": "Privacy"
+    }
+   ]
+  },
+  {
+   "id": "D-003",
+   "family": "D",
+   "short": "Floor, paint, trim & doors",
+   "text": "Floor finish, general paint, feature wall, trim, doors and hardware.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "wir",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "floor_finish",
+     "label": "Floor finish"
+    },
+    {
+     "id": "general_paint",
+     "label": "General paint"
+    },
+    {
+     "id": "feature_wall",
+     "label": "Feature wall"
+    },
+    {
+     "id": "trim",
+     "label": "Trim"
+    },
+    {
+     "id": "doors_and_hardware",
+     "label": "Doors and hardware"
+    }
+   ],
+   "notes": "Reads the whole-house defaults once P4d links them."
+  },
+  {
+   "id": "D-004",
+   "family": "D",
+   "short": "Wardrobe layout",
+   "text": "Wardrobe layout: robe doors, shelves, drawers, hanging and lighting; standard or custom.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "wir"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "standard",
+     "label": "Standard",
+     "children": [
+      {
+       "id": "robe_doors",
+       "label": "Robe doors"
+      },
+      {
+       "id": "shelves",
+       "label": "Shelves"
+      },
+      {
+       "id": "drawers",
+       "label": "Drawers"
+      },
+      {
+       "id": "hanging",
+       "label": "Hanging"
+      },
+      {
+       "id": "lighting",
+       "label": "Lighting"
+      }
+     ]
+    },
+    {
+     "id": "custom",
+     "label": "Custom",
+     "children": [
+      {
+       "id": "robe_doors",
+       "label": "Robe doors"
+      },
+      {
+       "id": "shelves",
+       "label": "Shelves"
+      },
+      {
+       "id": "drawers",
+       "label": "Drawers"
+      },
+      {
+       "id": "hanging",
+       "label": "Hanging"
+      },
+      {
+       "id": "lighting",
+       "label": "Lighting"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "D-005",
+   "family": "D",
+   "short": "Windows, coverings & privacy",
+   "text": "Windows/glazing/screens, blackout/window furnishings, acoustic privacy.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "windows",
+     "label": "Windows"
+    },
+    {
+     "id": "glazing",
+     "label": "Glazing"
+    },
+    {
+     "id": "screens",
+     "label": "Screens"
+    },
+    {
+     "id": "blackout",
+     "label": "Blackout"
+    },
+    {
+     "id": "window_furnishings",
+     "label": "Window furnishings"
+    },
+    {
+     "id": "acoustic_privacy",
+     "label": "Acoustic privacy"
+    }
+   ]
+  },
+  {
+   "id": "D-006",
+   "family": "D",
+   "short": "Fan, AC, power & lighting",
+   "text": "Ceiling fan, reverse-cycle zone, GPO/data and lighting needs.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "wir",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "ceiling_fan",
+     "label": "Ceiling fan"
+    },
+    {
+     "id": "reverse_cycle_zone",
+     "label": "Reverse-cycle zone"
+    },
+    {
+     "id": "power_or_data",
+     "label": "Power or data"
+    },
+    {
+     "id": "lighting",
+     "label": "Lighting"
+    }
+   ]
+  },
+  {
+   "id": "D-007",
+   "family": "D",
+   "short": "Outstanding robe / electrical decisions",
+   "text": "Outstanding robe layout/fitting and electrical decisions.",
+   "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "bedroom",
+     "wir",
+     "study"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "repeat": {
+    "key": "room_decision",
+    "by": "record"
+   }
+  },
+  {
+   "id": "H-001",
+   "family": "H",
+   "short": "Stair type & responsibility",
+   "text": "Stair type/location, change to existing stair, new stair or no stair; engineering/design responsibility.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "stairs"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "new_stair",
+     "label": "New stair",
+     "disposition": "new"
+    },
+    {
+     "id": "change_existing_stair",
+     "label": "Change existing stair",
+     "disposition": "alter"
+    },
+    {
+     "id": "no_stair",
+     "label": "No stair",
+     "disposition": "na"
+    }
+   ]
+  },
+  {
+   "id": "H-002",
+   "family": "H",
+   "short": "Treads, balustrade & handrail",
+   "text": "Stair treads/risers, balustrade/handrail material, finish and lighting intent.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "stairs"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "proposed",
+   "options": [
+    {
+     "id": "treads_and_risers",
+     "label": "Treads and risers",
+     "children": [
+      {
+       "id": "timber",
+       "label": "Timber"
+      },
+      {
+       "id": "carpet",
+       "label": "Carpet"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "balustrade",
+     "label": "Balustrade",
+     "children": [
+      {
+       "id": "glass",
+       "label": "Glass"
+      },
+      {
+       "id": "metal",
+       "label": "Metal"
+      },
+      {
+       "id": "timber",
+       "label": "Timber"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "id": "handrail",
+     "label": "Handrail",
+     "children": [
+      {
+       "id": "timber",
+       "label": "Timber"
+      },
+      {
+       "id": "metal",
+       "label": "Metal"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "H-003",
+   "family": "H",
+   "short": "Hall / entry finishes & joinery",
+   "text": "Hall/entry flooring transitions, feature cladding, joinery, door and hardware.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "hall"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "room_supply",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "flooring_transitions",
+     "label": "Flooring transitions"
+    },
+    {
+     "id": "feature_cladding",
+     "label": "Feature cladding"
+    },
+    {
+     "id": "joinery",
+     "label": "Joinery"
+    },
+    {
+     "id": "door_and_hardware",
+     "label": "Door and hardware"
+    }
+   ]
+  },
+  {
+   "id": "H-004",
+   "family": "H",
+   "short": "Front entry door",
+   "text": "Front entry door: material, glazing, pivot/hinged, hardware, security and thresholds.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "essential",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "hall"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "pivot",
+     "label": "Pivot",
+     "children": [
+      {
+       "id": "glazed",
+       "label": "Glazed"
+      },
+      {
+       "id": "solid",
+       "label": "Solid"
+      }
+     ]
+    },
+    {
+     "id": "hinged",
+     "label": "Hinged",
+     "children": [
+      {
+       "id": "glazed",
+       "label": "Glazed"
+      },
+      {
+       "id": "solid",
+       "label": "Solid"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "H-005",
+   "family": "H",
+   "short": "Entry storage & lighting",
+   "text": "Entry storage, coats/shoes and visitor movement/lighting.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "hall"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "coats",
+     "label": "Coats"
+    },
+    {
+     "id": "shoes",
+     "label": "Shoes"
+    },
+    {
+     "id": "visitor_movement",
+     "label": "Visitor movement"
+    },
+    {
+     "id": "lighting",
+     "label": "Lighting"
+    }
+   ]
+  },
+  {
+   "id": "H-006",
+   "family": "H",
+   "short": "Garage scope",
+   "text": "Garage: size, door motor/finish, storage, access door, slab/finish, insulation and services.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "garage"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "garage_element",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "door_motor",
+     "label": "Door motor"
+    },
+    {
+     "id": "door_finish",
+     "label": "Door finish"
+    },
+    {
+     "id": "storage",
+     "label": "Storage"
+    },
+    {
+     "id": "access_door",
+     "label": "Access door"
+    },
+    {
+     "id": "slab_or_finish",
+     "label": "Slab or finish"
+    },
+    {
+     "id": "insulation",
+     "label": "Insulation"
+    },
+    {
+     "id": "services",
+     "label": "Services"
+    }
+   ]
+  },
+  {
+   "id": "H-007",
+   "family": "H",
+   "short": "Garage services & EV",
+   "text": "EV charger, workshop power, hot/cold water, garage floor coating, security and ventilation.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "garage"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "ev_charger",
+     "label": "EV charger"
+    },
+    {
+     "id": "workshop_power",
+     "label": "Workshop power"
+    },
+    {
+     "id": "hot_and_cold_water",
+     "label": "Hot and cold water"
+    },
+    {
+     "id": "floor_coating",
+     "label": "Floor coating"
+    },
+    {
+     "id": "security",
+     "label": "Security"
+    },
+    {
+     "id": "ventilation",
+     "label": "Ventilation"
+    }
+   ]
+  },
+  {
+   "id": "H-008",
+   "family": "H",
+   "short": "Stair compliance & structure",
+   "text": "Stair geometry/balustrade compliance, structural and fire/acoustic design to responsible consultant.",
+   "group": "STAIRS / HALLS / ENTRY / GARAGE",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "stairs"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "O-001",
+   "family": "O",
+   "short": "Outdoor area in scope?",
+   "text": "Is alfresco/deck/verandah/pergola/balcony included, future, by client or excluded? Areas and levels.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "scope",
+   "tier": "essential",
+   "control": "single",
+   "disposition": "answer",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony",
+     "external"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "included",
+     "label": "Included",
+     "disposition": "included"
+    },
+    {
+     "id": "future",
+     "label": "Future",
+     "disposition": "deferred"
+    },
+    {
+     "id": "by_client",
+     "label": "By client",
+     "disposition": "by_others",
+     "supplyBy": "client"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    }
+   ]
+  },
+  {
+   "id": "O-002",
+   "family": "O",
+   "short": "How it will be used",
+   "text": "Covered vs open, all-season use, BBQ/outdoor kitchen, privacy, orientation and shade.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "essential",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "covered",
+     "label": "Covered"
+    },
+    {
+     "id": "open",
+     "label": "Open"
+    },
+    {
+     "id": "all_season_use",
+     "label": "All-season use"
+    },
+    {
+     "id": "bbq_or_outdoor_kitchen",
+     "label": "BBQ or outdoor kitchen"
+    },
+    {
+     "id": "privacy",
+     "label": "Privacy"
+    },
+    {
+     "id": "orientation_and_shade",
+     "label": "Orientation and shade"
+    }
+   ]
+  },
+  {
+   "id": "O-003",
+   "family": "O",
+   "short": "External flooring",
+   "text": "External flooring: concrete/pavers/deck/tiles, levels, steps, drainage and slip resistance requirement.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony",
+     "external"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "concrete",
+     "label": "Concrete"
+    },
+    {
+     "id": "pavers",
+     "label": "Pavers"
+    },
+    {
+     "id": "deck",
+     "label": "Deck"
+    },
+    {
+     "id": "tiles",
+     "label": "Tiles"
+    }
+   ]
+  },
+  {
+   "id": "O-004",
+   "family": "O",
+   "short": "Roof, posts, screens & cladding",
+   "text": "Roof, soffit, posts, screens, ceiling fan/heater and cladding finish direction.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "SELECTION",
+   "itemKind": "selection",
+   "mapping": "progressive_branch",
+   "nature": "choice",
+   "tier": "more_detail",
+   "control": "tree",
+   "disposition": "settled_only",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "roof",
+     "label": "Roof"
+    },
+    {
+     "id": "soffit",
+     "label": "Soffit"
+    },
+    {
+     "id": "posts",
+     "label": "Posts"
+    },
+    {
+     "id": "screens",
+     "label": "Screens"
+    },
+    {
+     "id": "ceiling_fan_or_heater",
+     "label": "Ceiling fan or heater"
+    },
+    {
+     "id": "cladding_finish",
+     "label": "Cladding finish"
+    }
+   ]
+  },
+  {
+   "id": "O-005",
+   "family": "O",
+   "short": "Outdoor services & connections",
+   "text": "Outdoor lighting, power, gas/water/drain connections, sink/fridge/BBQ provisions.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "REQUIREMENT",
+   "itemKind": "requirement",
+   "mapping": "requirement",
+   "nature": "requirement",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "lighting",
+     "label": "Lighting"
+    },
+    {
+     "id": "power",
+     "label": "Power"
+    },
+    {
+     "id": "gas",
+     "label": "Gas"
+    },
+    {
+     "id": "water",
+     "label": "Water"
+    },
+    {
+     "id": "drain",
+     "label": "Drain"
+    },
+    {
+     "id": "sink_fridge_or_bbq",
+     "label": "Sink, fridge or BBQ"
+    }
+   ]
+  },
+  {
+   "id": "O-006",
+   "family": "O",
+   "short": "Driveway, paths, fences & landscaping",
+   "text": "Driveway, paths, fences, gates, boundary wall, retaining, landscaping, turf and irrigation included?",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "external"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "external_work",
+    "by": "element"
+   },
+   "presentedWith": "W-010",
+   "elements": [
+    {
+     "id": "driveway",
+     "label": "Driveway"
+    },
+    {
+     "id": "paths",
+     "label": "Paths"
+    },
+    {
+     "id": "fences",
+     "label": "Fences"
+    },
+    {
+     "id": "gates",
+     "label": "Gates"
+    },
+    {
+     "id": "boundary_wall",
+     "label": "Boundary wall"
+    },
+    {
+     "id": "retaining",
+     "label": "Retaining"
+    },
+    {
+     "id": "landscaping",
+     "label": "Landscaping"
+    },
+    {
+     "id": "turf",
+     "label": "Turf"
+    },
+    {
+     "id": "irrigation",
+     "label": "Irrigation"
+    }
+   ],
+   "actions": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "replace",
+     "label": "Replace",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter",
+     "details": true
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "deferred",
+     "label": "Deferred",
+     "disposition": "deferred"
+    }
+   ],
+   "notes": "Same external items as W-010, seen from an External room."
+  },
+  {
+   "id": "O-007",
+   "family": "O",
+   "short": "Pool, shed or future additions",
+   "text": "Pool, outdoor shower, sauna, fire pit, shed or future additions by others?",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "external"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "external_work",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "pool",
+     "label": "Pool"
+    },
+    {
+     "id": "outdoor_shower",
+     "label": "Outdoor shower"
+    },
+    {
+     "id": "sauna",
+     "label": "Sauna"
+    },
+    {
+     "id": "fire_pit",
+     "label": "Fire pit"
+    },
+    {
+     "id": "shed",
+     "label": "Shed"
+    },
+    {
+     "id": "future_additions",
+     "label": "Future additions"
+    }
+   ],
+   "actions": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "replace",
+     "label": "Replace",
+     "disposition": "new",
+     "details": true
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter",
+     "details": true
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "deferred",
+     "label": "Deferred",
+     "disposition": "deferred"
+    }
+   ]
+  },
+  {
+   "id": "O-008",
+   "family": "O",
+   "short": "Balustrades, waterproofing & spans",
+   "text": "Balustrades, waterproofed balconies, drainage, structural spans, roof connections and consents to engineer/designer.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony",
+     "external"
+    ],
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "O-009",
+   "family": "O",
+   "short": "Boundary, drainage & staging issues",
+   "text": "Boundary, drainage, existing-to-new and staging/contract exclusion issues.",
+   "group": "OUTDOOR / ALFRESCO / PERGOLA / BALCONY / SITE",
+   "section": "room",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "risk",
+   "tier": "more_detail",
+   "control": "multi",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": [
+     "alfresco",
+     "balcony",
+     "external"
+    ],
+    "stage": "C",
+    "overlay": null
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "boundary",
+     "label": "Boundary"
+    },
+    {
+     "id": "drainage",
+     "label": "Drainage"
+    },
+    {
+     "id": "existing_to_new",
+     "label": "Existing-to-new"
+    },
+    {
+     "id": "staging_or_contract_exclusion",
+     "label": "Staging or contract exclusion"
+    }
+   ]
+  },
+  {
+   "id": "E-001",
+   "family": "E",
+   "short": "Siteworks",
+   "text": "SITEWORKS: Confirm survey, geotechnical assumptions, setout, cut/fill, retaining, spoil, truck/access, stormwater, contaminated material/trees; owner, document reference.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-002",
+   "family": "E",
+   "short": "Foundations",
+   "text": "FOUNDATIONS: Confirm footing/slab design, reinforcement, waterproofing, termite management, subfloor ventilation and ground levels; engineer/certifier responsibilities.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-003",
+   "family": "E",
+   "short": "Structure",
+   "text": "STRUCTURE: Confirm framing material, roof/floor systems, engineered beams, steel, bracing, tie-down and temporary support; designer approval and issue revision.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-004",
+   "family": "E",
+   "short": "Walls",
+   "text": "WALLS: Confirm brick/masonry/blocks, cladding substrate, fixing details, movement joints, cavity/ventilation, weep holes, lintel/flashings.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-005",
+   "family": "E",
+   "short": "Roofs",
+   "text": "ROOFS: Confirm pitch, sheet/tile type, roof drainage, penetrations, eaves, gutters/box gutters, downpipes, sarking/membrane and condensation strategy.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-006",
+   "family": "E",
+   "short": "Windows",
+   "text": "WINDOWS: Confirm window ID, opening sizes, handing, frame/material/finish, energy/glass, safety/acoustic/BAL where applicable, screens, reveals, water management, schedule revisions.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-007",
+   "family": "E",
+   "short": "Doors",
+   "text": "DOORS: Confirm internal/external door schedule, heights, widths, leaf type, jamb, seal, fire/acoustic where applicable, hardware/locksets, handles, garage motors.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-008",
+   "family": "E",
+   "short": "Envelope",
+   "text": "ENVELOPE: Confirm insulation continuity, vapour/water-control layers, thermal bridges, airtightness, ventilation and window/roof/slab junction detailing, performance evidence.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-009",
+   "family": "E",
+   "short": "Internal linings",
+   "text": "INTERNAL LININGS: Confirm plasterboard/cement sheet, ceiling profiles, feature substrate, wet-area lining, cornice/setout, acoustic requirements.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-010",
+   "family": "E",
+   "short": "Waterproofing",
+   "text": "WATERPROOFING: Confirm wet-area substrate/falls, membrane, hobs, wastes, wet-area joinery junctions and balcony/external waterproofing system.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-011",
+   "family": "E",
+   "short": "Floor finishes",
+   "text": "FLOOR FINISHES: Confirm substrate preparation, moisture, level transitions, tile/stone/timber/hybrid/carpet product, underlay and installation requirements.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-012",
+   "family": "E",
+   "short": "Paint / finishes",
+   "text": "PAINT / FINISHES: Confirm paint system, substrate, number of coats/colour/sheens and feature/timber/metal finishes.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-013",
+   "family": "E",
+   "short": "Joinery",
+   "text": "JOINERY: Confirm cabinet/shop drawings, panel/hinge/runner types, laminates, stone, tolerances, fixtures, service cutouts and approvals.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-014",
+   "family": "E",
+   "short": "Plumbing",
+   "text": "PLUMBING: Confirm hot/cold water, roof/stormwater, sanitary/drainage, fixture rough-ins, hot water system and specialist supplier schedule revisions.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-015",
+   "family": "E",
+   "short": "Electrical",
+   "text": "ELECTRICAL: Confirm general power, RCD/switchboard, lighting legend, switches, data/AV, solar/EV/smart/security and exact fixture positions.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-016",
+   "family": "E",
+   "short": "HVAC / ventilation",
+   "text": "HVAC/VENT: Confirm mechanical sizing, zones, duct/penetration routes, bathrooms/kitchen exhaust, makeup air and controls.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-017",
+   "family": "E",
+   "short": "Energy / compliance",
+   "text": "ENERGY/COMPLIANCE: Confirm relevant NCC version, design energy assessment, approvals, special site conditions, thermal/glazing/fire/BAL ratings where applicable (all require qualified review, no guessed compliance).",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-018",
+   "family": "E",
+   "short": "External works",
+   "text": "EXTERNAL: Confirm decking/substructure, external paving/slopes, balconies, decks/pergolas, retaining/fences, drainage and landscaping interfaces.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-019",
+   "family": "E",
+   "short": "Demolition",
+   "text": "DEMOLITION: Confirm strip-out extents, isolation/protection, temporary works, waste and disposal, latent hazard investigation, service alterations.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-020",
+   "family": "E",
+   "short": "Existing-to-new",
+   "text": "EXISTING-TO-NEW: Confirm roof/floor/wall/slab interface, levels, material matching or transition, damp/air/thermal continuity, structural differential movement and remedial making-good.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "reno",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-021",
+   "family": "E",
+   "short": "Procurement",
+   "text": "PROCUREMENT: Identify long lead materials, owner supply versus Blue Leaf/trade supply and install, procurement schedule and warranty liabilities.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "T",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-022",
+   "family": "E",
+   "short": "Cost",
+   "text": "COST: Confirm scope item priced/allowed/excluded against current drawings; source quote/date, quantity confidence, GST and contract-specific allowance classification.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "T",
+    "overlay": null
+   }
+  },
+  {
+   "id": "E-023",
+   "family": "E",
+   "short": "Document control",
+   "text": "DOC CONTROL: Reconcile specification, supplier schedule, drawings and approved register versions to prevent cross-version tender errors.",
+   "group": "ELEMENT-BASED TECHNICAL / WORK PACKAGE PROMPTS (NOT ROUTINELY CLIENT QUESTIONS)",
+   "section": "tech",
+   "libraryKind": "TECH",
+   "itemKind": "action",
+   "mapping": "technical_only",
+   "nature": "technical",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "T",
+    "overlay": null
+   }
+  },
+  {
+   "id": "M-001",
+   "family": "M",
+   "short": "Design coordination owner",
+   "text": "Who owns design coordination: client architect, Blue Leaf, other? Design deliverables and communication route.",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "single_select",
+   "nature": "fact",
+   "tier": "more_detail",
+   "control": "single",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": "management_delivery"
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "client_architect",
+     "label": "Client architect"
+    },
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ]
+  },
+  {
+   "id": "M-002",
+   "family": "M",
+   "short": "Who engages & pays consultants",
+   "text": "Who engages and pays each consultant, surveyor, certifier and authority? Record contract responsibility, not just contact.",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": "management_delivery"
+   },
+   "optionSource": "tab21",
+   "repeat": {
+    "key": "engagement",
+    "by": "element"
+   },
+   "elements": [
+    {
+     "id": "consultant",
+     "label": "Consultant"
+    },
+    {
+     "id": "surveyor",
+     "label": "Surveyor"
+    },
+    {
+     "id": "certifier",
+     "label": "Certifier"
+    },
+    {
+     "id": "authority",
+     "label": "Authority"
+    }
+   ]
+  },
+  {
+   "id": "M-003",
+   "family": "M",
+   "short": "Who sources, orders & installs",
+   "text": "Who sources, orders, stores and warrants each fixture/finish/major component? Who installs it? Avoid 'client supplied' ambiguity.",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "office_only",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": "management_delivery"
+   },
+   "repeat": {
+    "key": "supply_install",
+    "by": "element"
+   },
+   "notes": "Tab 27 Q4 (client supplied versus installed by Blue Leaf) is still open."
+  },
+  {
+   "id": "M-004",
+   "family": "M",
+   "short": "Direct costs, fees & packages",
+   "text": "Which items are direct client costs, construction management fees, trade packages or excluded? Link commercial terms; do not invent pricing.",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "repeatable_scope",
+   "nature": "scope",
+   "tier": "office_only",
+   "control": "repeat",
+   "disposition": "element",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": "management_delivery"
+   },
+   "optionSource": "tab21",
+   "options": [
+    {
+     "id": "direct_client_cost",
+     "label": "Direct client cost"
+    },
+    {
+     "id": "construction_management_fee",
+     "label": "Construction management fee"
+    },
+    {
+     "id": "trade_package",
+     "label": "Trade package"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded"
+    }
+   ],
+   "repeat": {
+    "key": "commercial_class",
+    "by": "element"
+   },
+   "notes": "Links commercial terms. Invents no pricing."
+  },
+  {
+   "id": "M-005",
+   "family": "M",
+   "short": "Who can approve what",
+   "text": "What approvals/decisions can Blue Leaf give versus those requiring client/designer signature?",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "ACTION",
+   "itemKind": "action",
+   "mapping": "action_risk",
+   "nature": "action",
+   "tier": "office_only",
+   "control": "note",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "D",
+    "overlay": "management_delivery"
+   }
+  },
+  {
+   "id": "M-006",
+   "family": "M",
+   "short": "Programme & interface responsibility",
+   "text": "Programme and interface responsibility between other trades and Blue Leaf; site access/occupation risks.",
+   "group": "MANAGEMENT-ONLY / THIRD-PARTY RESPONSIBILITY OVERLAY",
+   "section": "mgmt",
+   "libraryKind": "SCOPE",
+   "itemKind": "scope",
+   "mapping": "action_risk",
+   "nature": "risk",
+   "tier": "more_detail",
+   "control": "repeat",
+   "disposition": "none",
+   "relevance": {
+    "projects": "all",
+    "optional": false,
+    "rooms": null,
+    "stage": "C",
+    "overlay": "management_delivery"
+   },
+   "repeat": {
+    "key": "interface_risk",
+    "by": "record"
+   }
+  }
+ ]
+}
