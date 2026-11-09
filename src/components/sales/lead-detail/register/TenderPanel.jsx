@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../../../lib/apiFetch.js";
+import { answerSummary } from "../../../../lib/register.js";
 import { Chip, Section, Select } from "./ui.jsx";
 
 function Rows({ rows, empty, extra }) {
@@ -16,7 +17,7 @@ function Rows({ rows, empty, extra }) {
         <tr key={r.id} className="border-t border-hairline/60 align-top">
           <td className="w-20 py-0.5 pr-2 font-mono text-[10px] text-muted">{r.ref}</td>
           <td className="w-28 py-0.5 pr-2 text-ink">{r.area}</td>
-          <td className="py-0.5 pr-2">{r.description || r.category}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
+          <td className="py-0.5 pr-2">{r.description || answerSummary(r) || r.category}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
           <td className="py-0.5 pr-2 text-muted">{r.disposition}</td>
           {extra && <td className="py-0.5">{extra(r)}</td>}
         </tr>

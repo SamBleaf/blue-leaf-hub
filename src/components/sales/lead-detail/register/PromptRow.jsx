@@ -2,18 +2,23 @@
  * PromptRow — one register item (or an unstarted prompt from the Tab 21 library). Compact by default,
  * detail behind "More". Answers are optional; "Undecided / N/A / Excluded / By Others" are valid answers.
  *
+ * A configured question is answered on its ProgressiveChoiceCard (Tab 27 Gate 2). A custom item, or one with no
+ * question behind it, keeps the typed row. RepeatRows draws one row per item for a question that repeats.
+ *
  * Rules made physical here (the server enforces the same ones):
  *   • client-approved can only be set together with evidence (who / when / how);
  *   • technical "verified" can only be set together with a drawing / consultant reference;
  *   • a project-wide default is inherited by rooms until a room exception is recorded explicitly;
  *   • portal actions on a selection are explicit buttons, never side effects of editing.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  makeItem, REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, RESPONSIBILITIES,
+  makeItem, genId, REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, RESPONSIBILITIES,
   TECHNICAL_STATUSES, PRICING_STATUSES, SUPPLY_BY, ITEM_KINDS, categoryLabel, itemIssues, outstandingReasons,
+  questionById, resolvePromptId, answerConfigFor, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES,
 } from "../../../../lib/register.js";
 import { Chip, Mini, Select } from "./ui.jsx";
+import ProgressiveChoiceCard from "./ProgressiveChoiceCard.jsx";
 
 const KIND_TONE = { scope: "slate", requirement: "violet", selection: "blue", action: "amber" };
 const QUICK = [["na", "N/A"], ["excluded", "Excluded"], ["by_others", "By others"], ["undecided", "Undecided"]];
@@ -33,7 +38,7 @@ function portalBadge(item) {
 }
 
 export default function PromptRow({
-  question, item, seed, onChange, onDelete, inherited, onMakeException, actor, onPortal, readOnlyReason, compact,
+  question: questionProp, item, seed, onChange, onDelete, inherited, onMakeException, actor, onPortal, readOnlyReason, compact, saveState,
 }) {
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState(null);          // 'approve' | 'verify' | 'portal_approve'
@@ -41,6 +46,11 @@ export default function PromptRow({
   const [evRef, setEvRef] = useState("");
   const [showText, setShowText] = useState(false);
   const it = item || makeItem(seed);
+  const question = questionProp || questionById(resolvePromptId(it.promptKey));   // the office table opens rows by item
+  const config = answerConfigFor(question?.id);
+  const guided = isGuidedConfig(config) && answerIsEditable(it.answer);
+  const noteOnly = config?.handling === "note";
+  const usesDisposition = dispositionApplies(config);
   const kind = it.itemKind;
   const started = !!item;
   const issues = item ? itemIssues(item) : [];
@@ -63,22 +73,17 @@ export default function PromptRow({
     if (ask === "portal_approve") onPortal?.("approve", { at: today, by: who, method: "portal_choice", ref: evRef.trim() || "Client choice via portal" });
     setAsk(null);
   }
-  function appendOption(opt) {
-    const cur = (it.description || "").trim();
-    if (cur.toLowerCase().includes(opt.toLowerCase())) return;
-    set({ description: cur ? `${cur}, ${opt}` : opt });
-  }
 
   const title = question?.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
   const locked = !!it.sync?.locked;
   const disabled = !!readOnlyReason;
 
   return (
-    <div className={`rounded-lg border p-2.5 ${started ? "border-hairline bg-page" : "border-dashed border-hairline bg-surface"}`} data-testid={`prompt-${question?.id || it.id}`}>
+    <div className={`relative rounded-lg border p-2.5 ${started ? "border-hairline bg-page" : "border-dashed border-hairline bg-surface"}`} data-testid={`prompt-${question?.id || it.id}`}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Chip tone={KIND_TONE[kind]}>{ITEM_KINDS[kind]}</Chip>
+          <div className="flex flex-wrap items-center gap-1.5 pr-24 sm:pr-0">
+            <Chip tone={KIND_TONE[kind]}>{guided ? ANSWER_NATURES[config.nature] : ITEM_KINDS[kind]}</Chip>
             <span className="text-xs font-semibold text-ink">{title}</span>
             {question?.id && <span className="text-[10px] text-muted">{question.id}</span>}
             {it.category && !compact && <Chip>{categoryLabel(it.category)}</Chip>}
@@ -97,14 +102,26 @@ export default function PromptRow({
 
           {inherited && !item && (
             <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-violet-200 bg-violet-50/60 px-2 py-1 text-[11px] text-violet-800">
-              <span>Whole-house default: <span className="font-semibold">{inherited.description || inherited.product || "set"}</span></span>
+              <span>Whole-house default: <span className="font-semibold">{inherited.description || answerSummary(inherited) || inherited.product || "set"}</span></span>
               <button type="button" disabled={disabled} onClick={onMakeException} className="font-semibold text-violet-700 hover:underline disabled:opacity-40">Record a room exception</button>
             </div>
           )}
 
-          {(!inherited || item) && (
+          {(!inherited || item) && guided && (
+            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} />
+          )}
+          {(!inherited || item) && guided && kind === "action" && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {kind === "scope" && (
+              <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
+              <label className="flex min-h-[40px] items-center gap-1 text-[11px] text-ink sm:min-h-0">
+                <input type="checkbox" className="h-4 w-4 accent-primary" checked={it.resolved} disabled={disabled} onChange={(e) => set({ resolved: e.target.checked })} /> Done
+              </label>
+            </div>
+          )}
+
+          {(!inherited || item) && !guided && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {kind === "scope" && usesDisposition && (
                 <Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} className="w-36" disabled={disabled || locked} />
               )}
               <input value={it.description} disabled={disabled || locked} onChange={(e) => set({ description: e.target.value })}
@@ -113,28 +130,27 @@ export default function PromptRow({
               {kind === "selection" && (
                 <Select value={it.certainty} onChange={chooseCertainty} options={certOptions} className="w-32" disabled={disabled || locked} />
               )}
-              {kind === "requirement" && (
+              {kind === "requirement" && !noteOnly && (
                 <Select value={it.certainty} onChange={chooseCertainty} options={reqCertOptions} className="w-32" disabled={disabled} />
               )}
+              {(kind === "action" || noteOnly) && (
+                <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
+              )}
               {kind === "action" && (
-                <>
-                  <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
-                  <label className="flex items-center gap-1 text-[11px] text-ink">
-                    <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={it.resolved} disabled={disabled} onChange={(e) => set({ resolved: e.target.checked })} /> Done
-                  </label>
-                </>
+                <label className="flex items-center gap-1 text-[11px] text-ink">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={it.resolved} disabled={disabled} onChange={(e) => set({ resolved: e.target.checked })} /> Done
+                </label>
               )}
             </div>
           )}
 
-          {(!inherited || item) && !disabled && !locked && (
+          {!guided && item?.answer && answerSummary(item) && <p className="mt-1 text-[11px] text-muted">Recorded: <span className="font-medium text-ink">{answerSummary(item)}</span></p>}
+
+          {(!inherited || item) && !guided && !noteOnly && !disabled && !locked && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
               {kind !== "action" && QUICK.filter(([k]) => kind !== "requirement" || k === "na" || k === "undecided").map(([k, l]) => (
                 <button key={k} type="button" onClick={() => set({ disposition: k })}
                   className={`rounded-full border px-2 py-0.5 text-[10px] ${it.disposition === k && started && k !== "undecided" ? "border-primary bg-primary text-white" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
-              ))}
-              {question?.options?.map((o) => (
-                <button key={o} type="button" onClick={() => appendOption(o)} className="rounded-full border border-dashed border-hairline px-2 py-0.5 text-[10px] text-ink hover:bg-surface">+ {o}</button>
               ))}
             </div>
           )}
@@ -176,8 +192,8 @@ export default function PromptRow({
           {readOnlyReason && <p className="mt-1 text-[10px] text-muted">{readOnlyReason}</p>}
           {locked && <p className="mt-1 text-[10px] text-muted">Approved under the contract — product changes go through a variation.</p>}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {(!inherited || item) && <button type="button" onClick={() => setOpen((o) => !o)} className="text-[11px] text-primary hover:underline">{open ? "Less" : "More"}</button>}
+        <div className="absolute right-2.5 top-2.5 flex items-center gap-2 sm:static sm:shrink-0 sm:flex-col sm:items-end sm:gap-1">
+          {(!inherited || item) && <button type="button" onClick={() => setOpen((o) => !o)} className="text-[11px] text-primary hover:underline">{open ? "Less" : guided ? "Office fields" : "More"}</button>}
           {onDelete && !disabled && <button type="button" onClick={onDelete} title="Remove this item" className="text-xs text-red-500 hover:text-red-700">×</button>}
         </div>
       </div>
@@ -190,9 +206,12 @@ export default function PromptRow({
             <Mini label="Model / code"><input value={it.model} disabled={disabled || locked} onChange={(e) => set({ model: e.target.value })} className="inp text-[11px]" /></Mini>
             <Mini label="Finish / colour"><input value={it.colour} disabled={disabled || locked} onChange={(e) => set({ colour: e.target.value })} className="inp text-[11px]" /></Mini>
             <Mini label="Supplier"><input value={it.supplier} disabled={disabled || locked} onChange={(e) => set({ supplier: e.target.value })} placeholder="e.g. Routleys" className="inp text-[11px]" /></Mini>
-            <Mini label="Scope / disposition"><Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} disabled={disabled || locked} /></Mini>
+            {usesDisposition && <Mini label="Scope / disposition"><Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} disabled={disabled || locked} /></Mini>}
           </>}
-          {(kind === "selection" || kind === "scope") && <>
+          {guided && kind === "scope" && usesDisposition && <Mini label="Scope / disposition"><Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} disabled={disabled || locked} /></Mini>}
+          {guided && kind === "selection" && <Mini label="Client status"><Select value={it.certainty} onChange={chooseCertainty} options={certOptions} disabled={disabled || locked} /></Mini>}
+          {guided && kind === "requirement" && <Mini label="Client status"><Select value={it.certainty} onChange={chooseCertainty} options={reqCertOptions} disabled={disabled} /></Mini>}
+          {(kind === "selection" || kind === "scope") && usesDisposition && <>
             <Mini label="Quantity (blank = not measured)">
               <div className="flex gap-1">
                 <input type="number" step="any" value={it.quantity ?? ""} disabled={disabled || locked} onChange={(e) => set({ quantity: e.target.value === "" ? null : Number(e.target.value) })} className="inp w-20 text-[11px]" />
@@ -210,7 +229,7 @@ export default function PromptRow({
             <Select value={it.technicalStatus} onChange={chooseTechnical} options={Object.entries(TECHNICAL_STATUSES)} disabled={disabled} />
             {it.technicalEvidence?.ref && <p className="mt-0.5 text-[10px] text-muted">by {it.technicalEvidence.by} — {it.technicalEvidence.ref}</p>}
           </Mini>
-          {kind !== "action" && kind !== "requirement" && (
+          {kind !== "action" && kind !== "requirement" && usesDisposition && (
             <Mini label="Pricing (link — never a price)">
               <Select value={it.pricingStatus} onChange={(v) => set({ pricingStatus: v })} options={Object.entries(PRICING_STATUSES)} disabled={disabled} />
               <input value={it.pricingRef} disabled={disabled} onChange={(e) => set({ pricingRef: e.target.value })} placeholder="estimate line / RFQ / quote ref" className="inp mt-1 text-[11px]" />
@@ -227,6 +246,33 @@ export default function PromptRow({
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One row per item for a question that repeats (Tab 27 B01, MR-UX-01H): "+ Add another" opens a fresh row. A row isn't
+ * saved until something is answered on it, and its id is fixed up front, so answering it keeps focus where it was.
+ */
+export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, ...row }) {
+  const first = useRef(genId());
+  const [added, setAdded] = useState([]);
+  const saved = new Set(items.map((i) => i.id));
+  if (saved.has(first.current)) first.current = genId();
+  const open = added.filter((id) => !saved.has(id));
+  const blanks = items.length || open.length ? open : [first.current];
+  const seedFor = (id) => ({ ...seed, id });
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <PromptRow key={item.id} question={question} item={item} onChange={(partial) => updateItem(item.id, partial)} onDelete={() => deleteItem(item.id)} readOnlyReason={readOnly ? "Read-only" : null} {...row} />
+      ))}
+      {blanks.map((id) => (
+        <PromptRow key={id} question={question} item={null} seed={seedFor(id)} onChange={(partial) => upsertItem(seedFor(id), partial)} readOnlyReason={readOnly ? "Read-only" : null} {...row} />
+      ))}
+      {!readOnly && blanks.length === 0 && (
+        <button type="button" onClick={() => setAdded((a) => [...a, genId()])} className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]" data-testid={`add-another-${question.id}`}>+ Add another</button>
       )}
     </div>
   );

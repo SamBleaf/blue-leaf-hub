@@ -8,14 +8,17 @@ import { useMemo, useState } from "react";
 import {
   roomLabel, refCode, outstandingReasons, promptsFor, resolvePromptId, isClientSelection, TECH_TOPICS,
   REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, TECHNICAL_STATUSES, PRICING_STATUSES,
-  RESPONSIBILITIES, ITEM_KINDS, REGISTER_CATEGORIES, categoryLabel,
+  RESPONSIBILITIES, ITEM_KINDS, REGISTER_CATEGORIES, categoryLabel, answerSummary, answerConfigFor, dispositionApplies, natureOf,
 } from "../../../../lib/register.js";
 import { Chip, Select } from "./ui.jsx";
 import PromptRow from "./PromptRow.jsx";
 
 const REASON_LABEL = { decision: "Decision", verification: "Verification", action: "Action" };
+const NON_WORK_NATURES = new Set(["fact", "risk", "technical", "action", "requirement"]);
+/** A site fact or a risk has no work disposition to set. */
+const hasWorkStatus = (i) => dispositionApplies(answerConfigFor(resolvePromptId(i.promptKey))) && !NON_WORK_NATURES.has(natureOf(i));
 
-export default function RegisterTable({ reg, context, stage, info, actor, baseline, updateItem, deleteItem, addItem, onPortalItems, onPortalItem, readOnly }) {
+export default function RegisterTable({ reg, context, stage, info, actor, baseline, updateItem, deleteItem, addItem, onPortalItems, onPortalItem, readOnly, saveState }) {
   const [f, setF] = useState({ q: "", room: "", kind: "", cat: "", disp: "", cert: "", tech: "", price: "", owner: "", open: true, portal: "" });
   const [expanded, setExpanded] = useState(null);
   const [advanced, setAdvanced] = useState(false);
@@ -39,7 +42,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
       : f.portal === "live" ? i.sync?.clientVisible : f.portal === "review" ? (i.sync?.status === "in_review" || i.sync?.status === "changes_requested") : true));
     if (f.q.trim()) {
       const q = f.q.trim().toLowerCase();
-      items = items.filter((i) => [i.description, i.product, i.model, i.source, i.nextAction, i.supplier, refCode(i)].some((v) => String(v || "").toLowerCase().includes(q)));
+      items = items.filter((i) => [i.description, answerSummary(i), i.product, i.model, i.source, i.nextAction, i.supplier, refCode(i)].some((v) => String(v || "").toLowerCase().includes(q)));
     }
     const order = new Map(rooms.map((r, i) => [r.id, i]));
     return items.sort((a, b) => (a.roomId ? order.get(a.roomId) ?? 999 : -1) - (b.roomId ? order.get(b.roomId) ?? 999 : -1));
@@ -116,14 +119,14 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                     {info.mode === "project" && <td className="py-1 pr-1">{canPick && !readOnly && <input type="checkbox" className="h-3 w-3 accent-primary" checked={picked.includes(i.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, i.id] : p.filter((x) => x !== i.id)))} />}</td>}
                     <td className="whitespace-nowrap py-1 pr-2 font-mono text-[10px] text-muted">{refCode(i)}</td>
                     <td className="py-1 pr-2 text-ink">{roomLabel(reg, i)}</td>
-                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} className="inp w-full min-w-[9rem] text-[11px]" />
+                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} placeholder={answerSummary(i)} className="inp w-full min-w-[9rem] text-[11px]" />
                       <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-muted">
                         <Chip tone={i.itemKind === "selection" ? "blue" : i.itemKind === "requirement" ? "violet" : i.itemKind === "action" ? "amber" : "slate"}>{ITEM_KINDS[i.itemKind]}</Chip>
                         <span>{categoryLabel(i.category)}</span>
                         {i.product && <span>· {[i.manufacturer, i.product, i.model].filter(Boolean).join(" ")}</span>}
                         {i.source && <span>· {i.source}</span>}
                       </div></td>
-                    <td className="py-1 pr-2"><Select value={i.disposition} onChange={(v) => updateItem(i.id, { disposition: v })} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} disabled={readOnly || lock} /></td>
+                    <td className="py-1 pr-2">{hasWorkStatus(i) ? <Select value={i.disposition} onChange={(v) => updateItem(i.id, { disposition: v })} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} disabled={readOnly || lock} /> : <span className="text-[10px] text-muted">Not scope</span>}</td>
                     <td className="whitespace-nowrap py-1 pr-2 text-[10px] leading-snug">
                       {(i.itemKind === "selection" || i.itemKind === "requirement") && <div className={i.certainty === "client_approved" ? "font-semibold text-green-700" : "text-ink"}>{REGISTER_CERTAINTY[i.certainty]}</div>}
                       <div className={i.technicalStatus === "needs_verification" ? "text-amber-700" : i.technicalStatus === "verified" ? "text-green-700" : "text-muted"}>Tech: {TECHNICAL_STATUSES[i.technicalStatus].toLowerCase()}</div>
@@ -144,7 +147,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                   </tr>,
                   expanded === i.id && (
                     <tr key={`${i.id}-x`}><td colSpan={9} className="pb-2">
-                      <PromptRow question={null} item={i} actor={actor} compact readOnlyReason={readOnly ? "Read-only" : null}
+                      <PromptRow question={null} item={i} actor={actor} compact readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
                         onChange={(partial) => updateItem(i.id, partial)} onDelete={() => deleteItem(i.id)} onPortal={(a, ev) => onPortalItem(i, a, ev)} />
                     </td></tr>
                   ),

@@ -5,11 +5,11 @@
 import { useState } from "react";
 import {
   makeRoom, ROOM_TYPES, ROOM_SCOPES, DELIVERY_MODELS, PROJECT_TYPE_LABELS, isRenovationProject, promptsFor,
-  questionById, resolvePromptId, siteLine,
+  questionById, resolvePromptId, siteLine, answerConfigFor,
 } from "../../../../lib/register.js";
 import { PROJECT_TYPES, STAGES } from "../../../../lib/salesPipeline.js";
 import { Chip, Field, Section, Select } from "./ui.jsx";
-import PromptRow from "./PromptRow.jsx";
+import PromptRow, { RepeatRows } from "./PromptRow.jsx";
 
 const QUICK_ROOMS = [
   ["Entry", "hall"], ["Living", "living"], ["Dining", "dining"], ["Kitchen", "kitchen"], ["Pantry", "pantry"],
@@ -17,7 +17,6 @@ const QUICK_ROOMS = [
   ["Study", "study"], ["Stairs", "stairs"], ["Garage", "garage"], ["Alfresco", "alfresco"], ["External / site", "external"],
 ];
 const OCCUPANCY = [["vacant", "Vacant during works"], ["occupied", "Occupied during works"], ["partly", "Partly occupied / staged"]];
-const PRIORITY_Q = "P-005";
 const money = (v) => (v == null ? null : "$" + Math.round(v).toLocaleString("en-AU"));
 
 function Fact({ label, value, id, children }) {
@@ -29,7 +28,7 @@ function Fact({ label, value, id, children }) {
   );
 }
 
-export default function ContextStep({ reg, context, lead, patchLead, setDeliveryModel, mutateMeta, replaceItems, upsertItem, updateItem, deleteItem, addItem, openRoom, actor, stage, readOnly }) {
+export default function ContextStep({ reg, context, lead, patchLead, setDeliveryModel, mutateMeta, replaceItems, upsertItem, updateItem, deleteItem, addItem, openRoom, actor, stage, readOnly, saveState }) {
   const meta = reg.meta;
   const rooms = meta.rooms || [];
   const [qLevel, setQLevel] = useState("Ground");
@@ -38,7 +37,20 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
   const ctx = { projectType, deliveryModel: context?.deliveryModel, renovationOverlay: meta.renovationOverlay, stage };
   const brief = promptsFor("project", ctx).filter((q) => q.topic === "brief");
   const mgmt = promptsFor("mgmt", ctx);
-  const itemFor = (qid) => reg.items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId) || null;
+  const itemsFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
+  const itemFor = (qid) => itemsFor(qid)[0] || null;
+  const renderPrompt = (q, sectionKey) => {
+    const seed = { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: sectionKey, technicalStatus: q.technical, responsibility: q.owner || "" };
+    if (answerConfigFor(q.id)?.repeat) {
+      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seed} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
+    }
+    const item = itemFor(q.id);
+    return (
+      <PromptRow key={q.id} question={q} item={item} seed={seed} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
+        onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seed, partial))}
+        onDelete={item ? () => deleteItem(item.id) : null} />
+    );
+  };
 
   function setRooms(next) { mutateMeta({ rooms: next.map((r, i) => makeRoom({ ...r, order: i })) }); }
   function addRoom(name = "Room", roomType = "generic") {
@@ -59,16 +71,6 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
       items: cur.items.filter((i) => i.roomId !== id) }));
   }
 
-  // P-005 — up to 3 priorities + a note, stored as ONE requirement item (no new column).
-  const pItem = itemFor(PRIORITY_Q);
-  const pq = questionById(PRIORITY_Q);
-  const chosen = (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter((s) => pq?.options?.includes(s));
-  const note = (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
-  function setPriorities(list, nextNote = note) {
-    const description = [list.join(", "), nextNote].filter(Boolean).join("; ");
-    if (pItem) updateItem(pItem.id, { description });
-    else addItem({ itemKind: "requirement", category: "notes", promptKey: PRIORITY_Q, section: "project", description, certainty: "preference" });
-  }
   // P-006 — areas of the property: one scope item per area.
   const areas = reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-006");
 
@@ -162,20 +164,6 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
       </Section>
 
       <Section title="Brief" defaultOpen>
-        {pq && (
-          <div className="rounded-lg border border-hairline bg-page p-2.5">
-            <div className="flex items-center gap-2"><Chip tone="violet">Requirement</Chip><span className="text-xs font-semibold text-ink">{pq.short}</span><span className="text-[10px] text-muted">{pq.id} · pick up to 3</span></div>
-            <p className="mt-0.5 text-[11px] text-muted">{pq.text}</p>
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {pq.options.map((o) => {
-                const on = chosen.includes(o);
-                return <button key={o} type="button" disabled={readOnly || (!on && chosen.length >= 3)} onClick={() => setPriorities(on ? chosen.filter((x) => x !== o) : [...chosen, o])}
-                  className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-primary bg-primary text-white" : "border-hairline text-ink hover:bg-surface"} disabled:opacity-40`}>{o}</button>;
-              })}
-            </div>
-            <input value={note} disabled={readOnly} onChange={(e) => setPriorities(chosen, e.target.value)} placeholder="Note (optional)…" className="inp mt-1.5 w-full text-[11px]" />
-          </div>
-        )}
         <div className="rounded-lg border border-hairline bg-page p-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2"><Chip>Scope / works</Chip><span className="text-xs font-semibold text-ink">{questionById("P-006")?.short}</span><span className="text-[10px] text-muted">P-006</span></div>
@@ -195,28 +183,12 @@ export default function ContextStep({ reg, context, lead, patchLead, setDelivery
             ))}
           </div>
         </div>
-        {brief.filter((q) => !["P-005", "P-006", "P-008"].includes(q.id)).map((q) => {
-          const item = itemFor(q.id);
-          return (
-            <PromptRow key={q.id} question={q} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null}
-              seed={{ itemKind: q.itemKind, category: q.category, promptKey: q.id, section: "project", technicalStatus: q.technical, responsibility: q.owner || "" }}
-              onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem({ itemKind: q.itemKind, category: q.category, promptKey: q.id, section: "project", technicalStatus: q.technical, responsibility: q.owner || "" }, partial))}
-              onDelete={item ? () => deleteItem(item.id) : null} />
-          );
-        })}
+        {brief.filter((q) => !["P-006", "P-008"].includes(q.id)).map((q) => renderPrompt(q, "project"))}
       </Section>
 
       {mgmt.length > 0 && (
         <Section title={`Responsibilities — ${DELIVERY_MODELS[context?.deliveryModel] || ""} overlay`} count={mgmt.length} defaultOpen={false}>
-          {mgmt.map((q) => {
-            const item = itemFor(q.id);
-            return (
-              <PromptRow key={q.id} question={q} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null}
-                seed={{ itemKind: q.itemKind, category: q.category, promptKey: q.id, section: "mgmt", technicalStatus: q.technical }}
-                onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem({ itemKind: q.itemKind, category: q.category, promptKey: q.id, section: "mgmt", technicalStatus: q.technical }, partial))}
-                onDelete={item ? () => deleteItem(item.id) : null} />
-            );
-          })}
+          {mgmt.map((q) => renderPrompt(q, "mgmt"))}
         </Section>
       )}
     </div>

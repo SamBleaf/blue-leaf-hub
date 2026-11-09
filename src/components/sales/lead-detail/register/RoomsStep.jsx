@@ -6,14 +6,14 @@
 import { useEffect } from "react";
 import {
   promptsFor, resolvePromptId, defaultItemFor, exceptionAnswerFrom, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
-  partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS,
+  partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS, answerConfigFor, itemTitle,
 } from "../../../../lib/register.js";
 import { Section, Select } from "./ui.jsx";
-import PromptRow from "./PromptRow.jsx";
+import PromptRow, { RepeatRows } from "./PromptRow.jsx";
 
 const NO_ROOMS = [];
 
-export default function RoomsStep({ reg, context, stage, showDetail, activeRoomId, setActiveRoomId, actor, upsertItem, updateItem, deleteItem, addItem, mutateMeta, onSaveNext, onPrev, gotoContext, onPortalItem, readOnly }) {
+export default function RoomsStep({ reg, context, stage, showDetail, activeRoomId, setActiveRoomId, actor, upsertItem, updateItem, deleteItem, addItem, mutateMeta, onSaveNext, onPrev, gotoContext, onPortalItem, readOnly, saveState }) {
   const rooms = reg.meta.rooms || NO_ROOMS;
   const room = rooms.find((r) => r.id === activeRoomId) || rooms[0] || null;
   useEffect(() => { if (!activeRoomId && rooms[0]) setActiveRoomId(rooms[0].id); }, [activeRoomId, rooms, setActiveRoomId]);
@@ -25,7 +25,8 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const qs = promptsFor("room", { roomType: room.roomType, roomScope: room.scope, projectType, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail });
   const primarySet = partitionRoomPrompts(qs);   // R04 Slice 5: which prompts lead the guided conversation
   const roomItems = reg.items.filter((i) => i.roomId === room.id);
-  const itemFor = (qid) => roomItems.find((i) => resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId) || null;
+  const itemsFor = (qid) => roomItems.filter((i) => resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
+  const itemFor = (qid) => itemsFor(qid)[0] || null;
   const exceptionFor = (defaultId) => roomItems.find((i) => i.overridesDefaultId === defaultId) || null;
   const promptIds = new Set(qs.map((q) => q.id));
   const custom = roomItems.filter((i) => !i.promptKey || !promptIds.has(resolvePromptId(i.promptKey)));
@@ -34,12 +35,15 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const seedFor = (q) => ({ itemKind: q.itemKind, category: q.category, promptKey: q.id, roomId: room.id, level: room.level, room: room.name,
     technicalStatus: q.technical, responsibility: q.owner || "", source: room.sheet || "" });
   const renderRow = (q) => {
+    if (answerConfigFor(q.id)?.repeat) {
+      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
+    }
     const def = q.inherits ? defaultItemFor(reg, q.inherits) : null;
     const exc = def ? exceptionFor(def.id) : null;
     const item = exc || itemFor(q.id);
     return (
       <PromptRow key={q.id} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
-        readOnlyReason={readOnly ? "Read-only" : null}
+        readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
         onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
           manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: exceptionAnswerFrom(def) })}
         onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
@@ -101,7 +105,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
           <Section title="This room at a glance" count={`${agreed} agreed · ${unresolved.length} to confirm`} defaultOpen={false}>
             {unresolved.length ? (
               <div><p className="mb-0.5 text-[11px] font-semibold text-amber-800">Still to confirm</p>
-                <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink">{unresolved.slice(0, 8).map((i) => <li key={i.id}>{i.description || i.category}{i.responsibility ? ` — ${i.responsibility}` : ""}</li>)}</ul></div>
+                <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink">{unresolved.slice(0, 8).map((i) => <li key={i.id}>{itemTitle(i)}{i.responsibility ? ` — ${i.responsibility}` : ""}</li>)}</ul></div>
             ) : <p className="text-[11px] text-muted">Nothing outstanding recorded in this room.</p>}
             {owners.length ? (
               <div className="mt-1.5"><p className="mb-0.5 text-[11px] font-semibold text-muted">Next action / owner</p>
@@ -114,7 +118,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
       {custom.length > 0 && (
         <Section title="Other items in this room" count={custom.length} defaultOpen>
           {custom.map((item) => (
-            <PromptRow key={item.id} question={null} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null}
+            <PromptRow key={item.id} question={null} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
               onChange={(partial) => updateItem(item.id, partial)} onDelete={() => deleteItem(item.id)}
               onPortal={(action, ev) => onPortalItem(item, action, ev)} />
           ))}

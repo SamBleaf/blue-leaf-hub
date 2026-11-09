@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../../../lib/apiFetch.js";
-import { roomLabel, refCode, outstandingReasons, isClientSelection } from "../../../../lib/register.js";
+import { roomLabel, refCode, outstandingReasons, isClientSelection, itemTitle } from "../../../../lib/register.js";
 import { Chip, Mini, Section, Select } from "./ui.jsx";
 
 const DOCS = [
@@ -292,12 +292,12 @@ function SourceDocuments({ lead, reg, sources, reload, openFile, updateItem }) {
             {open === d.id && (
               <div className="mt-2 space-y-1.5 border-t border-hairline pt-2">
                 <select multiple value={d.register_item_ids || []} onChange={(e) => patch(d, { itemIds: [...e.target.selectedOptions].map((o) => o.value) })} className="inp h-28 w-full text-[11px]">
-                  {reg.items.map((i) => <option key={i.id} value={i.id}>{refCode(i)} · {roomLabel(reg, i)} · {i.description || i.category}</option>)}
+                  {reg.items.map((i) => <option key={i.id} value={i.id}>{refCode(i)} · {roomLabel(reg, i)} · {itemTitle(i) || i.category}</option>)}
                 </select>
                 {linked.map((i) => (
                   <div key={i.id} className="flex flex-wrap items-center gap-2 rounded bg-page px-2 py-1">
                     <span className="font-mono text-[10px] text-muted">{refCode(i)}</span>
-                    <span className="text-ink">{roomLabel(reg, i)} — {i.description || i.category}</span>
+                    <span className="text-ink">{roomLabel(reg, i)} — {itemTitle(i)}</span>
                     {i.product && <span className="text-muted">{[i.manufacturer, i.product, i.model].filter(Boolean).join(" ")}</span>}
                     {outstandingReasons(i).includes("verification") && <Chip tone="amber">needs verification</Chip>}
                     {i.technicalStatus === "verified" && <Chip tone="green">verified</Chip>}

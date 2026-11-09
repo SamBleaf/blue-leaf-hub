@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, emptyMeta, editOutrunsApproval, itemKindLabel } from "../../../../lib/register.js";
+import { makeItem, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle } from "../../../../lib/register.js";
 
 const AUTOSAVE_MS = 1200;
 const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
@@ -147,7 +147,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
     // client re-confirms (the server refuses to keep "client-approved" on it without new evidence).
     if (editOutrunsApproval(item, partial)) {
       next = { ...partial, certainty: "proposed", evidence: null };
-      setNotices((n) => [`“${item.description || itemKindLabel(item.itemKind)}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
+      setNotices((n) => [`“${item.description || (item.answer && itemTitle(item)) || itemKindLabel(item.itemKind)}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
     }
     commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...next, sync: i.sync }) : i)) }, [id]);
   }, [commit]);
@@ -286,17 +286,17 @@ export function useRegister(leadId, { enabled = true } = {}) {
       const reason = byReason.get(t.id);
       if (reason && GUARD_REASONS[reason]) {
         out.push(t); dirty.current.delete(t.id); guardRejected = true;
-        notes.push(`“${mine.description || "Item"}” ${GUARD_REASONS[reason]}.`);
+        notes.push(`“${itemTitle(mine)}” ${GUARD_REASONS[reason]}.`);
         continue;
       }
       const { item, conflicts: fields } = mergeItem(baseItems.get(t.id), mine, t);
       out.push(item);
-      if (fields.length) { versionConflict = true; notes.push(`“${mine.description || "Item"}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`); }
+      if (fields.length) { versionConflict = true; notes.push(`“${itemTitle(mine)}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`); }
     }
     for (const mine of local.items) {
       if (theirs.has(mine.id)) continue;
       if (dirty.current.has(mine.id) && !baseItems.has(mine.id)) { out.push(makeItem({ ...mine, sync: null })); continue; } // my new item
-      if (dirty.current.has(mine.id)) { dirty.current.delete(mine.id); notes.push(`“${mine.description || "Item"}” was removed elsewhere.`); }
+      if (dirty.current.has(mine.id)) { dirty.current.delete(mine.id); notes.push(`“${itemTitle(mine)}” was removed elsewhere.`); }
     }
     for (const [id] of deleted.current) if (!theirs.has(id)) deleted.current.delete(id);
     for (const [id] of deleted.current) { const t = theirs.get(id); if (t) deleted.current.set(id, t); }
@@ -305,7 +305,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
       if (GUARD_REASONS[c.reason] && deleted.current.has(c.itemId)) {
         const it = deleted.current.get(c.itemId);
         deleted.current.delete(c.itemId); guardRejected = true;
-        notes.push(`“${it?.description || "Item"}” was not removed — it ${GUARD_REASONS[c.reason]}.`);
+        notes.push(`“${it ? itemTitle(it) : "Item"}” was not removed — it ${GUARD_REASONS[c.reason]}.`);
       }
     }
     const meta = metaSeq.current !== metaSaved.current && baseMeta ? mergeMeta(baseMeta, local.meta, server.meta) : server.meta;

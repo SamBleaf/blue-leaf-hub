@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../../../../lib/apiFetch.js";
-import { isClientSelection, outstandingItems, roomLabel } from "../../../../lib/register.js";
+import { isClientSelection, outstandingItems, roomLabel, itemTitle } from "../../../../lib/register.js";
 import { Chip, Section } from "./ui.jsx";
 
 export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseline }) {
@@ -111,7 +111,7 @@ export default function HandoverPanel({ lead, reg, info, flush, portal, onBaseli
               {staged.map((i) => (
                 <label key={i.id} className="flex items-center gap-2 text-[11px]">
                   <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={chosen.includes(i.id)} onChange={(e) => setPicked(e.target.checked ? [...chosen, i.id] : chosen.filter((x) => x !== i.id))} />
-                  <span className="text-ink">{roomLabel(reg, i)} — {i.description || i.category}</span>
+                  <span className="text-ink">{roomLabel(reg, i)} — {itemTitle(i)}</span>
                   {i.certainty === "client_approved" && <Chip tone="green">approved</Chip>}
                 </label>
               ))}
