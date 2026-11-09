@@ -25,7 +25,7 @@
  * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests/server.
  */
 import { QUESTIONS, QUESTION_LIBRARY_VERSION } from "./registerQuestions.js";
-import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption } from "./registerAnswer.js";
+import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, answerMaterialChanged, stableStringify } from "./registerAnswer.js";
 
 export { QUESTION_LIBRARY_VERSION };
 export * from "./registerAnswer.js";
@@ -587,6 +587,18 @@ export function itemAxes(item) {
     pricingStatus: item.pricingStatus,
     internalAssumption: activeAssumption(item),
   };
+}
+
+const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
+
+/**
+ * Does this edit go beyond what the client approved? An approval covers a specific product on a selection,
+ * and a specific answer on any item. The screen steps the item back to Proposed; the server refuses otherwise.
+ */
+export function editOutrunsApproval(item, partial) {
+  if (!item || item.certainty !== "client_approved" || "certainty" in partial) return false;
+  const productMoved = item.itemKind === "selection" && PRODUCT_FIELDS.some((f) => f in partial && stableStringify(partial[f]) !== stableStringify(item[f]));
+  return productMoved || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer));
 }
 
 /** Business-rule problems with one item (shown inline; the server enforces the same rules). */

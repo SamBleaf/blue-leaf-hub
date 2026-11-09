@@ -164,6 +164,84 @@ async function main() {
   const delivery = await put(leadId, { changes: [{ ...fc, answer: { ...fc.answer, delivery: { method: "subcontract", trade: "Fencer" } } }] });
   ok("delivery can still be recorded on baselined scope", delivery.ok, JSON.stringify(delivery.body).slice(0, 300));
 
+  console.log("\nLocks hold however the request is written (real register_apply)");
+  const FORGED_ID = "ri_forged_not_real";
+  const alias = (v) => (v.endsWith("+00:00") ? v.replace("+00:00", "Z") : v.replace(/Z$/, "+00:00"));
+  const answerIn = async (table, id) => (await svc.from(table).select("register_detail").eq("project_id", projectId).eq("source_register_item_id", id).single()).data.register_detail.answer;
+  const E = { at: "2026-11-01T00:00:00.000Z", by: "Sandbox Staff", method: "meeting", ref: "Meeting note" };
+  const recorded = (nature, selected, more = {}) => ({ v: 1, state: "recorded", nature, selected, ...more });
+  // Each has typed text, so item_name and description can't change. If one of these is refused, the answer lock refused it.
+  const probe = {
+    ordered: makeItem({ itemKind: "selection", category: "flooring", promptKey: "W-017", section: "project", description: "Bedroom floor finish", product: "Probe floor", answer: recorded("choice", [{ path: ["timber"], label: "Timber" }]) }),
+    other: makeItem({ itemKind: "selection", category: "cladding", promptKey: "W-013", section: "project", description: "Feature wall", product: "Probe board", certainty: "client_approved", evidence: E, answer: recorded("choice", [{ path: ["other"], label: "Spotted gum shiplap" }]) }),
+    element: makeItem({ itemKind: "scope", category: "external", promptKey: "W-010", section: "site", disposition: "new", description: "Second driveway", answer: recorded("scope", [{ path: ["concrete"], label: "Concrete" }], { element: { id: "el_drive_side", key: "driveway", label: "Side driveway" } }) }),
+    requirement: makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", description: "Envelope goal", certainty: "client_approved", evidence: E, answer: recorded("requirement", [{ path: ["airtightness"], label: "Airtightness" }]) }),
+  };
+  const addedProbes = await put(leadId, { changes: Object.values(probe) });
+  ok("items for the lock checks added on the project", addedProbes.ok, JSON.stringify(addedProbes.body).slice(0, 300));
+  await svc.from("client_selections").update({ status: "ordered" }).eq("project_id", projectId).eq("source_register_item_id", probe.ordered.id);
+  await svc.from("room_scope_items").update({ baselined_at: new Date().toISOString() }).eq("project_id", projectId).eq("source_register_item_id", probe.element.id);
+
+  const regL = await getReg(leadId);
+  const ord = itemOf(regL, probe.ordered.id);
+  const ordCarpet = { ...ord, answer: { ...ord.answer, selected: [{ path: ["carpet"], label: "Carpet" }] } };
+  const isCarpet = async () => (await answerIn("client_selections", probe.ordered.id)).selected[0].optionId === "carpet";
+  const reasonOf = (r) => r.body?.conflicts?.[0]?.reason;
+  const ctlOrd = await put(leadId, { changes: [ordCarpet] });
+  ok("control: an ordered selection's answer is refused", ctlOrd.status === 409 && reasonOf(ctlOrd) === "post_contract_locked", JSON.stringify(ctlOrd.body).slice(0, 300));
+  const aliasOrd = await put(leadId, { changes: [{ ...ordCarpet, sync: { ...ord.sync, version: alias(ord.sync.version) } }] });
+  ok("the same version spelled differently is refused", aliasOrd.status === 409 && reasonOf(aliasOrd) === "post_contract_locked", JSON.stringify(aliasOrd.body).slice(0, 300));
+  const foreignOrd = await put(leadId, { changes: [{ ...ordCarpet, id: FORGED_ID }] });
+  ok("a made-up item id on a real row is refused", foreignOrd.status === 409 && reasonOf(foreignOrd) === "item_mismatch", JSON.stringify(foreignOrd.body).slice(0, 300));
+  const otherIdOrd = await put(leadId, { changes: [{ ...ordCarpet, id: N.kitchenFloor.id }] });
+  ok("another real item's id on a real row is refused", otherIdOrd.status === 409 && reasonOf(otherIdOrd) === "item_mismatch", JSON.stringify(otherIdOrd.body).slice(0, 300));
+  const upperOrd = await put(leadId, { changes: [{ ...ordCarpet, sync: { ...ord.sync, rowId: ord.sync.rowId.toUpperCase() } }] });
+  ok("a row id spelled differently is refused", upperOrd.status === 409 && reasonOf(upperOrd) === "missing", JSON.stringify(upperOrd.body).slice(0, 300));
+  const foreignDel = await put(leadId, { changes: [], deletes: [{ id: FORGED_ID, sync: ord.sync }] });
+  ok("a delete naming the wrong item is refused", foreignDel.status === 409 && reasonOf(foreignDel) === "item_mismatch", JSON.stringify(foreignDel.body).slice(0, 300));
+  ok("the ordered selection is unchanged and still there", !(await isCarpet()));
+  const { count: forgedEvents } = await svc.from("job_events").select("*", { count: "exact", head: true }).eq("job_id", jobId).eq("metadata->>item_id", FORGED_ID);
+  ok("nothing was filed in history under the made-up id", forgedEvents === 0, forgedEvents);
+  const ordNoted = await put(leadId, { changes: [{ ...ord, answer: { ...ord.answer, note: "Delivery booked" } }] });
+  ok("an honest note on that row still saves", ordNoted.ok, JSON.stringify(ordNoted.body).slice(0, 300));
+  const ordHist = await api(staff, "GET", `/api/register/leads/${leadId}/history?itemId=${probe.ordered.id}`);
+  ok("and is filed under the real item", ordHist.ok && ordHist.body.events.some((e) => e.event === "register.item.updated"));
+
+  const elm = itemOf(regL, probe.element.id);
+  const elmAnswer = async () => answerIn("room_scope_items", probe.element.id);
+  const elMoved = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, element: { id: "el_drive_rear", key: "driveway", label: "Rear driveway" } } }] });
+  ok("baselined scope can't move to another element of the same type", elMoved.status === 409 && reasonOf(elMoved) === "baseline_locked", JSON.stringify(elMoved.body).slice(0, 300));
+  const elFact = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, nature: "fact" } }] });
+  ok("baselined scope can't be turned into a fact", elFact.status === 409 && reasonOf(elFact) === "baseline_locked", JSON.stringify(elFact.body).slice(0, 300));
+  const elTimber = { ...elm, answer: { ...elm.answer, selected: [{ path: ["timber"], label: "Timber" }] } };
+  const elAlias = await put(leadId, { changes: [{ ...elTimber, sync: { ...elm.sync, version: alias(elm.sync.version) } }] });
+  ok("baselined scope stays locked when the version is spelled differently", elAlias.status === 409 && reasonOf(elAlias) === "baseline_locked", JSON.stringify(elAlias.body).slice(0, 300));
+  const elForeign = await put(leadId, { changes: [{ ...elTimber, id: FORGED_ID }] });
+  ok("baselined scope can't be reached through a made-up id", elForeign.status === 409 && reasonOf(elForeign) === "item_mismatch", JSON.stringify(elForeign.body).slice(0, 300));
+  ok("baselined scope is unchanged", same(await elmAnswer(), elm.answer));
+  const elRenamed = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, element: { ...elm.answer.element, label: "Driveway on the side" } } }] });
+  ok("renaming the element under its stable id is still allowed", elRenamed.ok, JSON.stringify(elRenamed.body).slice(0, 300));
+
+  const oth = itemOf(regL, probe.other.id);
+  ok("an approved Other selection is approved on real rows", oth.certainty === "client_approved" && oth.sync.status === "approved");
+  const othReworded = { ...oth, answer: { ...oth.answer, selected: [{ path: ["other"], label: "Painted fibre cement" }] } };
+  const othSame = await put(leadId, { changes: [othReworded] });
+  ok("changing what an approved Other says on the old evidence is refused", othSame.status === 409 && reasonOf(othSame) === "reapproval_required", JSON.stringify(othSame.body).slice(0, 300));
+  ok("and it still says what the client approved", (await answerIn("client_selections", probe.other.id)).selected[0].label === "Spotted gum shiplap");
+  const othBack = await put(leadId, { changes: [{ ...othReworded, certainty: "proposed", evidence: null }] });
+  const othAfter = itemOf(await getReg(leadId), probe.other.id);
+  ok("stepping it back to Proposed is allowed and takes the new words", othBack.ok && othAfter.certainty === "proposed" && othAfter.answer.selected[0].label === "Painted fibre cement", JSON.stringify(othBack.body).slice(0, 300));
+
+  const rq = itemOf(regL, probe.requirement.id);
+  ok("an approved requirement is approved in the internal store", rq.sync.table === "room_scope_items" && rq.certainty === "client_approved");
+  const rqSwap = { ...rq, answer: { ...rq.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } };
+  const rqSame = await put(leadId, { changes: [rqSwap] });
+  ok("swapping an approved requirement's answer on the old evidence is refused", rqSame.status === 409 && reasonOf(rqSame) === "reapproval_required", JSON.stringify(rqSame.body).slice(0, 300));
+  ok("and it still says what the client approved", (await answerIn("room_scope_items", probe.requirement.id)).selected[0].optionId === "airtightness");
+  const rqFresh = await put(leadId, { changes: [{ ...rqSwap, evidence: { at: new Date().toISOString(), by: "Sandbox Staff", method: "signed", ref: "Variation 3" } }] });
+  const rqAfter = itemOf(await getReg(leadId), probe.requirement.id);
+  ok("fresh evidence allows it", rqFresh.ok && rqAfter.certainty === "client_approved" && rqAfter.answer.selected[0].optionId === "passive_house_target", JSON.stringify(rqFresh.body).slice(0, 300));
+
   console.log("\nPortal projection");
   await svc.from("project_client_users").insert({ project_id: projectId, user_id: creds.client.id, role: "primary", is_active: true });
   const reg4 = await getReg(leadId);

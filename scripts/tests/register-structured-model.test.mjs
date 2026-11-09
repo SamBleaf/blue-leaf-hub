@@ -7,7 +7,7 @@ import {
   makeItem, makeRoom, emptyMeta, readRegister, writeRegister, isClientSelection, defaultItemFor, defaultItemsFor, applyDefaultToRooms,
   contractInclusionOf, itemAxes, normaliseAnswer, stableStringify, answerStateOf, unresolvedOf, clientSafeAnswer, answerSummary,
   answerMaterialChanged, answerFingerprint, hasExplicitChoice, activeAssumption, applyPricingAssumption, exceptionAnswerFrom,
-  confirmRoomDefaults, roomDefaultStatus, ANSWER_SCHEMA_VERSION, UNRESOLVED_REASONS,
+  confirmRoomDefaults, roomDefaultStatus, editOutrunsApproval, ANSWER_SCHEMA_VERSION, UNRESOLVED_REASONS,
 } from "../../src/lib/register.js";
 import { INTERNAL_MARK, buildStructuredRegister, LEGACY_ROWS } from "./lib/registerStructuredFixture.mjs";
 
@@ -119,6 +119,42 @@ ok("reordering selections isn't", !answerMaterialChanged(normaliseAnswer({ selec
 ok("legacy with nothing chosen equals an empty answer", !answerMaterialChanged(null, { note: "only a note" }));
 ok("the first real selection on a legacy item is a change", answerMaterialChanged(null, { selected: ["a"] }));
 
+console.log("\nAn answer's own words and identity are part of what was agreed");
+const said = (label, path = ["other"]) => normaliseAnswer({ v: 1, state: "recorded", nature: "choice", selected: [{ path, label }] });
+const el = (element, nature = "scope") => normaliseAnswer({ v: 1, state: "recorded", nature, selected: [{ path: ["concrete"], label: "Concrete" }], element });
+const zoned = (zone) => normaliseAnswer({ v: 1, state: "recorded", nature: "choice", selected: [{ path: ["timber"], label: "Timber" }], zone });
+ok("what an Other answer says is the answer", answerMaterialChanged(said("Spotted gum shiplap"), said("Painted fibre cement")));
+ok("that holds for a nested Other", answerMaterialChanged(said("Spotted gum", ["timber", "other"]), said("Blackbutt", ["timber", "other"])));
+ok("filling in an Other for the first time is a change", answerMaterialChanged(said("Other"), said("Spotted gum")));
+ok("the bare word Other and a blank label say the same thing", !answerMaterialChanged(said("Other"), said("")));
+ok("a configured option that merely starts with 'other' keeps its label out of it", !answerMaterialChanged(said("Other cement-sheet system", ["lightweight_cladding", "other_cement_sheet_system"]), said("Other cement sheet", ["lightweight_cladding", "other_cement_sheet_system"])));
+ok("a different element of the same type is a change", answerMaterialChanged(el({ id: "el_a", key: "driveway", label: "Front driveway" }), el({ id: "el_b", key: "driveway", label: "Rear driveway" })));
+ok("renaming an element under its stable id isn't", !answerMaterialChanged(el({ id: "el_a", key: "driveway", label: "Front driveway" }), el({ id: "el_a", key: "driveway", label: "Driveway at the front" })));
+ok("with no id and no key, the label is all there is", answerMaterialChanged(el({ label: "Front driveway" }), el({ label: "Rear driveway" })));
+ok("with an id but no key, the label still says what it is", answerMaterialChanged(el({ id: "el_a", label: "Water tank" }), el({ id: "el_a", label: "Cubby" })));
+ok("an element of type Other is what its label says", answerMaterialChanged(el({ id: "el_a", key: "other", label: "Water tank" }), el({ id: "el_a", key: "other", label: "Cubby" })));
+ok("a keyed zone can be reworded", !answerMaterialChanged(zoned({ key: "main_floor", label: "Main floor" }), zoned({ key: "main_floor", label: "Main living floor" })));
+ok("a zone with no key is what its label says", answerMaterialChanged(zoned({ label: "North wall" }), zoned({ label: "South wall" })));
+ok("an Other zone is what its label says", answerMaterialChanged(zoned({ key: "other_zone", label: "Study nook" }), zoned({ key: "other_zone", label: "Mudroom" })));
+ok("turning scope into a fact is a change", answerMaterialChanged(el({ id: "el_a", key: "driveway" }, "scope"), el({ id: "el_a", key: "driveway" }, "fact")));
+ok("stamping a nature on an answer that says nothing isn't", !answerMaterialChanged(null, { nature: "choice", note: "only a note" }));
+const open = makeItem({ itemKind: "selection", answer: said("Spotted gum shiplap") });
+ok("the client view reads an Other answer from its label", clientSafeAnswer(open).selected[0].label === "Spotted gum shiplap" && answerSummary(open) === "Spotted gum shiplap");
+ok("a blank Other still reads Other to the client", clientSafeAnswer(makeItem({ answer: said("") })).selected[0].label === "Other");
+
+console.log("\nAn approved item steps back on the screen");
+const approvedSel = makeItem({ itemKind: "selection", certainty: "client_approved", product: "Oak 180", answer: said("Spotted gum") });
+const approvedReq = makeItem({ itemKind: "requirement", certainty: "client_approved", answer: normaliseAnswer({ state: "recorded", nature: "requirement", selected: [{ path: ["airtightness"], label: "Airtightness" }] }) });
+ok("a selection's changed product steps back", editOutrunsApproval(approvedSel, { product: "Ash 180" }));
+ok("the same product doesn't", !editOutrunsApproval(approvedSel, { product: "Oak 180" }));
+ok("a selection's changed Other text steps back", editOutrunsApproval(approvedSel, { answer: said("Blackbutt") }));
+ok("a staff note doesn't", !editOutrunsApproval(approvedSel, { answer: { ...approvedSel.answer, note: "Sample requested" } }));
+ok("an approved requirement's changed answer steps back", editOutrunsApproval(approvedReq, { answer: { ...approvedReq.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } }));
+ok("a requirement has no product to change, as before", !editOutrunsApproval(approvedReq, { product: "x" }));
+ok("an explicit certainty is the caller's decision", !editOutrunsApproval(approvedSel, { product: "Ash 180", certainty: "client_approved" }));
+ok("an item that isn't approved has nothing to step back", !editOutrunsApproval(makeItem({ itemKind: "selection", product: "a" }), { product: "b" }));
+ok("no item, no step back", !editOutrunsApproval(undefined, { product: "b" }));
+
 console.log("\nShared defaults and room exceptions");
 const reg = { meta: fx.meta, items: fx.items };
 ok("a question can hold several zone defaults", defaultItemsFor(reg, "W-017").length === 2);
@@ -142,6 +178,15 @@ ok("confirmed room reads confirmed", roomDefaultStatus(confirmed, N.floorMain) =
 const changedDefault = makeItem({ ...N.floorMain, answer: { ...N.floorMain.answer, selected: [{ path: ["carpet"], label: "Carpet" }] } });
 ok("a changed default flags the confirmed room, and doesn't move it", roomDefaultStatus(confirmed, changedDefault) === "changed" && answerFingerprint(changedDefault) !== confirmed.defaultConfirmations[N.floorMain.id].fingerprint);
 ok("a legacy default changes its fingerprint on a text edit", answerFingerprint(makeItem({ description: "oak" })) !== answerFingerprint(makeItem({ description: "ash" })));
+{
+  const defOther = makeItem({ itemKind: "selection", isDefault: true, promptKey: "W-013", answer: said("Spotted gum shiplap") });
+  const defEl = makeItem({ itemKind: "scope", isDefault: true, promptKey: "W-010", answer: el({ id: "el_a", key: "fencing", label: "Rear fence" }) });
+  const r = confirmRoomDefaults(makeRoom({ name: "Bed 4" }), [defOther, defEl], { at: "t", by: "b" });
+  ok("a default's Other text changing flags the confirmed room", roomDefaultStatus(r, makeItem({ ...defOther, answer: said("Painted fibre cement") })) === "changed");
+  ok("a default moving to another element flags the confirmed room", roomDefaultStatus(r, makeItem({ ...defEl, answer: el({ id: "el_b", key: "fencing", label: "Side fence" }) })) === "changed");
+  ok("a default changing nature flags the confirmed room", roomDefaultStatus(r, makeItem({ ...defEl, answer: el({ id: "el_a", key: "fencing", label: "Rear fence" }, "fact") })) === "changed");
+  ok("renaming the element under its id leaves the room confirmed", roomDefaultStatus(r, makeItem({ ...defEl, answer: el({ id: "el_a", key: "fencing", label: "Back fence" }) })) === "confirmed");
+}
 ok("an exception reads overridden", roomDefaultStatus(confirmed, N.floorMain, N.kitchenFloor) === "overridden");
 ok("an overridden default is skipped by confirm", !(N.floorMain.id in confirmRoomDefaults(room, [N.floorMain], { at: "t", by: "b", exceptionFor: () => N.kitchenFloor }).defaultConfirmations));
 ok("a parked default stays open", !(N.parked.id in confirmRoomDefaults(room, [N.parked], { at: "t", by: "b" }).defaultConfirmations));
@@ -152,7 +197,7 @@ console.log("\nThe screens' save store carries it");
 const hook = readFileSync(new URL("../../src/components/sales/lead-detail/register/useRegister.js", import.meta.url), "utf8");
 ok("autosave's field list comes from makeItem, so it includes answer", /Object\.keys\(makeItem\(\{\}\)\)/.test(hook) && "answer" in makeItem({}));
 ok("the conflict merge keeps room confirmations", /ROOM_FIELDS = \[[^\]]*"defaultConfirmations"/.test(hook));
-ok("an approved selection steps back when its answer really changes", /"answer" in partial && answerMaterialChanged\(item\.answer, partial\.answer\)/.test(hook));
+ok("an approved item steps back through the tested rule above", /if \(editOutrunsApproval\(item, partial\)\)/.test(hook));
 
 console.log(`\nregister-structured-model: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

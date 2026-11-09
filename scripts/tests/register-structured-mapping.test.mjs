@@ -5,6 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { QUESTIONS } from "../../src/lib/registerQuestions.js";
+import { OPEN_OPTION_IDS } from "../../src/lib/register.js";
 import { JSON_PATH, MD_PATH, validateAnswerMap, renderAnswerMap } from "../register/build-answer-map-doc.mjs";
 import { buildStructuredRegister } from "./lib/registerStructuredFixture.mjs";
 
@@ -48,6 +49,12 @@ ok("no option can record an approval, a verification or a price", !map.questions
 ok("waterproofing stays an office technical check, apart from wet-area looks (B03)", by.get("B-012").mapping === "technical_only" && by.get("B-012").tier === "office_only");
 ok("element technical prompts never reach a client meeting", map.questions.filter((q) => q.family === "E").every((q) => q.tier === "office_only"));
 ok("every Sales fact stays prefilled, none is re-asked", QUESTIONS.filter((q) => q.kind === "FACT" || q.prefill).every((q) => by.get(q.id).mapping === "fact_prefill"));
+
+console.log("\nOpen options");
+const everyChoice = map.questions.flatMap((q) => flat([...(q.options || []), ...(q.zones || []), ...(q.elements || [])]));
+const catchAll = everyChoice.filter((o) => /^other( zone)?$/i.test(o.label));
+ok("every catch-all in the map is one the model treats as open, so its words count as the answer", catchAll.length >= 14 && catchAll.every((o) => OPEN_OPTION_IDS.has(o.id)), catchAll.filter((o) => !OPEN_OPTION_IDS.has(o.id)).map((o) => o.id).join());
+ok("named options that only sound open stay configured", !OPEN_OPTION_IDS.has("custom") && !OPEN_OPTION_IDS.has("other_cement_sheet_system") && everyChoice.some((o) => o.id === "other_cement_sheet_system"));
 
 console.log("\nThe model's option paths exist in the map");
 const walk = (list, path) => { let level = list; for (const id of path) { const hit = (level || []).find((o) => o.id === id); if (!hit) return false; level = hit.children; } return true; };

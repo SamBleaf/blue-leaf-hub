@@ -25,8 +25,10 @@
  *   nature         ANSWER_NATURES: a recorded fact is not construction scope
  *   configVersion  the answer-map version the option ids came from
  *   selected[]     { optionId, path[], label, stale? } — several allowed, partial paths allowed (B02).
- *                  stale = kept after an upstream choice changed, awaiting review; never silently dropped
- *   element        { id, key, label } — the physical thing a repeatable item is about
+ *                  stale = kept after an upstream choice changed, awaiting review; never silently dropped.
+ *                  On an open option (OPEN_OPTION_IDS, "Other") the label holds the person's own words
+ *   element        { id, key, label } — the physical thing a repeatable item is about. key = its type
+ *                  (driveway), id = which one (stable across edits, separates two driveways)
  *   zone           { key, label } — main floor / bedrooms / wet areas, façade zone, paint surface …
  *   areaIds[]      room / project-area ids this item covers (same item from Site & Existing and Rooms)
  *   sourceQuestionIds[]  Tab 21 ids a merged card stands in for (W-004 / W-006 / W-008)
@@ -220,17 +222,39 @@ export function answerAllowsClientSelection(answer) {
 
 // ── Change detection ──────────────────────────────────────────────────────────────────────────────
 
-/** The part of an answer a client decision or agreed scope rests on. Labels, notes, assumptions don't count. */
+/**
+ * The catch-all options. Their label isn't configured wording: it is what the person actually said, and the
+ * only place that text lives ("Other: spotted gum shiplap"). Never put it in the staff-only note.
+ */
+export const OPEN_OPTION_IDS = new Set(["other", "other_zone"]);
+
+/** The words on an open option. The bare word "Other" says nothing. */
+const statedText = (label) => (/^other( zone)?$/i.test(label || "") ? "" : label || "");
+
+/** Which element or zone this is. A label counts only when no configured key stands behind it. */
+function identityOf(thing) {
+  if (!thing) return "";
+  const key = thing.key || "";
+  return { id: thing.id || "", key, label: !key || OPEN_OPTION_IDS.has(key) ? statedText(thing.label) : "" };
+}
+
+/**
+ * The part of an answer a client decision or agreed scope rests on: what was chosen (including the words of
+ * an Other answer), which physical element and zone it covers, and what kind of record it is. Tidying a
+ * configured label, notes, assumptions and delivery don't count.
+ */
 function materialOf(raw) {
   const a = normaliseAnswer(raw);
   if (a && Number(a.v) > ANSWER_SCHEMA_VERSION) return a;
-  return {
-    state: a?.state || "not_discussed",
-    selected: liveSelected(a).map((s) => s.path.join("/")).sort(),
-    element: a?.element?.key || "",
-    zone: a?.zone?.key || "",
-    areaIds: [...(a?.areaIds || [])].sort(),
-  };
+  const state = a?.state || "not_discussed";
+  const selected = liveSelected(a).map((s) => {
+    const path = s.path.join("/");
+    return OPEN_OPTION_IDS.has(s.path[s.path.length - 1]) ? `${path}=${statedText(s.label)}` : path;
+  }).sort();
+  const element = identityOf(a?.element), zone = identityOf(a?.zone), areaIds = [...(a?.areaIds || [])].sort();
+  // Stamping a nature on an answer that says nothing yet (a note on an old record) isn't a change.
+  const saysSomething = state !== "not_discussed" || selected.length || element || zone || areaIds.length;
+  return { state, nature: saysSomething ? a?.nature || "" : "", selected, element, zone, areaIds };
 }
 export const answerMaterialChanged = (a, b) => stableStringify(materialOf(a)) !== stableStringify(materialOf(b));
 

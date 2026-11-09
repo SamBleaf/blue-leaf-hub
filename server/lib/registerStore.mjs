@@ -394,22 +394,43 @@ function carryRoomConfirmations(meta, stored) {
 
 const APPROVED_STATUSES = ["approved", "ordered", "installed"];
 
+// Postgres compares versions as instants, so "+00:00" and "Z" are one version and a string compare can't
+// decide. Only a strict ISO stamp for a different millisecond is certainly stale, and register_apply will
+// refuse it. Six decimals at most, because Postgres rounds beyond that and JS truncates. Anything else gets
+// the lock check.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
+function certainlyStale(sent, stored) {
+  if (!ISO_INSTANT.test(String(sent)) || !ISO_INSTANT.test(String(stored))) return false;
+  const a = Date.parse(sent), b = Date.parse(stored);
+  return Number.isFinite(a) && Number.isFinite(b) && a !== b;
+}
+
 /**
  * register_apply compares product columns, not register_detail, so the lock rules for a structured answer
  * live here. Same reasons, same outcome: refused before anything is written. Safe against a race because
  * register_apply still refuses the row if its version moves after this check.
  */
 function answerGuardReason(before, after, rawSync) {
-  if (!before?.sync?.rowId || !rawSync?.version || rawSync.version !== before.sync.version) return null;  // new or stale: register_apply answers
-  if (!answerMaterialChanged(before.answer, after.answer)) return null;                                     // notes, assumptions stay editable
-  if (before.sync.table === RSI) return before.sync.baselined ? "baseline_locked" : null;
+  if (certainlyStale(rawSync.version, before.sync.version)) return null;     // register_apply answers: stale
+  if (!answerMaterialChanged(before.answer, after.answer)) return null;      // notes, assumptions stay editable
+  const scopeStore = before.sync.table === RSI;
+  if (scopeStore && before.sync.baselined) return "baseline_locked";
   if (before.sync.locked) return "post_contract_locked";
-  if (APPROVED_STATUSES.includes(before.sync.status) && after.certainty === "client_approved") {
-    const ev = after.evidence;
-    const fresh = ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence);
-    if (!fresh) return "reapproval_required";
-  }
-  return null;
+  const approved = scopeStore ? before.certainty === "client_approved" : APPROVED_STATUSES.includes(before.sync.status);
+  if (!approved || after.certainty !== "client_approved") return null;
+  const ev = after.evidence;
+  const fresh = ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence);
+  return fresh ? null : "reapproval_required";
+}
+
+/**
+ * The row a request names must be a row on this project, under the item id it claims. Decided from sync.rowId
+ * because that is the row register_apply writes: checking the request's item id would check a different row
+ * and file the history under the wrong item.
+ */
+function rowClaimReason(before, itemId) {
+  if (!before) return "missing";                     // however it's spelled, it isn't a row we loaded
+  return before.id === itemId ? null : "item_mismatch";
 }
 
 async function saveLead(sb, target, { meta, changes, deletes }) {
@@ -462,6 +483,7 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
   // Changes may reference rooms added in this same save — resolve labels against the incoming meta.
   const known = new Set(current.items.map((it) => it.id));
   const stored = new Map(current.items.map((it) => [it.id, it]));
+  const storedByRow = new Map(current.items.map((it) => [it.sync.rowId, it]));
   const guarded = [];
   const ops = [];
   if (meta) ops.push({ op: "meta_set", base_rev: Number(meta.rev) || 0, meta: metaForCanonical(meta) });
@@ -470,8 +492,11 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
     const it = makeItem(carryAnswer(raw, stored.get(raw.id)));
     const want = storeFor(it);
     const sync = raw.sync && raw.sync.mode === "project" ? raw.sync : null;
-    const guard = answerGuardReason(stored.get(it.id), it, sync);
-    if (guard) guarded.push({ itemId: it.id, reason: guard });
+    if (sync?.rowId) {
+      const before = storedByRow.get(sync.rowId);
+      const guard = rowClaimReason(before, it.id) || answerGuardReason(before, it, sync);
+      if (guard) guarded.push({ itemId: it.id, reason: guard });
+    }
     // Existing rows keep their sort_order (null ⇒ unchanged); new rows append after the current list.
     const sortOrder = known.has(it.id) ? null : nextOrder++;
     const rowFor = (store) => (store === SEL ? itemToSelRow(it, register, sortOrder) : itemToRsiRow(it, register, sortOrder));
@@ -490,6 +515,8 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
   for (const del of deletes) {
     const sync = del.sync && del.sync.mode === "project" ? del.sync : null;
     if (!sync?.rowId) continue;                                   // never persisted — nothing to delete
+    const claim = rowClaimReason(storedByRow.get(sync.rowId), del.id);
+    if (claim) guarded.push({ itemId: del.id, reason: claim });
     ops.push({ op: sync.table === SEL ? "sel_delete" : "scope_delete", item_id: del.id, row_id: sync.rowId, base_version: sync.version });
   }
   if (guarded.length) throw new RegisterError(409, conflictMessage(guarded), "CONFLICT", { conflicts: guarded });
@@ -527,6 +554,7 @@ const REASON_TEXT = {
   technical_evidence_required: "needs a drawing / consultant reference to be marked verified",
   not_in_review: "has no client choice waiting for review",
   reapproval_required: "changed after client approval — step it back to Proposed or record the client's re-approval",
+  item_mismatch: "doesn't match the record it was opened from — reload and try again",
   meta_stale: "room list was changed elsewhere",
   selection_not_ready: "has no options or a specified product yet — add one before releasing it to the client",
 };

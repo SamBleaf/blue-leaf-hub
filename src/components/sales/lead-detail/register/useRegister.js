@@ -14,14 +14,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, emptyMeta, answerMaterialChanged } from "../../../../lib/register.js";
+import { makeItem, emptyMeta, editOutrunsApproval, itemKindLabel } from "../../../../lib/register.js";
 
 const AUTOSAVE_MS = 1200;
 const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
 const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
 const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet", "defaultConfirmations"];
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
 
 const GUARD_REASONS = {
   issued_locked: "is on the client portal — withdraw it before deleting or re-classifying",
@@ -32,6 +31,7 @@ const GUARD_REASONS = {
   technical_evidence_required: "needs a technical reference before it can be marked verified",
   not_in_review: "has no client choice waiting for review",
   reapproval_required: "changed after client approval — it needs the client's re-confirmation",
+  item_mismatch: "doesn't match the record it was opened from — reload and try again",
 };
 
 /** Three-way merge of one item. Returns { item, conflicts: [field] }. */
@@ -143,12 +143,11 @@ export function useRegister(leadId, { enabled = true } = {}) {
     const cur = regRef.current; if (!cur) return;
     const item = cur.items.find((i) => i.id === id);
     let next = partial;
-    // An approval covers a specific product: changing it returns the item to Proposed until the client
-    // re-confirms (the server refuses to keep "client-approved" on a changed product without new evidence).
-    if (item && item.itemKind === "selection" && item.certainty === "client_approved" && !("certainty" in partial)
-        && (PRODUCT_FIELDS.some((f) => f in partial && !same(partial[f], item[f])) || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer)))) {
+    // An approval covers a specific product or answer: changing it returns the item to Proposed until the
+    // client re-confirms (the server refuses to keep "client-approved" on it without new evidence).
+    if (editOutrunsApproval(item, partial)) {
       next = { ...partial, certainty: "proposed", evidence: null };
-      setNotices((n) => [`“${item.description || "Selection"}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
+      setNotices((n) => [`“${item.description || itemKindLabel(item.itemKind)}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
     }
     commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...next, sync: i.sync }) : i)) }, [id]);
   }, [commit]);

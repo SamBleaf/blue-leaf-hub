@@ -232,6 +232,99 @@ const carpet = (it) => ({ ...it, answer: { ...it.answer, selected: [{ path: ["ca
   ok("a stale structured save is a conflict and writes nothing", e?.status === 409 && e.conflicts?.[0]?.reason === "stale" && same(w.db.client_selections[0].register_detail.answer, N.floorMain.answer), e?.message);
 }
 
+console.log("\nLocks hold however the request is written (refused before anything is written)");
+const alias = (v) => (v.endsWith("+00:00") ? v.replace("+00:00", "Z") : v.replace(/Z$/, "+00:00"));
+const EV = { at: "2026-11-01", by: "Sandbox Staff", method: "meeting" };
+const FRESH_EV = { at: "2026-11-09", by: "Sandbox Staff", method: "signed", ref: "Variation 3" };
+const reasonOf = (e) => e?.conflicts?.[0]?.reason;
+{
+  const typed = makeItem({ ...N.floorMain, description: "Main floor finish" });
+  const { w, it, calls } = await guardCase({ item: typed, rowPatch: { status: "ordered", certainty: "client_approved" } });
+  const before = calls();
+  const change = carpet(it);
+  const spelledAgain = await attempt(w, { ...change, sync: { ...it.sync, version: alias(it.sync.version) } });
+  ok("the same version spelled differently is still locked", reasonOf(spelledAgain) === "post_contract_locked", spelledAgain?.message);
+  const spaced = await attempt(w, { ...change, sync: { ...it.sync, version: it.sync.version.replace("T", " ") } });
+  ok("a looser timestamp format is still locked", reasonOf(spaced) === "post_contract_locked", spaced?.message);
+  const noVersion = await attempt(w, { ...change, sync: { ...it.sync, version: undefined } });
+  ok("no version at all is still locked", reasonOf(noVersion) === "post_contract_locked", noVersion?.message);
+  const unparsable = await attempt(w, { ...change, sync: { ...it.sync, version: it.sync.version.replace(/:\d\d\.\d+/, ":60.000") } });
+  ok("a stamp JavaScript can't read but Postgres can is still locked", reasonOf(unparsable) === "post_contract_locked", unparsable?.message);
+  // Postgres rounds this up to the stored instant. JavaScript truncates it to the millisecond before.
+  const justUnder = new Date(Date.parse(it.sync.version) - 1000).toISOString().replace(/\.\d+Z$/, ".9999996Z");
+  const overPrecise = await attempt(w, { ...change, sync: { ...it.sync, version: justUnder } });
+  ok("a stamp Postgres would round differently is still locked", reasonOf(overPrecise) === "post_contract_locked", overPrecise?.message);
+  const foreign = await attempt(w, { ...change, id: "ri_forged_not_real" });
+  ok("a made-up item id on a real row is refused", reasonOf(foreign) === "item_mismatch" && foreign.status === 409, foreign?.message);
+  const noId = await attempt(w, { ...change, id: undefined });
+  ok("no item id on a real row is refused", reasonOf(noId) === "item_mismatch", noId?.message);
+  const spelledRow = await attempt(w, { ...change, sync: { ...it.sync, rowId: it.sync.rowId.toUpperCase() } });
+  ok("a row id spelled differently is refused", reasonOf(spelledRow) === "missing", spelledRow?.message);
+  const del = await (async () => { try { await saveRegister(w.sb, LEAD_ID, { changes: [], deletes: [{ id: "ri_forged_not_real", sync: it.sync }] }, { actor: { name: "Staff" } }); return null; } catch (e) { return e; } })();
+  ok("a delete naming the wrong item is refused", reasonOf(del) === "item_mismatch", del?.message);
+  ok("none of those reached the database", calls() === before && same(w.db.client_selections[0].register_detail.answer, typed.answer));
+  const honest = await attempt(w, { ...it, answer: { ...it.answer, note: "Delivery booked" } });
+  ok("an honest save of the same row still works", honest === null, honest?.message);
+}
+{
+  const typed = makeItem({ ...N.floorMain, description: "Main floor finish" });
+  const { w, it } = await guardCase({ item: typed, rowPatch: { status: "ordered", certainty: "client_approved" } });
+  w.db.client_selections[0].updated_at = "2026-11-10T09:00:00.000Z";
+  const before = w.rpcCalls.length;
+  const e = await attempt(w, carpet(it));
+  ok("a genuinely stale copy of a locked row is reported as stale, so the screen can merge", reasonOf(e) === "stale" && w.rpcCalls.length === before + 1, e?.message);
+}
+{
+  const otherSel = makeItem({ itemKind: "selection", category: "cladding", promptKey: "W-013", section: "project", description: "Feature wall", product: "Probe board",
+    answer: { v: 1, state: "recorded", nature: "choice", selected: [{ path: ["other"], label: "Spotted gum shiplap" }] } });
+  const { w, it, calls } = await guardCase({ item: otherSel, rowPatch: { status: "approved", certainty: "client_approved", approval_evidence: EV } });
+  const before = calls();
+  const reworded = { ...it, answer: { ...it.answer, selected: [{ path: ["other"], label: "Painted fibre cement" }] } };
+  const e = await attempt(w, reworded);
+  ok("changing what an approved Other says needs re-approval", reasonOf(e) === "reapproval_required" && calls() === before, e?.message);
+  const stepped = await attempt(w, { ...reworded, certainty: "proposed", evidence: null });
+  ok("stepping it back to Proposed is allowed", stepped === null, stepped?.message);
+}
+{
+  const { w, it, calls } = await guardCase({ table: "room_scope_items", item: N.driveway, rowPatch: { baselined_at: "2026-11-05T00:00:00Z" } });
+  const before = calls();
+  const moved = await attempt(w, { ...it, answer: { ...it.answer, element: { id: "el_driveway_rear", key: "driveway", label: "Rear driveway" } } });
+  ok("baselined scope can't move to another element of the same type", reasonOf(moved) === "baseline_locked", moved?.message);
+  const asFact = await attempt(w, { ...it, answer: { ...it.answer, nature: "fact" } });
+  ok("baselined scope can't be turned into a fact", reasonOf(asFact) === "baseline_locked", asFact?.message);
+  const spelledAgain = await attempt(w, { ...it, sync: { ...it.sync, version: alias(it.sync.version) }, answer: { ...it.answer, selected: [{ path: ["pavers"], label: "Pavers" }] } });
+  ok("baselined scope stays locked when the version is spelled differently", reasonOf(spelledAgain) === "baseline_locked", spelledAgain?.message);
+  const foreign = await attempt(w, { ...it, id: "ri_forged_scope", answer: { ...it.answer, selected: [{ path: ["pavers"], label: "Pavers" }] } });
+  ok("baselined scope can't be reached through a made-up item id", reasonOf(foreign) === "item_mismatch", foreign?.message);
+  ok("and nothing was written", calls() === before && same(w.db.room_scope_items[0].register_detail.answer, N.driveway.answer));
+  const renamed = await attempt(w, { ...it, answer: { ...it.answer, element: { ...it.answer.element, label: "Driveway at the front" } } });
+  ok("renaming the element under its id is still allowed", renamed === null, renamed?.message);
+}
+{
+  const req = makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", certainty: "client_approved", evidence: EV,
+    answer: { v: 1, state: "recorded", nature: "requirement", selected: [{ path: ["airtightness"], label: "Airtightness" }] } });
+  const passive = (it) => ({ ...it, answer: { ...it.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } });
+  const { w, it, calls } = await guardCase({ table: "room_scope_items", item: req, rowPatch: {} });
+  ok("an approved requirement loads as approved from the internal store", it.sync.table === "room_scope_items" && it.certainty === "client_approved");
+  const before = calls();
+  const e = await attempt(w, passive(it));
+  ok("swapping an approved requirement's answer on the old evidence needs re-approval", reasonOf(e) === "reapproval_required" && calls() === before, e?.message);
+  const noted = await attempt(w, { ...it, answer: { ...it.answer, note: "Confirm with the designer" } });
+  ok("a staff note on it needs nothing", noted === null, noted?.message);
+  const again = (await loadRegister(w.sb, LEAD_ID)).register.items[0];
+  const fresh = await attempt(w, { ...passive(again), evidence: FRESH_EV });
+  ok("fresh evidence allows the change", fresh === null, fresh?.message);
+  const again2 = (await loadRegister(w.sb, LEAD_ID)).register.items[0];
+  const back = await attempt(w, { ...again2, answer: { ...again2.answer, selected: [{ path: ["airtightness"], label: "Airtightness" }] }, certainty: "proposed", evidence: null });
+  ok("stepping it back to Proposed is allowed", back === null, back?.message);
+}
+{
+  const { w, it, calls } = await guardCase({ table: "room_scope_items", item: makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", answer: { v: 1, state: "recorded", nature: "requirement", selected: [{ path: ["airtightness"], label: "Airtightness" }] } }), rowPatch: {} });
+  const before = calls();
+  const e = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } });
+  ok("a requirement that isn't approved is free to change", e === null && calls() === before + 1, e?.message);
+}
+
 console.log("\nLead-mode save");
 {
   const w = world({ lead: { job_id: null, selections_schedule: clone(writeRegister(reg)) } });
