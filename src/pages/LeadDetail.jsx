@@ -2658,7 +2658,18 @@ export default function LeadDetail() {
   // ── Pass 3A: one obvious primary action (reuses existing handlers) ──────────
   let primaryAction = null;
   const firstUnmet = gateChecks.find((g) => !g.check(lead));
-  const scrollToFocus = () => { try { document.getElementById("lead-focus")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* noop */ } };
+  const scrollToFocus = () => {
+    try {
+      const card = document.getElementById("lead-focus");
+      if (!card) return;
+      // Prefer the stage's own action panel (tagged data-primary-action) so "Next:" lands ON the thing to do,
+      // not the top of the whole card. Flash a ring so the click is visibly acknowledged even when already in view.
+      const target = card.querySelector("[data-primary-action]") || card;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("ring-2", "ring-primary", "ring-offset-2");
+      setTimeout(() => { try { target.classList.remove("ring-2", "ring-primary", "ring-offset-2"); } catch { /* unmounted */ } }, 1600);
+    } catch { /* noop */ }
+  };
   if (lead.stage === "enquiry") {
     primaryAction = null; // the Enquiry call script owns the Proceed / Nurture / Lost decision
   } else if (lead.stage === "won") {

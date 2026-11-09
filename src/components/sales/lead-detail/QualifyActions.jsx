@@ -66,8 +66,20 @@ export default function QualifyActions({ lead, patch, reload }) {
     await reload();
   }
 
+  // Already spoken to them (phone / in person)? Record the build conversation as held WITHOUT sending the
+  // qualify email — this is the manual path that satisfies the Discovery gate when there's no cal.com booking.
+  async function logCall() {
+    setBusy(true); setMsg(null);
+    const now = new Date().toISOString();
+    const saved = await patch({ discovery_meeting_booked_at: now, discovery_meeting_at: now, discovery_meeting_source: "manual" });
+    setBusy(false);
+    if (!saved) { setMsg({ type: "error", text: "Could not log the call — try again." }); return; }
+    setMsg({ type: "success", text: "Logged — build conversation recorded as already held (no email sent)." });
+    await reload();
+  }
+
   return (
-    <div className="rounded-card border border-hairline bg-surface p-4 space-y-3">
+    <div data-primary-action className="rounded-card border border-hairline bg-surface p-4 space-y-3 transition-shadow">
       <h3 className="section-label">Qualify — next step</h3>
 
       {needsConfirm && (
@@ -106,6 +118,15 @@ export default function QualifyActions({ lead, patch, reload }) {
           </div>
         ) : (
           <p className="text-muted">Send the qualify email to invite them to book a build conversation.</p>
+        )}
+        {!booked && (
+          <div className="mt-2 border-t border-hairline pt-2">
+            <p className="text-xs text-muted">Already spoken to them by phone or in person?</p>
+            <button type="button" onClick={logCall} disabled={busy}
+              className="mt-1 text-xs font-semibold text-primary hover:underline disabled:opacity-50">
+              {busy ? "Logging…" : "Log the build conversation as already held (no email)"}
+            </button>
+          </div>
         )}
       </div>
 
