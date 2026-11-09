@@ -5531,7 +5531,8 @@
     {
      "id": "no_stair",
      "label": "No stair",
-     "disposition": "na"
+     "disposition": "na",
+     "state": "not_applicable"
     }
    ]
   },

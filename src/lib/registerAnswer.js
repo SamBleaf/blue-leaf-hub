@@ -29,6 +29,8 @@
  *                  (OPEN_OPTION_IDS, "Other"), where the label holds the person's own words, so two Other
  *                  answers with different words are two entries.
  *                  stale = kept after an upstream choice changed, awaiting review; never silently dropped.
+ *                  Words typed on an Other zone or element that is then replaced are kept here too, flagged, under a
+ *                  path starting "_zone" or "_element". No option has that path, so they can be removed but not reused.
  *                  The label is copied once, when the option is chosen, and is what people read from then on
  *   element        { id, key, label } — the physical thing a repeatable item is about. key = its type
  *                  (driveway), id = which one (stable across edits, separates two driveways), label = the

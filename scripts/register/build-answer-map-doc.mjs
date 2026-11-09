@@ -42,6 +42,7 @@ function checkOptions(list, where, errors) {
     if (o?.supplyBy && !(o.supplyBy in SUPPLY_BY)) errors.push(`${where}/${o.id}: unknown supplyBy ${o.supplyBy}`);
     if (o?.supplyBy === "client" && o?.disposition) errors.push(`${where}/${o.id}: client supply can't set a disposition while Tab 27 Q4 is open`);
     if (o?.state && !OPTION_STATES.includes(o.state)) errors.push(`${where}/${o.id}: unknown state ${o.state}`);
+    if (o?.disposition === "na" && o?.state !== "not_applicable") errors.push(`${where}/${o.id}: an option that means N/A must carry the not_applicable state`);
     if (o?.children) checkOptions(o.children, `${where}/${o.id}`, errors);
   }
 }

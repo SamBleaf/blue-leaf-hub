@@ -34,10 +34,10 @@ export const dispositionApplies = (cfg) => !cfg || cfg.dispositionUse !== "none"
 
 const SETTLE_OUT = [["by_others", "By others"], ["excluded", "Excluded"]];
 const SETTLE_OUT_MORE = [["deferred", "Deferred"], ["retain", "Existing to remain"]];
-/** The settle-out answers a question offers beside its choices. Only choices use these. */
-export function settleOptions(cfg, { showDetail = false } = {}) {
+/** The settle-out answers a question offers beside its choices. Only choices use these. The rarer ones wait for More detail, except the one on the record. */
+export function settleOptions(cfg, { showDetail = false, current = "" } = {}) {
   if (cfg?.dispositionUse !== "settled_only") return [];
-  return showDetail ? [...SETTLE_OUT, ...SETTLE_OUT_MORE] : SETTLE_OUT;
+  return [...SETTLE_OUT, ...SETTLE_OUT_MORE.filter(([d]) => showDetail || d === current)];
 }
 
 // ── Reading the tree ──────────────────────────────────────────────────────────────────────────────
@@ -233,11 +233,20 @@ function revalidate(cfg, w) {
   return { ...w, selected: out };
 }
 
+/**
+ * Words typed on an Other zone or element are the only copy of what was said, so replacing it can't drop them. They stay
+ * on the record flagged, under a path that is no option's, so they are listed to Remove but can't come back as a choice.
+ */
+function keepOpenWords(selected, root, thing) {
+  if (!thing || !OPEN_OPTION_IDS.has(thing.key) || !statedText(thing.label)) return selected;
+  return [...selected, { optionId: thing.key, path: [root, thing.key], label: thing.label, stale: true }];
+}
+
 export function chooseZone(cfg, answer, key) {
   const w = working(cfg, answer);
   const o = (cfg.zones || []).find((z) => z.id === key);
   if (!o) return normaliseAnswer(answer);
-  return finish({ ...w, zone: w.zone?.key === key ? null : { key, label: o.label } });
+  return finish({ ...w, selected: keepOpenWords(w.selected, "_zone", w.zone), zone: w.zone?.key === key ? null : { key, label: o.label } });
 }
 
 export function chooseElement(cfg, answer, key, { id } = {}) {
@@ -245,7 +254,7 @@ export function chooseElement(cfg, answer, key, { id } = {}) {
   const o = (cfg.elements || []).find((x) => x.id === key);
   if (!o) return normaliseAnswer(answer);
   const element = w.element?.key === key ? null : { id: w.element?.id || id || newElementId(), key, label: o.label };
-  const next = revalidate(cfg, { ...w, element });
+  const next = revalidate(cfg, { ...w, selected: keepOpenWords(w.selected, "_element", w.element), element });
   return finish({ ...next, state: isParked(w.state) || w.state === "not_applicable" ? w.state : restedState(cfg, next) });
 }
 
@@ -319,6 +328,8 @@ const TYPED_FIELDS = ["description", "product", "manufacturer", "model", "colour
 /**
  * The item fields a new answer changes. Disposition and who-supplies follow the chosen action only where the
  * question says they may, and only when the action actually moved, so tapping an element can't reset an old record.
+ * An option that only says who supplies carries no disposition, so it can't move one (Tab 27 Gate 1.2): the status
+ * changes when the option chosen sets one, or when the option left set the one still on the item.
  * Certainty can only move between "not discussed" and "preference": it never reaches an approval.
  */
 export function itemPatch(item, cfg, next, extra = {}) {
@@ -330,7 +341,10 @@ export function itemPatch(item, cfg, next, extra = {}) {
     let d = item.disposition;
     if (isNa) d = "na";
     else if (cfg.dispositionUse === "settled_only") { if (wasNa && d === "na") d = "undecided"; }
-    else if (before?.id !== after?.id || wasNa) d = after?.disposition || (after || before || wasNa ? "undecided" : d);
+    else if (before?.id !== after?.id || wasNa) {
+      if (after?.disposition) d = after.disposition;
+      else if (wasNa ? d === "na" : before?.disposition && d === before.disposition) d = "undecided";
+    }
     if (d !== item.disposition) patch.disposition = d;
   }
   if (before?.id !== after?.id) {
@@ -425,5 +439,6 @@ export function choiceView(cfg, answer, { showDetail = false } = {}) {
     reason: state === "unresolved" ? a?.unresolved?.reason || "" : "", note: a?.note || "", clientNote: a?.clientNote || "",
     summary: state === "not_applicable" ? "" : answerSummary({ answer: a }),
     ownNotApplicable: (cfg.options || []).some((o) => o.state === "not_applicable"),
+    chosenDisposition: topOption(cfg, a)?.disposition || "",
   };
 }

@@ -218,6 +218,19 @@ section("N/A");
   ok("N/A on a site fact leaves the disposition alone", !("disposition" in itemPatch(fact, cfg("W-001"), toggleNotApplicable(cfg("W-001"), null))));
   const r3 = pick("R-003", ["n_a"]);
   ok("R-003's own N/A option is the N/A state", r3.state === "not_applicable" && choiceView(cfg("R-003"), r3).ownNotApplicable);
+  const stair = pick("H-001", ["no_stair"]);
+  ok("H-001 No stair is the N/A state too, so no second N/A sits beside it", stair.state === "not_applicable" && paths(stair).join() === "no_stair" && choiceView(cfg("H-001"), stair).ownNotApplicable && choiceView(cfg("H-001"), stair).notApplicable);
+  const stairItem = apply(seedOf("H-001"), itemPatch(seedOf("H-001"), cfg("H-001"), stair));
+  ok("it closes the question and reads as not applicable", stairItem.disposition === "na" && outstandingReasons(stairItem).length === 0 && contractInclusionOf(stairItem) === "not_applicable");
+  const stairBack = apply(stairItem, itemPatch(stairItem, cfg("H-001"), toggleOption(cfg("H-001"), stairItem.answer, ["no_stair"])));
+  ok("taking it back clears it", stairBack.disposition === "undecided" && stairBack.answer === null);
+  const stairOther = apply(stairItem, itemPatch(stairItem, cfg("H-001"), toggleOption(cfg("H-001"), stairItem.answer, ["new_stair"])));
+  ok("another answer replaces it", stairOther.disposition === "new" && stairOther.answer.state === "recorded");
+  const everyNa = Object.entries(ANSWER_CONFIG).flatMap(([id, c]) => { const w = (l) => (l || []).flatMap((o) => [o, ...w(o.children)]); return w(c.options).filter((o) => o.disposition === "na").map((o) => `${id}:${o.id}:${o.state}`); });
+  ok("every option that means N/A carries the N/A state", everyNa.length === 3 && everyNa.every((x) => x.endsWith(":not_applicable")), everyNa.join());
+  const damaged = JSON.parse(readFileSync(JSON_PATH, "utf8"));
+  delete damaged.questions.find((q) => q.id === "H-001").options.find((o) => o.id === "no_stair").state;
+  ok("the map check refuses one that doesn't", validateAnswerMap(damaged).some((e) => /H-001.*no_stair.*not_applicable/.test(e)), validateAnswerMap(damaged).join());
 }
 
 section("What a tap may write to the item");
@@ -259,6 +272,32 @@ section("What a tap may write to the item");
   const mine = seedOf("W-022", { supplyBy: "trade" });
   ok("a supplier someone set by hand isn't cleared", apply(mine, itemPatch(mine, cfg("W-022"), toggleOption(cfg("W-022"), null, ["included"]))).supplyBy === "trade");
 
+  const noStatus = Object.entries(ANSWER_CONFIG).filter(([, x]) => ["answer", "element"].includes(x.dispositionUse)).flatMap(([id, x]) => (x.options || []).filter((o) => !o.disposition).map((o) => [id, o.id]));
+  ok("the options that carry no status are the who-supplies ones and M-004's", new Set(noStatus.map(([id]) => id)).size === 12 && noStatus.every(([id, o]) => id === "M-004" || cfg(id).options.find((x) => x.id === o).supplyBy), JSON.stringify(noStatus));
+  const resets = noStatus.filter(([id, o]) => { const it = seedOf(id, { disposition: "included", description: "Oven from earlier meeting" }); const after = apply(it, itemPatch(it, cfg(id), toggleOption(cfg(id), null, [o]))); return after.disposition !== "included" || after.description !== "Oven from earlier meeting"; });
+  ok(`a tap on an option that carries no status leaves a recorded one alone (${noStatus.length} options)`, resets.length === 0, JSON.stringify(resets));
+  const k8 = seedOf("K-008", { disposition: "included" });
+  const k8Client = apply(k8, itemPatch(k8, cfg("K-008"), toggleOption(cfg("K-008"), chooseElement(cfg("K-008"), null, "oven"), ["client"])));
+  ok("K-008: Client records who supplies and Included stands", k8Client.supplyBy === "client" && k8Client.disposition === "included" && contractInclusionOf(k8Client) === "included");
+  const w23 = seedOf("W-023", { disposition: "included" });
+  const w23Trade = apply(w23, itemPatch(w23, cfg("W-023"), toggleOption(cfg("W-023"), null, ["trade"])));
+  ok("W-023: Trade records who supplies and Included stands", w23Trade.supplyBy === "trade" && w23Trade.disposition === "included");
+  const k8Moved = apply(k8Client, itemPatch(k8Client, cfg("K-008"), toggleOption(cfg("K-008"), k8Client.answer, ["blue_leaf"])));
+  ok("moving to another supplier leaves it too", k8Moved.supplyBy === "blue_leaf" && k8Moved.disposition === "included");
+  const k8Off = apply(k8Moved, itemPatch(k8Moved, cfg("K-008"), toggleOption(cfg("K-008"), k8Moved.answer, ["blue_leaf"])));
+  ok("taking the supplier back clears the supply it set and leaves the status", k8Off.supplyBy === "" && k8Off.disposition === "included");
+  const k8Na = apply(k8, itemPatch(k8, cfg("K-008"), toggleNotApplicable(cfg("K-008"), null)));
+  ok("N/A still says what it says on these", k8Na.disposition === "na");
+  ok("and undoing it clears the N/A it wrote", apply(k8Na, itemPatch(k8Na, cfg("K-008"), toggleNotApplicable(cfg("K-008"), k8Na.answer))).disposition === "undecided");
+  const k8NaPick = apply(k8Na, itemPatch(k8Na, cfg("K-008"), toggleOption(cfg("K-008"), k8Na.answer, ["client"])));
+  ok("answering after N/A clears the N/A too", k8NaPick.disposition === "undecided" && k8NaPick.supplyBy === "client");
+  const inc2 = apply(seedOf("W-022"), itemPatch(seedOf("W-022"), cfg("W-022"), toggleOption(cfg("W-022"), null, ["included"])));
+  ok("leaving an answer that set the status clears it", apply(inc2, itemPatch(inc2, cfg("W-022"), toggleOption(cfg("W-022"), inc2.answer, ["by_client"]))).disposition === "undecided");
+  const inc3 = { ...inc2, disposition: "alter" };
+  ok("unless someone has changed the status since, by hand", apply(inc3, itemPatch(inc3, cfg("W-022"), toggleOption(cfg("W-022"), inc3.answer, ["by_client"]))).disposition === "alter");
+  ok("an option that does carry a status still sets it over an earlier one", apply(k8, itemPatch({ ...k8, promptKey: "O-001" }, cfg("O-001"), toggleOption(cfg("O-001"), null, ["excluded"]))).disposition === "excluded");
+  ok("the view says which status the chosen option carries", choiceView(cfg("K-001"), pick("K-001", ["new_kitchen"])).chosenDisposition === "new" && choiceView(cfg("K-008"), k8Client.answer).chosenDisposition === "");
+
   const sel = seedOf("K-005");
   const chosen = apply(sel, itemPatch(sel, cfg("K-005"), pick("K-005", ["engineered_stone"])));
   ok("a choice is a preference, nothing more", chosen.certainty === "preference" && chosen.evidence === null);
@@ -285,6 +324,10 @@ section("What a tap may write to the item");
   ok("a second tap takes it back", back.disposition === "undecided" && back.answer === null);
   ok("only choices offer settle-outs", settleOptions(cfg("W-013")).length === 2 && settleOptions(cfg("W-001")).length === 0 && settleOptions(cfg("K-001")).length === 0);
   ok("the rarer ones wait for More detail", settleOptions(cfg("W-013"), { showDetail: true }).length === 4);
+  const shownFor = (current) => settleOptions(cfg("W-013"), { current }).map(([d]) => d).join();
+  ok("the one on the record is always offered, so it shows and can be undone", shownFor("deferred") === "by_others,excluded,deferred" && shownFor("retain") === "by_others,excluded,retain");
+  ok("and only that one", shownFor("by_others") === "by_others,excluded" && shownFor("undecided") === "by_others,excluded");
+  ok("a question with no settle-outs still has none", settleOptions(cfg("W-001"), { current: "deferred" }).length === 0);
 }
 
 section("+ More detail");
@@ -305,6 +348,29 @@ section("+ More detail");
   const el = chooseElement(cfg("W-004"), null, "other");
   ok("an Other element takes words", setElementWords(cfg("W-004"), el, "Bay window").element.label === "Bay window");
   ok("zone tap again clears it", chooseZone(cfg("W-017"), chooseZone(cfg("W-017"), pick("W-017", ["timber"]), "main_floor"), "main_floor").zone === null);
+
+  const zc = cfg("W-017");
+  const rear = setZoneWords(zc, chooseZone(zc, pick("W-017", ["timber"]), "other_zone"), "Rear gable");
+  const kept = chooseZone(zc, rear, "main_floor");
+  ok("words on an Other zone stay on the record when another zone is tapped", kept.zone.key === "main_floor" && kept.selected.some((s) => s.stale && s.label === "Rear gable"));
+  ok("the view lists them for review", choiceView(zc, kept).kept.map((k) => k.label).join() === "Rear gable");
+  ok("they can be removed and not reused as a choice", !choiceView(zc, kept).kept[0].canReuse && !removeChoice(zc, kept, choiceView(zc, kept).kept[0]).selected.some((s) => s.stale));
+  ok("what was chosen is untouched", paths(kept).join() === "timber");
+  ok("they don't reach the client", !JSON.stringify(clientSafeAnswer({ answer: kept })).includes("Rear gable"));
+  ok("and they make the item outstanding", outstandingReasons(seedOf("W-017", { answer: kept, certainty: "client_approved" })).join() === "decision");
+  ok("they survive a reload", normaliseAnswer(JSON.parse(JSON.stringify(kept))).selected.some((s) => s.stale && s.label === "Rear gable"));
+  const retap = chooseZone(zc, rear, "other_zone");
+  ok("tapping the same Other zone again keeps them too", retap.zone === null && retap.selected.some((s) => s.stale && s.label === "Rear gable"));
+  ok("a bare Other zone has nothing to keep", !chooseZone(zc, chooseZone(zc, null, "other_zone"), "main_floor")?.selected.length);
+  ok("W-013's Other zone can't be mistaken for its Other option", (() => { const w = chooseZone(cfg("W-013"), setZoneWords(cfg("W-013"), chooseZone(cfg("W-013"), null, "other"), "Boundary wall"), "main_walls"); const v = choiceView(cfg("W-013"), w); return v.kept.length === 1 && !v.kept[0].canReuse && !v.levels[0].options.find((o) => o.id === "other").on; })());
+  const ec = cfg("W-004");
+  const boat = setElementWords(ec, chooseElement(ec, null, "other"), "Boat shed slipway");
+  const swapped = chooseElement(ec, boat, "joinery");
+  ok("words on an Other element stay on the record when another element is tapped", swapped.element.key === "joinery" && swapped.element.id === boat.element.id && swapped.selected.some((s) => s.stale && s.label === "Boat shed slipway"));
+  const boatOff = chooseElement(ec, boat, "other");
+  ok("tapping the same Other element again keeps them too", boatOff.element === null && boatOff.selected.some((s) => s.stale && s.label === "Boat shed slipway"));
+  ok("two lots of words are both kept", chooseElement(ec, setElementWords(ec, chooseElement(ec, swapped, "other"), "Jetty"), "joinery").selected.filter((s) => s.stale).map((s) => s.label).sort().join() === "Boat shed slipway,Jetty");
+  ok("a configured element replaced keeps nothing", !chooseElement(ec, chooseElement(ec, null, "joinery"), "other").selected.length);
 }
 
 section("Outstanding: what the record says");
@@ -335,7 +401,12 @@ section("Outstanding: what the record says");
   const scope = seedOf("W-010", { disposition: "new", answer: toggleOption(cfg("W-010"), chooseElement(cfg("W-010"), null, "driveway"), ["new"]) });
   ok("scope with an action is not open", reasons(scope) === "");
   ok("scope with only an element is", reasons(seedOf("W-010", { answer: chooseElement(cfg("W-010"), null, "driveway") })) === "decision");
-  ok("By client is an answer to who supplies, not an open question", reasons(seedOf("O-001", { supplyBy: "client", answer: pick("O-001", ["by_client"]) })) === "" && contractInclusionOf(seedOf("O-001", { supplyBy: "client", answer: pick("O-001", ["by_client"]) })) === "undecided");
+  const supplied = (supplyBy, opt) => seedOf("W-023", { supplyBy, answer: toggleOption(cfg("W-023"), chooseElement(cfg("W-023"), null, "appliances"), [opt]) });
+  for (const [supplyBy, opt] of [["blue_leaf", "blue_leaf"], ["trade", "trade"], ["client", "client"], ["by_others", "others"]]) {
+    ok(`who supplies (${supplyBy}) doesn't close the scope decision while Tab 27 Q4 is open`, reasons(supplied(supplyBy, opt)) === "decision" && contractInclusionOf(supplied(supplyBy, opt)) === "undecided");
+  }
+  ok("O-001 By client is the same", reasons(seedOf("O-001", { supplyBy: "client", answer: pick("O-001", ["by_client"]) })) === "decision");
+  ok("once a status is set the decision is closed, whoever supplies", reasons({ ...supplied("client", "client"), disposition: "included" }) === "" && reasons({ ...supplied("blue_leaf", "blue_leaf"), disposition: "included" }) === "");
   ok("an answer flagged after a change needs review", reasons(seedOf("W-007", { answer: toggleOption(cfg("W-007"), pick("W-007", ["yes"], ["yes", "temporary_kitchen"]), ["no"]) })) === "decision");
   ok("an open action stays open until done", reasons(seedOf("W-011", { answer: pick("W-011", ["investigation"]) })) === "action" && reasons(seedOf("W-011", { resolved: true, answer: pick("W-011", ["investigation"]) })) === "");
   ok("legacy: a typed selection is still open", reasons(makeItem({ itemKind: "selection", description: "Oak" })) === "decision");

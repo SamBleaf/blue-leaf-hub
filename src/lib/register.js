@@ -557,7 +557,9 @@ const parkedAnswer = (a) => a && (a.state === "unresolved" || a.state === "clien
  *   • N/A closes the decision, but it isn't evidence: a verification flag and any follow-up stay open;
  *   • "Not decided", "Client unsure" or an answer flagged after an earlier choice changed is an open decision;
  *   • a recorded fact, requirement or risk is not an undecided piece of scope;
- *   • a choice stays open until the client approves it. Picking an option on the card is not an approval.
+ *   • a choice stays open until the client approves it. Picking an option on the card is not an approval;
+ *   • who supplies says nothing about whether the work is in the contract, so a scope item with its status still
+ *     undecided stays open whatever supply answer it holds (Tab 27 Q4 is undecided, so this is the base behaviour).
  */
 export function outstandingReasons(item) {
   const reasons = [];
@@ -573,7 +575,7 @@ export function outstandingReasons(item) {
   if (parkedAnswer(answer)) reasons.push("decision");
   else if (!SETTLED_DISPOSITIONS.has(item.disposition) && !NOT_A_DECISION.has(natureOf(item))) {
     if (item.itemKind === "selection" && item.certainty !== "client_approved") reasons.push("decision");
-    else if (item.itemKind === "scope" && item.disposition === "undecided" && !(answer?.state === "recorded" && item.supplyBy)) reasons.push("decision");
+    else if (item.itemKind === "scope" && item.disposition === "undecided") reasons.push("decision");
   }
   if (openAction) reasons.push("action");
   return reasons;
