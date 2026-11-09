@@ -226,3 +226,67 @@ A real send has still never been exercised. Sending stays off in the sandbox, an
 ### Next dependency
 
 P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathway, and does the Won handover truth and the per-stage content gaps. P7 takes the formal browser evidence and should cover a real send on a test recipient only if the owner allows it.
+
+---
+
+## P3 — Register structured data foundation (2026-11-10)
+
+**Outcome.** A register item can now hold a typed answer, and that answer survives the whole path: lead scratchpad, promotion, project load and save, portal projection, document input. Old free-text records read and edit as before. No screen writes an answer yet, so nothing changes for staff. Nothing here is deployed.
+
+**Commits.** `6e4dd5c` (model, mappers, tests), `4bacd18` (answer map), and the docs commit carrying this entry.
+
+### What changed
+
+| Area | Now |
+|---|---|
+| Answer map (Gate 0.2) | All 147 Tab 21 questions classified, count checked by test. 8 fact/prefill, 14 single-select, 3 multi-select, 25 progressive branch, 22 repeatable scope, 25 requirement, 13 action/risk, 37 technical-only. 70 essential, 37 more detail, 40 office-only. JSON plus a generated table. |
+| Answer model (Gate 1.1) | `item.answer`, schema v1, in `src/lib/registerAnswer.js`. Field list in `R03_TECHNICAL_GUIDE.md` §3. |
+| Mappers (Gate 1.3) | Carried by `makeItem`, `readRegister`, `writeRegister`, `selRowToItem`, `rsiRowToItem`, `detailOf` and so both row writers, `ITEM_FIELDS`, promotion, canonical load and save, `applyDefaultToRooms`, the room exception copy, and the staff tender and baseline rows. |
+| Store classification | A part-finished or unresolved selection stays in `client_selections`. Excluded, N/A or a non-choice nature goes to `room_scope_items`, same id, answer intact, and comes back the same. |
+| Locks | A real answer change on a locked row is refused before writing: `post_contract_locked`, `reapproval_required`, `baseline_locked`. Before this, `register_detail` wasn't compared, so an answer could have changed under an approval. |
+| Client boundary | `clientSafeAnswer` is an allow-list. A structured selection's portal name comes from its labels. |
+| Zone defaults | `defaultItemsFor`, and `defaultItemFor(reg, id, {zoneKey})`. Existing callers still get one default. |
+| Room confirmation | `room.defaultConfirmations`, with `confirmRoomDefaults` and `roomDefaultStatus`. Library only until P4d. |
+
+### Decisions within the brief
+
+- **No migration.** Both stores already have `register_detail`. The one thing that looked like it needed SQL, the lock check, is safe in the service because `register_apply` still refuses a row whose version moves after the check.
+- **Contract inclusion is derived from the disposition**, not stored. `CLAUDE.md` forbids storing a generated fact, and a second field could disagree. Trade delivery is separate, in `answer.delivery`.
+- **Responsible party is the existing `responsibility`**, not a second owner field.
+- **Room confirmation sits on the room, not on items.** One action writes the room list, touches no client-visible row, and can't set an approval because it never sees an item.
+- **Merged cards keep their source ids.** W-004, W-006 and W-008 are one path in presentation only.
+
+### Schema and API impact
+
+No migration. The next free number stays 218. `PUT` and `GET /api/register/leads/:id` carry `answer` on items and `defaultConfirmations` on rooms. `sync.baselined` is added on scope items. A `PUT` can return 409 `CONFLICT` for a locked answer change, the existing shape. Tender and baseline rows gain `answer`, staff-only. `npm run register:answer-map` is new.
+
+### Tests
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-structured-mapping.test.mjs`: coverage, wording, Tab 27 decisions, 13 damaged maps refused, fixture paths exist in the map | 48 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-model.test.mjs`: canonical form, legacy, axes, assumptions, client view, change detection, defaults, room confirmation | 93 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-store.test.mjs`: every mapper with jsonb key reordering, promotion, save, locks, older screens. In-memory stand-in for `register_apply`. | 51 passed, 0 failed |
+| AUTOMATED, DB | `node scripts/tests/sandbox-register-structured.test.mjs`: real API, PostgREST, RLS and `register_apply`. Lead, promotion, canonical save, 409s, locked approvals, baseline, portal board, client token reads, client choice, three document previews, one issued snapshot, legacy records. | 77 passed, 0 failed |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`: 26 suites | 1242 checks, 0 failing |
+| AUTOMATED | Each of seven protections removed in turn (`detailOf`, row reader, lock guard, client allow-list, store check, `makeItem`, older-screen carry). The unit suites failed each time. Files restored. Ad hoc, not committed. | Failed as expected |
+| SOURCE | Portal reads use allow-lists (`CLIENT_SELECTION_FIELDS`, `PROJECT_SELECT`). `LegacyScheduleRows` keeps every row that has a `kind`. | Read only |
+| BROWSER | Not driven. No screen changed. | Not verified |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint`, `npm run build` and `node --check` on changed server files pass. These say nothing about behaviour. No existing test assertion changed.
+
+### Caveats
+
+- Every structured answer tested was built by a test. No staff screen has produced one.
+- The lock rules for answers live in `saveProject`. It is the only caller of `register_apply` for edits today. A new direct caller would skip them.
+- `outstandingReasons` is unchanged, so a recorded fact on a scope item still counts as an open decision and would be listed in the Client Brief's questions. No screen can create one before P4a, which recomputes it.
+- Document builders are unchanged. A structured selection with no typed text shows TBC in the schedule. P5 must read answers through `clientSafeAnswer`.
+- The map is a proposal. Child options beyond the source wording are marked `proposed` or sit under a Tab 27 source, for Blue Leaf to confirm in P4.
+- Tab 27 Q4 (who supplies versus who installs) is still open, so W-023, M-003 and "Owner supplied" on R-009 record only who supplies.
+- Gate 1.4's central baseline config is P4b, per the brief. P3 provides the assumption field and `applyPricingAssumption` only.
+- Project mode needs migration 213. Without it the register stays on the lead, as before.
+
+### Next dependency
+
+P4a generates the choice trees from `tab21-answer-map-v1.0.json`, writes `item.answer` through `ProgressiveChoiceCard`, and recomputes `outstandingReasons` from `state` and `nature`. P4b adds the baseline config and calls `applyPricingAssumption`. P4d uses `confirmRoomDefaults` and `roomDefaultStatus`. P5 reads answers through `clientSafeAnswer` for every client-facing output.

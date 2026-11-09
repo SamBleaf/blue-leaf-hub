@@ -41,6 +41,32 @@ Never written by the register: `client_notes`, `cost_impact`, `allowance_amount`
 | `reapproval_required` | Approved product fields changed without fresh evidence (the UI steps the item back to Proposed instead) |
 | `not_in_review` | Approve / return only when a client choice is waiting |
 
+### Structured answers (R05 P3, added 2026-11-10)
+
+One namespaced field, `item.answer`, defined in `src/lib/registerAnswer.js` (schema v1). On the lead it sits in the item row. On a project it is `register_detail.answer` on `client_selections` and `room_scope_items`. **No new table or column.** `null` means a legacy or free-text record: its `description` is the answer and is never parsed. Nothing in the UI writes this field until P4.
+
+| Field | Holds |
+|---|---|
+| `state` | `not_discussed`, `recorded`, `client_unsure`, `unresolved`, `not_applicable` |
+| `nature` | `fact`, `choice`, `scope`, `requirement`, `risk`, `action`, `technical`. Only `choice` can sit in `client_selections` |
+| `selected[]` | `{optionId, path[], label, stale?}`. Several allowed, partial paths allowed. `stale` keeps a choice flagged after an upstream change |
+| `element`, `zone`, `areaIds[]` | What a repeatable item is about, and where |
+| `sourceQuestionIds[]`, `linkedItemIds[]` | Tab 21 aliases for a merged card; related items such as gutters to roof |
+| `unresolved` | `{reason, note}`, reasons from Tab 27 B09. The owner is the existing `responsibility` |
+| `assumption` | **Internal.** Blue Leaf pricing assumption `{origin, tier, baselineVersion, categoryKey, text, at, by}` |
+| `delivery` | **Internal.** `{method, trade, note}`, decided at Tender |
+| `note` | **Internal.** Short staff note |
+
+Kept in their existing fields, so no fact has two sources: preference and approval (`certainty`, `evidence`), scope (`disposition`), technical (`technicalStatus`), pricing (`pricingStatus`), category and question (`category`, `promptKey`), defaults and exceptions (`isDefault`, `overridesDefaultId`). Contract inclusion is derived from the disposition by `contractInclusionOf`.
+
+Room confirmation is `meta.rooms[].defaultConfirmations` = `{[defaultItemId]: {at, by, fingerprint}}`. It is on the room so a room needs no copy of a default and no client-visible row is touched. `roomDefaultStatus` returns `inherited`, `confirmed`, `changed` or `overridden`.
+
+Client views use `clientSafeAnswer`, an allow-list: state, chosen labels, element label, zone label. The client portal routes (`/api/portal/app/*`) select named columns that exclude `register_detail`. RLS denies client tokens on these tables.
+
+**Locks.** `register_apply` compares product columns, not `register_detail`, so `saveProject` applies the same rules to a real answer change before calling it: `post_contract_locked`, `reapproval_required` (selections) and `baseline_locked` (scope). Notes, assumptions and delivery stay editable. This is race-safe because `register_apply` still refuses the row if its version moves. Every write must go through `saveProject`: a new direct caller of `register_apply` would skip these checks.
+
+A saved item or room with no `answer` / `defaultConfirmations` key means "not touched", so an older screen can't erase them. An explicit `answer: null` clears.
+
 ## 4. API (all staff-only via `requireAuth`, which rejects portal clients; all behind the feature switch)
 
 Base `/api/register/leads/:leadId`: `GET`, `PUT`, `GET /context`, `PUT /facts`, `POST /promote`, `POST /portal/:action` (issue / withdraw / return), `GET /history`, `GET /documents`, `POST /documents/:docType/preview`, `POST /documents/:docType/issue`, `GET /documents/:docId/url`, `GET /packs/:discipline`, `POST /sources`, `PATCH /sources/:docId`, `GET /tender`, `GET|POST /baseline`.
@@ -52,6 +78,7 @@ The job/project is always resolved server-side from the lead, so a browser can't
 - Build: `npm run register:questions` (runs `scripts/register/build-question-library.mjs`) → `src/lib/registerQuestions.js` (`QUESTION_LIBRARY_VERSION = "tab21-v1.0"`). The META table in the build script holds the routing (section, room types, topic, kind → item kind, stage detail, defaults/inheritance, quick chips). **No column per question**: answers are register items keyed by `promptKey`.
 - Relevance: `promptsFor(section, {roomType, roomScope, projectType, deliveryModel, renovationOverlay, stage, showDetail})` in `src/lib/register.js`. Old R02 prompt keys map through `resolvePromptId`.
 - To change wording: edit the Tab 21 source, re-run the build, bump the version, run `npm run test:register` (the verbatim-wording test will flag drift).
+- Answer map (R05 P3): `question-library/tab21-answer-map-v1.0.json` classifies all 147 questions, with relevance, meeting tier and proposed option ids. `npm run register:answer-map` validates it against the library and writes `TAB21_ANSWER_MAP.md`.
 
 ## 6. Documents
 
