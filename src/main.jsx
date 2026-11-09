@@ -22,6 +22,22 @@ registerSW({
   }
 });
 
+// A new deploy must take over the open page automatically. The SW uses skipWaiting + clientsClaim, so the
+// new worker activates and claims this page the moment it is ready — but the page keeps running the OLD bundle
+// until something reloads it. Without this, a staff member sees stale UI after a deploy until they manually
+// reload a SECOND time (the first reload only swaps the worker in the background). Reload once when control
+// passes to a new worker. Guards: PROD only; skip the first-ever registration (no prior controller, e.g. a
+// brand-new visit) so it doesn't double-load; and a one-shot flag so it can never loop.
+if (import.meta.env.PROD && typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloading) return;   // first registration, or already reloading
+    reloading = true;
+    window.location.reload();
+  });
+}
+
 async function boot() {
   // ── UI Review Mode (non-production) ─────────────────────────────────────────
   // Dead in production: VITE_UI_REVIEW_MODE is unset, so this branch is statically
