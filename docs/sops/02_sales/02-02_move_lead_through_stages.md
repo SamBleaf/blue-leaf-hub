@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-07-02
+sop_version: 2.1
+last_reviewed: 2026-11-09
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -232,10 +232,24 @@ Next review: 2027-01-02
 3. Expected: Blueprint Insight shows a loading state briefly, then new advice referencing the Qualify stage
 - [ ] Pass  [ ] Fail
 
+**TC-08 — Hard gate blocks a forward advance (one canonical source)**
+1. Open a real (non-test) lead at Qualify whose qualifying score is below 5, or with no booked build conversation
+2. Try to advance to Discovery (stepper jump or board drag)
+3. Expected: the advance is refused — "Can't advance to Discovery yet — needs a qualifying score of at least 5 and/or a booked build conversation." (HTTP 422, error code `GATE_BLOCKED`)
+4. Satisfy the requirement(s), then retry → the advance succeeds
+5. Expected: the requirements the Discovery focus panel lists as unmet are EXACTLY the ones the server enforces — they cannot disagree, because both read the one module `src/lib/stageGates.js`
+- [ ] Pass  [ ] Fail
+
+**TC-09 — Advisory requirement warns but never blocks**
+1. Open a real lead and advance into a stage whose requirements are advisory (e.g. Concept → PTSA / Plans, or into Consultants / Tender) with an advisory item unmet
+2. Expected: the advance SUCCEEDS (advisory items never hard-block)
+3. Expected DB: the `lead_activities` stage_change row has `detail = "Gate bypass — missing: …"` naming the unmet advisory requirement(s); the server log shows a matching `[gate-bypass]` line
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] Stage changes update DB correctly (stage, stage_entered_at, last_activity_at)
 - [ ] Stage history recorded in activity log
-- [ ] Gate requirements work (block button when unmet, enable when met)
+- [ ] Gate requirements work — hard gates block the advance server-side (422 `GATE_BLOCKED`), advisory gates warn + log a bypass; the UI and server never disagree (one source: `src/lib/stageGates.js`)
 - [ ] Nurture and Lost work via header buttons
 - [ ] Stage stepper visually reflects the current stage
 - [ ] Blueprint Insight refreshes after advance
