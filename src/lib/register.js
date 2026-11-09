@@ -24,11 +24,12 @@
  *
  * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests/server.
  */
-import { QUESTIONS, QUESTION_LIBRARY_VERSION } from "./registerQuestions.js";
-import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, answerMaterialChanged, stableStringify } from "./registerAnswer.js";
+import { QUESTIONS, QUESTION_LIBRARY_VERSION, ANSWER_CONFIG } from "./registerQuestions.js";
+import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, answerMaterialChanged, stableStringify, answerSummary, ANSWER_SCHEMA_VERSION } from "./registerAnswer.js";
 
 export { QUESTION_LIBRARY_VERSION };
 export * from "./registerAnswer.js";
+export * from "./registerChoice.js";
 
 // ── Vocabulary ────────────────────────────────────────────────────────────────────────────────────
 
@@ -494,7 +495,7 @@ export function writeRegister(register) {
   const meta = register?.meta ? { ...emptyMeta(register.meta) } : null;
   const items = Array.isArray(register?.items) ? register.items.map((i) => { const it = makeItem(i); delete it.sync; if (!it.answer) delete it.answer; return it; }) : [];
   const metaStarted = meta && (meta.rooms.length || meta.planRev || meta.deliveryModel ||
-    meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId);
+    meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId || meta.lastStep);
   return [...(metaStarted ? [meta] : []), ...items];
 }
 
@@ -537,18 +538,36 @@ export function applyDefaultToRooms(register, defaultItemId, roomIds) {
 
 // ── Selectors ─────────────────────────────────────────────────────────────────────────────────────
 
+/** What a record IS: its own answer's nature, else what its question records. Null for custom items. */
+export function natureOf(item) {
+  return item?.answer?.nature || ANSWER_CONFIG[resolvePromptId(item?.promptKey)]?.nature || null;
+}
+
+const NOT_A_DECISION = new Set(["fact", "requirement", "technical", "risk", "action"]);
+const parkedAnswer = (a) => a && (a.state === "unresolved" || a.state === "client_unsure" || (a.selected || []).some((s) => s.stale));
+
 /**
- * Why an item is outstanding (Tab 18 §7): 'decision' (a choice / scope still open), 'verification'
+ * Why an item is outstanding (Tab 18 §7, Tab 27 B09): 'decision' (a choice / scope still open), 'verification'
  * (a designer / engineer / trade must confirm), 'action' (an open follow-up). [] = settled.
+ *
+ * Read from what the record says, not from the fact that a disposition is blank:
+ *   • N/A is finished, unless someone has left a follow-up on it;
+ *   • "Not decided", "Client unsure" or an answer flagged after an earlier choice changed is an open decision;
+ *   • a recorded fact, requirement or risk is not an undecided piece of scope;
+ *   • a choice stays open until the client approves it. Picking an option on the card is not an approval.
  */
 export function outstandingReasons(item) {
   const reasons = [];
   const openAction = !!(item.nextAction && item.nextAction.trim()) && !item.resolved;
+  const answer = item.answer && Number(item.answer.v) <= ANSWER_SCHEMA_VERSION ? item.answer : null;
+  if (answer?.state === "not_applicable") return openAction ? ["action"] : [];
   if (item.itemKind === "action") return item.resolved ? [] : ["action"];
   if (item.technicalStatus === "needs_verification") reasons.push("verification");
-  if (SETTLED_DISPOSITIONS.has(item.disposition)) { if (openAction) reasons.push("action"); return reasons; }
-  if (item.itemKind === "selection" && item.certainty !== "client_approved") reasons.push("decision");
-  else if (item.itemKind === "scope" && item.disposition === "undecided") reasons.push("decision");
+  if (parkedAnswer(answer)) reasons.push("decision");
+  else if (!SETTLED_DISPOSITIONS.has(item.disposition) && !NOT_A_DECISION.has(natureOf(item))) {
+    if (item.itemKind === "selection" && item.certainty !== "client_approved") reasons.push("decision");
+    else if (item.itemKind === "scope" && item.disposition === "undecided" && !(answer?.state === "recorded" && item.supplyBy)) reasons.push("decision");
+  }
   if (openAction) reasons.push("action");
   return reasons;
 }
@@ -611,6 +630,11 @@ export function itemIssues(item) {
     issues.push("Verified needs a technical reference (drawing / consultant document).");
   }
   return issues;
+}
+
+/** What to call an item on screen: what was typed, else what was chosen, else its category. */
+export function itemTitle(item) {
+  return item.description || answerSummary(item) || categoryLabel(item.category);
 }
 
 /** Display name for an item's room — the LIVE room list is canonical (survives a room rename). */
@@ -703,7 +727,7 @@ export function buildDocViews(lead, register) {
   return {
     meta: { clientName: clientName || "[Client]", planRev: register.meta.planRev || TBC, projectType: lead?.project_type || TBC },
     clientBrief: {
-      goals: goalsItem?.description || TBC,
+      goals: goalsItem?.description || (goalsItem && answerSummary(goalsItem)) || TBC,
       majorScope: included.map((i) => ({ area: roomName(i), work: i.description || dispositionLabel(i.disposition) })),
       requirements: items.filter((i) => i.itemKind === "requirement").map((i) => ({ area: roomName(i), requirement: i.description || TBC })),
       preferences: preferences.map((i) => ({ area: roomName(i), direction: i.description || i.product || TBC, status: certaintyLabel(i.certainty) })),

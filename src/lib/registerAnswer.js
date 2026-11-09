@@ -108,7 +108,7 @@ export const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
 export const OPEN_OPTION_IDS = new Set(["other", "other_zone"]);
 
 /** The words on an open option. The bare word "Other" says nothing. */
-const statedText = (label) => (/^other( zone)?$/i.test(label || "") ? "" : label || "");
+export const statedText = (label) => (/^other( zone)?$/i.test(label || "") ? "" : label || "");
 
 function normSelected(list) {
   if (!Array.isArray(list)) return [];

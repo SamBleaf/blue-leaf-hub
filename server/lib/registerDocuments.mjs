@@ -27,7 +27,7 @@ import { DOC_DEFS, validateFixture } from "./documents/documentPayloads.mjs";
 import { loadRegister } from "./registerStore.mjs";
 import { loadRegisterContext } from "./registerContext.mjs";
 import {
-  roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel,
+  roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
   QUESTION_LIBRARY_VERSION,
 } from "../../src/lib/register.js";
@@ -114,7 +114,9 @@ function clientBriefFixture(input) {
   const items = orderItems(register, register.items);
   const area = (i) => roomLabel(register, i);
   const pItem = items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-005");
-  const priorities = (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean).slice(0, 3);
+  // Chosen priorities come from the typed answer. Older records hold them as text, read without changing them.
+  const chosenPriorities = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
+  const priorities = (chosenPriorities.length ? chosenPriorities : (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean)).slice(0, 3);
   const priorityNote = (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
   const reqs = items.filter((i) => i.itemKind === "requirement" && !i.roomId && i.description && resolvePromptId(i.promptKey) !== "P-005");
   const intentions = priorities.length
