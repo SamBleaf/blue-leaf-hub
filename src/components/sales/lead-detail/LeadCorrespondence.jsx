@@ -1,16 +1,16 @@
 /**
  * LeadCorrespondence — the one "Client correspondence" area on every stage. Closed, it is a line saying what was
  * last recorded and one way to review the stage's email. The thread, replies and new messages open on demand.
- * The email families and their endpoints are unchanged: StageEmailButton previews and sends, LeadMailbox reads
- * and composes. This component only decides what is offered and describes what the log actually holds.
+ * The email families, the meeting booking emails and their endpoints are unchanged: StageEmailButton previews and
+ * sends, LeadMailbox reads and composes. This component only decides what is offered and describes what the log holds.
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../../lib/apiFetch.js";
 import {
   stageEmailTemplates, stageCorrespondenceNote, correspondenceStatus, recordedSendAt, defaultStageTemplate,
-  isSendingOff, templateBlockedReason, templateSendOptions, patchAfterStageEmail, formatCorrespondenceDate,
+  isSendingOff, templateBlockedReason, templateSendOptions, templateSendPath, patchAfterStageEmail, formatCorrespondenceDate,
 } from "../../../lib/leadCorrespondence.js";
-import { STAGE_EMAIL_TARGET } from "../../../lib/leadNextAction.js";
+import { CHOOSE_STAGE_EMAIL, STAGE_EMAIL_TARGET } from "../../../lib/leadNextAction.js";
 import StageEmailButton from "./StageEmailButton.jsx";
 import LeadMailbox from "./LeadMailbox.jsx";
 
@@ -25,6 +25,13 @@ export default function LeadCorrespondence({ lead, patch, reload }) {
     else setBox((b) => ({ ...b, loading: false, loadFailed: true }));
   }, [lead.id]);
   useEffect(() => { loadBox(); }, [loadBox]);
+
+  // A meeting card's "Go to the booking email" picks that meeting's email in the list here.
+  useEffect(() => {
+    const choose = (e) => setPickedKey(e.detail);
+    document.addEventListener(CHOOSE_STAGE_EMAIL, choose);
+    return () => document.removeEventListener(CHOOSE_STAGE_EMAIL, choose);
+  }, []);
 
   const templates = stageEmailTemplates(lead.stage);
   const selected = templates.find((t) => t.key === pickedKey) || defaultStageTemplate(templates, box.messages, lead);
@@ -73,7 +80,7 @@ export default function LeadCorrespondence({ lead, patch, reload }) {
               })}
             </select>
           )}
-          <StageEmailButton key={selected.key} lead={lead} endpoint={selected.endpoint} which={selected.which}
+          <StageEmailButton key={selected.key} lead={lead} sendPath={templateSendPath(selected)} which={selected.which}
             label={templates.length > 1 ? "Review email" : `Review ${selected.label.charAt(0).toLowerCase()}${selected.label.slice(1)}`}
             title={selected.label} note={selected.note} defaultsAt={selected.defaultsAt}
             options={templateSendOptions(selected, lead)} disabledReason={blockedReason} sendingOff={selectedOff}

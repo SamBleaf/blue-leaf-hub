@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeLeadNextAction as nextAction, currentTenderStep, ADVANCE_TARGET, ENQUIRY_CALL_TARGET, QUALIFY_CONFIRM_TARGET, RFQ_START_TARGET, PROPOSAL_PRESENTATION_TARGET, WON_HANDOFF_TARGET, OPS_READY_TARGET, STAGE_EMAIL_TARGET } from "../../src/lib/leadNextAction.js";
 import { STAGE_GATES, STAGE_ORDER, gateRows } from "../../src/lib/stageGates.js";
+import { preScoreEnquiry } from "../../server/lib/enquiryPreScore.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 let pass = 0, fail = 0;
@@ -32,7 +33,17 @@ const seen = (a) => { targets.add(a.target); return a; };
 
 console.log("\n▸ Enquiry");
 t("before anything is recorded, it points at the call", () => assert.deepEqual(seen(at("enquiry")), { label: "Run the enquiry call", target: ENQUIRY_CALL_TARGET, mobileTab: "action" }));
-t("once answers exist, it asks for the outcome at the bottom panel", () => assert.equal(seen(at("enquiry", { qualify_budget: 1 })).target, ADVANCE_TARGET));
+t("once the site is answered, it asks for the outcome at the bottom panel", () => assert.equal(seen(at("enquiry", { qualify_site: 1 })).target, ADVANCE_TARGET));
+t("the decision-maker answer counts too", () => assert.equal(at("enquiry", { qualify_decision_maker: 0 }).target, ADVANCE_TARGET));
+t("a budget or timeframe alone isn't a call: the website can fill those", () => {
+  assert.equal(at("enquiry", { qualify_budget: 1 }).target, ENQUIRY_CALL_TARGET);
+  assert.equal(at("enquiry", { qualify_timeframe: 2 }).target, ENQUIRY_CALL_TARGET);
+});
+t("a web enquiry answering Not sure yet stays pointed at the call", () => {
+  const web = preScoreEnquiry({ budget_range: "Not sure yet", timeframe: "Not sure yet" });
+  assert.equal(web.stage, "enquiry"); assert.equal(web.qualify_budget, 1); assert.equal(web.qualify_timeframe, 1);
+  assert.deepEqual(at("enquiry", { qualify_budget: web.qualify_budget, qualify_timeframe: web.qualify_timeframe }), { label: "Run the enquiry call", target: ENQUIRY_CALL_TARGET, mobileTab: "action" });
+});
 
 console.log("\n▸ Qualify");
 t("a web lead's score is confirmed first", () => assert.equal(seen(at("qualify", { ...BOOKED, web_prescored: true })).target, QUALIFY_CONFIRM_TARGET));
@@ -84,6 +95,15 @@ console.log("\n▸ Tender");
 t("at the start it's the estimate, not the contract", () => assert.equal(seen(at("tender", { site_address: "1 Test St" })).target, RFQ_START_TARGET));
 t("no site address comes first, because the RFQ button needs one", () => assert.equal(at("tender", {}).target, "site_address"));
 t("proposal generated: present it", () => assert.equal(seen(at("tender", { site_address: "x", tender_substatus: "proposal_generated" })).target, PROPOSAL_PRESENTATION_TARGET));
+t("proposal presented: never asks to present it again", () => {
+  const a = seen(at("tender", { site_address: "x", tender_substatus: "proposal_presented" }));
+  assert.deepEqual(a, { label: "Follow up on the proposal", target: STAGE_EMAIL_TARGET, mobileTab: "action" });
+  assert.doesNotMatch(a.label, /Present/);
+});
+t("no step before the presentation points past it", () => {
+  for (const s of ["pack_prep", "rfqs_issued", "awaiting_pricing", "estimate_review"]) assert.equal(at("tender", { site_address: "x", tender_substatus: s }).target, RFQ_START_TARGET, s);
+});
+t("a contract status outranks the strip, as before", () => assert.equal(at("tender", { site_address: "x", tender_substatus: "proposal_presented", contract_status: "sent" }).target, "contract_status"));
 t("client reviewing: the contract is next", () => assert.equal(at("tender", { site_address: "x", tender_substatus: "client_reviewing", contract_status: null }).target, "contract_status"));
 t("signed with no PDF is not ready", () => {
   const a = at("tender", { site_address: "x", contract_status: "signed", contract_evidence_present: false });

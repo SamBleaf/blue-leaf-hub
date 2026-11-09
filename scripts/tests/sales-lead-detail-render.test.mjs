@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { gateRows } from "../../src/lib/stageGates.js";
+import { stageEmailTemplates, bookingTemplateKey } from "../../src/lib/leadCorrespondence.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const dir = mkdtempSync(join(tmpdir(), "lead-render-"));
@@ -26,6 +27,7 @@ import LeadSummaryPanel from ${C("LeadSummaryPanel")};
 import LeadMailbox from ${C("LeadMailbox")};
 import LeadCorrespondence from ${C("LeadCorrespondence")};
 import StageEmailButton from ${C("StageEmailButton")};
+import MeetingScheduler from ${C("MeetingScheduler")};
 import QualifyActions from ${C("QualifyActions")};
 import DiscoveryActions from ${C("DiscoveryActions")};
 import LeadDetailHeader from ${C("LeadDetailHeader")};
@@ -36,7 +38,8 @@ export const enquiry = (lead) => r(<EnquiryCallScript lead={lead} patch={noop} s
 export const summary = (lead) => r(<LeadSummaryPanel lead={lead} />);
 export const mailbox = (p) => r(<LeadMailbox lead={{ id: "l1" }} {...p} />);
 export const correspondence = (lead) => r(<LeadCorrespondence lead={lead} patch={noop} reload={noop} />);
-export const emailButton = (p) => r(<StageEmailButton lead={{ id: "l1" }} endpoint="qualify-email" label="Review qualify email" {...p} />);
+export const emailButton = (p) => r(<StageEmailButton lead={{ id: "l1" }} sendPath="qualify-email/send" label="Review qualify email" {...p} />);
+export const meeting = (lead) => r(<MeetingScheduler lead={lead} meetingType="proposal_presentation" reload={noop} />);
 export const qualify = (lead) => r(<QualifyActions lead={lead} patch={noop} reload={noop} />);
 export const discovery = (lead) => r(<DiscoveryActions lead={lead} reload={noop} />);
 export const header = (primaryAction) => r(<LeadDetailHeader breadcrumb={null} stepper={null} keyFacts={null} secondaryActions={null} primaryAction={primaryAction} />);
@@ -103,6 +106,7 @@ try {
 
   console.log("\n▸ The stage email button");
   t("opening it is the only control until asked", () => { const b = v.emailButton({}); assert.match(b, />Review qualify email</); assert.doesNotMatch(b, /<textarea/); });
+  t("the pointer's focus lands on it", () => assert.match(v.emailButton({}), /<button[^>]*data-next-focus/));
   t("shows why it can't be opened", () => { const b = v.emailButton({ disabledReason: "Select a designer above before sending the discovery email." }); assert.match(b, /Select a designer/); assert.match(b, /<button[^>]* disabled=""/); });
 
   console.log("\n▸ Client correspondence, first paint");
@@ -115,7 +119,35 @@ try {
   const cons = v.correspondence({ id: "l1", stage: "consultants" });
   t("consultants defer to the per-consultant threads", () => assert.match(cons, /each consultant/));
   const tender = v.correspondence({ id: "l1", stage: "tender" });
-  t("several emails share one picker and one button", () => { assert.equal(count(tender, /<select/g), 1); assert.equal(count(tender, />Review email</g), 1); assert.equal(count(tender, /<option/g), 5); });
+  t("several emails share one picker and one button", () => { assert.equal(count(tender, /<select/g), 1); assert.equal(count(tender, />Review email</g), 1); assert.equal(count(tender, /<option/g), 6); });
+  t("the booking email is in that list", () => assert.match(tender, /Proposal presentation booking link/));
+
+  console.log("\n▸ A meeting card");
+  const card = v.meeting({ id: "l1", stage: "tender" });
+  t("points at the booking email and has no send of its own", () => { assert.match(card, />\s*Go to the booking email\s*</); assert.doesNotMatch(card, /Email booking link/); assert.doesNotMatch(card, />Send email</); assert.doesNotMatch(card, /<textarea/); });
+  t("still offers the link and setting a time", () => { assert.match(card, /Copy client booking link/); assert.match(card, /Set a time yourself/); });
+  t("no developer flag name or delivery claim is left in it", () => {
+    const src = readFileSync(join(REPO, "src/components/sales/lead-detail/MeetingScheduler.jsx"), "utf8");
+    assert.doesNotMatch(src, /LEAD_MAILBOX_ENABLED/); assert.doesNotMatch(src, /Booking email sent/); assert.doesNotMatch(src, /invite-email/);
+  });
+  const mounts = { "src/pages/LeadDetail.jsx": [["designer_meeting", "discovery"], ["plan_presentation", "fee_proposal"]],
+    "src/components/sales/lead-detail/ConceptStage.jsx": [["designer_meeting", "winning_offer"], ["winning_offer_presentation", "winning_offer"]],
+    "src/components/sales/lead-detail/ConsultantsStage.jsx": [["proposal_presentation", "consultants"]],
+    "src/components/sales/lead-detail/TenderStage.jsx": [["proposal_presentation", "tender"]] };
+  t("every meeting card's email is in that stage's list, so the pointer has somewhere to land", () => {
+    for (const [file, list] of Object.entries(mounts)) {
+      const found = [...readFileSync(join(REPO, file), "utf8").matchAll(/<MeetingScheduler [^>]*meetingType="([a-z_]+)"/g)].map((m) => m[1]);
+      assert.deepEqual(found, list.map(([type]) => type), file);
+      for (const [type, stage] of list) assert.ok(stageEmailTemplates(stage).some((x) => x.key === bookingTemplateKey(type)), `${stage}: ${type}`);
+    }
+  });
+  t("no other page mounts a meeting card", () => {
+    const known = new Set(Object.keys(mounts));
+    for (const f of readdirSync(join(REPO, "src/components/sales/lead-detail")).filter((x) => x.endsWith(".jsx"))) {
+      const path = `src/components/sales/lead-detail/${f}`;
+      if (!known.has(path)) assert.doesNotMatch(readFileSync(join(REPO, path), "utf8"), /<MeetingScheduler /, path);
+    }
+  });
 
   console.log("\n▸ Qualify panel");
   const q = v.qualify({ id: "l1", stage: "qualify", qualify_score: 3 });
@@ -149,9 +181,18 @@ try {
   t("the advance block isn't in the rail or the Action tab any more", () => assert.doesNotMatch(page, /nextActionEl/));
   t("LeadCorrespondence is mounted once per layout, in the focus card", () => assert.equal(count(page, /<LeadCorrespondence /g), 1));
   t("the page doesn't mount the mailbox directly", () => assert.doesNotMatch(page, /<LeadMailbox /));
-  t("only StageEmailButton posts to a stage email endpoint", () => {
-    for (const f of files) if (f !== "StageEmailButton.jsx") assert.doesNotMatch(read(`${dirPath}/${f}`), /(qualify|discovery|concept|tender|pipeline)-email\/send|<StageEmailButton(?![^>]*key=\{selected)/, f);
+  t("only StageEmailButton posts to a stage or booking email endpoint", () => {
+    for (const f of files) if (f !== "StageEmailButton.jsx") assert.doesNotMatch(read(`${dirPath}/${f}`), /(qualify|discovery|concept|tender|pipeline)-email\/send|invite-email|<StageEmailButton(?![^>]*key=\{selected)/, f);
+    assert.doesNotMatch(page, /invite-email/);
   });
+  t("a failed invoice send shows inside its window and keeps it open", () => {
+    const s = read(`${dirPath}/XeroInvoiceCard.jsx`);
+    assert.match(s, /msg && !\(previewOpen && preview\) && <p/);
+    assert.match(s, /msg\?\.type === "error" && \(\s*<p role="alert"/);
+    assert.match(s, /if \(!ok\) \{ setMsg\(\{ type: "error", text: `Send failed: [^\n]*return; \}\n\s*setPreviewOpen\(false\)/);
+    assert.match(s, /can't see whether it was delivered/);
+  });
+  t("consultant email wording doesn't imply delivery", () => { const s = read(`${dirPath}/ConsultantComms.jsx`); assert.doesNotMatch(s, /Email sent \+ logged/); assert.match(s, /can't see whether it was delivered/); });
   t("only LeadCorrespondence renders StageEmailButton", () => {
     assert.match(read(`${dirPath}/LeadCorrespondence.jsx`), /<StageEmailButton/);
     assert.doesNotMatch(page, /StageEmailButton/);

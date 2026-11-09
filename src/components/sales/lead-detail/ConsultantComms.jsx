@@ -48,7 +48,7 @@ export default function ConsultantComms({ leadId, role, contactId, messages, onC
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not save." }); return; }
     setBody(""); setSubject("");
-    setMsg({ type: "success", text: kind === "email" ? "Email sent + logged." : "Logged." });
+    setMsg({ type: "success", text: kind === "email" ? "Sent and logged. The Hub can't see whether it was delivered." : "Logged." });
     onChange && onChange();
   }
   async function toggleVisible(m) {

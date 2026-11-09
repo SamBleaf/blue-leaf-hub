@@ -21,6 +21,8 @@ export const RFQ_START_TARGET = "rfq-start";
 export const PROPOSAL_PRESENTATION_TARGET = "proposal-presentation";
 
 const SCORE_FIELDS = ["qualify_budget", "qualify_timeframe", "qualify_site", "qualify_decision_maker"];
+// The website form can pre-fill budget and timeframe. It never asks these two, so only they show someone spoke to the client.
+const ANSWERED_ON_THE_CALL = ["qualify_site", "qualify_decision_maker"];
 
 // These controls live under Lead details, which is the Summary tab on a phone. Everything else is on Action.
 const LEAD_DETAIL_TARGETS = new Set(["design_stage", "desired_start_date", "site_address"]);
@@ -65,13 +67,13 @@ export function currentTenderStep(lead) {
   return lead.tender_substatus === "contract_signed" ? "contract_sent" : lead.tender_substatus || null;
 }
 
-// Until a client is reviewing a proposal, the contract gate isn't the next thing to do: the estimate is.
+// Until a client is reviewing a proposal, the contract gate isn't the next thing to do: the estimate, the
+// presentation and the follow-up after it are.
 function tenderWorkAction(lead) {
-  const step = TENDER_SUBSTATUS_ORDER.indexOf(currentTenderStep(lead));
-  if (lead.contract_status || step >= TENDER_SUBSTATUS_ORDER.indexOf("client_reviewing")) return null;
-  if (step >= TENDER_SUBSTATUS_ORDER.indexOf("proposal_generated")) {
-    return action({ label: "Present the proposal to the client", target: PROPOSAL_PRESENTATION_TARGET });
-  }
+  const current = currentTenderStep(lead);
+  if (lead.contract_status || TENDER_SUBSTATUS_ORDER.indexOf(current) >= TENDER_SUBSTATUS_ORDER.indexOf("client_reviewing")) return null;
+  if (current === "proposal_presented") return action({ label: "Follow up on the proposal", target: STAGE_EMAIL_TARGET });
+  if (current === "proposal_generated") return action({ label: "Present the proposal to the client", target: PROPOSAL_PRESENTATION_TARGET });
   if (!lead.site_address?.trim()) return action({ label: "Add the site address", target: "site_address" });
   return action({ label: "Build the estimate in the RFQ Engine", target: RFQ_START_TARGET });
 }
@@ -98,7 +100,7 @@ export function computeLeadNextAction(lead, { next, nextLabel } = {}) {
   if (!next) return null;
 
   if (lead.stage === "enquiry") {
-    return SCORE_FIELDS.some((f) => lead[f] != null)
+    return ANSWERED_ON_THE_CALL.some((f) => lead[f] != null)
       ? action({ label: "Decide the outcome of the enquiry", target: ADVANCE_TARGET })
       : action({ label: "Run the enquiry call", target: ENQUIRY_CALL_TARGET });
   }
@@ -143,4 +145,12 @@ export function focusLeadControl(target, root = document) {
   if (!control) el.tabIndex = -1;
   (control || el).focus({ preventScroll: true });
   return true;
+}
+
+export const CHOOSE_STAGE_EMAIL = "lead:choose-stage-email";
+
+/** Land on Client correspondence with one named email already chosen in its list. */
+export function goToStageEmail(key) {
+  document.dispatchEvent(new CustomEvent(CHOOSE_STAGE_EMAIL, { detail: key }));
+  focusLeadControl(STAGE_EMAIL_TARGET);
 }

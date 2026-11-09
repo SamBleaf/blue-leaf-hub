@@ -7,9 +7,10 @@
  * so "sent" is the strongest thing this module may say and "delivered" is never claimed.
  *
  * Each sending family stamps `<family-which-...>` into the Message-ID (qualifyEmail, discoveryEmail, conceptEmails,
- * tenderEmails, pipelineGapEmails), so a row can be tied to its template even when staff edited the subject.
+ * tenderEmails, pipelineGapEmails), so a row can be tied to its template even when staff edited the subject. A
+ * meeting's booking email is stamped `<meeting-leadId-meetingType-...>` (calcomRoutes).
  */
-import { TENDER_SUBSTATUS_ORDER } from "./constants.js";
+import { MEETING_TYPE_LABELS, TENDER_SUBSTATUS_ORDER } from "./constants.js";
 import { currentTenderStep } from "./leadNextAction.js";
 
 // `flag` is the key in the mailbox response's `sending` object. `sentField` is the lead stamp, where the family has one.
@@ -18,24 +19,31 @@ const DISCOVERY = { key: "discovery_intro", label: "Discovery email", endpoint: 
 const concept = (which, label, sentField) => ({ key: which, which, label, endpoint: "concept-email", flag: "concept", idPrefix: `concept-${which}`, sentField });
 const tender = (which, label) => ({ key: which, which, label, endpoint: "tender-email", flag: "tender", idPrefix: `tender-${which}` });
 const pipeline = (which, label) => ({ key: which, which, label, endpoint: "pipeline-email", flag: "pipeline", idPrefix: `pipeline-${which}` });
+export const bookingTemplateKey = (meetingType) => `booking_${meetingType}`;
+const booking = (meetingType) => ({ key: bookingTemplateKey(meetingType), meetingType, label: `${MEETING_TYPE_LABELS[meetingType]} booking link`, flag: "mailbox" });
 
 export const STAGE_EMAIL_TEMPLATES = {
   qualify: [QUALIFY],
-  discovery: [DISCOVERY],
+  discovery: [DISCOVERY, booking("designer_meeting")],
   winning_offer: [
     concept("brief_questions", "Brief questions (pre-meeting)", "concept_brief_questions_sent_at"),
     concept("interim", "Interim update", "concept_interim_sent_at"),
+    booking("designer_meeting"),
+    booking("winning_offer_presentation"),
   ],
   fee_proposal: [
     concept("accepted_concepts", "Accepted-concepts acknowledgement"),
     pipeline("ptsa_covering", "PTSA covering email"),
+    booking("plan_presentation"),
   ],
+  consultants: [booking("proposal_presentation")],
   tender: [
     pipeline("tender_started", "Tender started (client update)"),
     tender("proposal_followup", "Proposal follow-up (24h)"),
     tender("review_followup", "Client-review follow-up"),
     tender("contract_sent", "Contract sent"),
     tender("contract_followup", "Unsigned-contract follow-up"),
+    booking("proposal_presentation"),
   ],
   won: [pipeline("contract_signed", "Contract signed: welcome"), pipeline("ops_handoff", "Moving into Operations")],
   nurture: [pipeline("nurture", "Nurture check-in")],
@@ -43,6 +51,9 @@ export const STAGE_EMAIL_TEMPLATES = {
 };
 
 export const stageEmailTemplates = (stage) => STAGE_EMAIL_TEMPLATES[stage] || [];
+
+/** Where this template previews and sends, relative to the lead. */
+export const templateSendPath = (template) => (template.meetingType ? `meetings/${template.meetingType}/invite-email` : `${template.endpoint}/send`);
 
 /** A short explanation for the stages that deliberately have no client template. */
 export function stageCorrespondenceNote(stage) {
@@ -80,13 +91,15 @@ export function correspondenceStatus({ loading, loadFailed, columnMissing, messa
 
 /** When this template was last recorded as sent (ISO), or null. Prefers the correspondence row over the lead stamp. */
 export function recordedSendAt(template, messages = [], lead = {}) {
-  const prefix = `<${template.idPrefix}-`;
+  const prefix = template.meetingType ? `<meeting-${lead.id}-${template.meetingType}-` : `<${template.idPrefix}-`;
   const rows = messages.filter((m) => m.direction === "outbound" && m.messageId?.startsWith(prefix)).sort(byTime);
   return rows.at(-1)?.sentAt || (template.sentField && lead[template.sentField]) || null;
 }
 
-/** The first template with no recorded send, or the first one if they have all gone. */
+/** The email the page should offer first: the follow-up straight after a presentation, otherwise the first with no recorded send. */
 export function defaultStageTemplate(templates, messages = [], lead = {}) {
+  const followUp = currentTenderStep(lead) === "proposal_presented" ? templates.find((t) => t.key === "proposal_followup") : null;
+  if (followUp && !recordedSendAt(followUp, messages, lead)) return followUp;
   return templates.find((t) => !recordedSendAt(t, messages, lead)) || templates[0] || null;
 }
 

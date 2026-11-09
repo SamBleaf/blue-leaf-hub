@@ -121,8 +121,8 @@ export default function XeroInvoiceCard({ lead, reload, variant = "concept" }) {
     // Send the EDITED subject + body (the preview is editable).
     const { ok, error } = await apiPost(`/api/finance/xero-invoices/${preview.invId}/send`, { subject: preview.subject, text: preview.text });
     setBusy(false);
-    if (!ok) { setMsg({ type: "error", text: error || "Could not send the invoice." }); return; }
-    setPreviewOpen(false); setMsg({ type: "success", text: "Invoice emailed to the client." });
+    if (!ok) { setMsg({ type: "error", text: `Send failed: ${error || "the invoice could not be sent."}` }); return; }
+    setPreviewOpen(false); setMsg({ type: "success", text: "Invoice sent. The Hub can't see whether it was delivered." });
     await loadAll();
   }
 
@@ -204,7 +204,7 @@ export default function XeroInvoiceCard({ lead, reload, variant = "concept" }) {
         </div>
       )}
 
-      {msg && <p className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
+      {msg && !(previewOpen && preview) && <p className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</p>}
 
       {previewOpen && preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewOpen(false)}>
@@ -218,6 +218,11 @@ export default function XeroInvoiceCard({ lead, reload, variant = "concept" }) {
             <textarea value={preview.text} onChange={(e) => setPreview((p) => ({ ...p, text: e.target.value }))} rows={12}
               className="w-full rounded-lg border border-hairline px-3 py-2 text-sm text-ink bg-page leading-relaxed focus-ring" />
             <p className="text-[11px] text-muted mt-2">Edits here apply to this send only. Change the default template at Settings → General → Invoice email.</p>
+            {msg?.type === "error" && (
+              <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <span className="font-semibold">{msg.text}</span> Your edits are still here, so you can try again.
+              </p>
+            )}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Cancel</button>
               <button type="button" onClick={confirmSend} disabled={busy} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{busy ? "Sending…" : "Send email"}</button>

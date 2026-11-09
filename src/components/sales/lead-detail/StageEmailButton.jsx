@@ -1,11 +1,12 @@
 /**
- * StageEmailButton — a self-contained "preview then send" button for a stage-family email. Endpoint
- * is parameterised so it drives any of the sales email endpoints (concept-email, tender-email, …).
- * Preview always works; sending is gated server-side by that family's *_EMAIL_ENABLED flag. Edited
- * copy in the preview is honoured for that send only.
+ * StageEmailButton — a self-contained "preview then send" button for a client email. The path is
+ * parameterised so it drives any of the sales email endpoints (concept-email, tender-email, a meeting's
+ * booking email, …). Preview always works; sending is gated server-side by that email's flag. Edited
+ * copy in the preview is honoured for that send only. A failed send keeps the window and the edits open
+ * and says so inside the window, because nothing else records it.
  *
- *   endpoint        e.g. "concept-email" | "tender-email"  →  POST /api/sales/leads/:id/<endpoint>/send
- *   which           the template key within that family
+ *   sendPath        e.g. "concept-email/send"  →  POST /api/sales/leads/:id/<sendPath>
+ *   which           the template key within that family, where it has one
  *   options         [{ key, label, disabled }] ticked in the window and posted with the send
  *   disabledReason  why it can't be opened yet (shown beside the button)
  *   sendingOff      the server reported this family's sending is off: preview only
@@ -13,12 +14,12 @@
 import { useState } from "react";
 import { apiPost } from "../../../lib/apiFetch.js";
 
-export default function StageEmailButton({ lead, endpoint, which, label, title, reload, onSent, note, defaultsAt, options = [], disabledReason = null, sendingOff = false }) {
+export default function StageEmailButton({ lead, sendPath, which, label, title, reload, onSent, note, defaultsAt, options = [], disabledReason = null, sendingOff = false }) {
   const [preview, setPreview] = useState(null); // { subject, text, bookingLink }
   const [chosen, setChosen] = useState({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const url = `/api/sales/leads/${lead.id}/${endpoint}/send`;
+  const url = `/api/sales/leads/${lead.id}/${sendPath}`;
 
   async function open() {
     setBusy(true); setMsg(null);
@@ -31,19 +32,19 @@ export default function StageEmailButton({ lead, endpoint, which, label, title, 
     setBusy(true); setMsg(null);
     const { ok, error } = await apiPost(url, { which, subject: preview.subject, text: preview.text, ...chosen });
     setBusy(false);
-    if (!ok) { setMsg({ type: "error", text: error || "Could not send." }); return; }
+    if (!ok) { setMsg({ type: "error", text: `Send failed: ${error || "the mail server didn't accept it."}` }); return; }
     setPreview(null); setMsg({ type: "success", text: "Sent. The Hub can't see whether it was delivered." });
     onSent?.(); reload?.();
   }
 
   return (
     <>
-      <button type="button" onClick={open} disabled={busy || !!disabledReason}
+      <button type="button" data-next-focus onClick={open} disabled={busy || !!disabledReason}
         className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-50">
         {busy && !preview ? "…" : label}
       </button>
       {disabledReason && <span className="text-xs text-amber-700">{disabledReason}</span>}
-      {msg && <span role="status" className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</span>}
+      {msg && !preview && <span role="status" className={`text-xs ${msg.type === "error" ? "text-red-600" : "text-green-600"}`}>{msg.text}</span>}
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreview(null)}>
@@ -65,6 +66,11 @@ export default function StageEmailButton({ lead, endpoint, which, label, title, 
               </label>
             ))}
             {sendingOff && <p className="mt-2 text-[11px] font-medium text-amber-700">Sending is turned off for this email. This is a preview only.</p>}
+            {msg?.type === "error" && (
+              <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <span className="font-semibold">{msg.text}</span> Your edits are still here, so you can try again.
+              </p>
+            )}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setPreview(null)} className="rounded-lg border border-hairline px-4 py-2 text-sm text-ink hover:bg-page">Close</button>
               <button type="button" onClick={send} disabled={busy || sendingOff} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{busy ? "Sending…" : "Send email"}</button>

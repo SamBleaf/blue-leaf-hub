@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   STAGE_EMAIL_TEMPLATES, stageEmailTemplates, stageCorrespondenceNote, correspondenceStatus, recordedSendAt, defaultStageTemplate,
-  isSendingOff, templateBlockedReason, templateSendOptions, patchAfterStageEmail,
+  isSendingOff, templateBlockedReason, templateSendOptions, templateSendPath, bookingTemplateKey, patchAfterStageEmail,
 } from "../../src/lib/leadCorrespondence.js";
 import { STAGE_ORDER } from "../../src/lib/stageGates.js";
 
@@ -24,6 +24,7 @@ function t(name, fn) {
 const out = (subject, sentAt, messageId) => ({ id: subject, direction: "outbound", subject, sentAt, messageId });
 const inn = (subject, sentAt) => ({ id: subject, direction: "inbound", subject, sentAt, messageId: "<abc@gmail.com>" });
 const tpl = (stage, key) => stageEmailTemplates(stage).find((x) => x.key === key);
+const src = (f) => readFileSync(join(REPO, "server/lib", f), "utf8");
 
 console.log("\n▸ The status line only states what is recorded");
 t("no messages", () => assert.equal(correspondenceStatus({ messages: [] }).line, "No emails recorded for this lead yet."));
@@ -60,6 +61,30 @@ const tenderList = stageEmailTemplates("tender");
 t("the first one not yet sent", () => assert.equal(defaultStageTemplate(tenderList, [out("x", "2026-11-02T00:00:00Z", "<pipeline-tender_started-1@x>")], {}).key, "proposal_followup"));
 t("all sent falls back to the first", () => assert.equal(defaultStageTemplate(stageEmailTemplates("nurture"), [out("x", "2026-11-02T00:00:00Z", "<pipeline-nurture-1@x>")], {}).key, "nurture"));
 t("a stage with none has none", () => assert.equal(defaultStageTemplate(stageEmailTemplates("enquiry")), null));
+t("straight after the presentation, the follow-up is offered first", () => assert.equal(defaultStageTemplate(tenderList, [], { stage: "tender", tender_substatus: "proposal_presented" }).key, "proposal_followup"));
+t("once that follow-up is recorded, the normal order returns", () => assert.equal(defaultStageTemplate(tenderList, [out("x", "2026-11-02T00:00:00Z", "<tender-proposal_followup-1@x>")], { stage: "tender", tender_substatus: "proposal_presented" }).key, "tender_started"));
+t("at any other step the first unsent is offered", () => assert.equal(defaultStageTemplate(tenderList, [], { stage: "tender", tender_substatus: "proposal_generated" }).key, "tender_started"));
+
+console.log("\n▸ A meeting's booking email");
+const designBooking = tpl("discovery", bookingTemplateKey("designer_meeting"));
+const presentBooking = tpl("winning_offer", bookingTemplateKey("winning_offer_presentation"));
+t("named after the meeting", () => { assert.equal(designBooking.label, "Design meeting booking link"); assert.equal(presentBooking.label, "Concept presentation booking link"); });
+t("uses the existing route", () => assert.equal(templateSendPath(designBooking), "meetings/designer_meeting/invite-email"));
+t("the family emails keep their routes", () => assert.equal(templateSendPath(brief), "concept-email/send"));
+t("follows the mailbox switch, the one that route is behind", () => { assert.equal(designBooking.flag, "mailbox"); assert.match(src("calcomRoutes.mjs"), /invite-email"[\s\S]{0,400}LEAD_MAILBOX_ENABLED/); });
+t("off means the page says so", () => assert.equal(isSendingOff(designBooking.flag, { mailbox: false, qualify: true }), true));
+const L = { id: "l1" };
+t("nothing recorded", () => assert.equal(recordedSendAt(designBooking, [], L), null));
+t("tied to its row by Message-ID, so an edited subject still counts", () => assert.equal(recordedSendAt(designBooking, [out("Edited", "2026-11-02T00:00:00Z", "<meeting-l1-designer_meeting-1762000000000@blueleafbuilding.com.au>")], L), "2026-11-02T00:00:00Z"));
+t("another meeting's row doesn't count", () => assert.equal(recordedSendAt(designBooking, [out("x", "2026-11-02T00:00:00Z", "<meeting-l1-winning_offer_presentation-1@x>")], L), null));
+t("the Message-ID is the route's real format", () => assert.match(src("calcomRoutes.mjs"), /`<meeting-\$\{lead\.id\}-\$\{meetingType\}-\$\{Date\.now\(\)\}@/));
+t("every booking email is a real meeting type", () => {
+  const registry = src("calcom.mjs");
+  for (const x of Object.values(STAGE_EMAIL_TEMPLATES).flat()) if (x.meetingType) assert.match(registry, new RegExp(`\\b${x.meetingType}\\b`), x.meetingType);
+});
+t("never blocked by the discovery designer rule", () => assert.equal(templateBlockedReason(designBooking, {}), null));
+t("sending one changes nothing on the lead", () => assert.equal(patchAfterStageEmail({}, designBooking.key, "2026-11-09"), null));
+t("doesn't take the place of the stage's own email", () => assert.equal(defaultStageTemplate(stageEmailTemplates("discovery"), [], {}).key, "discovery_intro"));
 
 console.log("\n▸ Sending switch");
 t("off", () => assert.equal(isSendingOff("qualify", { qualify: false }), true));
@@ -67,7 +92,6 @@ t("on", () => assert.equal(isSendingOff("qualify", { qualify: true }), false));
 t("unknown is not claimed as off", () => assert.equal(isSendingOff("qualify", null), false));
 
 console.log("\n▸ Each stage's emails match the real families");
-const src = (f) => readFileSync(join(REPO, "server/lib", f), "utf8");
 const pipelineKeys = [...src("pipelineGapEmails.mjs").matchAll(/^\s{2}([a-z_]+): \{\s*$/gm)].map((m) => m[1]);
 t("every stage is covered or explained", () => {
   for (const s of [...STAGE_ORDER, "nurture", "lost"]) assert.ok(stageEmailTemplates(s).length || stageCorrespondenceNote(s), s);
@@ -89,7 +113,8 @@ t("qualify and discovery send under the 'intro' id the templates expect", () => 
   assert.match(src("qualifyEmail.mjs"), /buildQualifyEmail\(lead, "intro"/);
   assert.match(src("discoveryEmail.mjs"), /buildDiscoveryEmail\(lead, "intro"/);
 });
-t("no key is offered twice", () => { const keys = Object.values(STAGE_EMAIL_TEMPLATES).flat().map((x) => x.key); assert.equal(new Set(keys).size, keys.length); });
+t("no stage email is offered at two stages", () => { const keys = Object.values(STAGE_EMAIL_TEMPLATES).flat().filter((x) => !x.meetingType).map((x) => x.key); assert.equal(new Set(keys).size, keys.length); });
+t("no stage offers the same email twice", () => { for (const list of Object.values(STAGE_EMAIL_TEMPLATES)) assert.equal(new Set(list.map((x) => x.key)).size, list.length); });
 
 console.log("\n▸ Existing send rules kept");
 const discovery = tpl("discovery", "discovery_intro");

@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { buildTestJobAddress } from "../lib/testArtifactPrefixes.mjs";
-import { STAGE_EMAIL_TEMPLATES, correspondenceStatus, recordedSendAt, defaultStageTemplate, isSendingOff, templateBlockedReason } from "../../src/lib/leadCorrespondence.js";
+import { STAGE_EMAIL_TEMPLATES, correspondenceStatus, recordedSendAt, defaultStageTemplate, isSendingOff, templateBlockedReason, templateSendPath } from "../../src/lib/leadCorrespondence.js";
 
 const API = "http://localhost:8797", GW = "http://localhost:54321";
 for (const u of [API, GW]) if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(u)) { console.error("Refusing: loopback sandbox only."); process.exit(2); }
@@ -80,7 +80,7 @@ try {
   for (const [stage, list] of Object.entries(STAGE_EMAIL_TEMPLATES)) {
     for (const t of list) {
       const id = await mkLead(stage, { selected_designer_contact_id: designerId });
-      const url = `/api/sales/leads/${id}/${t.endpoint}/send`;
+      const url = `/api/sales/leads/${id}/${templateSendPath(t)}`;
       const before = await svc.from("leads").select("*").eq("id", id).single();
       const prev = await api(admin, "POST", url, { which: t.which, preview: true });
       check(`${t.key}: preview works with sending off`, prev.ok && !!prev.body?.preview?.subject, `${prev.status} ${prev.body?.error}`);
