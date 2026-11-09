@@ -60,7 +60,9 @@ It records what the client wants, room by room, in one place. Each answer become
 5. **Site & existing** step: answer access, occupancy, existing-building condition and unknowns for the whole project (not per room). Answers here are recorded as what they are. A steep driveway is a site fact, not building work.
 6. **Rooms** step:
    1. Pick a room from the room list at the top (or step with ← and →; it shows "Room 4 of 8"). Check its name, level and type, and set its scope: **New**, **Renovated**, **Existing — Remain** or **Not in scope**. Add the drawing sheet if you are working from one.
-   2. Answer the prompts that appear for that room type. Floors, walls, kitchen, wet-area and laundry prompts show the **Whole-house default** for that kind of room: a bedroom reads the bedroom floor, a scullery reads the scullery standard, then the kitchen's, an ensuite reads the ensuite standard, then the bathroom's. Leave it, or tap **Record a room exception** where this room differs. A room with no default for its zone just asks the question.
+   2. At the top of the room, **From Whole House** lists what this room takes from the whole-house standards, one line each: its floor, walls, ceiling, kitchen, wet-area and laundry standards. Tap **Confirm room defaults** to say they apply here. That records applicability only. It is not client approval, a technical check or a price. If one line is different in this room, tap **Different here** on that line and choose. Other rooms don't change. If someone changes a whole-house standard after you confirmed a room, the line says **Changed since confirmed** and nothing moves until you look at it.
+   3. Answer the questions listed below that list. Those are the ones this room still has to answer.
+   4. On a renovation, **Existing works here** shows the work recorded for this room on Site & Existing. It is the same record, so a change here shows there. **+ Existing work here** adds one.
    3. Tap **Save & next room →** to move on. The last room shows **Save — last room**.
 7. Tick **Show detailed prompts** only when you want the detailed (later-stage) questions now.
 
@@ -81,7 +83,7 @@ It records what the client wants, room by room, in one place. Each answer become
 |---------|---------------|-----------------|
 | Re-typing the address, budget or consultants into a prompt | Habit from paper briefs | Those come from Sales automatically — fix them at source |
 | Ticking **Client-approved** for "they liked it" | Approval means the client has signed off | Use **Preference** or **Proposed**; Client-approved asks for who / when / how |
-| Recording the same floor in every room | Not using the whole-house default | Set W-017 once per zone; only record room exceptions |
+| Recording the same floor in every room | Not using the whole-house default | Set W-017 once per zone, then Confirm room defaults; use Different here only where a room differs |
 | Telling the client "that's Premium, so it costs…" | The pricing guide sits on the page | The guide is an estimating assumption, staff only. It is not a price and not what the client has chosen |
 | Reading the review list out as what you will build | It looks like a specification | It is a list of things to check. Nothing on it is selected until someone reviews it and records it on the right card |
 | Typing the answer into **+ Note** | Habit from the old text box | Tap the choices. The note is for staff only and doesn't appear in anything the client reads |
@@ -301,7 +303,7 @@ Next review date: 2027-05-07
 **TC-25 — One tap per zone, and rooms read the right one**
 1. W-017: **Main floor** → **Timber**, **Bedroom floor** → **Carpet**. K-005: **Kitchen** → **Engineered stone**, **+ Scullery** → **Laminate**. B-008: **Bathroom** → **Chrome**, **+ Ensuite** → **Brushed brass**.
 2. Rooms: Living shows **Timber**. A bedroom shows **Carpet**. Kitchen shows **Engineered stone**, Scullery **Laminate**, Bathroom **Chrome**, Ensuite **Brushed brass**.
-3. On a bedroom tap **Record a room exception** and choose **Timber**. Expected: one new room item with `overridesDefaultId` set. The W-017 default and every other room are unchanged.
+3. On a bedroom tap **Different here** on the floor line and choose **Timber**. Expected: one new room item with `overridesDefaultId` set. The W-017 default and every other room are unchanged.
 4. Reject path: **Not decided** on the bedroom floor instead of a choice. Expected: a bedroom asks the question, because there is nothing to inherit.
 - [ ] Pass  [ ] Fail
 
@@ -325,6 +327,30 @@ Next review date: 2027-05-07
 5. Tap a choice on L-003. Expected: the assumption line goes, and the item is a Preference, never Client-approved.
 6. Reject path: send `meta.baseline` with tier `platinum` through the API. Expected: the tier is dropped and the rest saves.
 7. Expected: no Client Brief, Architect Brief or Selections Schedule preview contains any of this wording.
+- [ ] Pass  [ ] Fail
+
+**TC-29 — Confirm room defaults records applicability only**
+1. Set W-017 Bedrooms and W-019 Walls and Ceiling. Open a bedroom. Expected: **From Whole House** lists the floor, walls and ceiling once each, and those questions aren't repeated below it.
+2. Tap **Confirm room defaults**. Expected: each line reads **Confirmed for this room**. No item is client-approved, verified or priced. No item is created in the room.
+3. Open the next bedroom. Expected: its lines still read **To confirm**.
+4. Change W-019 Walls on Whole House. Expected: the first bedroom's walls line reads **Changed since confirmed** and the button offers one to confirm. The floor line is still confirmed.
+- [ ] Pass  [ ] Fail
+
+**TC-30 — One surface can differ**
+1. On a bedroom's ceiling line tap **Different here** and choose a different ceiling. Expected: one room record linked to the ceiling default. The walls line is unchanged. The whole-house ceiling is unchanged. The next bedroom still reads the whole-house ceiling.
+2. Reject path: on a default that is client-approved, tap **Different here**. Expected: the room record is Proposed, never Client-approved.
+- [ ] Pass  [ ] Fail
+
+**TC-31 — Existing works are one record**
+1. On a renovation, open Site & Existing. Expected: Protect and Match are actions on the existing-works row, not a second question.
+2. Choose a room under **Where**, then **Walls**, then **Demolish**. Expected: one scope record, status Remove / demolish, nothing typed.
+3. Open that room. Expected: **Existing works here** shows the record. Tap **Retain**. Expected: the same record changes, and Site & Existing shows Retain.
+4. Reject path: choose **Protect**, then **Alter**. Expected: the W-006 source reference comes off again.
+- [ ] Pass  [ ] Fail
+
+**TC-32 — No quantities in the meeting, and a way back to what's open**
+1. In a room open **Office fields**. Expected: no quantity or pricing field. In the Register step the same record has both, and quantity stays blank until measured.
+2. Tap **N outstanding** under the steps, then a place. Expected: straight to that step or room.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

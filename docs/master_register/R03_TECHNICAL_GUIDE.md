@@ -115,6 +115,15 @@ The job/project is always resolved server-side from the lead, so a browser can't
 - **`GET /tender`** returns `assumptions[]`: staff-only, no price field. Client documents, the portal and `clientSafeAnswer` don't read any of this. `projects.register_meta` is behind the `deny_clients` policy.
 - The Tab 27 Q4 supply question stays open. Nothing here decides it.
 
+### Rooms and existing works (R05 P4c, P4d, added 2026-11-10)
+
+- **`roomDefaultsFor(reg, question, roomType)`** returns every default a room reads. One, except `W-019` (`roomReadsAll`), where walls, ceiling and, in a laundry or mudroom, the wet-area surface are each read. **`roomInheritedLines(reg, room, questions)`** is the list on screen. It reads and writes nothing.
+- **Confirm** writes `room.defaultConfirmations` only (`confirmRoomDefaults`). `roomDefaultStatus` compares an `answerFingerprint`, so a changed default reads `changed` and the room isn't moved. **`exceptionFieldsFrom(def, {keepZone})`** builds an exception. An approval never carries across, and a surface exception keeps its zone so finish levels still apply.
+- **Pricing guide parts.** `parts` on a `BASELINE_CATEGORIES` entry name what it is made of. `baselineView` returns `partGaps`, and `partAssumptionFor` puts the same gaps on the row. A record with typed words only counts as covering every part.
+- **Existing works.** `W-006` and `W-008` are `presentedWith: W-004`. Records keep their own `promptKey`. Protect and Match add `W-006` to `answer.sourceQuestionIds` through `itemPatch`. `answer.areaIds` holds room ids, and `roomLabel` reads the live names. A room shows every site record whose `areaIds` include it, by the same id. An older room-level `R-013` row stays on screen until dealt with.
+- **Meeting screens** pass `meeting` to `PromptRow`, which hides quantity and pricing. Both stay in the office Register.
+- **`outstandingByPlace(reg)`** groups the same rule the Register uses.
+
 ## 6. Documents
 
 `server/lib/registerDocuments.mjs` builds fixtures from register rows and renders through the existing doc engine (`docTemplates.renderDocxTemplate` + `public/templates/blb-*-template.docx`), then LibreOffice (`server/lib/docxToPdf.mjs`). Pre-issue checks: drawing basis, recipient, unevidenced approvals, unverified items, **any `$` figure**, empty schedule, template placeholders. Issue = PDF + DOCX uploaded to a new path (never overwritten), SHA-256, `register_issue_document` (advisory lock; version conflict retried once). Previous revision → `superseded`. Nothing is emailed. Coordination packs (Architect, Routleys, TLI, windows, engineer, energy, joiner) are drafts filtered by supplier / category.

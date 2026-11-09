@@ -645,3 +645,47 @@ No assertion was weakened.
 ### Next dependency
 
 P4c merges W-004, W-006 and W-008 presentation and uses `areaIds`. P4d uses `roomDefaultFor`, `confirmRoomDefaults` and the inherited summary. P5 prints answers through `clientSafeAnswer`, adds gutters and standards, decides whether a surface's usual finish prints, and reads `baselineAssumptions` and `performanceSuggestions` for Tender Notes only.
+
+### Corrections after the independent review of P4b (2026-11-10)
+
+Built directly in the main session from here on, at Sam's request. Commit `8d24f10`, with the room half in `3e6fee8`.
+
+| Finding | Fix | Level |
+|---|---|---|
+| One answer closed a whole pricing category. A kitchen with only a benchtop read as chosen, and Tender listed no assumption | Named `parts` per category, one rule for the row, the guide and Tender | AUTOMATED `register-progressive-wholehouse` |
+| The ceiling never reached a room once walls were set, and `wet_area` was never read. Regression from `4e2e884` | `roomDefaultsFor` reads every surface | AUTOMATED, BROWSER `sandbox-register-rooms` |
+| Walls, roofs and gutters recorded as needing no technical check | `tech: needs_verification` on W-013 and W-014 in the generator. Existing saved rows keep the status they already have | AUTOMATED, BROWSER |
+| Two people editing different pricing categories silently lost one | `mergeBaseline` per category, with a real conflict when both change the same one | AUTOMATED (logic only). The merge path wasn't re-driven in two browser tabs |
+| Two roofs' gutters looked identical in Tender | `linkedParentLabel`, read live | SOURCE, and through the Tender `row()` |
+| Draft wording marked only inside the guide | Marked wherever it is read, and `wordingStatus` stamped on the copy | AUTOMATED, BROWSER |
+| Two checks could not fail | Both now assert something that can be false | AUTOMATED |
+
+**Corrections to the P4b entry above.** "Rooms read the default for their type" wasn't true for paint and ceilings. "A labelled assumption only where nothing is chosen" described the row only. "No assertion was weakened" was wrong about sheen: the old checks forbade any sheen option, and the new ones allow it under a surface. That relaxation follows MR-UX-01G, but it was a relaxation. The 126 browser checks included one that could not fail.
+
+## P4c and P4d — Site & Existing, Rooms and meeting behaviour (2026-11-10)
+
+**Outcome.** A room now shows what it takes from Whole House in one short list, with one confirm. Existing works are one path and one record, seen from Site & Existing and from each room they cover. Nothing here is deployed.
+
+**Commit.** `3e6fee8`, and the docs commit carrying this entry.
+
+**What changed.** `RoomDefaultsPanel` replaces the repeated inherited rows. `OutstandingSummary` sits under the steps on the meeting screens. `areaIds` is now on the card as **Where**. `W-006` and `W-008` no longer appear as separate questions. **+ New-to-existing connection** opens W-008. **+ Existing work here** adds a site record from a room. `PromptRow` lost `inherited` and `onMakeException`.
+
+**Decisions within the brief.** A surface exception keeps its zone, because a finish level can only be offered with a surface. An exception never inherits an approval. A brand-new room doesn't offer existing works, which matches the rule the R-013 prompt already used. `W-003` stays its own row under Explore more.
+
+**Schema and API impact.** No migration. `roomReadsAll` added to the answer map. No route added.
+
+**Tests.**
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `register-progressive-rooms` (new) | 53 passed |
+| AUTOMATED | `register-progressive-wholehouse`, `register-progressive-render` | 163 and 76 passed |
+| BROWSER, DB | `sandbox-register-rooms` (new), headless Chromium, 1440 and 375 with touch. Evidence `~/blh-register-evidence/r05/p4cd/` | 46 passed |
+| BROWSER, DB | `sandbox-register-wholehouse`, `sandbox-register-guided` | 126 and 128 passed |
+| PRODUCTION | Not available | Not verified |
+
+The guided suite caught a regression while this was built: the row key included the item id, so a card remounted on its first save and lost its Saved label. Fixed before commit.
+
+**Caveats.** The merged path is a presentation: `W-004`, `W-006` and `R-013` records keep separate question ids. Whether bulk confirm is what staff want remains the Tab 27 open question: it is built, and the pilot should test it. General joinery is still not read by a room prompt.
+
+**Next dependency.** P5 prints these answers.
