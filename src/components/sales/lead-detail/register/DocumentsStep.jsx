@@ -18,6 +18,7 @@ const DOCS = [
   { key: "client_brief", label: "Preliminary Client Project Brief", hint: "Concept presentation — issue record only, no signature.", stages: ["winning_offer", "discovery", "fee_proposal"] },
   { key: "architect_brief", label: "Architect Design Brief", hint: "Design coordination — client intent vs technical items to verify.", stages: ["consultants", "fee_proposal", "winning_offer"] },
   { key: "selections_schedule", label: "Selections & Finishes Schedule", hint: "Consultants / tender — choices only, never scope or prices.", stages: ["consultants", "tender", "won"] },
+  { key: "tender_scope_notes", label: "Tender Scope & Pricing Notes", hint: "Internal, for the Blue Leaf estimator. Never goes to the client, consultants or trades. No amounts.", stages: ["consultants", "tender", "won"], internal: true },
 ];
 const PACKS = [["architect", "Architect"], ["routleys", "Routleys"], ["tli", "TLI lighting"], ["windows", "Windows"], ["engineer", "Engineer"], ["joiner", "Joiner"], ["energy", "Energy"]];
 const DISCIPLINES = [["architect", "Architect / designer"], ["routleys", "Routleys"], ["tli", "TLI"], ["windows", "Window supplier"], ["engineer", "Engineer"], ["energy", "Energy assessor"], ["joiner", "Joiner"], ["other", "Other"]];
@@ -47,6 +48,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview]);
 
   function defaultRecipient(key) {
+    if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
     if (key === "architect_brief") {
       const a = (context?.consultants || []).find((c) => ["architect", "designer"].includes(c.role));
       return { name: a?.name || "", email: "" };
@@ -154,7 +156,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
           <div key={d.key} className={`rounded-lg border p-3 ${d.stages[0] === stage ? "border-primary/40 bg-primary/[0.03]" : "border-hairline bg-surface"}`} data-testid={`doc-card-${d.key}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-xs font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>}</p>
+                <p className="text-xs font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>} {d.internal && <Chip tone="amber">Internal only</Chip>}</p>
                 <p className="text-[11px] text-muted">{d.hint} {current ? `Issued: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · to ${current.recipient_name || "—"}` : "Draft — not issued yet."}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -196,7 +198,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
             )}
 
             {history.length > 0 && (
-              <table className="mt-2 w-full text-[11px]" data-testid={`history-${d.key}`}>
+              <div className="mt-2 overflow-x-auto"><table className="w-full text-[11px]" data-testid={`history-${d.key}`}>
                 <thead><tr className="text-left text-muted"><th className="pr-2">Rev</th><th className="pr-2">Issued</th><th className="pr-2">To</th><th className="pr-2">By</th><th className="pr-2">Status</th><th className="pr-2">Checksum</th><th></th></tr></thead>
                 <tbody>{history.map((h) => (
                   <tr key={h.id} className="border-t border-hairline/60">
@@ -210,7 +212,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                     </td>
                   </tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             )}
           </div>
         );

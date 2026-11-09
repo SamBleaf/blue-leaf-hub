@@ -29,7 +29,7 @@ import { loadRegisterContext } from "./registerContext.mjs";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
-  QUESTION_LIBRARY_VERSION,
+  QUESTION_LIBRARY_VERSION, answerSummary, natureOf, answerConfigFor, linkedParentLabel, baselineAssumptions, performanceSuggestions, technicalLabel, pricingLabel,
 } from "../../src/lib/register.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -42,6 +42,7 @@ export const REGISTER_DOC_TYPES = {
   client_brief: { label: "Preliminary Client Project Brief", def: "client_brief", audience: "client" },
   architect_brief: { label: "Architect Design Brief", def: "architect_brief", audience: "architect" },
   selections_schedule: { label: "Selections & Finishes Schedule", def: "selections_schedule", audience: "client", altLayout: "client_presentation" },
+  tender_scope_notes: { label: "Tender Scope & Pricing Notes", def: "tender_scope_notes", audience: "internal" },
 };
 const DOC_TYPE_KEYS = new Set(Object.keys(REGISTER_DOC_TYPES));
 export const COORD_DISCIPLINES = { architect: "Architect", routleys: "Routleys (plumbing fixtures)", tli: "TLI (lighting & electrical)", windows: "Window supplier", engineer: "Engineer", energy: "Energy assessor", joiner: "Joiner" };
@@ -59,6 +60,14 @@ export class DocumentError extends Error {
 
 // ── fixture builders (live data → the doc-engine fixture contract) ───────────────────────────────
 
+/** What a record says, in words people read: what was typed, else what was chosen on the card. Client-safe either way. */
+const said = (item) => clean(item.description) || clean(answerSummary(item));
+/** A recorded fact, risk or check is not work, whatever older status it carries (Tab 27 MR-UX-02.8). */
+const NOT_WORK = new Set(["fact", "risk", "technical", "requirement", "action"]);
+const isWork = (item) => item.itemKind === "scope" && !NOT_WORK.has(natureOf(item));
+const sourceTag = (item) => (item.overridesDefaultId ? " (room exception)" : item.isDefault ? " (project default)" : "");
+const reviewOnly = (item) => (answerConfigFor(resolvePromptId(item.promptKey))?.reviewSuggestions ? " (intent, subject to consultant review)" : "");
+
 function itemShort(item) { return questionById(resolvePromptId(item.promptKey))?.short || categoryLabel(item.category); }
 function orderItems(register, items) {
   const rank = new Map((register.meta.rooms || []).map((r, i) => [r.id, i]));
@@ -73,6 +82,15 @@ function selectionStatus(item) {
   return { proposed: "Proposed", preference: "Preferred" }[item.certainty] || "TBC";
 }
 
+/** The product line: a named product, what was chosen on the card, or both. Gutters say which roof. */
+function productWords(register, item) {
+  const named = clean([item.manufacturer, item.product || item.description, item.model].filter(Boolean).join(" "));
+  const chosen = clean(answerSummary(item));
+  const under = linkedParentLabel(register, item);
+  const words = named && chosen ? `${named} (${chosen})` : named || chosen;
+  return words && under ? `${words}, ${under}` : words;
+}
+
 export function selectionRows(register, { coord } = {}) {
   let items = register.items.filter(isClientSelection);
   if (coord) items = items.filter((i) => questionById(resolvePromptId(i.promptKey))?.coord === coord || (coord === "routleys" && /routleys/i.test(i.supplier || "")) || (coord === "tli" && /\btli\b/i.test(i.supplier || "")));
@@ -81,8 +99,8 @@ export function selectionRows(register, { coord } = {}) {
     return {
       itemId: refCode(i),
       group: SCHEDULE_GROUPS.has(group) ? group : "Internal Finishes",
-      category: `${roomLabel(register, i)} — ${itemShort(i)}`,
-      product: clean([i.manufacturer, i.product || i.description, i.model].filter(Boolean).join(" ")) || "TBC",
+      category: `${roomLabel(register, i)} — ${itemShort(i)}${sourceTag(i)}`,
+      product: productWords(register, i) || "TBC",
       finish: clean(i.colour) || "TBC",
       qty: i.quantity != null ? clean(`${i.quantity} ${i.unit || ""}`) : "—",            // never a fake zero
       status: selectionStatus(i),
@@ -118,10 +136,10 @@ function clientBriefFixture(input) {
   const chosenPriorities = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
   const priorities = (chosenPriorities.length ? chosenPriorities : (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean)).slice(0, 3);
   const priorityNote = clientSafeAnswer(pItem)?.clientNote || (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
-  const reqs = items.filter((i) => i.itemKind === "requirement" && !i.roomId && i.description && resolvePromptId(i.promptKey) !== "P-005");
+  const reqs = items.filter((i) => i.itemKind === "requirement" && !i.roomId && said(i) && resolvePromptId(i.promptKey) !== "P-005");
   const intentions = priorities.length
     ? priorities.map((p, idx) => ({ label: p, text: idx === 0 ? priorityNote : "" }))
-    : reqs.slice(0, 3).map((r) => ({ label: itemShort(r), text: clean(r.description) }));
+    : reqs.slice(0, 3).map((r) => ({ label: itemShort(r), text: said(r) }));
   const occupancy = { occupied: "The home is expected to stay occupied during the works.", partly: "Part of the home is expected to stay occupied during the works.", vacant: "The home is expected to be vacant during the works." }[register.meta.occupancy] || "";
   const summary = [
     sentence(context.goals.description || context.goals.vision || `${fx.project.projectDescription} for ${fx.project.clientName}`),
@@ -129,17 +147,17 @@ function clientBriefFixture(input) {
   ].filter(Boolean);
   // DOC1b (R04): "Included" is scope of WORKS only. Retained fabric ("existing to remain") is a scope
   // BOUNDARY, so it belongs under "Not in the current scope", not conflated with demolition under Included.
-  const scopeIn = items.filter((i) => i.itemKind === "scope" && INCLUDED_DISPOSITIONS.has(i.disposition) && (i.description || i.disposition !== "undecided"))
-    .map((i) => `${area(i)}: ${clean(i.description) || dispositionLabel(i.disposition)}${i.disposition === "remove" ? " (remove)" : i.disposition === "make_good" ? " (make good)" : ""}`);
-  const scopeOut = items.filter((i) => ["excluded", "by_others", "deferred", "retain"].includes(i.disposition))
-    .map((i) => `${area(i)}: ${clean(i.description) || itemShort(i)} — ${i.disposition === "retain" ? "existing to remain" : dispositionLabel(i.disposition)}`);
+  const scopeIn = items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided"))
+    .map((i) => `${area(i)}: ${said(i) || dispositionLabel(i.disposition)}${i.disposition === "remove" ? " (remove)" : i.disposition === "make_good" ? " (make good)" : ""} [${refCode(i)}]`);
+  const scopeOut = items.filter((i) => ["excluded", "by_others", "deferred", "retain"].includes(i.disposition) && !NOT_WORK.has(natureOf(i)))
+    .map((i) => `${area(i)}: ${said(i) || itemShort(i)} — ${i.disposition === "retain" ? "existing to remain" : dispositionLabel(i.disposition)} [${refCode(i)}]`);
   const groups = new Map();
-  for (const i of items.filter((x) => isClientSelection(x) && ["preference", "proposed", "client_approved"].includes(x.certainty) && (x.description || x.product))) {
+  for (const i of items.filter((x) => isClientSelection(x) && ["preference", "proposed", "client_approved"].includes(x.certainty) && (said(x) || x.product))) {
     const g = docGroupFor(i.category) === "General" ? "Internal Finishes" : docGroupFor(i.category);
     if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(`${area(i)} — ${itemShort(i)}: ${clean(i.description || i.product)} (${selectionStatus(i).toLowerCase()})`);
+    groups.get(g).push(`${area(i)} — ${itemShort(i)}${sourceTag(i)}: ${clean(i.description || i.product) || said(i)} (${selectionStatus(i).toLowerCase()})`);
   }
-  const perf = items.filter((i) => i.itemKind === "requirement" && i.description && resolvePromptId(i.promptKey) !== "P-005").map((i) => `${area(i)}: ${clean(i.description)}`);
+  const perf = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005").map((i) => `${area(i)}: ${said(i)}${reviewOnly(i)}`);
   if (perf.length) groups.set("Performance & comfort", perf.slice(0, 8));
   const open = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
     .filter((i) => !["architect", "consultant", "trade"].includes(i.responsibility))
@@ -147,19 +165,21 @@ function clientBriefFixture(input) {
     // is NOT a required client action — it belongs in §02 "Design direction", not §03 "Key questions" —
     // UNLESS it carries an explicit, unresolved next action (e.g. the genuine "confirm the appliance" ask).
     .filter((i) => {
-      const hasDirection = isClientSelection(i) && ["preference", "proposed", "client_approved"].includes(i.certainty) && (i.description || i.product);
+      const hasDirection = isClientSelection(i) && ["preference", "proposed", "client_approved"].includes(i.certainty) && (said(i) || i.product);
       const openAction = !!(i.nextAction && i.nextAction.trim()) && !i.resolved;
       return !hasDirection || openAction;
     })
     .sort((a, b) => (a.responsibility === "client" ? -1 : 0) - (b.responsibility === "client" ? -1 : 0)).slice(0, 7);
   const risks = items.filter((i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site"))
-    .map((i) => `${area(i)}: ${clean(i.description) || itemShort(i)} — to be confirmed by ${responsibilityLabel(i.responsibility || "consultant").toLowerCase()}`).slice(0, 8);
+    .map((i) => `${area(i)}: ${said(i) || itemShort(i)} — to be confirmed by ${responsibilityLabel(i.responsibility || "consultant").toLowerCase()}`).slice(0, 8);
+  // A site fact is noted here as a fact. It never appears as work (Tab 27 MR-UX-02.8).
+  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${itemShort(i)}: ${clean(answerSummary(i))} (recorded as a site or household fact)`);
   fx.clientBrief = {
     summaryParas: summary,
     intentions,
     scopeIn, scopeOut,
     preferenceGroups: [...groups.entries()].map(([name, list]) => ({ name, items: list })),
-    questions: open.map((i) => ({ id: refCode(i), action: clean(i.nextAction || i.description || itemShort(i)), owner: responsibilityLabel(i.responsibility || "blue_leaf"), status: "OPEN" })),
+    questions: open.map((i) => ({ id: refCode(i), action: clean(i.nextAction) || said(i) || itemShort(i), owner: responsibilityLabel(i.responsibility || "blue_leaf"), status: "OPEN" })),
     nextStepsParas: ["The next step is the Pre-construction Services Agreement (PTSA). Design development, consultant coordination and detailed selections follow, and each decision above is recorded against the same project brief."],
     processSteps: [
       { num: "01", label: "Concept", note: "Brief & concept design" },
@@ -168,7 +188,7 @@ function clientBriefFixture(input) {
       { num: "04", label: "Tender", note: "Scope & pricing confirmed" },
       { num: "05", label: "Contract", note: "Build & handover" },
     ],
-    assumptions: risks,
+    assumptions: [...facts, ...risks],
   };
   return fx;
 }
@@ -181,19 +201,19 @@ function architectBriefFixture(input) {
   const roomSheet = (i) => (register.meta.rooms || []).find((r) => r.id === i.roomId)?.sheet || "";
   const archStatus = (i) => (i.technicalStatus === "needs_verification" ? "To verify" : i.certainty === "client_approved" && approvalIsEvidenced(i) ? "Client-approved" : "Proposed");
   const actions = items.filter((i) => !i.resolved && (i.itemKind === "action" || (i.nextAction && i.nextAction.trim())) && ["architect", "consultant", "", undefined, null].includes(i.responsibility))
-    .slice(0, 14).map((i) => ({ id: refCode(i), action: clean(i.nextAction || i.description || itemShort(i)), owner: responsibilityLabel(i.responsibility || "architect"), status: "OPEN" }));
-  const register_ = items.filter((i) => (i.itemKind === "scope" && !["na", "undecided"].includes(i.disposition)) || i.itemKind === "requirement" || i.technicalStatus === "needs_verification")
-    .filter((i) => i.description || i.itemKind === "scope")
+    .slice(0, 14).map((i) => ({ id: refCode(i), action: clean(i.nextAction) || said(i) || itemShort(i), owner: responsibilityLabel(i.responsibility || "architect"), status: "OPEN" }));
+  const register_ = items.filter((i) => (isWork(i) && !["na", "undecided"].includes(i.disposition)) || i.itemKind === "requirement" || i.technicalStatus === "needs_verification")
+    .filter((i) => said(i) || i.itemKind === "scope")
     .map((i) => ({
       itemId: refCode(i), location: area(i),
-      requirement: clean(`${i.itemKind === "scope" ? `${dispositionLabel(i.disposition)}: ` : i.itemKind === "requirement" ? "Requirement: " : ""}${i.description || itemShort(i)}`),
+      requirement: clean(`${isWork(i) ? `${dispositionLabel(i.disposition)}: ` : i.itemKind === "requirement" ? "Requirement: " : ""}${said(i) || itemShort(i)}${sourceTag(i)}${reviewOnly(i)}`),
       status: archStatus(i), action: clean(i.nextAction), dwgRef: clean(i.source || roomSheet(i) || register.meta.planRev), group: ENVELOPE_CATS.has(i.category) ? "Envelope & structure" : "Internal & services",
     }));
   fx.architectBrief = {
     actionsIntro: "The following are the decisions most likely to delay the next coordinated drawing issue. Reference IDs match the design register below and the project register.",
     actions,
-    confirmedReqs: items.filter((i) => i.itemKind === "requirement" && i.certainty === "client_approved" && approvalIsEvidenced(i) && i.description).map((i) => `${area(i)}: ${clean(i.description)}`),
-    clientPrefs: items.filter((i) => isClientSelection(i) && ["preference", "proposed"].includes(i.certainty) && (i.description || i.product)).slice(0, 10).map((i) => `${area(i)} ${itemShort(i).toLowerCase()}: ${clean(i.description || i.product)}`),
+    confirmedReqs: items.filter((i) => i.itemKind === "requirement" && i.certainty === "client_approved" && approvalIsEvidenced(i) && said(i)).map((i) => `${area(i)}: ${said(i)}`),
+    clientPrefs: items.filter((i) => isClientSelection(i) && ["preference", "proposed"].includes(i.certainty) && (said(i) || i.product)).slice(0, 10).map((i) => `${area(i)} ${itemShort(i).toLowerCase()}: ${clean(i.description || i.product) || said(i)}`),
     scheduleItems: register_,
     references: [register.meta.planRev ? `Current drawing basis: ${register.meta.planRev}` : null,
       ...(context.drawings || []).slice(0, 10).map((d) => clean(`${d.filename}${d.revision ? ` — ${d.revision}` : ""}${d.issuer ? ` (${d.issuer})` : ""}`))].filter(Boolean),
@@ -208,10 +228,47 @@ function selectionsFixture(input, opts = {}) {
   return fx;
 }
 
+/**
+ * Tender Scope & Pricing Notes (Tab 27 B12, Gate 6.2). INTERNAL: the one document allowed to read assumptions, staff notes and
+ * review suggestions. No amounts and no quantities, because Buildxact holds the numbers and nothing is measured yet.
+ */
+function tenderNotesFixture(input) {
+  const { context, register } = input;
+  const fx = baseFixture(input);
+  const items = orderItems(register, register.items);
+  const words = (i) => { const w = productWords(register, i) || said(i) || itemShort(i); return `${w}${sourceTag(i)}`; };
+  const noteOf = (i) => clean([i.answer?.note, i.nextAction && !i.resolved ? `Next: ${i.nextAction}` : "", i.responsibility ? responsibilityLabel(i.responsibility) : ""].filter(Boolean).join(" · "));
+  const row = (i, status) => ({ itemId: refCode(i), area: roomLabel(register, i), text: words(i), status, note: noteOf(i) });
+  const isExisting = (i) => ["W-004", "W-006", "W-008", "R-013"].includes(resolvePromptId(i.promptKey));
+  const nature = natureOf;
+  const out = (i) => ["excluded", "deferred", "by_others", "na"].includes(i.disposition) || i.answer?.state === "not_applicable";
+  const systems = items.filter((i) => isClientSelection(i) && ENVELOPE_CATS.has(i.category));
+  const finishes = items.filter((i) => isClientSelection(i) && !ENVELOPE_CATS.has(i.category));
+  const selStatus = (i) => [selectionStatus(i), technicalLabel(i.technicalStatus) === technicalLabel("needs_verification") ? "to verify" : "", pricingLabel(i.pricingStatus)].filter(Boolean).join(" · ");
+  const sections = [
+    { title: "Included work", intro: "In Blue Leaf's scope, by area.", rows: items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && !isExisting(i)).map((i) => row(i, dispositionLabel(i.disposition))) },
+    { title: "Existing works and demolition", intro: "Demolish, retain, alter, make good, protect and match.", rows: items.filter((i) => isExisting(i) && isWork(i) && !out(i) && i.disposition !== "undecided").map((i) => row(i, dispositionLabel(i.disposition))) },
+    { title: "Excluded or deferred", intro: "Not to be priced in this tender.", rows: items.filter((i) => ["excluded", "deferred"].includes(i.disposition) && !NOT_WORK.has(nature(i))).map((i) => row(i, dispositionLabel(i.disposition))) },
+    { title: "By others or client supplied", intro: "Allow for coordination only. Who carries it out is decided at Tender.", rows: items.filter((i) => (i.disposition === "by_others" || ["client", "by_others"].includes(i.supplyBy)) && !NOT_WORK.has(nature(i))).map((i) => row(i, i.disposition === "by_others" ? dispositionLabel(i.disposition) : supplyLabel(i.supplyBy))) },
+    { title: "Construction systems and materials", intro: "Envelope and structure, as chosen so far. Each system is its own line.", rows: systems.map((i) => row(i, selStatus(i))) },
+    { title: "Finishes and fittings", intro: "Project defaults and room exceptions, as chosen so far.", rows: finishes.map((i) => row(i, selStatus(i))) },
+    { title: "Site and household facts", intro: "Recorded facts. These are constraints to allow for, not work to price as scope.", rows: items.filter((i) => nature(i) === "fact" && said(i)).map((i) => row(i, "Fact")) },
+    { title: "Existing-condition risks", intro: "Allow for investigation or exclusions.", rows: items.filter((i) => nature(i) === "risk" && (said(i) || i.nextAction)).map((i) => row(i, i.resolved ? "Closed" : "Open")) },
+    { title: "Unresolved decisions", intro: "Decide before pricing is final.", rows: items.filter((i) => outstandingReasons(i).includes("decision") && !out(i)).map((i) => row(i, i.answer?.state === "client_unsure" ? "Client unsure" : "To be decided")) },
+    { title: "Technical questions", intro: "A designer, engineer or trade must confirm these.", rows: items.filter((i) => i.technicalStatus === "needs_verification" || (nature(i) === "technical" && !i.resolved && said(i))).map((i) => row(i, technicalLabel(i.technicalStatus))) },
+    { title: "Blue Leaf pricing assumptions", intro: "Labelled guides for what isn't chosen. Not a client choice, an approval or a price. Anything the client chooses replaces them.", rows: baselineAssumptions(register).map((a) => ({ itemId: "", area: a.label, text: `${a.tierLabel}: ${a.text}`, status: a.draft ? "Assumption, draft wording" : "Assumption", note: a.status === "part" && a.gaps.length ? `Covers only: ${a.gaps.join(", ")}` : "" })) },
+    { title: "Performance goals for review", intro: "Staff-only prompts for Blue Leaf or consultant review. Nothing here is selected, specified or priced.", rows: items.flatMap((i) => performanceSuggestions(i.answer).flatMap((g) => g.suggestions.map((sg) => ({ itemId: refCode(i), area: sg.area, text: sg.text, status: "Review required", note: g.goalLabel })))) },
+    { title: "Drawing references", intro: "The drawings this was prepared against.", rows: [register.meta.planRev ? { itemId: "", area: "Drawing basis", text: register.meta.planRev, status: "Current", note: "" } : null, ...(context.drawings || []).map((d) => ({ itemId: "", area: "Drawing", text: clean(d.filename), status: clean(d.revision) || "On file", note: clean(d.issuer) }))].filter(Boolean) },
+  ].filter((sec) => sec.rows.length);
+  fx.tenderNotes = { sections };
+  return fx;
+}
+
 export function buildRegisterFixture(docType, input, opts = {}) {
   if (docType === "client_brief") return clientBriefFixture(input);
   if (docType === "architect_brief") return architectBriefFixture(input);
   if (docType === "selections_schedule") return selectionsFixture(input, opts);
+  if (docType === "tender_scope_notes") return tenderNotesFixture(input);
   throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
 }
 
@@ -229,6 +286,7 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   const strings = JSON.stringify(fx);
   if (MONEY_RX.test(strings)) errors.push("The document would contain a dollar figure — register documents never show prices or allowances.");
   if (docType === "selections_schedule" && !fx.selections.length) errors.push("There are no client selections to schedule yet.");
+  if (docType === "tender_scope_notes" && !fx.tenderNotes.sections.some((sec) => sec.title !== "Drawing references")) errors.push("There is nothing in the register for the estimator yet.");
   if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferenceGroups.length) warnings.push("The brief has no recorded scope or preferences yet.");
   const v = validateFixture(fx, { mode: mode === "issue" ? "issue" : "draft" });
   if (mode === "issue") errors.push(...v.errors); else warnings.push(...v.warnings);
@@ -384,6 +442,7 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
       // literally true (no unreferenced PDF/DOCX left behind). Tab 25 issue 5.
       await sb.storage.from(BUCKET).remove([pdfPath, docxPath]).catch(() => {});
       if (error.code === "42883" || error.code === "PGRST202") throw new DocumentError(503, "Apply migration 213 first (document issue registry).", "SCHEMA");
+      if (/is not a register document type/.test(error.message || "") || error.code === "23514") throw new DocumentError(503, "Apply migration 218 first (Tender Scope & Pricing Notes). Nothing was issued.", "SCHEMA");
       throw new DocumentError(400, "Could not record the issue — nothing was issued.", "ISSUE", { detail: error.message });
     }
     if (data?.ok === false) {

@@ -96,14 +96,14 @@ ok("T12 pagination: short/medium architect stay one page; long breaks + shows re
   cbReno.CB_BREAK === true && cbReno.HAS_PROCESS.length === 1 && cbReno.PROC1_LABEL === "Concept" &&
   cbShort.CB_BREAK === false && cbShort.HAS_PROCESS.length === 0 && cbShort.ASSUMPTIONS.length === short.clientBrief.assumptions.length);
 
-// 13. All FOUR templates render from one fixture via the canonical engine (no second engine, no image module).
+// 13. All FIVE templates (four client and consultant, one internal: R05 P5) render from one fixture via the canonical engine (no second engine, no image module).
 let rendered = 0;
 for (const def of Object.values(DOC_DEFS)) {
   const tpl = fs.readFileSync(path.join(REPO, "public/templates", def.templateFile));
   const out = renderDocxTemplate(tpl, def.build(reno));
   if (out && out.length > 5000) rendered++;
 }
-ok("T13 all four documents render through the existing renderDocxTemplate", rendered === 4 && Object.keys(DOC_DEFS).length === 4);
+ok("T13 all five documents render through the existing renderDocxTemplate", rendered === 5 && Object.keys(DOC_DEFS).length === 5);
 
 console.log(`\nR01–R04 document tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

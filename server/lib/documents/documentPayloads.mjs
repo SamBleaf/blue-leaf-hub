@@ -188,11 +188,31 @@ export function buildSelectionsSchedulePayload(fx) {
   };
 }
 
+// ── 04 Tender Scope & Pricing Notes (INTERNAL) ───────────────────────────────
+// One master copy for the Buildxact estimator. Never a client or supplier document, and it carries no amounts or quantities.
+export function buildTenderNotesPayload(fx) {
+  const t = fx.tenderNotes || {}, p = fx.project;
+  const c = chrome(fx, { prefix: "TSN", breadcrumb: "Internal  /  Tender",
+    sectionLabel: "Internal  /  Estimating", title: "Tender scope & pricing notes",
+    tagline: "What to price, what is out, and what is still open. Buildxact holds the numbers." });
+  return {
+    ...c,
+    META_ROWS: metaRows([["Project", p.projectDescription], ["Drawing basis", p.drawingBasis], ["Site", p.siteAddress], ["Audience", "Blue Leaf estimating only"], ["Status", c._statusValue], ["Prepared by", p.preparedBy]]),
+    CALLOUT_LABEL: "Internal only",
+    CALLOUT_BODY: "Not for the client, consultants or trades. Blue Leaf assumptions below are labelled pricing guides. They are not client choices, approvals or prices. Reference IDs match the project register.",
+    SECTIONS: (t.sections || []).map((sec, i) => ({
+      SEC_NUM: String(i + 1).padStart(2, "0"), SEC_TITLE: sec.title, SEC_INTRO: sec.intro || "",
+      ROWS: sec.rows.map((r) => ({ REF_ID: r.itemId || "", AREA: r.area || "", TEXT: r.text || "", STATUS: r.status || "", NOTE: r.note || "" })),
+    })),
+  };
+}
+
 export const DOC_DEFS = {
   client_brief: { templateFile: "blb-client-brief-template.docx", build: buildClientBriefPayload, label: "Client Project Brief" },
   architect_brief: { templateFile: "blb-architect-brief-template.docx", build: buildArchitectBriefPayload, label: "Architect Design Brief" },
   client_presentation: { templateFile: "blb-client-presentation-template.docx", build: buildClientPresentationPayload, label: "Client Selections Presentation" },
   selections_schedule: { templateFile: "blb-selections-schedule-template.docx", build: buildSelectionsSchedulePayload, label: "Technical Selection Register" },
+  tender_scope_notes: { templateFile: "blb-tender-notes-template.docx", build: buildTenderNotesPayload, label: "Tender Scope & Pricing Notes" },
 };
 
 // ── Pre-issue validation (Tab 17 blockers) ───────────────────────────────────

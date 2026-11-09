@@ -47,6 +47,8 @@ export function normaliseDocxTemplate(zip, { transformHeaderXml } = {}) {
   return zip;
 }
 
+const FIXED_ZIP_DATE = new Date(Date.UTC(2000, 0, 1));
+
 /**
  * The canonical render: DOCX template bytes (Buffer|Uint8Array|base64 string) + merge data → filled
  * DOCX Buffer. `opts.transformHeaderXml` is an optional per-document header rewrite.
@@ -66,5 +68,8 @@ export function renderDocxTemplate(templateBytes, data, { transformHeaderXml } =
     nullGetter: () => "",
   });
   doc.render(data);
-  return doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+  // Entries are stamped with the time they were written, at two-second resolution. Fixing it means the same input gives the same bytes.
+  const out = doc.getZip();
+  for (const f of Object.values(out.files)) f.date = FIXED_ZIP_DATE;
+  return out.generate({ type: "nodebuffer", compression: "DEFLATE" });
 }
