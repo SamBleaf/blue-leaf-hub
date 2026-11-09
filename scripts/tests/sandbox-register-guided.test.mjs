@@ -191,6 +191,10 @@ async function main() {
   await by(p, "reasons-W-013").waitFor();
   await by(p, "reason-W-013-blue_leaf_to_advise").click();
   check("the reason suggests who has it", (await by(p, "reasons-W-013").locator("select").inputValue()) === "blue_leaf");
+  await by(p, "add-another-W-013").click();
+  await by(p, "zone-W-013-feature").last().click();
+  await by(p, "choice-W-013-lightweight_cladding").last().click();
+  await by(p, "choice-W-013-lightweight_cladding-fibre_cement_sheet").last().click();
   await by(p, "zone-W-017-main_floor").click();
   await by(p, "choice-W-017-timber").click();
   await by(p, "add-another-W-017").click();
@@ -203,7 +207,10 @@ async function main() {
   const roof = byPrompt(reg, "W-014")[0];
   check("the roof tree stored its path", roof.answer.selected[0].path.join("/") === "metal_roofing/pitched/corrugated" && roof.answer.selected[0].label === "Metal roofing · Pitched · Corrugated");
   check("a choice is a preference, never an approval", roof.certainty === "preference" && !roof.evidence);
-  const wall = byPrompt(reg, "W-013")[0];
+  const walls = byPrompt(reg, "W-013");
+  const wall = walls.find((w) => w.answer.state === "unresolved");
+  const feature = walls.find((w) => w.answer.zone?.key === "feature");
+  check("a second wall system is its own record, no typing (B01)", walls.length === 2 && feature.answer.selected[0].label === "Lightweight cladding · Fibre cement sheet" && !feature.description);
   check("Not decided needs no note, and has a reason and an owner", wall.answer.state === "unresolved" && wall.answer.unresolved.reason === "blue_leaf_to_advise" && wall.responsibility === "blue_leaf" && !wall.answer.note && !wall.description);
   const floors = byPrompt(reg, "W-017");
   check("two floor defaults, one per zone", floors.length === 2 && floors.every((f) => f.isDefault) && floors.map((f) => f.answer.zone.key).sort().join() === "main_floor,wet_area_floor");
@@ -211,8 +218,8 @@ async function main() {
   await p.screenshot({ path: join(EVIDENCE, "whole-house-desktop.png"), fullPage: false });
 
   section("More detail and a note");
-  await by(p, "more-W-013").click();
-  check("Deferred and Existing to remain appear", !!(await by(p, "settle-W-013-deferred").count()) && !!(await by(p, "settle-W-013-retain").count()));
+  await by(p, "more-W-013").first().click();
+  check("Deferred and Existing to remain appear", !!(await by(p, "settle-W-013-deferred").first().count()) && !!(await by(p, "settle-W-013-retain").first().count()));
   await by(p, "note-W-014").click();
   await by(p, "note-input-W-014").fill("Check the fascia");
   await saved(p);
@@ -322,9 +329,16 @@ async function main() {
   await by(m, "notdecided-W-015").tap();
   await by(m, "reasons-W-015").waitFor();
   check("the reason row fits at phone width", (await overflow()) <= 0, await overflow());
+  const cardBox = await by(m, "card-W-019").boundingBox();
+  check("the card has most of the phone's width", cardBox.width >= 270, cardBox.width);
   await m.screenshot({ path: join(EVIDENCE, "whole-house-375.png"), fullPage: false });
   reg = await getReg(id);
   check("touch answers reached the store", byPrompt(reg, "W-019")[0].answer.selected.map((s) => s.path.join("/")).join() === "palette/warm,ceiling/square_set");
+  await by(m, "step-site").tap();
+  await by(m, "card-W-001").waitFor();
+  check("no sideways scroll on Site & existing", (await overflow()) <= 0, await overflow());
+  await by(m, "card-W-001").scrollIntoViewIfNeeded();
+  await m.screenshot({ path: join(EVIDENCE, "site-375.png"), fullPage: false });
   await m.context().close();
 
   section("Rooms and a real conflict on a project record");
@@ -344,6 +358,7 @@ async function main() {
   let preg = await getReg(pid);
   const k1 = byPrompt(preg, "K-001")[0];
   check("project mode: the answer is on the canonical record", preg.items.length === 1 && k1.disposition === "new" && !!k1.sync?.rowId && k1.answer.selected[0].optionId === "new_kitchen");
+  check("still nothing typed on a project record", k1.description === "");
   check("the row reads as project record", /Project record/.test(await by(rp, "register-mode").innerText()));
   const behind = await api("PUT", `/api/register/leads/${pid}`, { changes: [{ ...k1, nextAction: "Measure the old kitchen" }], deletes: [] });
   check("someone else saves the same item first", behind.status === 200, JSON.stringify(behind.body).slice(0, 200));

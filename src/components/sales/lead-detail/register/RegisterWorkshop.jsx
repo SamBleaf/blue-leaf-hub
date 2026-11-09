@@ -133,7 +133,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   if (!loaded && !store.error) return <div ref={rootRef} />; // first load — nothing shows until the switch is known
 
   return (
-    <div ref={rootRef} className={expanded ? "fixed inset-0 z-40 overflow-y-auto bg-page px-2 py-3 sm:px-6 sm:py-4" : ""}>
+    <div ref={rootRef} className={expanded ? "fixed inset-0 z-40 overflow-y-auto bg-page px-2 py-3 sm:px-6 sm:py-4" : "-mx-3 sm:mx-0"}>
       <div className={`rounded-card border border-hairline bg-surface ${expanded ? "mx-auto max-w-[1180px]" : ""}`} data-testid="register-workshop">
       {expanded && (
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-hairline bg-surface px-4 py-2 text-[11px]">
