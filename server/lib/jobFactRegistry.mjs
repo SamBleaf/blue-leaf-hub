@@ -41,6 +41,10 @@ export const FACT_REGISTRY = [
   // the physical project_type. Drives responsibility wording + the management overlay (Master Register, mig 213).
   { key: "delivery_model", label: "Delivery model", family: "identity", spine: "job", type: "versioned", tier: "consequential",
     store: { table: "jobs", column: "delivery_model" }, consumers: ["register", "documents", "contract"] },
+  // The client already held completed plans at the lead stage. Changes which Sales stages apply, so a director records it with a note.
+  // Stays on the lead: nothing after Won reads it. Never read from delivery_model, and it never waives a commercial gate.
+  { key: "plans_supplied_at", label: "Plans supplied by client", family: "identity", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "plans_supplied_at" }, consumers: ["sales_pipeline"] },
   { key: "architect_name", label: "Architect", family: "relationships", spine: "job", type: "versioned", tier: "internal",
     store: { table: "jobs", column: "architect_name" }, consumers: ["fee_proposal", "whs", "marketing"] },
   { key: "client_email", label: "Client email", family: "relationships", spine: "job", type: "versioned", tier: "consequential",

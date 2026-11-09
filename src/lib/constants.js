@@ -128,18 +128,20 @@ export const CONSULTANT_DELIVERABLES = {
   sanitary:          [{ key: "fixture_schedule", label: "Fixture & tapware schedule (WELS)", feeds: "proposal" }],
   other:             [],
 };
-/** Deliverable status machine: pending → requested → received → issued (to the next party). */
-export const DELIVERABLE_STATUS = { pending: "Pending", requested: "Requested", received: "Received", issued: "Issued" };
-export const DELIVERABLE_STATUS_ORDER = ["pending", "requested", "received", "issued"];
+/** Deliverable status machine: pending → requested → received → reviewed → included in the current set → issued (to the next party). */
+export const DELIVERABLE_STATUS = { pending: "Pending", requested: "Requested", received: "Received", reviewed: "Reviewed", included: "In the set", issued: "Issued" };
+export const DELIVERABLE_STATUS_ORDER = ["pending", "requested", "received", "reviewed", "included", "issued"];
 export const DELIVERABLE_STATUS_COLORS = {
   pending:   "bg-slate-100 text-slate-600",
   requested: "bg-amber-100 text-amber-800",
   received:  "bg-sky-100 text-sky-700",
+  reviewed:  "bg-indigo-100 text-indigo-700",
+  included:  "bg-teal-100 text-teal-700",
   issued:    "bg-green-100 text-green-700",
 };
 export const DELIVERABLE_FEEDS_LABELS = { consent: "→ Consent", proposal: "→ Proposal", both: "→ Consent + Proposal", none: "" };
 /** Advisory dependency graph between deliverables (by key). A deliverable is "waiting" while any
- *  upstream deliverable that is ALSO on the roster isn't yet received/issued — never a hard block.
+ *  upstream deliverable that is ALSO on the roster hasn't arrived yet — never a hard block.
  *  Changing an upstream (footing class, glazing) flags every downstream done doc as re-issue. */
 export const DELIVERABLE_DEPENDENCIES = {
   site_plan:            [],

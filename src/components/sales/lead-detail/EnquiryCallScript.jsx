@@ -7,11 +7,28 @@
 import QualificationDropdowns from "./QualificationDropdowns.jsx";
 import { ENQUIRY_CALL_TARGET } from "../../../lib/leadNextAction.js";
 
+const shortDate = (d) => (d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short" }) : null);
+
+/** What this enquiry still needs, read from what is on file. A fact already held is never asked for again. */
+function stillToFindOut(lead) {
+  return [
+    ["Phone", lead.phone], ["Email", lead.email], ["Property", lead.site_address || lead.suburb], ["Project type", lead.project_type],
+    ["Budget", lead.qualify_budget], ["Timeframe", lead.qualify_timeframe], ["Who decides", lead.qualify_decision_maker], ["Documents held", lead.documents_on_hand],
+  ].filter(([, v]) => v == null || v === "").map(([label]) => label);
+}
+
 export default function EnquiryCallScript({ lead, patch, scorecard }) {
+  const missing = stillToFindOut(lead);
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted" data-testid="enquiry-summary">
+        Enquiry received <span className="font-medium text-ink">{shortDate(lead.created_at) || "recently"}</span>
+        {lead.last_activity_at && <> · last activity <span className="font-medium text-ink">{shortDate(lead.last_activity_at)}</span></>}
+        {" · "}with <span className="font-medium text-ink">{lead.assigned_to || "nobody yet"}</span>
+      </p>
       <div data-next-target={ENQUIRY_CALL_TARGET} className="rounded-card border border-primary/20 bg-primary/[0.03] p-4 transition-shadow">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-primary mb-1">Enquiry call — complete the picture</h3>
+        <p className="mb-1 text-xs font-medium text-ink" data-testid="enquiry-missing">{missing.length ? `Still to find out: ${missing.join(", ")}.` : "The essentials are on file."}</p>
         <p className="text-xs text-muted leading-relaxed">
           Run the short call to fill the essentials, then decide the next step. Keep it tight — you&apos;re checking fit and readiness, not selling.
         </p>

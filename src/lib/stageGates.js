@@ -40,12 +40,19 @@
  * client and the server read the same thing.
  */
 
-// Consultants → Tender exit: the full consultant document set must be in (every roster
-// deliverable received/issued). An empty roster is not ready.
+// Consultants → Tender exit: the full consultant document set must be reviewed and in the current set.
+// An empty roster is not ready.
 export function consultantDocsReady(roster) {
   const r = Array.isArray(roster) ? roster : [];
-  return r.length > 0 && r.every((e) => (Array.isArray(e.deliverables) ? e.deliverables : []).every((d) => d.status === "received" || d.status === "issued"));
+  return r.length > 0 && r.every((e) => (Array.isArray(e.deliverables) ? e.deliverables : []).every(deliverableIsReady));
 }
+
+/**
+ * Is this consultant document actually ready to rely on? Received only means it arrived: someone has to review it and put it
+ * in the current set (Sales blueprint CNS-02). A document flagged for re-issue isn't ready, whatever it says.
+ */
+export const DELIVERABLE_READY_STATUSES = ["included", "issued"];
+export function deliverableIsReady(d) { return DELIVERABLE_READY_STATUSES.includes(d?.status) && !d?.reissue; }
 
 export const STAGE_GATES = {
   qualify: [],
@@ -87,7 +94,7 @@ export const STAGE_GATES = {
   ],
   tender: [
     { field: "consultant_roster", label: "Consultant documents complete", hard: false,
-      check: l => consultantDocsReady(l.consultant_roster), hint: "Advance each consultant's deliverables to received/issued" },
+      check: l => consultantDocsReady(l.consultant_roster), hint: "Review each consultant's documents and put them in the current set. A document that has only been received isn't ready." },
     { field: "fee_proposal_id", label: "Fixed-Price proposal generated", hard: false,
       check: l => !!l.fee_proposal_id, hint: "Generate the Fixed-Price proposal (button below)" },
     { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", hard: false,
@@ -118,18 +125,48 @@ export const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", 
 const LEGACY_STAGE_POSITION = { accepted: "fee_proposal" };
 
 /**
- * Which Sales stages apply to a lead. Derived, never stored — `delivery_model` plays no part in it.
- * Architect Tender leads enter at Tender: Concept and PTSA are intentionally skipped (mig 216). Discovery
- * still applies, like every pathway, so a move that crosses it has to meet its hard gate.
+ * Which Sales stages apply to a lead. Derived every time, never a stored enum. `delivery_model` plays no part: it says how Blue Leaf
+ * contracts and never waives a gate.
+ *   architect_tender  enters at Tender. Concept and PTSA are intentionally skipped (mig 216).
+ *   plans_supplied    the client already has completed plans, recorded with a note by a director (leads.plans_supplied_at).
+ *   design_build      everything else, including every lead with no plans recorded. Column absent reads as this.
+ * Every pathway keeps Discovery, the Consultants and Tender readiness requirements, and the signed-contract gate at Won.
  */
 export function resolveEngagementPathway(lead) {
-  return lead?.lead_type === "architect_tender" ? "architect_tender" : "design_build";
+  if (lead?.lead_type === "architect_tender") return "architect_tender";
+  if (lead?.plans_supplied_at) return "plans_supplied";
+  return "design_build";
 }
 
 const STAGES_NOT_APPLICABLE = {
   design_build: [],
   architect_tender: ["winning_offer", "fee_proposal"],
+  plans_supplied: ["winning_offer", "fee_proposal"],
 };
+
+/** Requirements that belong to a stage this pathway skips, so can't be met on it. Only ever an advisory one: no hard gate is listed here. */
+const REQUIREMENTS_NOT_APPLICABLE = { plans_supplied: ["ptsa_status"] };
+
+/** Does this stage apply to this lead's pathway? */
+export const stageApplies = (stage, lead) => !(STAGES_NOT_APPLICABLE[resolveEngagementPathway(lead)] || []).includes(stage);
+
+/** A stage's requirements for this lead. */
+export function requirementsFor(targetStage, lead) {
+  const skip = new Set(REQUIREMENTS_NOT_APPLICABLE[resolveEngagementPathway(lead)] || []);
+  return (STAGE_GATES[targetStage] || []).filter((r) => !(skip.has(r.field) && !r.hard));
+}
+
+/**
+ * The stage that comes next for this lead. Only a plans-supplied lead skips here. An Architect Tender lead moved back keeps the
+ * sequential order it has always had.
+ */
+export function nextStageFor(current, lead) {
+  const idx = STAGE_ORDER.indexOf(current);
+  if (idx < 0) return null;
+  const rest = STAGE_ORDER.slice(idx + 1);
+  if (resolveEngagementPathway(lead) !== "plans_supplied") return rest[0] || null;
+  return rest.find((s) => stageApplies(s, lead)) || null;
+}
 
 /**
  * Architect Tender leads normally have no qualifying scorecard. One moved back before Discovery has to meet
@@ -160,8 +197,8 @@ export function stagesCrossed(from, to, lead) {
  *   { ok, missing, hardMissing, advisoryMissing }   // each a list of requirement objects
  */
 export function evaluateGate(targetStage, lead) {
-  const reqs = STAGE_GATES[targetStage] || [];
   const l = lead || {};
+  const reqs = requirementsFor(targetStage, l);
   const missing = reqs.filter(r => !r.check(l));
   return {
     ok: missing.length === 0,
@@ -180,7 +217,7 @@ export function evaluateGate(targetStage, lead) {
  */
 export function gateRows(targetStage, lead) {
   const l = lead || {};
-  const rows = (STAGE_GATES[targetStage] || []).map((r) => ({ ...r, met: !!r.check(l) }));
+  const rows = requirementsFor(targetStage, l).map((r) => ({ ...r, met: !!r.check(l) }));
   return {
     required: rows.filter((r) => r.hard),
     recommended: rows.filter((r) => !r.hard),

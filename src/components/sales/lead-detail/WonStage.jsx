@@ -6,14 +6,17 @@
  * The job→live-project handoff itself is done server-side at the WIN transition (finalizeWonJob +
  * trigger 096) — this panel is the human confirmation layer on top of that automation.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { WON_SUBSTATUS, OPS_READY_ITEMS } from "../../../lib/constants.js";
-import { apiPost } from "../../../lib/apiFetch.js";
+import { apiFetch, apiPost } from "../../../lib/apiFetch.js";
 import { OPS_READY_TARGET } from "../../../lib/leadNextAction.js";
 
 export default function WonStage({ lead, patch }) {
   const [retrying, setRetrying] = useState(false);
   const [retryMsg, setRetryMsg] = useState(null);
+  // The one truthful hand-off status, from the server (contract, baseline, project, ops and portal stay separate facts).
+  const [handover, setHandover] = useState(null);
+  useEffect(() => { apiFetch(`/api/register/leads/${lead.id}/handover-status`).then((r) => { if (r.ok) setHandover(r.data.status || r.data.handover || null); }); }, [lead.id, lead.won_substatus, lead.ops_ready_checklist]);
   const checklist = lead.ops_ready_checklist && typeof lead.ops_ready_checklist === "object" ? lead.ops_ready_checklist : {};
   const autoState = {
     job_created: !!lead.job_id,
@@ -49,6 +52,7 @@ export default function WonStage({ lead, patch }) {
             ? "Everything's transferred — Operations can start."
             : "Complete the handoff checklist below, then mark it Ops Ready to hand over to Operations."}
         </p>
+        {handover?.nextAction && <p className="mt-1.5 text-xs text-ink" data-testid="won-next"><span className="font-semibold">Next: </span>{handover.nextAction.label} <span className="text-muted">({handover.nextAction.owner})</span></p>}
       </div>
 
       {/* Ops Ready checklist */}

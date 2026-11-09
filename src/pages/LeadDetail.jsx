@@ -2,13 +2,15 @@ import { authFetch } from "../lib/authFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
 import { apiFetch, apiPost } from "../lib/apiFetch.js";
 import { useAuth } from "../lib/useAuth.js";
-import {
+import { LEAD_DOCUMENTS_ON_HAND_LABELS,
   LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS,
   LEAD_ACTION_TYPE_LABELS,
   LEAD_SOURCE_CATEGORY_LABELS,
   LEAD_TEMPERATURE,
 } from "../lib/constants.js";
-import { STAGE_ORDER, showsQualifyingScorecard, gateRows } from "../lib/stageGates.js";
+import { STAGE_ORDER, showsQualifyingScorecard, gateRows, nextStageFor, stageApplies, resolveEngagementPathway } from "../lib/stageGates.js";
+import EngagementPathwayCard from "../components/sales/lead-detail/EngagementPathwayCard.jsx";
+import StageDrawings from "../components/sales/lead-detail/StageDrawings.jsx";
 import { computeLeadNextAction, focusLeadControl, WON_HANDOFF_TARGET } from "../lib/leadNextAction.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -101,11 +103,6 @@ const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 // Stage gate requirements are defined ONCE in the shared canonical module src/lib/stageGates.js
 // (read here through gateRows) and rendered read-only. The server enforces the same
 // definitions, so this display can never drift from what is actually enforced (S-013 / ARCH-01).
-
-function nextStage(current) {
-  const idx = STAGE_ORDER.indexOf(current);
-  return idx >= 0 && idx < STAGE_ORDER.length - 1 ? STAGE_ORDER[idx + 1] : null;
-}
 
 function relativeTime(iso) {
   if (!iso) return "";
@@ -1658,7 +1655,7 @@ export default function LeadDetail() {
   }
 
   async function advanceStage() {
-    const next = nextStage(lead.stage);
+    const next = nextStageFor(lead.stage, lead);
     if (!next || advancing) return;
     setAdvancing(true);
     // Surface the server hard gate (e.g. Discovery needs score ≥ 5 AND a booked build conversation).
@@ -1720,15 +1717,16 @@ export default function LeadDetail() {
   if (!lead) return null;
 
   const stageMeta = STAGES.find(s => s.id === lead.stage);
-  const next = nextStage(lead.stage);
+  const next = nextStageFor(lead.stage, lead);
   const gates = next ? gateRows(next, lead) : null;
   const nextLabel = STAGES.find(s => s.id === next)?.label;
   // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)
   const showSiteAddressWarning = !lead.job_id && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
   const isArchTender = lead.lead_type === "architect_tender";
   const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
-  const showWinningOffer = !isArchTender && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
-  const showPreTender = ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const plansSupplied = resolveEngagementPathway(lead) === "plans_supplied";
+  const showWinningOffer = !isArchTender && !plansSupplied && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const showPreTender = !plansSupplied && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
 
   // ── Option A refactor ──────────────────────────────────────────────
   // Each block below is the EXISTING JSX, copied verbatim (same handlers,
@@ -2533,13 +2531,22 @@ export default function LeadDetail() {
     focusContent = (
       <div className="space-y-4">
         <DiscoveryMeetingScript />
+        <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
         <DesignerSelect lead={lead} patch={patch} reload={load} />
         <DiscoveryActions lead={lead} reload={load} />
-        <MeetingScheduler lead={lead} meetingType="designer_meeting" reload={load} />
         {/* Master Register — optional at Discovery (context is read from Sales, never re-asked) */}
         <RegisterWorkshop lead={lead} patch={patch} stage="discovery" />
         <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
+        <div className="rounded-card border border-hairline bg-page p-3 text-xs" data-testid="discovery-facts">
+          <p className="section-label mb-1">Before moving on</p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-4">
+            <div><dt className="text-muted">Design stage</dt><dd className="font-medium text-ink">{lead.design_stage || "Not set"}</dd></div>
+            <div><dt className="text-muted">Desired start</dt><dd className="font-medium text-ink">{lead.desired_start_date || "Not set"}</dd></div>
+            <div><dt className="text-muted">Documents held</dt><dd className="font-medium text-ink">{LEAD_DOCUMENTS_ON_HAND_LABELS[lead.documents_on_hand] || lead.documents_on_hand || "Not recorded"}</dd></div>
+            <div><dt className="text-muted">Discovery notes</dt><dd className="font-medium text-ink">{lead.discovery_notes?.trim() ? "Written" : "Not yet"}</dd></div>
+          </dl>
+        </div>
         {conversationsBlock}
       </div>
     );
@@ -2559,12 +2566,7 @@ export default function LeadDetail() {
         {/* Design & pre-construction fee invoice (raised once the PTSA is signed) */}
         <XeroInvoiceCard lead={lead} reload={load} variant="design" />
         {/* Working drawings deliverables */}
-        <div className="rounded-card border border-hairline bg-surface p-4">
-          <h3 className="section-label mb-1">Working drawings</h3>
-          <p className="text-xs text-muted">
-            Upload the working drawings, elevations &amp; 3D render in the <span className="font-medium text-ink">Documents</span> tab (type &ldquo;Working drawings&rdquo;). They carry to the job&rsquo;s <span className="font-medium text-ink">PLANS</span> folder and feed the plan presentation below.
-          </p>
-        </div>
+<StageDrawings leadId={lead.id} title="Working drawings" types={["working_drawings", "concept_drawings"]} />
         <MeetingScheduler lead={lead} meetingType="plan_presentation" reload={load} />
         {/* Master Register — detailed work normally starts at a signed PTSA; staff may work ahead (D-038) */}
         <RegisterWorkshop lead={lead} patch={patch} stage="fee_proposal" />
@@ -2637,6 +2639,7 @@ export default function LeadDetail() {
   const focusEl = focusShown ? (
     <LeadNextActionCard id="lead-focus" stageLabel={stageMeta?.label}>
       {archTenderBlock}
+      {!isArchTender && (plansSupplied || ["discovery", "winning_offer", "fee_proposal"].includes(lead.stage)) && <EngagementPathwayCard lead={lead} canManage={isAdmin} reload={load} />}
       {focusContent}
       <LeadCorrespondence lead={lead} patch={patch} reload={load} />
       {wonHandoffBlock || advanceBlock}
@@ -2709,7 +2712,7 @@ export default function LeadDetail() {
     <div>
       <LeadDetailHeader
         breadcrumb={breadcrumbBlock}
-        stepper={<LeadStageStepper stageOrder={STAGE_ORDER} stages={STAGES} current={lead.stage} isArchTender={isArchTender} onJump={isAdmin ? jumpToStage : undefined} isTest={!!lead.is_test} canManage={isAdmin} />}
+        stepper={<LeadStageStepper stageOrder={plansSupplied ? STAGE_ORDER.filter((id) => id === lead.stage || stageApplies(id, lead)) : STAGE_ORDER} stages={STAGES} current={lead.stage} isArchTender={isArchTender} onJump={isAdmin ? jumpToStage : undefined} isTest={!!lead.is_test} canManage={isAdmin} />}
         keyFacts={keyFactsBlock}
         primaryAction={primaryAction}
         secondaryActions={headerActionsBlock}

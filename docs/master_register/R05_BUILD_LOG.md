@@ -719,3 +719,40 @@ The guided suite caught a regression while this was built: the row key included 
 **Caveats.** Nobody at Blue Leaf has read a real Tender Notes against a real job. Long notes in the narrow column will wrap. The template is new, so its hash is recorded on each issue.
 
 **Next dependency.** P6.
+
+## P6 — Remaining Sales stages and pathway (2026-11-10)
+
+**Outcome.** A lead whose client already has completed plans can skip Concept and PTSA, with a director's note, and every commercial gate still holds. Consultant documents have to be reviewed and put in the set before they count. Nothing here is deployed, and migration 219 is sandbox only.
+
+**Pathway (D6).** `resolveEngagementPathway`, `stageApplies`, `requirementsFor` and `nextStageFor` in `stageGates.js`, one table, no second engine. Migration 219 adds three nullable columns on `leads` and extends the 217 browser-write guard to them, because a direct write would otherwise skip a hard gate. Fact registered in `jobFactRegistry.mjs`.
+
+| Required outcome | Result | Level |
+|---|---|---|
+| Normal design and build follows the design process | Discovery to Consultants refused without the concept agreement | DB through API |
+| Completed plans not forced through concept approvals | Discovery to Consultants passes, with no concept or PTSA bypass logged | DB through API, BROWSER |
+| Build-only or CM handled appropriately | With no plans recorded: unchanged. With plans recorded: the plans route. Delivery model unchanged either way | DB through API |
+| Commercial gates never bypassed | Discovery gate, Tender readiness and Won hold. PATCH, a same-request move, a browser token, an employee and a client are all refused | DB through API |
+| Existing leads keep behaviour | NULL reads as design and build. A column not yet migrated does too | AUTOMATED |
+
+**Other stage work.**
+
+| Item | What changed | Level |
+|---|---|---|
+| ENQ-02, ENQ-03 | Enquiry says what is still missing, read from what is on file, and who has it. The fixed question list stays as a guide | BROWSER |
+| DIS-01, DIS-02 | Meeting comes first in Discovery. A compact "Before moving on" shows design stage, start date, documents held and notes | SOURCE |
+| PTS-03 | Working drawings open inside the PTSA stage, newest marked Latest. Same data as the Documents tab | BROWSER |
+| CNS-01, 02, 03, 05 | Reviewed and In the set added. Received no longer counts. Each document holds revision, reference, due date and who has it, inside the existing JSON. Moving past Received needs a revision or reference. Overdue shows | BROWSER, DB |
+| WON-02, WON-04 | The server's truthful next action shows in the Won banner. The dashboard button was already secondary from P2 | SOURCE |
+
+**Not built, recorded as decisions.** QUA-05: `land_status` and `qualify_site` are written independently. A code comment says one drives the other, and it doesn't. `qualify_site` feeds the score that is a hard gate, so linking them is a scoring decision. CON-01 and CON-04: the P2 correspondence status already shows sent state on the stage, and I did not add a second indicator. PTS-01 numbering and the rest of the audit's partial items remain.
+
+**Behaviour change to tell staff about.** A lead at Consultants with documents at Received now shows them as not ready, and the normal Move to Tender button waits for them (D4). The director's Move menu still passes with a logged bypass.
+
+**Tests.**
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `sales-stage-gates`, extended | 82 passed |
+| DB, BROWSER | `sandbox-sales-pathway` (new). Evidence `~/blh-register-evidence/r05/p6/` | 49 passed |
+| AUTOMATED, BROWSER, DB | `bash SP/run-tests.sh all`, 36 suites | 0 failing |
+| PRODUCTION | Not available | Not verified |

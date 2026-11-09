@@ -1,5 +1,5 @@
 ---
-sop_version: 2.3
+sop_version: 2.4
 last_reviewed: 2026-11-09
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
@@ -115,6 +115,19 @@ From **Sales Manager → Board view** (desktop only):
 3. Drop — the stage updates immediately in the DB and the card repositions.
 
 The board view does not enforce advisory gates — gates are only checked in the lead detail advance card. This means a drag-and-drop move will always succeed even if requirements are unmet.
+
+### When the client already has completed plans
+
+1. At Discovery, Concept or PTSA, find **Client already has completed plans?** at the top of the stage.
+2. Tap **Record plans supplied**. Write what was supplied, by whom and which revision. A director does this.
+3. Concept and PTSA / Plans drop out of this lead's stages, and the next stage becomes Consultants. The lead keeps the reason on screen.
+4. Discovery, Tender readiness and a signed contract still apply. Any pre-construction service Blue Leaf does perform still has to be separately agreed.
+5. Recording a build-only or construction-management job doesn't do this by itself. Only recording that the plans were supplied does.
+6. If it was recorded by mistake, tap **Change this**, give a reason, and the design stages come back. The lead stays at the stage it is at.
+
+### Consultant documents
+
+A document that has only been received isn't ready. Tap the status to move it on: **Reviewed**, then **In the set**. Before Reviewed the Hub asks for the revision or a document reference. **Details** holds the revision, reference, due date and who has it. Tender readiness counts documents that are in the set or issued, and none flagged for re-issue.
 
 ## 6. What happens next
 
@@ -285,6 +298,21 @@ Next review: 2027-01-02
 1. Open a Discovery lead with the concept agreement accepted but no discovery notes.
 2. Expected: "Concept agreement accepted" is ticked under **Required**. "Discovery notes filled" shows an amber mark under **Recommended**, and the wording says the button waits for it and that a Director can skip it with Move ▾.
 3. Use **Move ▾** on the pipeline card to move the lead to Concept. Expected: the move succeeds and the `stage_change` activity detail reads "Gate bypass — missing: …".
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Plans supplied skips Concept and PTSA only**
+1. On a qualified lead at Discovery tap **Record plans supplied** with no note. Expected: asks what was supplied, nothing changes.
+2. Add the note. Expected: the reason shows, the stepper has no Concept or PTSA, and the next stage is Consultants.
+3. Move to Consultants, then Tender. Expected: both pass, and Tender still lists any readiness item not met.
+4. Reject paths. Move to Won with no signed contract: refused. A lead below the Discovery gate moved past it: refused. An employee recording it: refused. Sending `plans_supplied_at` in a save: refused.
+5. Set the delivery model to Build only on a lead with no plans recorded. Expected: Concept still applies.
+6. Tap **Change this** and give a reason. Expected: the design stages return and the history shows both entries.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Received isn't ready**
+1. On a consultant document at Received. Expected: the summary doesn't count it as ready.
+2. Tap the status with no revision or reference. Expected: it asks for one and doesn't move.
+3. Add a revision and move it to In the set. Expected: it counts as ready. Mark an upstream document changed. Expected: it is flagged for re-issue and no longer counts.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -20,13 +20,18 @@ import ConsultantComms from "./ConsultantComms.jsx";
 import PreconstructionPortalCard from "./PreconstructionPortalCard.jsx";
 import MeetingScheduler from "./MeetingScheduler.jsx";
 import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
+import { deliverableIsReady, consultantDocsReady } from "../../../lib/stageGates.js";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
 const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key) || { label: key, feeds: "none" };
 // Clamp forward (no wrap): a deliverable at the final status stays there rather than silently
 // resetting to pending on an extra click.
 const nextStatus = (s) => { const i = DELIVERABLE_STATUS_ORDER.indexOf(s); return DELIVERABLE_STATUS_ORDER[Math.min(i + 1, DELIVERABLE_STATUS_ORDER.length - 1)]; };
-const isDoneStatus = (s) => s === "received" || s === "issued";
+// Has it arrived? Enough for downstream work to start. Being ready to rely on is a separate test: deliverableIsReady.
+const hasArrived = (s) => ["received", "reviewed", "included", "issued"].includes(s);
+// Past "received", the status has to rest on something: a revision or a document reference (CNS-05).
+const STATUSES_NEEDING_A_REFERENCE = ["reviewed", "included", "issued"];
+const todayIso = () => new Date().toISOString().slice(0, 10);
 // Global key → label lookup (keys are unique across the role templates).
 const DELIVERABLE_LABELS = {};
 Object.values(CONSULTANT_DELIVERABLES).flat().forEach((d) => { DELIVERABLE_LABELS[d.key] = d.label; });
@@ -47,7 +52,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
   const rosterDeliverables = {};
   roster.forEach((r) => delsOf(r).forEach((d) => { rosterDeliverables[d.key] = { status: d.status || "pending", reissue: !!d.reissue }; }));
   const rosterKeys = new Set(Object.keys(rosterDeliverables));
-  const waitingOn = (key) => (DELIVERABLE_DEPENDENCIES[key] || []).filter((up) => rosterKeys.has(up) && !isDoneStatus(rosterDeliverables[up]?.status));
+  const waitingOn = (key) => (DELIVERABLE_DEPENDENCIES[key] || []).filter((up) => rosterKeys.has(up) && !hasArrived(rosterDeliverables[up]?.status));
   function transitiveDownstream(changedKey) {
     const out = new Set(); const queue = [changedKey];
     while (queue.length) {
@@ -59,11 +64,13 @@ export default function ConsultantsStage({ lead, patch, reload }) {
     return out;
   }
   const allDelStates = Object.values(rosterDeliverables);
-  const doneCount = allDelStates.filter((d) => isDoneStatus(d.status)).length;
+  const doneCount = allDelStates.filter(deliverableIsReady).length;
   const blockedCount = Object.keys(rosterDeliverables).filter((k) => waitingOn(k).length).length;
   const reissueCount = allDelStates.filter((d) => d.reissue).length;
   // Exit-gate signal (CW-2): every consultant on the roster has all deliverables received/issued.
-  const docsReady = roster.length > 0 && roster.every((r) => delsOf(r).every((d) => isDoneStatus(d.status || "pending")));
+  const docsReady = consultantDocsReady(roster.map((r) => ({ ...r, deliverables: delsOf(r) })));
+  const [openDetail, setOpenDetail] = useState(null);     // "roster index:deliverable key"
+  const [needsRef, setNeedsRef] = useState(null);
 
   // ── Consultant roster + deliverables ──────────────────────────────────────
   function saveRoster(next) { setRoster(next); patch({ consultant_roster: next }); }
@@ -73,12 +80,18 @@ export default function ConsultantsStage({ lead, patch, reload }) {
   const delConsultant = (i) => saveRoster(roster.filter((_, ix) => ix !== i));
   const toggleStamp = (i, k) => editConsultant(i, k, roster[i][k] ? null : new Date().toISOString());
   // Advancing a deliverable clears its own re-issue flag (it's been re-done / re-checked).
-  const cycleDeliverable = (i, key) => saveRoster(roster.map((r, ix) => (ix !== i ? r
-    : { ...r, deliverables: delsOf(r).map((d) => (d.key === key ? { ...d, status: nextStatus(d.status || "pending"), reissue: false } : d)) })));
+  const editDeliverable = (i, key, partial) => saveRoster(roster.map((r, ix) => (ix !== i ? r : { ...r, deliverables: delsOf(r).map((d) => (d.key === key ? { ...d, ...partial } : d)) })));
+  const cycleDeliverable = (i, key) => {
+    const d = delsOf(roster[i]).find((x) => x.key === key);
+    const to = nextStatus(d.status || "pending");
+    if (STATUSES_NEEDING_A_REFERENCE.includes(to) && !(d.revision?.trim() || d.source?.trim())) { setNeedsRef(`${i}:${key}`); setOpenDetail(`${i}:${key}`); return; }
+    setNeedsRef(null);
+    editDeliverable(i, key, { status: to, reissue: false });
+  };
   // Mark an upstream doc changed → flag every downstream done doc for re-issue.
   const markChanged = (changedKey) => {
     const downstream = transitiveDownstream(changedKey);
-    saveRoster(roster.map((r) => ({ ...r, deliverables: delsOf(r).map((d) => (downstream.has(d.key) && isDoneStatus(d.status || "pending") ? { ...d, reissue: true } : d)) })));
+    saveRoster(roster.map((r) => ({ ...r, deliverables: delsOf(r).map((d) => (downstream.has(d.key) && hasArrived(d.status || "pending") ? { ...d, reissue: true } : d)) })));
   };
   const contactLabel = (c) => `${[c.firstName, c.lastName].filter(Boolean).join(" ")}${c.company ? ` — ${c.company}` : ""}`;
 
@@ -96,7 +109,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
         {rosterKeys.size > 0 && (
           <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[11px]">
             <span className="text-muted">{rosterKeys.size} deliverables</span>
-            <span className="text-green-700">{doneCount} done</span>
+            <span className="text-green-700">{doneCount} ready</span>
             {blockedCount > 0 && <span className="text-amber-700">{blockedCount} waiting</span>}
             {reissueCount > 0 && <span className="text-red-600 font-semibold">{reissueCount} re-issue</span>}
           </div>
@@ -140,13 +153,26 @@ export default function ConsultantsStage({ lead, patch, reload }) {
                             {meta.feeds && meta.feeds !== "none" && (
                               <span className="text-[10px] text-muted">{DELIVERABLE_FEEDS_LABELS[meta.feeds]}</span>
                             )}
-                            {waiting.length > 0 && !isDoneStatus(st) && (
+                            {(d.revision || d.source) && <span className="text-[10px] text-muted">{[d.revision && `Rev ${d.revision}`, d.source].filter(Boolean).join(" · ")}</span>}
+                            {d.due && !deliverableIsReady(d) && d.due < todayIso() && <span className="text-[10px] font-semibold text-red-600">Overdue {d.due}</span>}
+                            {waiting.length > 0 && !hasArrived(st) && (
                               <span className="text-[10px] text-amber-700">⏳ waiting: {waiting.map((k) => DELIVERABLE_LABELS[k] || k).join(", ")}</span>
                             )}
                             {d.reissue && <span className="text-[10px] font-semibold text-red-600">⟳ re-issue required</span>}
-                            {isDoneStatus(st) && (
+                            <button type="button" onClick={() => setOpenDetail(openDetail === `${i}:${d.key}` ? null : `${i}:${d.key}`)} aria-expanded={openDetail === `${i}:${d.key}`} data-testid={`deliverable-detail-${d.key}`}
+                              className="inline-flex min-h-[32px] items-center text-[10px] text-primary hover:underline sm:min-h-0">Details</button>
+                            {hasArrived(st) && (
                               <button type="button" onClick={() => markChanged(d.key)} title="Mark this document changed — flags downstream docs for re-issue"
                                 className="text-[10px] text-muted hover:text-red-600 underline underline-offset-2">changed?</button>
+                            )}
+                            {openDetail === `${i}:${d.key}` && (
+                              <div className="grid w-full grid-cols-2 gap-1.5 rounded border border-hairline bg-surface p-1.5 sm:grid-cols-4" data-testid={`deliverable-fields-${d.key}`}>
+                                {needsRef === `${i}:${d.key}` && <p className="col-span-2 text-[10px] font-medium text-amber-700 sm:col-span-4">Add the revision or a document reference first, so this status rests on something.</p>}
+                                <input value={d.revision || ""} onChange={(e) => editDeliverable(i, d.key, { revision: e.target.value })} placeholder="Revision" aria-label="Revision" className="rounded border border-hairline px-1.5 py-1 text-[11px]" data-testid={`deliverable-revision-${d.key}`} />
+                                <input value={d.source || ""} onChange={(e) => editDeliverable(i, d.key, { source: e.target.value })} placeholder="Document ref / source" aria-label="Document reference" className="rounded border border-hairline px-1.5 py-1 text-[11px]" />
+                                <input type="date" value={d.due || ""} onChange={(e) => editDeliverable(i, d.key, { due: e.target.value })} aria-label="Due date" className="rounded border border-hairline px-1.5 py-1 text-[11px]" />
+                                <input value={d.owner || ""} onChange={(e) => editDeliverable(i, d.key, { owner: e.target.value })} placeholder="Who has it" aria-label="Who has it" className="rounded border border-hairline px-1.5 py-1 text-[11px]" />
+                              </div>
                             )}
                           </div>
                         );
@@ -172,7 +198,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
             })}
           </div>
         )}
-        <p className="mt-2 text-[10px] text-muted">Click a status pill to advance it (pending → requested → received → issued). Everyone starts at once — <span className="text-amber-700">waiting</span> is advisory, not a block.</p>
+        <p className="mt-2 text-[10px] text-muted">Click a status pill to advance it (pending → requested → received → reviewed → in the set → issued). A document that has only been received isn&apos;t ready. Everyone starts at once — <span className="text-amber-700">waiting</span> is advisory, not a block.</p>
         {contacts.length === 0 && <p className="mt-1 text-[11px] text-muted">No consultant contacts yet — add engineers/suppliers in the CRM.</p>}
       </div>
 
@@ -191,7 +217,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
         <h3 className="section-label mb-1">Ready for tender</h3>
         <ul className="space-y-1 text-sm">
           <li className={`flex items-center gap-2 ${docsReady ? "text-green-700" : "text-muted"}`}>
-            <span>{docsReady ? "✓" : "○"}</span> Full consultant document set received / issued
+            <span>{docsReady ? "✓" : "○"}</span> Full consultant document set reviewed and in the current set
           </li>
           <li className={`flex items-center gap-2 ${lead.fee_proposal_id ? "text-green-700" : "text-muted"}`}>
             <span>{lead.fee_proposal_id ? "✓" : "○"}</span> Fixed-Price proposal generated

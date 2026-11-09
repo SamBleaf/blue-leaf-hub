@@ -73,6 +73,7 @@ const SERVER_OWNED_LEAD_FIELDS = [
   "fit_set_by", "fit_set_at",
   "schedule_signed_off_at", "schedule_signed_off_by", // POST …/schedule/sign-off
   "delivery_model", // PUT /api/register/leads/:id/facts (the facts service owns it once there is a job)
+  "plans_supplied_at", "plans_supplied_by", "plans_supplied_note", // POST …/plans-supplied: it changes which stages apply
 ];
 const CONTRACT_SIGNED_ONLY_VIA_UPLOAD = "A building contract can only be marked signed by uploading the signed PDF (POST /api/sales/leads/:id/contract/mark-signed).";
 // Set legitimately when a lead is created: `lead_type` by the Architect Tender intake, `is_test` by a director.
@@ -2139,6 +2140,44 @@ export function registerSalesRoutes(app) {
     } catch (e) {
       console.error("[contract/mark-signed]", e);
       return err(res, 500, "Failed to mark the contract as signed.");
+    }
+  });
+
+  // Records that the client already has completed plans, so Concept and PTSA don't apply (Sales blueprint Tab 11). A director
+  // decides, with a note saying what was supplied. Reversible the same way. Commercial gates stay on every pathway.
+  app.post("/api/sales/leads/:id/plans-supplied", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const leadId = String(req.params.id || "").trim();
+    const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
+    const supplied = req.body?.supplied !== false;
+    if (note.length < 8) return err(res, 400, supplied ? "Say what was supplied, by whom and which revision." : "Say why the plans no longer count as supplied.", "NOTE_REQUIRED");
+    if (note.length > 1000) return err(res, 400, "Keep the note under 1000 characters.");
+    try {
+      const { data: lead, error: leadErr } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (leadErr) return err(res, 400, translateDbError(leadErr));
+      if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+      if (!("plans_supplied_at" in lead)) return err(res, 503, "This needs migration 219 first. Nothing was changed.", "SCHEMA");
+      if (lead.lead_type === "architect_tender") return err(res, 409, "An Architect Tender lead already has its own pathway.", "PATHWAY_FIXED");
+      if (["won", "lost"].includes(lead.stage)) return err(res, 409, "This lead is closed, so its pathway can't change.", "PATHWAY_FIXED");
+      if (supplied === !!lead.plans_supplied_at) return err(res, 409, supplied ? "Plans are already recorded as supplied." : "Plans aren't recorded as supplied.", "NO_CHANGE");
+      const stamp = new Date().toISOString();
+      const { data: updated, error: updErr } = await sb.from("leads").update({
+        plans_supplied_at: supplied ? stamp : null,
+        plans_supplied_by: supplied ? req.caller?.id || null : null,
+        plans_supplied_note: supplied ? note : null,
+        updated_at: stamp, last_activity_at: stamp,
+      }).eq("id", leadId).select().single();
+      if (updErr) return err(res, 400, translateDbError(updErr));
+      await logLeadActivity(sb, leadId, {
+        activity_type: "note",
+        summary: supplied ? "Recorded as plans supplied: Concept and PTSA don't apply" : "Plans-supplied record removed: Concept and PTSA apply again",
+        detail: `${note} — by ${req.caller?.email || "unknown"}`,
+      });
+      return ok(res, { lead: rowToCamel(await withContractEvidence(sb, updated)) });
+    } catch (e) {
+      console.error("[plans-supplied]", e);
+      return err(res, 500, "Couldn't record that. Nothing was changed.");
     }
   });
 

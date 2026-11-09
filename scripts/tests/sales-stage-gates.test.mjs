@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   STAGE_GATES, STAGE_ORDER, evaluateGate, stagesCrossed, forwardMoveBlock, forwardBlockReason, hardBlockReason,
   resolveEngagementPathway, showsQualifyingScorecard, canPerformControlledSalesWrite, canUnsignContract, SALES_CONTROLLED_ROLES,
+  nextStageFor, stageApplies, requirementsFor, gateRows, consultantDocsReady, deliverableIsReady,
 } from "../../src/lib/stageGates.js";
 import { decodePdfUpload } from "../../server/lib/leadContractEvidence.mjs";
 
@@ -98,6 +99,32 @@ t("an incrementally saved PDF ending in %%EOF is accepted", () => assert.ok(deco
 t("white space before the header is tolerated", () => assert.ok(decodePdfUpload(b64("\r\n %PDF-1.4\nbody\n%%EOF"))));
 t("padding after the last %%EOF is tolerated", () => assert.ok(decodePdfUpload(Buffer.concat([Buffer.from("%PDF-1.4\nbody\n%%EOF\r\n"), Buffer.alloc(200)]).toString("base64"))));
 t("more than 1 KB after the last %%EOF is refused", () => assert.equal(decodePdfUpload(Buffer.concat([Buffer.from("%PDF-1.4\nbody\n%%EOF"), Buffer.alloc(1025)]).toString("base64")), null));
+
+const PLANS = { plans_supplied_at: "2026-11-10T00:00:00Z", qualify_score: 8, discovery_meeting_booked_at: "x" };
+t("a lead with no plans recorded is design and build", () => assert.equal(resolveEngagementPathway({ stage: "discovery", plans_supplied_at: null }), "design_build"));
+t("a column not yet migrated reads as design and build", () => assert.equal(resolveEngagementPathway({ stage: "discovery" }), "design_build"));
+t("delivery model never chooses a pathway", () => { for (const m of ["build_only", "construction_management", "other"]) assert.equal(resolveEngagementPathway({ delivery_model: m }), "design_build"); });
+t("plans supplied is its own pathway", () => assert.equal(resolveEngagementPathway(PLANS), "plans_supplied"));
+t("an Architect Tender lead stays one, even with the column set", () => assert.equal(resolveEngagementPathway({ ...PLANS, lead_type: "architect_tender" }), "architect_tender"));
+t("plans supplied goes Discovery to Consultants", () => assert.equal(nextStageFor("discovery", PLANS), "consultants"));
+t("design and build still goes to Concept", () => assert.equal(nextStageFor("discovery", {}), "winning_offer"));
+t("Qualify to Discovery is unchanged on every pathway", () => assert.equal(nextStageFor("qualify", PLANS), "discovery"));
+t("Architect Tender keeps its sequential next stage", () => assert.equal(nextStageFor("qualify", { lead_type: "architect_tender" }), "discovery"));
+t("Concept and PTSA don't apply to plans supplied", () => assert.ok(!stageApplies("winning_offer", PLANS) && !stageApplies("fee_proposal", PLANS)));
+t("every other stage does", () => { for (const st of ["discovery", "consultants", "tender", "won"]) assert.ok(stageApplies(st, PLANS)); });
+t("the PTSA requirement drops off Consultants", () => assert.equal(requirementsFor("consultants", PLANS).length, 0));
+t("and stays for design and build", () => assert.equal(requirementsFor("consultants", {}).length, 1));
+t("Tender readiness is the same on every pathway", () => assert.equal(requirementsFor("tender", PLANS).length, STAGE_GATES.tender.length));
+t("Won is the same on every pathway", () => assert.deepEqual(gateRows("won", PLANS).required.map((r) => r.field), gateRows("won", {}).required.map((r) => r.field)));
+t("a move across Discovery still meets its gate", () => { const b = forwardMoveBlock("qualify", "consultants", { plans_supplied_at: "x", qualify_score: 1, discovery_meeting_booked_at: null }); assert.equal(b.stage, "discovery"); });
+t("no hard requirement can be skipped by pathway", () => { for (const st of Object.keys(STAGE_GATES)) for (const r of STAGE_GATES[st].filter((x) => x.hard)) if (stageApplies(st, PLANS)) assert.ok(requirementsFor(st, PLANS).includes(r), `${st}/${r.field}`); });
+const roster = (...statuses) => [{ role: "engineer", deliverables: statuses.map((status) => ({ key: status, status })) }];
+t("received isn't ready", () => assert.equal(consultantDocsReady(roster("received")), false));
+t("reviewed isn't ready until it is in the set", () => assert.equal(consultantDocsReady(roster("reviewed")), false));
+t("in the set is ready", () => assert.equal(consultantDocsReady(roster("included")), true));
+t("issued is still ready, so older records keep their state", () => assert.equal(consultantDocsReady(roster("issued")), true));
+t("flagged for re-issue isn't ready", () => assert.equal(deliverableIsReady({ status: "included", reissue: true }), false));
+t("an empty roster isn't ready", () => assert.equal(consultantDocsReady([]), false));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
