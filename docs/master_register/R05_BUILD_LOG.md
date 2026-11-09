@@ -560,3 +560,88 @@ Four majors and three minors, all reproduced by the reviewer in the sandbox. All
 - An item answered only with who supplies stays on the outstanding list and under Unresolved until someone sets Scope / disposition in Office fields, and the card has no control for that. It is the base behaviour, and it will read longer than staff expect on appliance-heavy rooms. A client- or others-supplied item appears under both By others and Unresolved.
 - Until P5, the Selections Schedule and most of the briefs don't print card-only answers, and a card-only Included item prints in the Client Brief as a bare status line. Nothing should be issued from card answers before P5. The staff Tender view does read them now.
 - Words kept from an Other zone or element can be removed but not brought back with a tap. To use them again, tap Other and retype.
+
+---
+
+## P4b — Whole House (2026-11-10)
+
+**Outcome.** Whole House now captures the standards a home is built on, mostly by tapping. Several wall and roof systems can sit side by side, each with its own zone and status, and gutters are their own record under the roof. Floors, paint, kitchen, wet-area and laundry standards have one row per zone, so the zone takes no tap, and rooms read the default for their type. Performance goals list staff-only suggestions marked Review required, none stored and none a product. A staff-only pricing guide gives the estimator a labelled assumption where nothing is chosen, and can't touch a choice. Document builders don't read these answers until P5. Nothing here is deployed.
+
+**Commits.** `7a355a6` (config, logic and answer map), `27cc11c` (screens, API and tests), and the docs commit carrying this entry.
+
+### What changed
+
+| Area | Now |
+|---|---|
+| Walls (W-013) | Unchanged in shape. Several rows, each with its zone. Metal cladding added. |
+| Roof (W-014) | Zones added: main, alfresco or verandah, garage, other. Each profile takes a colour tone. A pitched main roof and a low-pitch alfresco are two records. |
+| Gutters | `cfg.linked` was in the config but not on the card. Now a separate selection under each saved roof, one per roof, `answer.element.key` `gutters`, `answer.linkedItemIds` the roof, `isDefault` false. A gutter whose roof is deleted stays on the page. |
+| Windows (W-015) | Frame colour added. Opening style behind + More detail. No label claims compliance. |
+| Envelope (W-016) | Goals only are stored. `performanceSuggestions(answer)` derives a staff-only list, marked Review required. It names the checks to confirm and says a Passive House target is an intent. Nothing is copied to another card. Technical status stays Needs verification until someone records evidence. |
+| Floors (W-017) | One row per zone, no zone tap. Each family can take a finish. Rooms read their zone: bedrooms and robes the bedroom floor, laundries the wet-area floor, garages nothing, others the main floor. |
+| Doors (W-018) | One record. Height, jamb and hardware first; the rest behind + More detail. Fire, acoustic and height exceptions on R-007. |
+| Paint and ceilings (W-019) | One row per surface. Palette, ceiling types and feature areas show only on the surfaces they apply to. No generic sheen chip: a finish level exists only under a surface, behind + More detail. Each surface states its usual finish. Shown, never recorded. |
+| Shared standards (B03) | K-004, K-005, K-006, B-003, B-004, B-008, B-009, L-003 are set once on Whole House, by zone, under their existing ids. No new question id: `QUESTIONS` stays at 147. Kitchen, Bathroom and Laundry are laid out; + Scullery, + General joinery, + Ensuite, + Powder / WC and + Mudroom are a tap away. |
+| Room defaults | `roomDefaultFor`. A scullery reads its own standard, then the kitchen's. An ensuite its own, then the bathroom's. A default with nothing chosen can't be inherited. An exception records no zone, and stays on screen if a closer default appears later. L-004 reads the W-017 wet-area zone. |
+| Inclusions (W-022, W-023) | By others added, Other element added, owner on the card. |
+| Pricing guide (B05) | End of Whole House, after the client's direction. Project guide, plus an independent tier per category. Stored in `meta.baseline`. The screen can only write meta. A labelled line appears on an unanswered row, as a chip in the Register, and in Tender. |
+| Baseline config | `src/lib/registerGuidance.js`, versioned, no admin screen. Wording is copied when a tier is chosen. Marked Draft on screen until Blue Leaf confirms it. |
+
+### Decisions within the brief
+
+- **Standards reuse the K, B and L ids** rather than adding questions, as Gate 3.2 asks where practical. The option trees then match the room card, so a room exception needs no translation.
+- **The tier lives in register meta, not on items.** Stamping items would mean creating records for things nobody discussed, some in `client_selections`, and two copies that could disagree. `assumptionFor` runs P3's `applyPricingAssumption` and `activeAssumption` over the stored assumption without saving the result.
+- **The project guide moves nothing by itself** (B05). One explicit button copies it to categories with no tier and something still to price.
+- **Waterproofing, insulation and the performance goals are not in the guide** (B04).
+- **Roof zones were missing.** `repeat.by` said zone, but W-014 had no zones to tell two roofs apart.
+- **W-018 no longer repeats.** It had `repeat.by: element` with no elements, so + Add another made an identical card. The groups are its separate defaults.
+- **`roomDefaultFor` no longer falls back to any default.** The old `defaultItemFor` first-match gave a bedroom the main floor.
+
+### Schema and API impact
+
+No migration. The next free number stays 218. `meta.baseline` is new inside the existing lead meta row and `projects.register_meta`. `GET /tender` adds `assumptions[]`. No route added. Option ids only added: the lock grew, nothing was removed or renamed. The answer map gains `standard`, `roomZones`, `repeat.eachZone`, `repeat.owner`, `onlyZones`, `needsZone`, `usual`, `usualGroup`, `childHeading` and `reviewSuggestions`, each validated.
+
+### Tests
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-progressive-wholehouse.test.mjs`: systems and gutters, doors, surfaces, standards, every room type's default, what the guide holds, what it can never do, what estimators read, performance suggestions | 143 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-progressive-render.test.mjs`, adds zone rows, the once-only question text, gutters, the labelled assumption, a standard inside a room | 75 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-progressive-choice.test.mjs` | 241 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-mapping.test.mjs`, adds nine damaged maps refused | 65 passed, 0 failed |
+| BROWSER, DB | `node scripts/tests/sandbox-register-wholehouse.test.mjs`, headless Chromium, real SPA, API, PostgREST, Postgres, 1440 and 375 with touch. Mixed AAC and feature cladding, flat and pitched roofs, linked gutters, main and bedroom floors, kitchen and scullery, bathroom and ensuite, an exception surviving a later closer default, paint by surface, performance suggestions, the pricing guide, Tender, reload, three document previews, promotion, a project-mode save, a client token. Evidence: `~/blh-register-evidence/r05/p4b/` | 126 passed, 0 failed, 0 page errors |
+| BROWSER, DB | `node scripts/tests/sandbox-register-guided.test.mjs`, updated for the zone rows | 128 passed, 0 failed |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`, on the final code: 31 suites (log `SP/p4b/final-tests-3.txt`) | 2104 checks, 0 failing |
+| AUTOMATED | The same command one run earlier (`SP/p4b/final-tests-2.txt`), on application code that differs only by the gutter row's + Add another: every suite passed except `documents-r01`, T10, 12 of 13. That failure is explained under Caveats and is not from this phase | 1 suite failing |
+| AUTOMATED | Each of 25 logic, config and label defects put back in turn against the unit suites, files restored and confirmed by checksum. Ad hoc, not committed (`SP/p4b/mutate.py`) | 25 of 25 caught |
+| BROWSER, DB | The same for four server and room-screen defects against the browser suite (`SP/p4b/mutate_browser.py`, `mutate_browser2.py`). The first pass missed one: an exception disappearing when a closer default appears, because the test changed an existing default instead. A test was added and it was then caught | 4 of 4 |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint`, `node --check` on `registerStore.mjs`, `registerHandover.mjs` and both generators, and both generator `--check` runs pass. The production build was run as `NODE_ENV=production vite build --mode production` with `vite.sandbox.config.mjs`, from the sandbox working directory into the scratchpad, because `npm run build` would load the repo `.env`. It passes. None of these say anything about behaviour.
+
+**Tests changed on purpose.**
+
+- `register-structured-mapping` and `register-progressive-choice`, "paint has no generic sheen": each said no option may contain the word sheen. A finish level per surface is now required by MR-UX-01G, so each now says every sheen option sits in the one group that needs a surface, and it can't be offered with no surface even with More detail open. Stricter on what MR-UX-01G actually forbids.
+- `register-progressive-choice`, the id-lock helper, now reads standard zones and linked options as well.
+- `sandbox-register-guided`: floors and paint no longer have a zone to tap or + Add another, so those steps tap the row for the zone. The legacy-text row is found by its Written earlier box. The phone test's two paint taps are now on two surfaces, so its last assertion expects two records.
+
+No assertion was weakened.
+
+### Caveats
+
+- Blue Leaf hasn't confirmed the tier wording, the usual finishes, the colour tones, frame colours, flooring finishes, opening styles or the review suggestions. All are proposed. The Tab 27 Gate 0.2 CHECK against real meetings stays open.
+- Until P5, card answers, gutters and whole-house standards don't print properly in the Selections Schedule or the briefs. Nothing should be issued from them yet. Previews render, and none contains the tier wording or a suggestion.
+- No catalogue exists for the dependent manufacturer and colour dropdown in MR-UX-01B. Colour tone is a tap. Product and finish remain typed under + More detail.
+- General joinery is recorded as a K-004 standard, but no room prompt reads it yet.
+- The W-017 wet-area default is read by laundries only. B-009 asks about tile extent, a different question, so bathrooms don't show it.
+- R-006 reads the walls default, then the ceiling's. The compact inherited summary across surfaces is P4d.
+- Inherited defaults still show row by row. Confirm room defaults is P4d.
+- A tier on a category the client has fully chosen is held but unused. It applies again if a row is later left unanswered.
+- The assumption line shows on Whole House rows, the Register and Tender. Room cards don't show it yet.
+- The client-token check on `projects.register_meta` is sandbox RLS only. On production it depends on the same `deny_clients` policy as the rest of the portal hardening.
+- **`documents-r01` T10 is intermittent and predates this phase.** It failed once in a full run here and once in three reruns of that suite alone, then passed 24 of 24. T10 renders the same document twice and compares bytes. `generate()` in `docTemplates.mjs` stamps each zip entry with the time, at two-second resolution, so the bytes differ when the two renders straddle a boundary. Confirmed by moving only the clock two seconds between renders: 18 bytes differ, same length, every entry's content identical. No file T10 imports changed in this phase, so it was not fixed here and the assertion was left alone. P5 should fix it, because that phase owns issue and immutable history: nothing that compares rendered DOCX bytes should rely on them being reproducible until it is.
+- The browser run signs in with a session placed in browser storage, so the login form isn't exercised.
+
+### Next dependency
+
+P4c merges W-004, W-006 and W-008 presentation and uses `areaIds`. P4d uses `roomDefaultFor`, `confirmRoomDefaults` and the inherited summary. P5 prints answers through `clientSafeAnswer`, adds gutters and standards, decides whether a surface's usual finish prints, and reads `baselineAssumptions` and `performanceSuggestions` for Tender Notes only.

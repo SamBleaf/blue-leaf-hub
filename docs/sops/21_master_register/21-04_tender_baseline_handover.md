@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -37,15 +37,16 @@ The **Tender** step reads the same register rows and shows the scope boundary fo
 1. Open the lead → **Project brief & register** → **Tender**.
 2. Read the sections: **Included work**, **Excluded / deferred**, **By others / client supplied**, **Unresolved — decide before pricing is final**, **Products specified**, **Needs pricing — link to the existing estimate**, **Technical risks to verify**. An item answered only with who supplies stays under **Unresolved** until its status is set in the Register. If the client or others supply it, it is also under **By others / client supplied**.
 3. For each item under **Needs pricing**, go to the Register (21-02) and add its estimate / RFQ / quote link. An answer given on a card counts the same as typed words. A recorded site fact never appears here. When no in-scope item is waiting for a price source, the section says so.
-4. Click **Refresh** after changes.
+4. **Blue Leaf pricing assumptions (internal)** lists the Standard / Upgraded / Premium wording in use for categories where nothing, or only part, has been chosen. It is for the estimator. It isn't a client choice, an approval or a price, and a category the client has chosen for doesn't appear. The Register shows the same assumption as a chip on that row.
+5. Click **Refresh** after changes.
 
 **Contract baseline and handover**
-5. Open **Handover** (shown once the contract is signed, or at Won).
-6. Check the tiles: **Building contract** (Signed), **Project record**, **Contract baseline** (Not recorded).
-7. Under **1 · Record the contract baseline**, read what will be captured, then click **Record contract baseline & hand over**.
-8. The message confirms the baseline number (B01) and how many scope items, selections, exclusions and open items were carried forward.
-9. Under **2 · Release selections to the client portal**, tick the selections the client should now see and click **Release N to the client portal**. No new client invitation is sent.
-10. Later changes appear as **Changed since contract** or **Added after contract**. If the scope changes materially, click **Record a new baseline revision** (B02) after the variation is agreed.
+6. Open **Handover** (shown once the contract is signed, or at Won).
+7. Check the tiles: **Building contract** (Signed), **Project record**, **Contract baseline** (Not recorded).
+8. Under **1 · Record the contract baseline**, read what will be captured, then click **Record contract baseline & hand over**.
+9. The message confirms the baseline number (B01) and how many scope items, selections, exclusions and open items were carried forward.
+10. Under **2 · Release selections to the client portal**, tick the selections the client should now see and click **Release N to the client portal**. No new client invitation is sent.
+11. Later changes appear as **Changed since contract** or **Added after contract**. If the scope changes materially, click **Record a new baseline revision** (B02) after the variation is agreed.
 
 > 💡 **Tip:** The baseline is permanent. Record it only when the signed contract is final.
 
@@ -158,6 +159,12 @@ Next review date: 2027-05-07
 1. On a Tender-stage lead, answer a selection (K-005) on its card with no typing, and tap **Blue Leaf** on an appliance (K-008). Open **Tender**.
 2. Expected: both are under **Needs pricing** showing what was chosen. The appliance is also under **Unresolved**.
 3. Reject path: answer a site fact (W-001). Expected: it is not under **Needs pricing** or **Unresolved**.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — Pricing assumptions are labelled and don't replace a choice**
+1. On a Tender-stage lead, set **Heating, cooling and hot water** to **Standard** in the Blue Leaf pricing guide with W-020 unanswered, and **Roof and gutters** to **Premium** with W-014 answered. Open **Tender**.
+2. Expected: **Blue Leaf pricing assumptions (internal)** lists heating and cooling with its wording and says it isn't a client choice, an approval or a price. Roof isn't listed.
+3. Reject path: check the API response. Expected: `tender.assumptions` lines have no price, cost, amount or rate field.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -1,5 +1,5 @@
 ---
-sop_version: 1.3
+sop_version: 1.4
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -48,13 +48,19 @@ It records what the client wants, room by room, in one place. Each answer become
    4. No answer yet? Tap **Not decided**. You can add why (**Client unsure**, **Decide later**, **Blue Leaf to advise**, **Designer / consultant to confirm**, **Awaiting drawings / info**) and who has it. Neither is required, and no note is required.
    5. Tap **N/A** if the question doesn't apply. On product and finish choices you can also tap **By others** or **Excluded**. N/A doesn't clear a technical check: an item marked **Needs verification** stays on the outstanding list until someone changes it in **Office fields**.
    6. **Other** opens a small box for the client's own words. **+ Note** adds a short staff-only note. **+ More detail** shows the rarer options, **Deferred**, **Existing to remain**, and finish and product boxes. Once set, **Deferred** or **Existing to remain** stays lit on the card, and a finish or product has its own line, so you can see them next meeting without opening anything.
-   7. Where a question can have more than one answer on its own line (several wall systems, a floor for each zone), tap **+ Add another**. Each row is saved once you answer it and belongs to the room you are in. Tap **×** to remove a row.
-   8. Questions about **who supplies** (appliances, tapware, fixtures and the like): tapping **Client**, **Blue Leaf**, **Trade** or **Others** records who supplies and nothing else. It doesn't say whether the work is in the contract, so a status already set stays as it was, and an item with no status stays on the outstanding list until someone sets **Scope / disposition** in **Office fields**.
-   9. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
+   7. Where a question can have more than one answer on its own line (several wall systems, several roofs, inclusions), tap **+ Add another**. Each row is saved once you answer it and belongs to the room you are in. Tap **×** to remove a row.
+   8. Where each zone is its own standard (floors, paint, kitchen, wet areas, laundry), every usual zone already has a row, so you tap the choice and nothing else. Rarer zones are one tap away: **+ Scullery**, **+ General joinery**, **+ Ensuite**, **+ Powder / WC**, **+ Mudroom**, **+ Other zone**. A zone already answered can't be answered twice.
+   9. **Roof:** choose **Applies to** first if there is more than one roof, then material, pitch, profile and colour tone. Once a roof is on the record a **Gutters** row appears under it. Gutters are their own record and don't go in the roof's colour.
+   10. **Paint and ceilings:** one row per surface. Each surface says its usual finish, for example **Low sheen** for walls. You don't need to touch it. Tap **+ More detail** on that row only if this client wants a different finish level.
+   11. **Doors:** door height, jamb or edge detail and hardware come first. Door type, skirting, architraves and cornice are under **+ More detail**. Fire, acoustic or height exceptions are recorded on the room (R-007).
+   12. **Envelope quality:** tap the goals the client cares about. A yellow **For technical review** box lists what those goals may prompt Blue Leaf or a consultant to look at. It is staff-only and marked **Review required**. Nothing in it is selected, specified or priced, and a **Passive House target** doesn't mean the home will be certified. When a review settles something, record it on the card it belongs to.
+   13. Questions about **who supplies** (appliances, tapware, fixtures and the like): tapping **Client**, **Blue Leaf**, **Trade** or **Others** records who supplies and nothing else. It doesn't say whether the work is in the contract, so a status already set stays as it was, and an item with no status stays on the outstanding list until someone sets **Scope / disposition** in **Office fields**.
+   14. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
+   15. **Blue Leaf pricing guide**, at the end of Whole House, after the client's direction. It is for the estimator and staff only. Tap **Standard**, **Upgraded** or **Premium** as the project guide. That moves nothing by itself. Open **By category** to set a tier for each category, or tap **Use … for the N categories with nothing set**. A row with nothing chosen then shows **Blue Leaf pricing assumption**. Once the client chooses, the choice takes over and the row stops showing it. Changing a tier never changes what the client chose, never counts as a preference or an approval, and is not a price.
 5. **Site & existing** step: answer access, occupancy, existing-building condition and unknowns for the whole project (not per room). Answers here are recorded as what they are. A steep driveway is a site fact, not building work.
 6. **Rooms** step:
    1. Pick a room from the room list at the top (or step with ← and →; it shows "Room 4 of 8"). Check its name, level and type, and set its scope: **New**, **Renovated**, **Existing — Remain** or **Not in scope**. Add the drawing sheet if you are working from one.
-   2. Answer the prompts that appear for that room type. Floors and walls show the **Whole-house default** — leave it, or tap **Record a room exception** where this room differs.
+   2. Answer the prompts that appear for that room type. Floors, walls, kitchen, wet-area and laundry prompts show the **Whole-house default** for that kind of room: a bedroom reads the bedroom floor, a scullery reads the scullery standard, then the kitchen's, an ensuite reads the ensuite standard, then the bathroom's. Leave it, or tap **Record a room exception** where this room differs. A room with no default for its zone just asks the question.
    3. Tap **Save & next room →** to move on. The last room shows **Save — last room**.
 7. Tick **Show detailed prompts** only when you want the detailed (later-stage) questions now.
 
@@ -75,7 +81,9 @@ It records what the client wants, room by room, in one place. Each answer become
 |---------|---------------|-----------------|
 | Re-typing the address, budget or consultants into a prompt | Habit from paper briefs | Those come from Sales automatically — fix them at source |
 | Ticking **Client-approved** for "they liked it" | Approval means the client has signed off | Use **Preference** or **Proposed**; Client-approved asks for who / when / how |
-| Recording the same floor in every room | Not using the whole-house default | Set W-017 once; only record room exceptions |
+| Recording the same floor in every room | Not using the whole-house default | Set W-017 once per zone; only record room exceptions |
+| Telling the client "that's Premium, so it costs…" | The pricing guide sits on the page | The guide is an estimating assumption, staff only. It is not a price and not what the client has chosen |
+| Reading the review list out as what you will build | It looks like a specification | It is a list of things to check. Nothing on it is selected until someone reviews it and records it on the right card |
 | Typing the answer into **+ Note** | Habit from the old text box | Tap the choices. The note is for staff only and doesn't appear in anything the client reads |
 | Treating a tick as the client's sign-off | The tick looks final | A tick is a preference. Approval is recorded in **Office fields**, with who, when and how |
 | Putting a supplier price in the notes | Old habit | Prices never go in the register — link the estimate line in **Pricing (link — never a price)** |
@@ -94,6 +102,9 @@ It records what the client wants, room by room, in one place. Each answer become
 | **Earlier work status** on a site question | An older answer used the old dropdown, which didn't make sense there | Tap **Clear** if it's wrong |
 | A choice is greyed out | That question has a limit, such as three priorities, or the item is locked | Take one off first. A locked item changes through a variation |
 | **Check these** has **Remove** but no **Use again** | The question is already at its limit, such as three priorities | Take one off first, and **Use again** comes back |
+| No **Gutters** row | Gutters appear under a roof once the roof has an answer | Answer the roof first |
+| **Draft wording** beside the pricing guide | Blue Leaf hasn't confirmed the Standard, Upgraded and Premium wording yet | Treat it as a starting point. It is staff-only either way |
+| A room asks a question you thought was set on Whole House | No default for that kind of room, or the default says **Not decided** | Set it on the row for that zone, or answer it in the room |
 | "This brief was moved onto the project record" banner | The job/project was created | Normal — keep working; the same rows carry on |
 | No **Project brief & register** card; the old Finishes schedule shows instead | The register is switched off for this lead | Ask the director to add the lead to `REGISTER_PILOT_LEADS` (or turn on `REGISTER_ENABLED`) — rows typed in the old list are adopted when it is switched on |
 
@@ -142,7 +153,7 @@ Next review date: 2027-05-07
 
 **TC-01 — Happy path (standard use)**
 1. Open the lead → **Project brief & register** → **Project**. Enter drawing revision, choose Design & build, add Kitchen and Bathroom.
-2. **Whole house** → W-017: tap **Main floor**, then **Timber**.
+2. **Whole house** → W-017: on the **Main floor** row tap **Timber**.
 3. **Rooms** → pick Kitchen in the room list → set its scope to **New** → K-005 benchtop: tap **Engineered stone**.
 4. Expected result: header shows "Saved"; each card shows **Recorded:** with the choice and a tick on the button.
 5. Expected DB record: `leads.selections_schedule` has items with `promptKey` W-017 and K-005, each with `answer.selected[].optionId`, `certainty` `preference` and blank `description`; `meta.rooms` has 2 rooms.
@@ -263,7 +274,7 @@ Next review date: 2027-05-07
 - [ ] Pass  [ ] Fail
 
 **TC-21 — Words on an Other area or element stay**
-1. W-017: tap **Other zone** and type words. Tap a different zone.
+1. W-013: tap **Other** under **Applies to** and type words. Tap a different zone.
 2. Expected: the words are in the yellow **Check these** box with **Remove** and no **Use again**. The item counts as outstanding.
 3. Reject path: tap **Remove**. Expected: the words go, only because you asked.
 - [ ] Pass  [ ] Fail
@@ -277,6 +288,43 @@ Next review date: 2027-05-07
 **TC-23 — A refused save says so on its own card only**
 1. On a project record, answer one card and wait for **Saved**. On a selection already issued to the portal, tap **N/A**.
 2. Expected: a notice explains the refusal, the issued card says **Not saved** and goes back, and the first card still says **Saved**.
+- [ ] Pass  [ ] Fail
+
+**TC-24 — Several systems in one category**
+1. W-013: **Main walls** → **Render** → **Rendered AAC**. **+ Add another**: **Feature** → **Lightweight cladding** → **Fibre cement sheet**.
+2. W-014: **Main roof** → **Metal roofing** → **Pitched** → **Corrugated** → **Dark tone**. **+ Add another**: **Alfresco or verandah** → **Metal roofing** → **Flat or low pitch** → **Standing seam**.
+3. Expected: two wall records and two roof records, each with its own zone. A **Gutters** row appears under each roof once it is answered. Tap **Quad** on the first.
+4. Expected DB record: the gutter is its own item with `answer.element.key` `gutters` and `answer.linkedItemIds` holding that roof's id, `isDefault` false. The roof's answer is unchanged.
+5. Reject path: remove the roof. Expected: its gutter row stays on the page, nothing is lost.
+- [ ] Pass  [ ] Fail
+
+**TC-25 — One tap per zone, and rooms read the right one**
+1. W-017: **Main floor** → **Timber**, **Bedroom floor** → **Carpet**. K-005: **Kitchen** → **Engineered stone**, **+ Scullery** → **Laminate**. B-008: **Bathroom** → **Chrome**, **+ Ensuite** → **Brushed brass**.
+2. Rooms: Living shows **Timber**. A bedroom shows **Carpet**. Kitchen shows **Engineered stone**, Scullery **Laminate**, Bathroom **Chrome**, Ensuite **Brushed brass**.
+3. On a bedroom tap **Record a room exception** and choose **Timber**. Expected: one new room item with `overridesDefaultId` set. The W-017 default and every other room are unchanged.
+4. Reject path: **Not decided** on the bedroom floor instead of a choice. Expected: a bedroom asks the question, because there is nothing to inherit.
+- [ ] Pass  [ ] Fail
+
+**TC-26 — Paint has no generic sheen chip**
+1. W-019. Expected: one row each for Walls, Ceiling, Trim and Wet area. Each says its usual finish. No finish level button shows until **+ More detail** on that row.
+2. Tap **+ More detail** on Walls, then **Matt**. Expected: the usual line goes for Walls only. The ceiling row offers ceiling types and no palette.
+3. Reject path: leave Ceiling alone. Expected DB: no `finish_level` entry on the ceiling record.
+- [ ] Pass  [ ] Fail
+
+**TC-27 — Performance goals only ever suggest**
+1. W-016: tap **Airtightness** and **Passive House target**. Expected: **For technical review** box, marked **Review required** and **Staff only**, naming the checks to confirm and saying a Passive House target is an intent.
+2. Expected DB: only the goals are in `answer.selected`. No suggestion text is stored, no insulation or membrane item is created, `technicalStatus` stays `needs_verification`.
+3. Reject path: take every goal off. Expected: the box goes.
+- [ ] Pass  [ ] Fail
+
+**TC-28 — The pricing guide never touches a choice**
+1. Answer W-014. At the end of Whole House tap project guide **Upgraded**. Expected: no category is set and no item changes.
+2. **By category** → **Laundry** → **Standard**. Expected: the blank L-003 row shows **Blue Leaf pricing assumption (Standard)** and says it isn't a client choice, an approval or a price.
+3. **Roof and gutters** → **Premium**. Expected: the roof says the client's choice is what counts, and its record is unchanged.
+4. Tap project guide **Standard**. Expected: no category moves. Tap **Use Standard for the N categories with nothing set**. Expected: categories already set keep their tier.
+5. Tap a choice on L-003. Expected: the assumption line goes, and the item is a Preference, never Client-approved.
+6. Reject path: send `meta.baseline` with tier `platinum` through the API. Expected: the tier is dropped and the rest saves.
+7. Expected: no Client Brief, Architect Brief or Selections Schedule preview contains any of this wording.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
