@@ -88,7 +88,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
       <PreconstructionPortalCard lead={lead} />
 
       {/* Consultant roster + deliverables */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
+      <div data-next-target="consultant_roster" className="rounded-card border border-hairline bg-surface p-4 transition-shadow">
         <div className="flex items-center justify-between mb-1">
           <h3 className="section-label">Consultants &amp; deliverables</h3>
           <button type="button" onClick={addConsultant} className="text-xs font-semibold text-primary hover:underline">+ Add consultant</button>
@@ -181,7 +181,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
 
       {/* Register — the same room-by-room records from Concept, now expanded for consultants (schedule thread) */}
       <RegisterWorkshop lead={lead} patch={patch} stage="consultants" />
-      <label className="flex items-center gap-2 rounded-card border border-hairline bg-surface p-4 text-sm text-ink">
+      <label data-next-target="provisional_ff_issued" className="flex items-center gap-2 rounded-card border border-hairline bg-surface p-4 text-sm text-ink transition-shadow">
         <input type="checkbox" className="h-4 w-4 accent-primary" checked={!!lead.provisional_ff_issued} onChange={(e) => patch({ provisional_ff_issued: e.target.checked })} />
         Provisional F&amp;F schedule issued to suppliers
       </label>

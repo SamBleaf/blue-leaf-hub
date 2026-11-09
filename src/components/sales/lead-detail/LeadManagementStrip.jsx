@@ -1,5 +1,5 @@
 /**
- * LeadManagementStrip — the operator management chips at the top of the lead focus panel:
+ * LeadManagementStrip — the operator management chips, shown in the reference rail:
  * temperature, stuck reason, and risk flags. Visible + one-click editable, never buried in notes.
  * Saves via the lead's optimistic patch(); values are controlled vocabs from constants.js.
  */
@@ -14,7 +14,7 @@ const TEMP_COLORS = {
   nurture:  "bg-violet-500 text-white",
 };
 
-export default function LeadManagementStrip({ lead, patch }) {
+export default function LeadManagementStrip({ lead, patch, bare = false }) {
   const [riskOpen, setRiskOpen] = useState(false);
   const flags = Array.isArray(lead.risk_flags) ? lead.risk_flags : [];
 
@@ -26,7 +26,7 @@ export default function LeadManagementStrip({ lead, patch }) {
   };
 
   return (
-    <div className="mb-3 rounded-card border border-hairline bg-page/60 px-3 py-2.5 space-y-2">
+    <div className={bare ? "space-y-2" : "mb-3 rounded-card border border-hairline bg-page/60 px-3 py-2.5 space-y-2"}>
       {/* Temperature */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[10px] font-bold uppercase tracking-wide text-muted mr-1">Temp</span>

@@ -21,7 +21,6 @@ export default function LeadSummaryPanel({ lead }) {
   return (
     <SectionCard title="Key details">
       <Row k="Estimated value" v={money} />
-      {lead.lead_type !== "architect_tender" && <Row k="Qualifying" v={`${lead.qualify_score ?? 0}/8`} />}
       <Row k="Suburb" v={lead.suburb || "—"} />
       <Row k="Project type" v={projectTypeLabel(lead.project_type)} />
       <Row k="Site address" v={lead.site_address || "—"} />

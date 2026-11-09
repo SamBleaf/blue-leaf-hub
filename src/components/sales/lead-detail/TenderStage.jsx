@@ -7,7 +7,7 @@
  *     specifications/allowances (schedule thread v3, over selections_schedule).
  *   • Blue Leaf Proposal Checklist — client-facing QC; a proposal <80% complete is flagged
  *     "not ready to present". (Client-facing → Blue Leaf branded, never "APB".)
- *   • Five named actions: the proposal presentation meeting + four named client emails.
+ *   • The proposal presentation meeting. The named client emails are in Client correspondence.
  *   • Building-contract capture: prepared → sent, then signed by uploading the signed PDF (feeds the Won gate).
  */
 import { useEffect, useState } from "react";
@@ -17,8 +17,8 @@ import {
   PROPOSAL_CHECKLIST_ITEMS, PROPOSAL_READY_THRESHOLD,
 } from "../../../lib/constants.js";
 import { apiFetch, apiPost } from "../../../lib/apiFetch.js";
+import { RFQ_START_TARGET, PROPOSAL_PRESENTATION_TARGET, currentTenderStep } from "../../../lib/leadNextAction.js";
 import MeetingScheduler from "./MeetingScheduler.jsx";
-import StageEmailButton from "./StageEmailButton.jsx";
 import ScheduleProgramme from "./ScheduleProgramme.jsx";
 import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
 
@@ -123,11 +123,11 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
       )}
 
       {!(signed && hasEvidence) && (
-        <div className="mt-2 rounded-lg border border-hairline bg-page/60 p-3">
+        <div data-next-target="contract_status" className="mt-2 rounded-lg border border-hairline bg-page/60 p-3 transition-shadow">
           <p className="mb-2 text-xs text-muted">
             {signed ? "Upload the client-signed PDF." : "When the client has signed, upload the PDF. That marks the contract signed. It's required to move to Won."}
           </p>
-          <input type="file" accept="application/pdf,.pdf" aria-label="Signed building contract PDF"
+          <input type="file" data-next-focus accept="application/pdf,.pdf" aria-label="Signed building contract PDF"
             onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); }}
             className="mb-2 block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink" />
           {(!signed || !lead.contract_signed_date) && (
@@ -149,13 +149,6 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
       )}
     </div>
   );
-}
-
-// "Contract signed" reads the building contract. A row saved before that rule can still claim it with no
-// signed contract, and shows the step before instead.
-function currentTenderStep(lead) {
-  if (lead.contract_status === "signed") return "contract_signed";
-  return lead.tender_substatus === "contract_signed" ? "contract_sent" : lead.tender_substatus || null;
 }
 
 /** Where the tender is up to. Staff set every step except the last, which only the signed PDF can set. */
@@ -187,8 +180,6 @@ export function TenderProgress({ lead, onSet }) {
 }
 
 export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJob, isAdmin = false }) {
-  const sub = currentTenderStep(lead);
-  const subIdx = sub ? TENDER_SUBSTATUS_ORDER.indexOf(sub) : -1;
   const checklist = lead.proposal_checklist && typeof lead.proposal_checklist === "object" ? lead.proposal_checklist : {};
   const [testimonials, setTestimonials] = useState(checklist._testimonials || "");
 
@@ -199,12 +190,6 @@ export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJ
   function setSub(s) { patch({ tender_substatus: s }); }
   function toggleItem(key) { patch({ proposal_checklist: { ...checklist, [key]: !checklist[key] } }); }
   function saveTestimonials(v) { patch({ proposal_checklist: { ...checklist, _testimonials: v } }); }
-
-  // The "Contract sent" email records Sent, but never moves a contract that is already signed backwards.
-  function markContractSent() {
-    if (lead.contract_status === "signed") return;
-    patch({ contract_status: "sent", contract_sent_date: lead.contract_sent_date || todayISO() });
-  }
 
   return (
     <div className="space-y-4">
@@ -217,7 +202,7 @@ export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJ
         <p className="text-xs text-muted mb-3 leading-relaxed">
           Build the estimate in the RFQ Engine, then generate the client Fixed-Price Proposal from it.
         </p>
-        <button type="button" onClick={onStartRfq} disabled={creatingJob || !lead.site_address?.trim()}
+        <button type="button" data-next-target={RFQ_START_TARGET} onClick={onStartRfq} disabled={creatingJob || !lead.site_address?.trim()}
           className="block w-full text-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-colors disabled:opacity-50">
           {creatingJob ? "Setting up…" : "Proceed to RFQ Engine & Estimate →"}
         </button>
@@ -264,18 +249,8 @@ export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJ
       </div>
 
       {/* Proposal presentation meeting */}
-      <MeetingScheduler lead={lead} meetingType="proposal_presentation" reload={reload} />
-
-      {/* Named client actions */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
-        <h3 className="section-label mb-2">Client emails</h3>
-        <div className="flex flex-wrap gap-2">
-          <StageEmailButton lead={lead} endpoint="tender-email" which="proposal_followup" label="Proposal follow-up (24h)" title="Post-presentation follow-up" reload={reload} onSent={() => { if (subIdx < TENDER_SUBSTATUS_ORDER.indexOf("client_reviewing")) setSub("client_reviewing"); }} />
-          <StageEmailButton lead={lead} endpoint="tender-email" which="review_followup" label="Client-review follow-up" title="Client reviewing" reload={reload} />
-          <StageEmailButton lead={lead} endpoint="tender-email" which="contract_sent" label="Contract sent" title="Contract on its way" reload={reload} onSent={markContractSent} />
-          <StageEmailButton lead={lead} endpoint="tender-email" which="contract_followup" label="Unsigned-contract follow-up" title="Contract chase" reload={reload} />
-        </div>
-        <p className="mt-2 text-[11px] text-muted">Each is a distinct action — the copy is editable before it sends. Sending is gated by TENDER_EMAIL_ENABLED (preview always works).</p>
+      <div data-next-target={PROPOSAL_PRESENTATION_TARGET} className="rounded-card transition-shadow">
+        <MeetingScheduler lead={lead} meetingType="proposal_presentation" reload={reload} />
       </div>
 
       <BuildingContract lead={lead} patch={patch} reload={reload} isAdmin={isAdmin} />

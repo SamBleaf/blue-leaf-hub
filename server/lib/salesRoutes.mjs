@@ -1425,6 +1425,15 @@ export function registerSalesRoutes(app) {
 
   // ── Sales OS Slice 1: two-way lead mailbox (Mail-app parity) ───────────────
   // Thread view of the lead's correspondence (inbound + outbound). Degrades softly pre-migration-175.
+  // `sending` reports each family's send switch, so the page can say sending is off before anyone tries.
+  const emailSendingFlags = () => ({
+    mailbox: process.env.LEAD_MAILBOX_ENABLED === "true",
+    qualify: process.env.QUALIFY_EMAIL_ENABLED === "true",
+    discovery: process.env.DISCOVERY_EMAIL_ENABLED === "true",
+    concept: process.env.CONCEPT_EMAIL_ENABLED === "true",
+    tender: process.env.TENDER_EMAIL_ENABLED === "true",
+    pipeline: process.env.PIPELINE_EMAIL_ENABLED === "true",
+  });
   app.get("/api/sales/leads/:id/mailbox", requireAuth, async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
@@ -1432,10 +1441,10 @@ export function registerSalesRoutes(app) {
       .select("id, direction, subject, body, email_from, email_to, message_id, sent_at")
       .eq("lead_id", req.params.id).order("sent_at", { ascending: true });
     if (error) {
-      if (error.code === "42703") return ok(res, { messages: [], columnMissing: true }); // correspondence.lead_id pre-mig
+      if (error.code === "42703") return ok(res, { messages: [], columnMissing: true, sending: emailSendingFlags() }); // correspondence.lead_id pre-mig
       return err(res, 400, translateDbError(error));
     }
-    ok(res, { messages: (data || []).map(rowToCamel) });
+    ok(res, { messages: (data || []).map(rowToCamel), sending: emailSendingFlags() });
   });
 
   // Compose / reply — sends real SMTP (mirrors to the Sent mailbox) + logs an outbound

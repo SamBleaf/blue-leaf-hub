@@ -6,13 +6,14 @@ import {
   LEAD_FIT_QUALITY_LABELS, LEAD_READINESS_LABELS,
   LEAD_ACTION_TYPE_LABELS,
   LEAD_SOURCE_CATEGORY_LABELS,
+  LEAD_TEMPERATURE,
 } from "../lib/constants.js";
-import { STAGE_GATES, STAGE_ORDER, showsQualifyingScorecard } from "../lib/stageGates.js";
+import { STAGE_ORDER, showsQualifyingScorecard, gateRows } from "../lib/stageGates.js";
+import { computeLeadNextAction, focusLeadControl, WON_HANDOFF_TARGET } from "../lib/leadNextAction.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
-import StatusBadge from "../components/ui/StatusBadge.jsx";
 import StickyActionBar from "../components/ui/StickyActionBar.jsx";
 import SafeBottomSpacer from "../components/ui/SafeBottomSpacer.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
@@ -28,7 +29,8 @@ import LeadAccordion from "../components/sales/lead-detail/LeadAccordion.jsx";
 import EnquiryCallScript from "../components/sales/lead-detail/EnquiryCallScript.jsx";
 import QualificationDropdowns from "../components/sales/lead-detail/QualificationDropdowns.jsx";
 import QualifyActions from "../components/sales/lead-detail/QualifyActions.jsx";
-import LeadMailbox from "../components/sales/lead-detail/LeadMailbox.jsx";
+import LeadCorrespondence from "../components/sales/lead-detail/LeadCorrespondence.jsx";
+import LeadStageAdvance from "../components/sales/lead-detail/LeadStageAdvance.jsx";
 import DiscoveryMeetingScript from "../components/sales/lead-detail/DiscoveryMeetingScript.jsx";
 import DesignerSelect from "../components/sales/lead-detail/DesignerSelect.jsx";
 import DiscoveryActions from "../components/sales/lead-detail/DiscoveryActions.jsx";
@@ -37,12 +39,10 @@ import LeadManagementStrip from "../components/sales/lead-detail/LeadManagementS
 import ConceptStage from "../components/sales/lead-detail/ConceptStage.jsx";
 import RegisterWorkshop from "../components/sales/lead-detail/register/RegisterWorkshop.jsx";
 import XeroInvoiceCard from "../components/sales/lead-detail/XeroInvoiceCard.jsx";
-import StageEmailButton from "../components/sales/lead-detail/StageEmailButton.jsx";
 import ConsultantsStage from "../components/sales/lead-detail/ConsultantsStage.jsx";
 import TenderStage from "../components/sales/lead-detail/TenderStage.jsx";
 import WonStage from "../components/sales/lead-detail/WonStage.jsx";
 import ConsentSpine from "../components/sales/lead-detail/ConsentSpine.jsx";
-import StageEmailBox from "../components/sales/lead-detail/StageEmailBox.jsx";
 import ApprovalRiskChip from "../components/sales/lead-detail/ApprovalRiskChip.jsx";
 import OpsScheduleHandoff from "../components/sales/lead-detail/OpsScheduleHandoff.jsx";
 
@@ -99,7 +99,7 @@ const PTSA_STATUS_LABELS = {
 const PTSA_SELECTABLE_STATUSES = ["draft", "sent", "declined"];
 
 // Stage gate requirements are defined ONCE in the shared canonical module src/lib/stageGates.js
-// (imported above as STAGE_GATES) and rendered read-only here. The server enforces the same
+// (read here through gateRows) and rendered read-only. The server enforces the same
 // definitions, so this display can never drift from what is actually enforced (S-013 / ARCH-01).
 
 function nextStage(current) {
@@ -120,7 +120,7 @@ function relativeTime(iso) {
   return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function InlineField({ label, value, type = "text", options, onSave, placeholder }) {
+function InlineField({ label, value, type = "text", options, onSave, placeholder, targetId }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || "");
   const ref = useRef();
@@ -137,10 +137,10 @@ function InlineField({ label, value, type = "text", options, onSave, placeholder
 
   if (options) {
     return (
-      <div className="flex items-center justify-between gap-2 py-1.5 border-b border-hairline last:border-0">
+      <div data-next-target={targetId} className="flex items-center justify-between gap-2 py-1.5 border-b border-hairline last:border-0 rounded transition-shadow">
         <span className="text-xs text-muted w-36 flex-shrink-0">{label}</span>
         <select
-          className="flex-1 text-sm text-ink bg-transparent border-0 focus:outline-none cursor-pointer"
+          className="flex-1 min-w-0 text-sm text-ink bg-transparent border-0 focus:outline-none cursor-pointer"
           value={value || ""}
           onChange={e => onSave(e.target.value || null)}
         >
@@ -152,7 +152,7 @@ function InlineField({ label, value, type = "text", options, onSave, placeholder
   }
 
   return (
-    <div className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline last:border-0">
+    <div data-next-target={targetId} className="flex items-start justify-between gap-2 py-1.5 border-b border-hairline last:border-0 rounded transition-shadow">
       <span className="text-xs text-muted w-36 flex-shrink-0 pt-0.5">{label}</span>
       {editing ? (
         type === "textarea" ? (
@@ -161,7 +161,7 @@ function InlineField({ label, value, type = "text", options, onSave, placeholder
           <input ref={ref} type={type} className="flex-1 text-sm text-ink bg-page border border-hairline rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/50" value={draft} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setEditing(false); setDraft(value || ""); } }} />
         )
       ) : (
-        <button className="flex-1 text-left text-sm text-ink hover:bg-page rounded px-1 -mx-1 min-h-[20px]" onClick={() => { setDraft(value || ""); setEditing(true); }}>
+        <button className="flex-1 min-w-0 text-left text-sm text-ink hover:bg-page rounded px-1 -mx-1 min-h-[20px]" onClick={() => { setDraft(value || ""); setEditing(true); }}>
           {value || <span className="text-muted/60 italic text-xs">{placeholder || "Click to edit"}</span>}
         </button>
       )}
@@ -169,9 +169,9 @@ function InlineField({ label, value, type = "text", options, onSave, placeholder
   );
 }
 
-function ScoreGate({ label, value, options, onChange }) {
+function ScoreGate({ label, value, options, onChange, targetId }) {
   return (
-    <div className="space-y-1">
+    <div data-next-target={targetId} className="space-y-1 rounded transition-shadow">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="flex gap-1.5">
         {options.map((opt, i) => (
@@ -816,7 +816,7 @@ const SIGNAL_META = {
   fear:      { label: "Fear",      icon: "😟" },
   priority:  { label: "Priority",  icon: "⭐" },
 };
-function LeadTrustRail({ leadId, lead }) {
+function LeadTrustRail({ leadId, lead, bare = false }) {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
@@ -867,8 +867,8 @@ function LeadTrustRail({ leadId, lead }) {
     : "—";
 
   return (
-    <div className="rounded-card border border-hairline bg-surface p-4">
-      <h3 className="section-label mb-3">Trust &amp; context</h3>
+    <div className={bare ? "" : "rounded-card border border-hairline bg-surface p-4"}>
+      {!bare && <h3 className="section-label mb-3">Trust &amp; context</h3>}
 
       <div className="grid grid-cols-2 gap-3 text-xs">
         <div>
@@ -936,7 +936,7 @@ function LeadTrustRail({ leadId, lead }) {
   );
 }
 
-function LeadNotesPanel({ leadId }) {
+function LeadNotesPanel({ leadId, bare = false }) {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newBody, setNewBody] = useState("");
@@ -995,8 +995,8 @@ function LeadNotesPanel({ leadId }) {
   }
 
   return (
-    <div className="rounded-card border border-hairline bg-surface p-4">
-      <h3 className="section-label mb-3">Notes</h3>
+    <div className={bare ? "" : "rounded-card border border-hairline bg-surface p-4"}>
+      {!bare && <h3 className="section-label mb-3">Notes</h3>}
 
       {/* Add note form */}
       <form onSubmit={addNote} className="space-y-2 mb-4">
@@ -1083,7 +1083,7 @@ function LeadNotesPanel({ leadId }) {
   );
 }
 
-function LeadDocumentsPanel({ leadId }) {
+function LeadDocumentsPanel({ leadId, bare = false }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -1142,8 +1142,8 @@ function LeadDocumentsPanel({ leadId }) {
   }
 
   return (
-    <div className="rounded-card border border-hairline bg-surface p-4">
-      <h3 className="section-label mb-3">Documents</h3>
+    <div className={bare ? "" : "rounded-card border border-hairline bg-surface p-4"}>
+      {!bare && <h3 className="section-label mb-3">Documents</h3>}
 
       {/* Upload controls */}
       <div className="flex items-center gap-2 mb-4">
@@ -1409,6 +1409,9 @@ export default function LeadDetail() {
   const [mobileTab, setMobileTab] = useState("action"); // "summary" | "action" | "activity" | "files" | "notes"
   const [ownerOptions, setOwnerOptions] = useState([]); // [{ value: userId, label: name }]
 
+  const [advancing, setAdvancing] = useState(false);
+  // Blueprint advice is an AI call, so it only runs once someone opens the section.
+  const [bpWanted, setBpWanted] = useState(false);
   const bpFetchedFor = useRef(null);
 
   // Load active staff for the Owner dropdown (runs once on mount).
@@ -1546,9 +1549,9 @@ export default function LeadDetail() {
   }
 
   useEffect(() => {
-    if (lead) fetchBlueprintInsight(lead);
+    if (lead && bpWanted) fetchBlueprintInsight(lead);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lead?.id, lead?.stage]);
+  }, [lead?.id, lead?.stage, bpWanted]);
 
   const [creatingJob, setCreatingJob] = useState(false);
   async function createJobFromLead() {
@@ -1656,12 +1659,20 @@ export default function LeadDetail() {
 
   async function advanceStage() {
     const next = nextStage(lead.stage);
-    if (!next) return;
+    if (!next || advancing) return;
+    setAdvancing(true);
     // Surface the server hard gate (e.g. Discovery needs score ≥ 5 AND a booked build conversation).
-    const r = await authFetch(`/api/sales/leads/${leadId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: next }),
-    });
-    const j = await r.json();
+    let j;
+    try {
+      const r = await authFetch(`/api/sales/leads/${leadId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: next }),
+      });
+      j = await r.json();
+    } catch {
+      j = { ok: false, error: "Couldn't reach the Hub. The stage hasn't changed." };
+    } finally {
+      setAdvancing(false);
+    }
     if (!j.ok) {
       alert(j.error || "Couldn't advance the stage yet.");
       if (j.code === "STAGE_CONFLICT") await load();
@@ -1710,8 +1721,7 @@ export default function LeadDetail() {
 
   const stageMeta = STAGES.find(s => s.id === lead.stage);
   const next = nextStage(lead.stage);
-  const gateChecks = next ? (STAGE_GATES[next] || []) : [];
-  const gatePass = gateChecks.every(g => g.check(lead));
+  const gates = next ? gateRows(next, lead) : null;
   const nextLabel = STAGES.find(s => s.id === next)?.label;
   // SAM-W03-001 Option B: PTSA signed but no job created yet (missing site_address)
   const showSiteAddressWarning = !lead.job_id && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
@@ -1766,11 +1776,11 @@ export default function LeadDetail() {
               <h3 className="section-label mb-3">Project</h3>
               <InlineField label="Project type" value={lead.project_type} options={PROJECT_TYPES} onSave={v => patch({ project_type: v })} />
               <InlineField label="Suburb" value={lead.suburb} onSave={v => patch({ suburb: v })} />
-              <InlineField label="Site address" value={lead.site_address} onSave={v => patch({ site_address: v })} placeholder="Once known" />
+              <InlineField label="Site address" value={lead.site_address} onSave={v => patch({ site_address: v })} placeholder="Once known" targetId="site_address" />
               <InlineField label="Est. value ($)" value={lead.estimated_value ? String(lead.estimated_value) : ""} type="number" onSave={v => patch({ estimated_value: v ? parseFloat(v) : null })} />
               <InlineField label="Floor area (m²)" value={lead.floor_area_estimate ? String(lead.floor_area_estimate) : ""} type="number" onSave={v => patch({ floor_area_estimate: v ? parseFloat(v) : null })} />
-              <InlineField label="Design stage" value={lead.design_stage} options={DESIGN_STAGES} onSave={v => patch({ design_stage: v })} />
-              <InlineField label="Desired start" value={lead.desired_start_date || ""} type="date" onSave={v => patch({ desired_start_date: v })} />
+              <InlineField label="Design stage" value={lead.design_stage} options={DESIGN_STAGES} onSave={v => patch({ design_stage: v })} targetId="design_stage" />
+              <InlineField label="Desired start" value={lead.desired_start_date || ""} type="date" onSave={v => patch({ desired_start_date: v })} targetId="desired_start_date" />
             </div>
   );
 
@@ -1875,19 +1885,23 @@ export default function LeadDetail() {
     lead.qualify_decision_maker == null && "Decision maker",
   ].filter(Boolean);
 
+  // The score appears once: on the scorecard while it is the stage's work, then on the Earlier stages line.
+  const scorecardInFocus = ["enquiry", "qualify"].includes(lead.stage);
   const qualifyingBlock = showsQualifyingScorecard(lead) && (
-            <div className="rounded-card border border-hairline bg-surface p-4">
+            <div data-next-target="qualify_score" className="rounded-card border border-hairline bg-surface p-4 transition-shadow">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="section-label">Qualifying Scorecard</h3>
-                <span className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
-                  {lead.qualify_score ?? 0}/8
-                </span>
+                {scorecardInFocus && (
+                  <span className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
+                    {lead.qualify_score ?? 0}/8
+                  </span>
+                )}
               </div>
               <div className="space-y-3">
-                <ScoreGate label="Budget" value={lead.qualify_budget} options={["No", "Unsure", "Yes"]} onChange={v => patch({ qualify_budget: v })} />
-                <ScoreGate label="Timeframe" value={lead.qualify_timeframe} options={["18+ months", "6–18 months", "< 6 months"]} onChange={v => patch({ qualify_timeframe: v })} />
-                <ScoreGate label="Site" value={lead.qualify_site} options={["No site", "Under contract", "Owns site"]} onChange={v => patch({ qualify_site: v })} />
-                <ScoreGate label="Decision maker" value={lead.qualify_decision_maker} options={["No", "One of two", "Yes"]} onChange={v => patch({ qualify_decision_maker: v })} />
+                <ScoreGate label="Budget" targetId="qualify_budget" value={lead.qualify_budget} options={["No", "Unsure", "Yes"]} onChange={v => patch({ qualify_budget: v })} />
+                <ScoreGate label="Timeframe" targetId="qualify_timeframe" value={lead.qualify_timeframe} options={["18+ months", "6–18 months", "< 6 months"]} onChange={v => patch({ qualify_timeframe: v })} />
+                <ScoreGate label="Site" targetId="qualify_site" value={lead.qualify_site} options={["No site", "Under contract", "Owns site"]} onChange={v => patch({ qualify_site: v })} />
+                <ScoreGate label="Decision maker" targetId="qualify_decision_maker" value={lead.qualify_decision_maker} options={["No", "One of two", "Yes"]} onChange={v => patch({ qualify_decision_maker: v })} />
               </div>
               {qualifyMissing.length > 0 && (
                 <p className="mt-3 text-xs text-muted bg-page rounded-lg px-3 py-2">
@@ -1896,7 +1910,7 @@ export default function LeadDetail() {
               )}
               {(lead.qualify_score || 0) < 5 && (
                 <p className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-                  Qualifying score {lead.qualify_score ?? 0}/8 — a score of <span className="font-semibold">5+</span> is required to advance to Discovery.
+                  A score of <span className="font-semibold">5+</span> is required to advance to Discovery.
                   {lead.qualify_budget != null && " APB recommends nurturing leads that stay under 5 rather than investing discovery time."}
                 </p>
               )}
@@ -1904,9 +1918,8 @@ export default function LeadDetail() {
   );
 
   const blueprintBlock = (
-            <div className="rounded-card border border-primary/20 bg-primary/5 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-primary">Blueprint Insight</h3>
+            <div>
+              <div className="flex justify-end mb-2">
                 <button onClick={() => { bpFetchedFor.current = null; fetchBlueprintInsight(lead); }} disabled={bpLoading} className="text-xs text-primary hover:opacity-70 disabled:opacity-40">↺ Refresh</button>
               </div>
               {bpLoading ? (
@@ -1992,7 +2005,6 @@ export default function LeadDetail() {
   );
 
   const timelineBlock = <LeadUnifiedTimeline timeline={timeline} activities={activities} viewMissing={timelineViewMissing} />;
-  const trustRailBlock = <LeadTrustRail leadId={leadId} lead={lead} />;
 
   const archTenderBlock = isArchTender && (
               <div className="rounded-card border border-primary/30 bg-primary/[0.04] px-4 py-3">
@@ -2006,7 +2018,7 @@ export default function LeadDetail() {
               <div className="rounded-card border border-hairline bg-surface p-4">
                 <h3 className="section-label mb-3">Discovery</h3>
                 <div className="space-y-3">
-                  <div>
+                  <div data-next-target="discovery_notes" className="rounded-lg transition-shadow">
                     <label className="block text-xs text-muted mb-1">Notes</label>
                     <textarea
                       className="w-full rounded-lg border border-hairline px-3 py-2 text-sm bg-page text-ink resize-none"
@@ -2354,7 +2366,7 @@ export default function LeadDetail() {
 
                   {/* Mark PTSA as signed — stores the signed PDF, stamps the lead, and
                       provisions the job + Dropbox folder tree (server-side, one event). */}
-                  <div className="mt-4 pt-4 border-t border-amber-100">
+                  <div data-next-target="ptsa_status" className="mt-4 pt-4 border-t border-amber-100 rounded-lg transition-shadow">
                     {lead.ptsa_status === "signed" ? (
                       <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-2.5">
                         <div className="flex items-center gap-1.5 text-sm font-semibold text-green-800">
@@ -2382,6 +2394,7 @@ export default function LeadDetail() {
                         <p className="text-xs text-muted mb-2">Upload the client-signed PDF. This stores the document, marks the lead signed, and creates the job folder.</p>
                         <input
                           type="file"
+                          data-next-focus
                           accept="application/pdf,.pdf"
                           onChange={e => { setSignedFile(e.target.files?.[0] || null); setPtsaError(""); }}
                           className="block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-page file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-hairline/40 mb-2"
@@ -2409,75 +2422,50 @@ export default function LeadDetail() {
               </div>
   );
 
+  const tenderJobBlocked = showSiteAddressWarning && next === "tender";
+  const advanceGuidance = lead.stage === "enquiry"
+    ? "Move on if it fits, the budget's potentially realistic, and they're open to a structured process. Choose Nurture at the top of the page (not Mark Lost) if they only want a quick price, won't discuss budget, aren't the decision-maker, or aren't ready."
+    : null;
   const advanceBlock = next && (
-              <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="section-label mb-3">
-                  Advance to {nextLabel}
-                </h3>
-                {gateChecks.length > 0 && (
-                  <ul className="space-y-2 mb-4">
-                    {gateChecks.map((g, i) => {
-                      const pass = g.check(lead);
-                      return (
-                        <li key={i} className={`text-sm ${pass ? "text-green-700" : "text-danger"}`}>
-                          <div className="flex items-center gap-2">
-                            <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${pass ? "bg-green-100 text-green-600" : "bg-red-50 text-danger"}`}>
-                              {pass ? "✓" : "✗"}
-                            </span>
-                            <span className={pass ? "" : "font-medium"}>{g.label}</span>
-                          </div>
-                          {!pass && g.hint && <p className="ml-7 mt-0.5 text-[11px] font-normal text-muted">{g.hint}</p>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+              <LeadStageAdvance
+                nextLabel={nextLabel}
+                gates={gates}
+                guidance={advanceGuidance}
+                canAdvance={gates.allMet && !tenderJobBlocked}
+                advancing={advancing}
+                blockedNote={tenderJobBlocked ? "Add site address before advancing to Tender." : "Finish the items above to move on."}
+                onAdvance={advanceStage}
+              >
                 {lead.stage === "consultants" && !lead.fee_proposal_id && (
                   <Link
                     to="/tender-manager/fee-proposal/new"
-                    className="block w-full text-center rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3"
+                    data-next-target="fee_proposal_id"
+                    className="block w-full text-center rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors"
                   >
                     Generate Fixed-Price proposal →
                   </Link>
                 )}
                 {next === "tender" && !lead.job_id && (
                   <button
+                    data-next-target="job_id"
                     onClick={createJobFromLead}
                     disabled={creatingJob || !lead.site_address?.trim()}
-                    className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors mb-3 disabled:opacity-50"
+                    className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
                   >
                     {creatingJob ? "Creating…" : "Create Job from Lead →"}
                   </button>
                 )}
                 {next === "tender" && !lead.job_id && !lead.site_address?.trim() && (
-                  <p className="text-xs text-orange-600 text-center mb-3 font-medium">Add site address before creating a job.</p>
+                  <p className="text-xs text-orange-600 text-center font-medium">Add site address before creating a job.</p>
                 )}
                 {next === "tender" && lead.job_id && (
-                  <p className="text-xs text-green-700 text-center mb-3">Job linked — ready to advance</p>
+                  <p className="text-xs text-green-700 text-center">Job linked</p>
                 )}
-                <button
-                  onClick={advanceStage}
-                  disabled={!gatePass || (showSiteAddressWarning && next === "tender")}
-                  className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Move to {nextLabel} →
-                </button>
-                {showSiteAddressWarning && next === "tender" && (
-                  <p className="mt-2 text-xs text-orange-600 text-center font-medium">Add site address before advancing to Tender.</p>
-                )}
-                {!gatePass && !(showSiteAddressWarning && next === "tender") && (
-                  <p className="mt-2 text-xs text-muted text-center">Complete the requirements above to advance.</p>
-                )}
-              </div>
+              </LeadStageAdvance>
   );
 
-  const notesBlock = <LeadNotesPanel leadId={leadId} />;
-
-  const documentsBlock = <LeadDocumentsPanel leadId={leadId} />;
-
   const nurtureBlock = !["won","lost"].includes(lead.stage) && (
-              <div className="rounded-card border border-hairline bg-surface p-4">
-                <h3 className="section-label mb-3">Nurture</h3>
+              <>
                 <InlineField label="Follow-up date" value={lead.nurture_follow_up_date || ""} type="date" onSave={v => patch({ nurture_follow_up_date: v })} />
                 <div className="mt-2">
                   <label className="block text-xs text-muted mb-1">Nurture notes</label>
@@ -2489,8 +2477,23 @@ export default function LeadDetail() {
                     onBlur={e => { if (e.target.value !== (lead.nurture_notes || "")) patch({ nurture_notes: e.target.value }); }}
                   />
                 </div>
-              </div>
+              </>
   );
+
+  // Reference material: closed until someone asks for it. An active risk still shows on the closed row.
+  const riskCount = Array.isArray(lead.risk_flags) ? lead.risk_flags.length : 0;
+  const managementSummary = [
+    LEAD_TEMPERATURE[lead.lead_temperature],
+    lead.stuck_reason && "Stuck",
+    riskCount > 0 && `${riskCount} risk${riskCount === 1 ? "" : "s"}`,
+  ].filter(Boolean).join(" · ") || "Not set";
+  const openBlueprint = (e) => { if (e.currentTarget.open) setBpWanted(true); };
+  const managementSection = <LeadStageSection title="Temperature & risks" summary={managementSummary}><LeadManagementStrip lead={lead} patch={patch} bare /></LeadStageSection>;
+  const trustSection = <LeadStageSection title="Trust & context"><LeadTrustRail leadId={leadId} lead={lead} bare /></LeadStageSection>;
+  const blueprintSection = <LeadStageSection title="Blueprint Insight" onToggle={openBlueprint}>{blueprintBlock}</LeadStageSection>;
+  const notesSection = <LeadStageSection title="Notes"><LeadNotesPanel leadId={leadId} bare /></LeadStageSection>;
+  const documentsSection = <LeadStageSection title="Documents"><LeadDocumentsPanel leadId={leadId} bare /></LeadStageSection>;
+  const nurtureSection = nurtureBlock && <LeadStageSection title="Nurture">{nurtureBlock}</LeadStageSection>;
 
   // Stage stepper now rendered via <LeadStageStepper /> in the header (Pass 3A).
 
@@ -2501,14 +2504,6 @@ export default function LeadDetail() {
         <p className="text-[10px] uppercase tracking-wide text-muted">Est. value</p>
         <p className="text-sm font-semibold text-ink">{lead.estimated_value ? `$${Number(lead.estimated_value).toLocaleString("en-AU")}` : "—"}</p>
       </div>
-      {!isArchTender && (
-        <div className="text-right">
-          <p className="text-[10px] uppercase tracking-wide text-muted">Qualifying</p>
-          <p className={`text-sm font-bold ${(lead.qualify_score || 0) >= 7 ? "text-green-600" : (lead.qualify_score || 0) >= 5 ? "text-amber-600" : "text-red-500"}`}>
-            {lead.qualify_score ?? 0}/8
-          </p>
-        </div>
-      )}
     </div>
   );
 
@@ -2519,24 +2514,22 @@ export default function LeadDetail() {
     // Sales OS Slice 1 — Enquiry is a guided call-script (scorecard + client details + dispositions).
     focusContent = (
       <div className="space-y-4">
-        <EnquiryCallScript lead={lead} patch={patch} reload={load} scorecard={qualifyingBlock} />
-        <LeadMailbox lead={lead} />
+        <EnquiryCallScript lead={lead} patch={patch} scorecard={qualifyingBlock} />
       </div>
     );
   } else if (lead.stage === "qualify") {
-    // Qualify — scorecard + the controlled-vocab client details + the Qualify action panel
-    // (confirm web score, send the qualify email, build-conversation status, nurture prompt) + mailbox.
+    // Qualify — scorecard + the controlled-vocab client details + the build conversation panel
+    // (confirm web score, booked / invite / already held, nurture prompt).
     focusContent = (
       <div className="space-y-4">
         {qualifyingBlock}
         <QualificationDropdowns lead={lead} patch={patch} />
         <QualifyActions lead={lead} patch={patch} reload={load} />
-        <LeadMailbox lead={lead} />
       </div>
     );
   } else if (lead.stage === "discovery") {
-    // Sales OS Discovery — the meeting script + designer/fees + the discovery actions (email,
-    // concept agreement, accept → client folder), then the notes/transcript workspace + mailbox.
+    // Sales OS Discovery — the meeting script + designer/fees + the discovery actions (concept
+    // agreement, accept → client folder), then the notes/transcript workspace.
     focusContent = (
       <div className="space-y-4">
         <DiscoveryMeetingScript />
@@ -2548,7 +2541,6 @@ export default function LeadDetail() {
         <XeroInvoiceCard lead={lead} reload={load} />
         {discoveryBlock}
         {conversationsBlock}
-        <LeadMailbox lead={lead} />
       </div>
     );
   } else if (lead.stage === "winning_offer") {
@@ -2563,12 +2555,6 @@ export default function LeadDetail() {
     // pre-construction fee, produce the working drawings, then present the plans before engineering.
     focusContent = (
       <div className="space-y-4">
-        {/* Concept→PTSA acknowledgement email */}
-        <div className="rounded-card border border-hairline bg-surface p-4">
-          <h3 className="section-label mb-2">Client email</h3>
-          <StageEmailButton lead={lead} endpoint="concept-email" which="accepted_concepts" label="Accepted-concepts acknowledgement" title="Concept approved — next steps" reload={load} />
-          <p className="mt-2 text-[11px] text-muted">Confirms the approved concept and sets up the PTSA + working-drawings stage.</p>
-        </div>
         {ptsaBlock}
         {/* Design & pre-construction fee invoice (raised once the PTSA is signed) */}
         <XeroInvoiceCard lead={lead} reload={load} variant="design" />
@@ -2617,61 +2603,30 @@ export default function LeadDetail() {
       </div>
     );
   } else {
-    // nurture / lost — no stage panel, but the Stage email box (nurture / lost close-off) still shows.
+    // nurture / lost — no stage panel, but Client correspondence (nurture / lost close-off) still shows.
     focusContent = null;
   }
 
-  // ── Pass 3A: one obvious primary action (reuses existing handlers) ──────────
-  let primaryAction = null;
-  const firstUnmet = gateChecks.find((g) => !g.check(lead));
-  const scrollToFocus = () => {
-    try {
-      const card = document.getElementById("lead-focus");
-      if (!card) return;
-      // Prefer the stage's own action panel (tagged data-primary-action) so "Next:" lands ON the thing to do,
-      // not the top of the whole card. Flash a ring so the click is visibly acknowledged even when already in view.
-      const target = card.querySelector("[data-primary-action]") || card;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.classList.add("ring-2", "ring-primary", "ring-offset-2");
-      setTimeout(() => { try { target.classList.remove("ring-2", "ring-primary", "ring-offset-2"); } catch { /* unmounted */ } }, 1600);
-    } catch { /* noop */ }
+  // ── The one next action. The header (desktop) and sticky bar (mobile) only point at it: the
+  //    stage itself is moved from the completion panel at the bottom of the workflow. ─────────
+  const nextAction = computeLeadNextAction(lead, { next, nextLabel });
+  const goToNextAction = () => {
+    setMobileTab(nextAction.mobileTab);
+    // Two frames: let React show the tab before looking for the control in it.
+    requestAnimationFrame(() => requestAnimationFrame(() => focusLeadControl(nextAction.target)));
   };
-  if (lead.stage === "enquiry") {
-    primaryAction = null; // the Enquiry call script owns the Proceed / Nurture / Lost decision
-  } else if (lead.stage === "won") {
-    primaryAction = lead.job_id
-      ? { label: "View job dashboard →", onClick: () => nav(`/finance/jobs/${lead.job_id}`) }
-      : { label: creatingJob ? "Creating…" : "Create Job from Lead →", onClick: createJobFromLead, disabled: creatingJob || !lead.site_address?.trim() };
-  } else if (lead.stage === "tender") {
-    primaryAction = { label: creatingJob ? "Setting up…" : "Proceed to RFQ Engine →", onClick: startTenderRfq, disabled: creatingJob || !lead.site_address?.trim() };
-  } else if (next) {
-    // The ONE obvious next step. If the exit gate isn't met, name the next requirement + jump to the
-    // work — an ACTIVE pointer, not a dead greyed-out "Move to X". Only once met is it the advance.
-    if (gatePass && !(showSiteAddressWarning && next === "tender")) {
-      primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage };
-    } else if (firstUnmet) {
-      primaryAction = { label: `Next: ${firstUnmet.hint || firstUnmet.label}`, onClick: scrollToFocus };
-    } else {
-      primaryAction = { label: `Move to ${nextLabel} →`, onClick: advanceStage, disabled: true };
-    }
-  }
+  const primaryAction = nextAction ? { label: `Next: ${nextAction.label}`, onClick: goToNextAction } : null;
 
-  // ── WON special case — success marker + hand-off CTAs (no "Next: Won →") ────
-  const wonCard = lead.stage === "won" ? (
-    <div className="rounded-card border border-accent/30 bg-accent/[0.04] p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xl leading-none">🎉</span>
-        <span className="text-base font-bold text-ink">Lead won</span>
-        <StatusBadge variant="success" dot>Won</StatusBadge>
-      </div>
-      <p className="mt-1 text-sm text-muted">{displayLeadName(lead)} is won — hand off to delivery.</p>
-      <div className="mt-3 space-y-2">
-        {lead.job_id ? (
-          <button type="button" onClick={() => nav(`/finance/jobs/${lead.job_id}`)} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">View job dashboard →</button>
-        ) : (
-          <button type="button" onClick={createJobFromLead} disabled={creatingJob || !lead.site_address?.trim()} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{creatingJob ? "Creating…" : "Create Job from Lead →"}</button>
-        )}
-      </div>
+  // Won has no next stage, so its bottom area is the hand-off instead. The dashboard stays secondary until Ops Ready.
+  const wonOpsReady = lead.won_substatus === "ops_ready";
+  const wonHandoffBlock = lead.stage === "won" ? (
+    <div data-next-target={WON_HANDOFF_TARGET} className="rounded-card border border-hairline bg-surface p-4 transition-shadow">
+      <h3 className="section-label mb-2">Hand-off</h3>
+      {lead.job_id ? (
+        <button type="button" onClick={() => nav(`/finance/jobs/${lead.job_id}`)} className={`w-full rounded-lg px-4 py-2.5 text-sm font-semibold hover:opacity-90 ${wonOpsReady ? "bg-primary text-white" : "border border-primary text-primary"}`}>View job dashboard →</button>
+      ) : (
+        <button type="button" onClick={createJobFromLead} disabled={creatingJob || !lead.site_address?.trim()} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">{creatingJob ? "Creating…" : "Create Job from Lead →"}</button>
+      )}
       {!lead.job_id && !lead.site_address?.trim() && <p className="mt-2 text-center text-[11px] font-medium text-orange-600">Add site address before creating a job.</p>}
     </div>
   ) : null;
@@ -2680,9 +2635,13 @@ export default function LeadDetail() {
   const focusBlockId = { enquiry: "qualifying", qualify: "qualifying", discovery: "discovery", winning_offer: "winning_offer", fee_proposal: "ptsa" }[lead.stage] || null;
   const conversationsInFocus = lead.stage === "discovery"; // conversations live in the Discovery focus, not the Activity group
   const focusEl = focusShown ? (
-    <LeadNextActionCard id="lead-focus" stageLabel={stageMeta?.label}>{archTenderBlock}{focusContent}<StageEmailBox lead={lead} /><LeadManagementStrip lead={lead} patch={patch} /></LeadNextActionCard>
+    <LeadNextActionCard id="lead-focus" stageLabel={stageMeta?.label}>
+      {archTenderBlock}
+      {focusContent}
+      <LeadCorrespondence lead={lead} patch={patch} reload={load} />
+      {wonHandoffBlock || advanceBlock}
+    </LeadNextActionCard>
   ) : null;
-  const nextActionEl = lead.stage === "won" ? wonCard : advanceBlock;
 
   const samBanner = showSiteAddressWarning ? (
     <div className="mt-4 rounded-card border border-orange-400 bg-orange-50 px-4 py-3 flex items-start gap-3">
@@ -2763,13 +2722,13 @@ export default function LeadDetail() {
         className="hidden lg:grid"
         main={<>{focusEl}{stageWorkDeep}{detailsGroup}{activityGroup}</>}
         rightRail={<>
-          {nextActionEl}
           <LeadSummaryPanel lead={lead} />
-          {trustRailBlock}
-          {blueprintBlock}
-          {notesBlock}
-          {documentsBlock}
-          {nurtureBlock}
+          {managementSection}
+          {trustSection}
+          {blueprintSection}
+          {notesSection}
+          {documentsSection}
+          {nurtureSection}
         </>}
       />
 
@@ -2777,25 +2736,23 @@ export default function LeadDetail() {
       <div className="lg:hidden">
         <div className="mt-4"><LeadMobileTabs tabs={MOBILE_TABS} value={mobileTab} onChange={setMobileTab} /></div>
         <div className="mt-4 space-y-5">
-          {mobileTab === "summary" && <><LeadSummaryPanel lead={lead} />{trustRailBlock}{detailsGroup}{stageWorkDeep}{nurtureBlock}</>}
+          {mobileTab === "summary" && <><LeadSummaryPanel lead={lead} />{managementSection}{trustSection}{blueprintSection}{detailsGroup}{stageWorkDeep}{nurtureSection}</>}
           {mobileTab === "action" && (
             <div className="space-y-5">
               {focusEl}
-              {nextActionEl}
-              {blueprintBlock}
-              {!focusEl && !nextActionEl && <EmptyState compact title="No current action" hint="See the Summary tab for details." />}
+              {!focusEl && <EmptyState compact title="No current action" hint="See the Summary tab for details." />}
             </div>
           )}
           {mobileTab === "activity" && activityGroup}
-          {mobileTab === "files" && documentsBlock}
-          {mobileTab === "notes" && notesBlock}
+          {mobileTab === "files" && <LeadDocumentsPanel leadId={leadId} />}
+          {mobileTab === "notes" && <LeadNotesPanel leadId={leadId} />}
         </div>
-        {/* Sticky primary action — sits clearly above the mobile bottom nav (~75px);
+        {/* Sticky next-action pointer — sits clearly above the mobile bottom nav (~75px);
             flush at md+ where the nav is hidden. AppShell collapses its FABs on this
             page so nothing overlaps. */}
         {primaryAction && (
           <StickyActionBar position="fixed" className="!bottom-[78px] md:!bottom-0">
-            <button type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled} className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+            <button type="button" onClick={primaryAction.onClick} className="w-full truncate rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">
               {primaryAction.label}
             </button>
           </StickyActionBar>

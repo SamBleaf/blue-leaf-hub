@@ -20,7 +20,7 @@
  *   hard        - true  → a FORWARD advance is blocked server-side until satisfied (422 GATE_BLOCKED)
  *                 false → advisory: surfaced to staff + logged as a bypass, never blocks
  *   check(lead) - predicate; true = satisfied
- *   hint        - plain-English how-to, shown under an unmet row / as the header "Next:" step
+ *   hint        - plain-English how-to, shown under an unmet row in the stage-completion panel
  *   blockPhrase - (hard only, optional) natural phrase used to compose the 422 message;
  *                 defaults to the lowercased label
  *
@@ -56,7 +56,7 @@ export const STAGE_GATES = {
     // Hard once migration 174 is applied (column present); pre-migration it is absent → passes.
     { field: "discovery_meeting_booked_at", label: "Build conversation booked", hard: true, blockPhrase: "a booked build conversation",
       check: l => !("discovery_meeting_booked_at" in l) || !!l.discovery_meeting_booked_at,
-      hint: "Send the qualify email; the client books via the link (or Check for booking)" },
+      hint: "Invite the client to book with the qualify email, or log a conversation already held" },
   ],
   winning_offer: [
     // Hard once migration 179 is applied (column present); pre-migration it is absent → passes.
@@ -64,11 +64,11 @@ export const STAGE_GATES = {
       check: l => !("concept_agreement_status" in l) || l.concept_agreement_status === "accepted",
       hint: "Generate the concept agreement, then Mark accepted" },
     { field: "discovery_notes", label: "Discovery notes filled", hard: false,
-      check: l => !!l.discovery_notes?.trim(), hint: "Capture the discovery notes below" },
+      check: l => !!l.discovery_notes?.trim(), hint: "Capture the discovery notes above" },
     { field: "design_stage", label: "Design stage set", hard: false,
-      check: l => !!l.design_stage, hint: "Set the Design stage (Concept readiness in the focus card)" },
+      check: l => !!l.design_stage, hint: "Set the Design stage under Lead details" },
     { field: "desired_start_date", label: "Desired start date set", hard: false,
-      check: l => !!l.desired_start_date, hint: "Set the client's desired start date (Concept readiness)" },
+      check: l => !!l.desired_start_date, hint: "Set the client's desired start date under Lead details" },
   ],
   fee_proposal: [
     { field: "concept_design_status", label: "Concept design approved", hard: false,
@@ -89,7 +89,7 @@ export const STAGE_GATES = {
     { field: "consultant_roster", label: "Consultant documents complete", hard: false,
       check: l => consultantDocsReady(l.consultant_roster), hint: "Advance each consultant's deliverables to received/issued" },
     { field: "fee_proposal_id", label: "Fixed-Price proposal generated", hard: false,
-      check: l => !!l.fee_proposal_id, hint: "Generate the Fixed-Price proposal (button in the Consultants stage)" },
+      check: l => !!l.fee_proposal_id, hint: "Generate the Fixed-Price proposal (button below)" },
     { field: "provisional_ff_issued", label: "Provisional F&F schedule issued", hard: false,
       check: l => !("provisional_ff_issued" in l) || !!l.provisional_ff_issued, hint: "Issue the provisional F&F schedule to suppliers, then tick 'issued'" },
     { field: "site_address", label: "Site address set", hard: false,
@@ -168,6 +168,23 @@ export function evaluateGate(targetStage, lead) {
     missing,
     hardMissing: missing.filter(r => r.hard),
     advisoryMissing: missing.filter(r => !r.hard),
+  };
+}
+
+/**
+ * The rows the stage-completion panel shows for entering `targetStage`, split the way staff need to read them.
+ *   required     hard requirements: the server refuses the move until they are met
+ *   recommended  advisory requirements: the Move button still waits for them, but a move made from the
+ *                pipeline board's Move menu passes them and the skip is logged
+ *   allMet       what the normal Move button waits for
+ */
+export function gateRows(targetStage, lead) {
+  const l = lead || {};
+  const rows = (STAGE_GATES[targetStage] || []).map((r) => ({ ...r, met: !!r.check(l) }));
+  return {
+    required: rows.filter((r) => r.hard),
+    recommended: rows.filter((r) => !r.hard),
+    allMet: rows.every((r) => r.met),
   };
 }
 

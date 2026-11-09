@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { WON_SUBSTATUS, OPS_READY_ITEMS } from "../../../lib/constants.js";
 import { apiPost } from "../../../lib/apiFetch.js";
+import { OPS_READY_TARGET } from "../../../lib/leadNextAction.js";
 
 export default function WonStage({ lead, patch }) {
   const [retrying, setRetrying] = useState(false);
@@ -51,7 +52,7 @@ export default function WonStage({ lead, patch }) {
       </div>
 
       {/* Ops Ready checklist */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
+      <div data-next-target={OPS_READY_TARGET} className="rounded-card border border-hairline bg-surface p-4 transition-shadow">
         <div className="flex items-center justify-between mb-2">
           <h3 className="section-label">Ops Ready handoff</h3>
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${allDone ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-800"}`}>

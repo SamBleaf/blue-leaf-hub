@@ -4,9 +4,9 @@
  * stage block lives inside (collapsed by default). Lets prior stages stay editable
  * on demand without dominating the current-stage workspace. No logic/handlers here.
  */
-export default function LeadStageSection({ title, summary, defaultOpen = false, children }) {
+export default function LeadStageSection({ title, summary, defaultOpen = false, onToggle, children }) {
   return (
-    <details open={defaultOpen} className="group rounded-card border border-hairline bg-surface">
+    <details open={defaultOpen} onToggle={onToggle} className="group rounded-card border border-hairline bg-surface">
       <summary className="flex cursor-pointer select-none list-none items-center justify-between gap-2 rounded-card px-4 py-2.5 hover:bg-page">
         <span className="text-sm font-semibold text-ink">{title}</span>
         <span className="flex items-center gap-2">
