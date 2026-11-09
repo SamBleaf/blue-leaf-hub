@@ -29,6 +29,7 @@ const row = (reg, i) => ({
   product: [i.manufacturer, i.product, i.model].filter(Boolean).join(" "), finish: i.colour, supplier: i.supplier,
   quantity: i.quantity, unit: i.unit, supplyBy: i.supplyBy, technicalStatus: i.technicalStatus,
   pricingStatus: i.pricingStatus, pricingRef: i.pricingRef, source: i.source, nextAction: i.nextAction,
+  answer: i.answer || undefined,                  // staff-only tender view and contract baseline: what was actually agreed
 });
 
 /** Existing cost sources for linking (names only — amounts stay in the estimate / fee proposal). */

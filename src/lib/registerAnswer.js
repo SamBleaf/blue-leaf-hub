@@ -1,0 +1,313 @@
+/**
+ * registerAnswer.js — the typed answer a register item can carry (R05 P3, Tab 27 Gates 0.2 and 1).
+ *
+ * WHERE IT LIVES. One namespaced field, `item.answer`, on the existing register item:
+ *   • lead scratchpad: inside the item row in `leads.selections_schedule`;
+ *   • project: `register_detail.answer` on `client_selections` / `room_scope_items` (jsonb, mig 213).
+ * No new table or column. `null` means a legacy / free-text record: its `description` stays the answer and
+ * is never parsed.
+ *
+ * WHAT IT DOES NOT HOLD. Everything the register already has a home for stays there, so no fact has two
+ * sources (CLAUDE.md Canonical Data Law, Tab 27 Gate 1.1):
+ *   client preference ............ item.certainty ("preference" / "proposed")
+ *   client approval .............. item.certainty ("client_approved") + item.evidence
+ *   construction scope ........... item.disposition  (contract inclusion is DERIVED: contractInclusionOf)
+ *   technical verification ....... item.technicalStatus + item.technicalEvidence
+ *   pricing status ............... item.pricingStatus + item.pricingRef
+ *   responsible party ............ item.responsibility, next step item.nextAction
+ *   category / question link ..... item.category, item.promptKey
+ *   shared default / exception ... item.isDefault, item.overridesDefaultId (zone via answer.zone)
+ * Selecting an answer can never approve, verify, price or scope anything: there is no field here to do it.
+ *
+ * WHAT IT ADDS (schema v1):
+ *   v              schema version
+ *   state          ANSWER_STATES: Not discussed ≠ Client unsure ≠ N/A ≠ To be resolved ≠ Recorded
+ *   nature         ANSWER_NATURES: a recorded fact is not construction scope
+ *   configVersion  the answer-map version the option ids came from
+ *   selected[]     { optionId, path[], label, stale? } — several allowed, partial paths allowed (B02).
+ *                  stale = kept after an upstream choice changed, awaiting review; never silently dropped
+ *   element        { id, key, label } — the physical thing a repeatable item is about
+ *   zone           { key, label } — main floor / bedrooms / wet areas, façade zone, paint surface …
+ *   areaIds[]      room / project-area ids this item covers (same item from Site & Existing and Rooms)
+ *   sourceQuestionIds[]  Tab 21 ids a merged card stands in for (W-004 / W-006 / W-008)
+ *   linkedItemIds[]      related items, e.g. gutters → roof
+ *   unresolved     { reason, note } — why it is parked; the owner is item.responsibility (no forced note)
+ *   assumption     { origin, tier, baselineVersion, categoryKey, text, at, by } — INTERNAL pricing assumption
+ *   delivery       { method, trade, note } — INTERNAL, decided at Tender, independent of contract inclusion
+ *   note           short INTERNAL staff note
+ *
+ * INTERNAL means staff only. `clientSafeAnswer` is an allow-list: anything not named there cannot reach a
+ * client projection, including fields added later.
+ *
+ * Pure module — no React, no network. Safe in the browser and in Node.
+ */
+
+export const ANSWER_SCHEMA_VERSION = 1;
+export const ANSWER_MAP_VERSION = "tab21-answer-map-v1.0";
+
+export const ANSWER_STATES = {
+  not_discussed: "Not discussed",
+  recorded: "Recorded",
+  client_unsure: "Client unsure",
+  unresolved: "To be resolved",
+  not_applicable: "Not applicable",
+};
+
+/** What the record IS. Only "choice" can become a client-facing selection. */
+export const ANSWER_NATURES = {
+  fact: "Fact",
+  choice: "Client choice",
+  scope: "Construction scope",
+  requirement: "Requirement",
+  risk: "Risk / investigation",
+  action: "Action",
+  technical: "Technical check",
+};
+
+/** Tab 27 B09. defaultOwner is a RESPONSIBILITIES key, offered by the UI and stored on item.responsibility. */
+export const UNRESOLVED_REASONS = {
+  decide_later: { label: "Decide later", defaultOwner: "client" },
+  blue_leaf_to_advise: { label: "Blue Leaf to advise", defaultOwner: "blue_leaf" },
+  designer_to_confirm: { label: "Designer / consultant to confirm", defaultOwner: "architect" },
+  awaiting_info: { label: "Awaiting drawings / info", defaultOwner: "" },
+};
+
+export const ASSUMPTION_ORIGINS = { blue_leaf_baseline: "Blue Leaf preliminary pricing assumption" };
+export const BASELINE_TIERS = { standard: "Standard", upgraded: "Upgraded", premium: "Premium" };
+
+/** Who physically delivers included work. Decided at Tender (B13); says nothing about contract inclusion. */
+export const DELIVERY_METHODS = { undecided: "Not decided", self_perform: "Blue Leaf crew", subcontract: "Subcontracted" };
+
+// ── Canonical form ────────────────────────────────────────────────────────────────────────────────
+
+const has = (set, k) => Object.prototype.hasOwnProperty.call(set, k);
+const text = (v) => (v == null || typeof v === "object" ? "" : String(v).trim());
+const keyIn = (set, v) => (typeof v === "string" && has(set, v) ? v : "");
+const omit = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
+const uniqueIds = (list) => (Array.isArray(list) ? [...new Set(list.map(text).filter(Boolean))] : []);
+
+function sortKeys(v) {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
+  return v;
+}
+
+/** JSON with sorted keys. Postgres jsonb reorders keys, so plain JSON.stringify can't compare stored values. */
+export const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
+
+function normSelected(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    const e = typeof raw === "string" ? { optionId: raw } : raw;
+    if (!e || typeof e !== "object") continue;
+    const given = pathIds(e.path);
+    const optionId = text(e.optionId) || given[given.length - 1] || "";
+    if (!optionId) continue;
+    const path = given.length ? given : [optionId];
+    const key = path.join("\u0001");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...omit(e, ["optionId", "path", "label", "stale"]), optionId, path, label: text(e.label), ...(e.stale ? { stale: true } : {}) });
+  }
+  return out;
+}
+// A path may repeat an id at different levels ("other" under "other"), so it is never de-duplicated.
+function pathIds(list) { return Array.isArray(list) ? list.map(text).filter(Boolean) : []; }
+
+function normElement(e) {
+  if (!e || typeof e !== "object") return null;
+  const out = { ...omit(e, ["id", "key", "label"]), id: text(e.id), key: text(e.key), label: text(e.label) };
+  return out.id || out.key || out.label ? out : null;
+}
+function normZone(z) {
+  if (!z || typeof z !== "object") return null;
+  const out = { ...omit(z, ["key", "label"]), key: text(z.key), label: text(z.label) };
+  return out.key || out.label ? out : null;
+}
+function normUnresolved(u) {
+  if (!u || typeof u !== "object") return null;
+  const out = { ...omit(u, ["reason", "note"]), reason: keyIn(UNRESOLVED_REASONS, u.reason), note: text(u.note) };
+  return out.reason || out.note ? out : null;
+}
+function normAssumption(a) {
+  if (!a || typeof a !== "object") return null;
+  const known = ["origin", "tier", "baselineVersion", "categoryKey", "text", "at", "by"];
+  const out = {
+    ...omit(a, known), origin: text(a.origin) || "blue_leaf_baseline", tier: keyIn(BASELINE_TIERS, a.tier),
+    baselineVersion: text(a.baselineVersion), categoryKey: text(a.categoryKey), text: text(a.text), at: text(a.at), by: text(a.by),
+  };
+  return out.tier || out.text ? out : null;
+}
+function normDelivery(d) {
+  if (!d || typeof d !== "object") return null;
+  const out = { ...omit(d, ["method", "trade", "note"]), method: keyIn(DELIVERY_METHODS, d.method), trade: text(d.trade), note: text(d.note) };
+  return out.method || out.trade || out.note ? out : null;
+}
+
+const KNOWN_KEYS = ["v", "state", "nature", "configVersion", "selected", "element", "zone", "areaIds", "sourceQuestionIds", "linkedItemIds", "unresolved", "assumption", "delivery", "note"];
+
+/**
+ * The one canonical form of an answer. Returns null when there is nothing in it. Same input in any key
+ * order gives identical output, and normalising twice changes nothing. Unknown keys are kept, and a record
+ * written by a newer schema is returned untouched, so an older reader can't strip what it doesn't know.
+ */
+export function normaliseAnswer(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (Number(raw.v) > ANSWER_SCHEMA_VERSION) return sortKeys(raw);
+  const selected = normSelected(raw.selected);
+  const unresolved = normUnresolved(raw.unresolved);
+  const state = keyIn(ANSWER_STATES, raw.state) || (unresolved ? "unresolved" : selected.length ? "recorded" : "not_discussed");
+  const a = {
+    ...omit(raw, KNOWN_KEYS),
+    v: ANSWER_SCHEMA_VERSION, state, nature: keyIn(ANSWER_NATURES, raw.nature) || null, configVersion: text(raw.configVersion),
+    selected, element: normElement(raw.element), zone: normZone(raw.zone), areaIds: uniqueIds(raw.areaIds),
+    sourceQuestionIds: uniqueIds(raw.sourceQuestionIds), linkedItemIds: uniqueIds(raw.linkedItemIds),
+    unresolved, assumption: normAssumption(raw.assumption), delivery: normDelivery(raw.delivery), note: text(raw.note),
+  };
+  const blank = state === "not_discussed" && !selected.length && !a.element && !a.zone && !a.areaIds.length && !a.sourceQuestionIds.length
+    && !a.linkedItemIds.length && !unresolved && !a.assumption && !a.delivery && !a.note && !Object.keys(omit(raw, KNOWN_KEYS)).length;
+  return blank ? null : sortKeys(a);
+}
+
+// ── Reading an answer ─────────────────────────────────────────────────────────────────────────────
+
+const liveSelected = (a) => (Array.isArray(a?.selected) ? a.selected.filter((s) => !s.stale) : []);
+const humanise = (id) => { const s = String(id || "").replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
+
+/** "legacy_text" for an old free-text record, otherwise the answer state. */
+export function answerStateOf(item) {
+  if (item?.answer) return item.answer.state || "not_discussed";
+  const typed = [item?.description, item?.product, item?.model, item?.colour].some((v) => String(v || "").trim());
+  return typed ? "legacy_text" : "not_discussed";
+}
+
+/** Why this is parked, and who holds it. Null unless the answer is actually in the "unresolved" state. */
+export function unresolvedOf(item) {
+  const a = item?.answer;
+  if (!a || a.state !== "unresolved") return null;
+  return { reason: a.unresolved?.reason || "", note: a.unresolved?.note || "", owner: item.responsibility || "", nextAction: item.nextAction || "" };
+}
+
+/**
+ * The ONLY view of an answer a client document, portal row or notification may use. An allow-list of what
+ * was chosen and where. Internal notes, assumptions, unresolved reasons, delivery and links can't appear.
+ */
+export function clientSafeAnswer(item) {
+  const a = item?.answer;
+  if (!a || !(Number(a.v) <= ANSWER_SCHEMA_VERSION)) return null;
+  return {
+    state: a.state,
+    selected: liveSelected(a).map((s) => ({ label: s.label || humanise(s.optionId) })),
+    element: a.element?.label || "",
+    zone: a.zone?.label || "",
+  };
+}
+
+/** One line from what was chosen, e.g. "Fibre cement sheet — Feature". "" when nothing was chosen. */
+export function answerSummary(item) {
+  const c = clientSafeAnswer(item);
+  if (!c || (!c.selected.length && !c.element)) return "";
+  return [c.element, c.selected.map((s) => s.label).join(", "), c.zone].filter(Boolean).join(" — ");
+}
+
+/** May this answer sit in the client-facing selection store? Facts, risks and N/A never can. */
+export function answerAllowsClientSelection(answer) {
+  if (!answer) return true;
+  return answer.state !== "not_applicable" && (!answer.nature || answer.nature === "choice");
+}
+
+// ── Change detection ──────────────────────────────────────────────────────────────────────────────
+
+/** The part of an answer a client decision or agreed scope rests on. Labels, notes, assumptions don't count. */
+function materialOf(raw) {
+  const a = normaliseAnswer(raw);
+  if (a && Number(a.v) > ANSWER_SCHEMA_VERSION) return a;
+  return {
+    state: a?.state || "not_discussed",
+    selected: liveSelected(a).map((s) => s.path.join("/")).sort(),
+    element: a?.element?.key || "",
+    zone: a?.zone?.key || "",
+    areaIds: [...(a?.areaIds || [])].sort(),
+  };
+}
+export const answerMaterialChanged = (a, b) => stableStringify(materialOf(a)) !== stableStringify(materialOf(b));
+
+/** A short stable value that changes when what a default says changes. Used to flag confirmed rooms. */
+export function answerFingerprint(item) {
+  const basis = stableStringify({
+    material: materialOf(item?.answer), description: text(item?.description), product: text(item?.product), manufacturer: text(item?.manufacturer),
+    model: text(item?.model), colour: text(item?.colour), supplier: text(item?.supplier), disposition: item?.disposition || "",
+  });
+  let h = 5381;
+  for (let i = 0; i < basis.length; i++) h = ((h << 5) + h + basis.charCodeAt(i)) >>> 0;
+  return "fp_" + h.toString(36);
+}
+
+// ── Blue Leaf pricing assumptions (B05) ───────────────────────────────────────────────────────────
+
+/** Has anyone actually chosen or stated something for this item? */
+export function hasExplicitChoice(item) {
+  if (liveSelected(item?.answer).length) return true;
+  return [item?.description, item?.product, item?.manufacturer, item?.model, item?.colour].some((v) => String(v || "").trim());
+}
+
+/** The assumption an estimator may rely on: none once a real choice exists. */
+export function activeAssumption(item) {
+  const a = item?.answer?.assumption;
+  return a && !hasExplicitChoice(item) ? a : null;
+}
+
+/**
+ * Record a Blue Leaf pricing assumption on an unresolved item. Changes the answer block only, so it can't
+ * become a preference, an approval, a product or a price. Returns the item unchanged if a real choice exists.
+ */
+export function applyPricingAssumption(item, assumption) {
+  if (hasExplicitChoice(item)) return item;
+  const answer = normaliseAnswer({ ...(item.answer || {}), assumption });
+  return answer ? { ...item, answer } : item;
+}
+
+// ── Defaults, exceptions, room confirmation (B10, DEC-MRUX-02) ────────────────────────────────────
+
+/** What a room exception starts from: the choice itself, not the default's own notes or assumption. */
+export function exceptionAnswerFrom(def) {
+  const a = def?.answer;
+  if (!a) return null;
+  return normaliseAnswer({ v: a.v, state: a.state, nature: a.nature, configVersion: a.configVersion, selected: a.selected, element: a.element, zone: a.zone, sourceQuestionIds: a.sourceQuestionIds });
+}
+
+/** room.defaultConfirmations: { [defaultItemId]: { at, by, fingerprint } }. */
+export function normaliseRoomConfirmations(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const id of Object.keys(raw).sort()) {
+    const c = raw[id];
+    if (c && typeof c === "object" && c.at) out[id] = { at: text(c.at), by: text(c.by), fingerprint: text(c.fingerprint) };
+  }
+  return out;
+}
+
+/**
+ * "Confirm room defaults": this room uses these defaults. Applicability only. Returns a new ROOM and never
+ * touches an item, so it can't approve, verify or price anything, and needs no per-room copy of the default.
+ * Pass exceptionFor(defaultId) so an overridden default is left alone. Parked defaults stay open.
+ */
+export function confirmRoomDefaults(room, defaults, { at, by, exceptionFor } = {}) {
+  const next = { ...normaliseRoomConfirmations(room.defaultConfirmations) };
+  for (const def of defaults || []) {
+    if (exceptionFor?.(def.id)) continue;
+    if (["unresolved", "client_unsure"].includes(def.answer?.state)) continue;
+    next[def.id] = { at: text(at), by: text(by), fingerprint: answerFingerprint(def) };
+  }
+  return { ...room, defaultConfirmations: normaliseRoomConfirmations(next) };
+}
+
+/** inherited | confirmed | changed (default moved since it was confirmed) | overridden. */
+export function roomDefaultStatus(room, def, exception) {
+  if (exception) return "overridden";
+  const c = normaliseRoomConfirmations(room?.defaultConfirmations)[def?.id];
+  if (!c) return "inherited";
+  return c.fingerprint === answerFingerprint(def) ? "confirmed" : "changed";
+}

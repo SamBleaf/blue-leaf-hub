@@ -25,8 +25,10 @@
  * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests/server.
  */
 import { QUESTIONS, QUESTION_LIBRARY_VERSION } from "./registerQuestions.js";
+import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption } from "./registerAnswer.js";
 
 export { QUESTION_LIBRARY_VERSION };
+export * from "./registerAnswer.js";
 
 // ── Vocabulary ────────────────────────────────────────────────────────────────────────────────────
 
@@ -368,6 +370,7 @@ export function makeItem(partial = {}) {
     isDefault: !!partial.isDefault,                            // a project-wide default
     overridesDefaultId: partial.overridesDefaultId || null,    // an explicit room exception to a default
     evidence: partial.evidence || null,                        // {at, by, ref, method} — required for client_approved
+    answer: normaliseAnswer(partial.answer),                   // typed answer (registerAnswer.js); null = legacy / free text
     createdAt: partial.createdAt || nowIso(),
     updatedAt: partial.updatedAt || nowIso(),
     // Server-owned, read-only: canonical row identity + version + portal state (project mode only).
@@ -454,6 +457,7 @@ export function makeRoom(partial = {}) {
     scope: ROOM_SCOPES[partial.scope] ? partial.scope : "new",
     order: Number.isFinite(partial.order) ? partial.order : 0,
     sheet: partial.sheet || "",                                // drawing sheet/revision for this room
+    defaultConfirmations: normaliseRoomConfirmations(partial.defaultConfirmations), // staff confirmed these defaults apply here
   };
 }
 
@@ -488,7 +492,7 @@ export function readRegister(lead) {
 /** Serialise { meta, items } back to the array stored in `selections_schedule` (strips server sync). */
 export function writeRegister(register) {
   const meta = register?.meta ? { ...emptyMeta(register.meta) } : null;
-  const items = Array.isArray(register?.items) ? register.items.map((i) => { const it = makeItem(i); delete it.sync; return it; }) : [];
+  const items = Array.isArray(register?.items) ? register.items.map((i) => { const it = makeItem(i); delete it.sync; if (!it.answer) delete it.answer; return it; }) : [];
   const metaStarted = meta && (meta.rooms.length || meta.planRev || meta.deliveryModel ||
     meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId);
   return [...(metaStarted ? [meta] : []), ...items];
@@ -496,9 +500,16 @@ export function writeRegister(register) {
 
 // ── Defaults with explicit exceptions (Tab 18 §6 — "Apply to selected rooms", no silent edits) ────
 
-/** The project-wide default item for a question ID (e.g. W-017 floor palette), if captured. */
-export function defaultItemFor(register, questionId) {
-  return register.items.find((i) => i.isDefault && !i.roomId && resolvePromptId(i.promptKey) === questionId) || null;
+/** Every project-wide default for a question ID. A question can hold several (main / bedroom / wet floor). */
+export function defaultItemsFor(register, questionId) {
+  return register.items.filter((i) => i.isDefault && !i.roomId && resolvePromptId(i.promptKey) === questionId);
+}
+
+/** The project-wide default for a question ID, if captured. With zoneKey: that zone's, else an unzoned one. */
+export function defaultItemFor(register, questionId, { zoneKey } = {}) {
+  const all = defaultItemsFor(register, questionId);
+  if (zoneKey) return all.find((i) => i.answer?.zone?.key === zoneKey) || all.find((i) => !i.answer?.zone) || null;
+  return all[0] || null;
 }
 
 /**
@@ -518,6 +529,7 @@ export function applyDefaultToRooms(register, defaultItemId, roomIds) {
       disposition: def.disposition, description: def.description, product: def.product, manufacturer: def.manufacturer,
       model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty,
       responsibility: def.responsibility, supplyBy: def.supplyBy, overridesDefaultId: defaultItemId,
+      answer: exceptionAnswerFrom(def),
     }));
   }
   return { ...register, items };
@@ -548,7 +560,33 @@ export function outstandingItems(register) { return register.items.filter(isOuts
 // Scope, requirement and action items NEVER qualify. This is the load-bearing scope-vs-selection guard.
 const NON_SELECTION_DISPOSITIONS = new Set(["excluded", "by_others", "na", "deferred"]);
 export function isClientSelection(item) {
-  return item.itemKind === "selection" && !NON_SELECTION_DISPOSITIONS.has(item.disposition);
+  return item.itemKind === "selection" && !NON_SELECTION_DISPOSITIONS.has(item.disposition) && answerAllowsClientSelection(item.answer);
+}
+
+/**
+ * Is this work inside Blue Leaf's contract? DERIVED from the disposition, never stored, so the two can't
+ * disagree. A recorded fact, risk or requirement isn't scope at all. Who later delivers included work is
+ * answer.delivery, which has no bearing on this.
+ */
+export function contractInclusionOf(item) {
+  const nature = item.answer?.nature;
+  if (nature && !["scope", "choice"].includes(nature)) return "not_scope";
+  if (item.itemKind === "requirement" || item.itemKind === "action") return "not_scope";
+  if (item.answer?.state === "not_applicable" || item.disposition === "na") return "not_applicable";
+  if (INCLUDED_DISPOSITIONS.has(item.disposition)) return "included";
+  return { excluded: "excluded", by_others: "by_others", deferred: "deferred", retain: "retained" }[item.disposition] || "undecided";
+}
+
+/** The six separate questions about an item, each read from its own field. None implies another. */
+export function itemAxes(item) {
+  return {
+    clientPreference: item.certainty === "preference",
+    clientApproval: item.certainty === "client_approved" && !!((item.evidence?.at && item.evidence?.by) || item.sync?.approvedOnBoard),
+    constructionScope: contractInclusionOf(item),
+    technicalVerification: item.technicalStatus,
+    pricingStatus: item.pricingStatus,
+    internalAssumption: activeAssumption(item),
+  };
 }
 
 /** Business-rule problems with one item (shown inline; the server enforces the same rules). */

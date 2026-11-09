@@ -20,7 +20,7 @@
  */
 import {
   readRegister, writeRegister, emptyMeta, makeItem, isClientSelection, roomLabel, categoryLabel,
-  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION,
+  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION, answerSummary, answerMaterialChanged, stableStringify,
 } from "../../src/lib/register.js";
 import { notifyClient } from "./portalNotify.mjs";
 
@@ -96,6 +96,7 @@ export function selRowToItem(row, { isPreconstruction } = {}) {
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
     evidence: row.approval_evidence || (approved && row.approved_at ? { at: row.approved_at, by: "Portal board", method: "board" } : null),
+    answer: d.answer || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     sync: {
@@ -148,9 +149,10 @@ export function rsiRowToItem(row) {
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
     evidence: row.approval_evidence || null,
+    answer: d.answer || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    sync: { mode: "project", table: RSI, rowId: row.id, version: row.updated_at, clientVisible: false, status: null },
+    sync: { mode: "project", table: RSI, rowId: row.id, version: row.updated_at, clientVisible: false, status: null, baselined: !!row.baselined_at },
   });
 }
 
@@ -159,12 +161,13 @@ function detailOf(item) {
     promptKey: item.promptKey || null, categoryKey: item.category, section: item.section, level: item.level || "",
     isDefault: !!item.isDefault, overridesDefaultId: item.overridesDefaultId || null, resolved: !!item.resolved,
     description: item.description || "",
+    ...(item.answer ? { answer: item.answer } : {}),                // internal: register_detail is never in a client projection
   };
 }
 
 function itemTitle(item) {
   const q = questionById(resolvePromptId(item.promptKey));
-  return (item.description || "").trim() || q?.short || categoryLabel(item.category) || "Selection";
+  return (item.description || "").trim() || answerSummary(item) || q?.short || categoryLabel(item.category) || "Selection";
 }
 
 export function itemToSelRow(item, register, order = 0) {
@@ -380,6 +383,35 @@ export async function saveRegister(sb, leadId, payload = {}, { actor } = {}) {
   return saveLead(sb, target, { meta: payload.meta, changes, deletes });
 }
 
+// A screen loaded before these fields existed sends items and rooms without them. Absent means "not
+// touched", so keep what is stored. An explicit answer: null still clears it.
+const carryAnswer = (raw, before) => (raw && !("answer" in raw) && before?.answer ? { ...raw, answer: before.answer } : raw);
+function carryRoomConfirmations(meta, stored) {
+  if (!meta || !Array.isArray(meta.rooms)) return meta;
+  const byId = new Map((stored?.rooms || []).map((r) => [r.id, r]));
+  return { ...meta, rooms: meta.rooms.map((r) => (r && !("defaultConfirmations" in r) && byId.has(r.id) ? { ...r, defaultConfirmations: byId.get(r.id).defaultConfirmations } : r)) };
+}
+
+const APPROVED_STATUSES = ["approved", "ordered", "installed"];
+
+/**
+ * register_apply compares product columns, not register_detail, so the lock rules for a structured answer
+ * live here. Same reasons, same outcome: refused before anything is written. Safe against a race because
+ * register_apply still refuses the row if its version moves after this check.
+ */
+function answerGuardReason(before, after, rawSync) {
+  if (!before?.sync?.rowId || !rawSync?.version || rawSync.version !== before.sync.version) return null;  // new or stale: register_apply answers
+  if (!answerMaterialChanged(before.answer, after.answer)) return null;                                     // notes, assumptions stay editable
+  if (before.sync.table === RSI) return before.sync.baselined ? "baseline_locked" : null;
+  if (before.sync.locked) return "post_contract_locked";
+  if (APPROVED_STATUSES.includes(before.sync.status) && after.certainty === "client_approved") {
+    const ev = after.evidence;
+    const fresh = ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence);
+    if (!fresh) return "reapproval_required";
+  }
+  return null;
+}
+
 async function saveLead(sb, target, { meta, changes, deletes }) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data: lead } = await sb.from("leads").select(LEAD_COLS).eq("id", target.lead.id).maybeSingle();
@@ -404,9 +436,9 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
     }
     if (conflicts.length) throw new RegisterError(409, "Some items were changed elsewhere.", "CONFLICT", { conflicts });
 
-    for (const ch of changes) byId.set(ch.id, makeItem({ ...ch, updatedAt: now, sync: null }));
+    for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(ch, byId.get(ch.id)), updatedAt: now, sync: null }));
     for (const del of deletes) byId.delete(del.id);
-    const nextMeta = meta ? emptyMeta({ ...meta, rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
+    const nextMeta = meta ? emptyMeta({ ...carryRoomConfirmations(meta, cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
     const next = writeRegister({ meta: nextMeta, items: [...byId.values()] });
 
     // Conditional write on the lead's own updated_at — a concurrent save makes this affect 0 rows and
@@ -423,18 +455,23 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
   throw new RegisterError(409, "The brief is being saved from another screen — please retry.", "BUSY");
 }
 
-async function saveProject(sb, target, { meta, changes, deletes }, actor) {
+async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, actor) {
   const current = await loadCanonical(sb, target.project);
+  const meta = rawMeta ? carryRoomConfirmations(rawMeta, current.meta) : rawMeta;
   const register = { meta: meta ? emptyMeta(meta) : current.meta, items: current.items };
   // Changes may reference rooms added in this same save — resolve labels against the incoming meta.
   const known = new Set(current.items.map((it) => it.id));
+  const stored = new Map(current.items.map((it) => [it.id, it]));
+  const guarded = [];
   const ops = [];
   if (meta) ops.push({ op: "meta_set", base_rev: Number(meta.rev) || 0, meta: metaForCanonical(meta) });
   let nextOrder = current.items.length;
   for (const raw of changes) {
-    const it = makeItem(raw);
+    const it = makeItem(carryAnswer(raw, stored.get(raw.id)));
     const want = storeFor(it);
     const sync = raw.sync && raw.sync.mode === "project" ? raw.sync : null;
+    const guard = answerGuardReason(stored.get(it.id), it, sync);
+    if (guard) guarded.push({ itemId: it.id, reason: guard });
     // Existing rows keep their sort_order (null ⇒ unchanged); new rows append after the current list.
     const sortOrder = known.has(it.id) ? null : nextOrder++;
     const rowFor = (store) => (store === SEL ? itemToSelRow(it, register, sortOrder) : itemToRsiRow(it, register, sortOrder));
@@ -455,6 +492,7 @@ async function saveProject(sb, target, { meta, changes, deletes }, actor) {
     if (!sync?.rowId) continue;                                   // never persisted — nothing to delete
     ops.push({ op: sync.table === SEL ? "sel_delete" : "scope_delete", item_id: del.id, row_id: sync.rowId, base_version: sync.version });
   }
+  if (guarded.length) throw new RegisterError(409, conflictMessage(guarded), "CONFLICT", { conflicts: guarded });
   if (!ops.length) return { mode: "project", register: current };
   await callApply(sb, target, ops, actor);
   return { mode: "project", register: await loadCanonical(sb, target.project) };

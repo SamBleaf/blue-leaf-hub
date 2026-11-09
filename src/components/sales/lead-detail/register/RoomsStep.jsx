@@ -5,7 +5,7 @@
  */
 import { useEffect } from "react";
 import {
-  promptsFor, resolvePromptId, defaultItemFor, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
+  promptsFor, resolvePromptId, defaultItemFor, exceptionAnswerFrom, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
   partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS,
 } from "../../../../lib/register.js";
 import { Section, Select } from "./ui.jsx";
@@ -41,7 +41,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
       <PromptRow key={q.id} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
         readOnlyReason={readOnly ? "Read-only" : null}
         onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
-          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id })}
+          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: exceptionAnswerFrom(def) })}
         onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
         onDelete={item ? () => deleteItem(item.id) : null}
         onPortal={item ? (action, ev) => onPortalItem(item, action, ev) : null} />

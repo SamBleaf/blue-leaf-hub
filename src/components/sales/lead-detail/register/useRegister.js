@@ -14,12 +14,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, emptyMeta } from "../../../../lib/register.js";
+import { makeItem, emptyMeta, answerMaterialChanged } from "../../../../lib/register.js";
 
 const AUTOSAVE_MS = 1200;
 const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
 const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
-const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet"];
+const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet", "defaultConfirmations"];
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
 
@@ -146,7 +146,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
     // An approval covers a specific product: changing it returns the item to Proposed until the client
     // re-confirms (the server refuses to keep "client-approved" on a changed product without new evidence).
     if (item && item.itemKind === "selection" && item.certainty === "client_approved" && !("certainty" in partial)
-        && PRODUCT_FIELDS.some((f) => f in partial && !same(partial[f], item[f]))) {
+        && (PRODUCT_FIELDS.some((f) => f in partial && !same(partial[f], item[f])) || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer)))) {
       next = { ...partial, certainty: "proposed", evidence: null };
       setNotices((n) => [`“${item.description || "Selection"}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
     }
