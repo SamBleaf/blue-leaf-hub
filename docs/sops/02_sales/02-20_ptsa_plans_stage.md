@@ -51,9 +51,9 @@ The one thing that unlocks the next stage (Consultants) is the **PTSA being sign
 - Dropbox is configured (so the job folder can be created when the PTSA is marked signed).
 
 ## 5. Step-by-step process
-1. Open the lead at the **PTSA / Plans** stage. The focus panel shows the stage's tools top to bottom: Client email, Pre-Tender Service Agreement, Design & pre-construction fee invoice, Working drawings, Plan presentation.
+1. Open the lead at the **PTSA / Plans** stage. The focus panel shows the stage's tools top to bottom: Pre-Tender Service Agreement, Design & pre-construction fee invoice, Working drawings, Plan presentation, Client correspondence.
    [insert screenshot: PTSA / Plans focus panel with all five cards]
-2. Under **Client email**, click **Accepted-concepts acknowledgement**. Review the preview (subject defaults to "Your concept is approved — here's what happens next"), edit the copy if you like, then **Send email**. This confirms the approved concept and sets up the PTSA + working-drawings stage.
+2. In **Client correspondence**, choose **Accepted-concepts acknowledgement** in the list and click **Review email**. Review the preview (subject defaults to "Your concept is approved — here's what happens next"), edit the copy if you like, then **Send email**. This confirms the approved concept and sets up the PTSA + working-drawings stage.
    [insert screenshot: Accepted-concepts email preview modal]
 3. In the **Pre-Tender Service Agreement** card, check the **PTSA fee** matches the pre-construction fee (it is read-only here — change it in the Concept stage if wrong).
 4. Open the **Services** section and tick the services included in the agreement (five are ticked by default). Open **Project scope** and fill in the scope — this text appears **verbatim in the PTSA** and is client-facing. Open **Terms** to set the validity period (default 14 days), the "Fee credited back on contract signing" toggle, and any special terms.
@@ -65,7 +65,7 @@ The one thing that unlocks the next stage (Consultants) is the **PTSA being sign
    [insert screenshot: Design fee Xero invoice card after creation]
 8. Go to the **Documents** tab. Upload the working drawings, elevations and 3D render, choosing document type **Working drawings**. They carry to the job's PLANS folder.
 9. Back in the focus panel, use **Plan presentation** to book the meeting (or copy the booking link). Present the plans, capture any layout/opening changes, and fold them into the working drawings **before** engineering.
-10. When the PTSA is signed, the **Advance to Consultants** panel shows a green "PTSA signed" tick. Advance the lead to **Consultants**.
+10. When the PTSA is signed, the **Move to Consultants** area at the bottom of the panel shows a green "PTSA signed" tick. Advance the lead to **Consultants**.
 
 ## 6. What happens next
 The lead moves to the **Consultants** stage, where engineering and certification are coordinated on the now-signed design. The job created at PTSA signing carries forward with its Dropbox folder tree; the working drawings sit in the PLANS folder ready for the consultants. The design fee invoice tracks in Xero and Finance until paid.
@@ -101,7 +101,7 @@ The lead moves to the **Consultants** stage, where engineering and certification
 - [02-13 Test lead — walk the pipeline](02-13_test_lead_walk_the_pipeline.md) — using a test lead to exercise this stage end to end.
 
 ## 10. Screenshot placeholders
-- [insert screenshot: PTSA / Plans focus panel — Client email, PTSA, Design fee, Working drawings, Plan presentation cards]
+- [insert screenshot: PTSA / Plans focus panel — PTSA, Design fee, Working drawings, Plan presentation, Client correspondence]
 - [insert screenshot: Accepted-concepts acknowledgement email preview modal]
 - [insert screenshot: Pre-Tender Service Agreement card — status, PTSA fee, Services / Scope / Terms accordions]
 - [insert screenshot: Signing section — Generate PTSA Document + Mark PTSA as signed upload]
@@ -109,7 +109,7 @@ The lead moves to the **Consultants** stage, where engineering and certification
 - [insert screenshot: Design & pre-construction fee invoice card after creation, showing ex/inc GST]
 - [insert screenshot: Documents tab upload with document type "Working drawings" selected]
 - [insert screenshot: Plan presentation meeting scheduler with booking link]
-- [insert screenshot: Advance to Consultants panel with green "PTSA signed" tick]
+- [insert screenshot: Move to Consultants area with green "PTSA signed" tick]
 
 ## 11. Automation notes
 - **Accepted-concepts email** — `POST /api/sales/leads/:id/concept-email/send` with `which=accepted_concepts`. Sending is gated by `CONCEPT_EMAIL_ENABLED=true` (returns 503 when off; preview always works). On send it writes an outbound row to **`correspondence`** (`direction='outbound'`) and a **`lead_activities`** row (`activity_type='email'`). This email carries no forward "sent" stamp of its own.

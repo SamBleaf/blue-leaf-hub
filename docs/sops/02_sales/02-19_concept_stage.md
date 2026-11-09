@@ -26,7 +26,7 @@ A Director (Sam or Josh) is needed for one thing only: the design-lock **Overrid
 
 Use this SOP when a lead has reached the **Concept** stage. On the pipeline stepper the stage is labelled **Concept** (its internal key is `winning_offer`). A lead lands here after Discovery, once the concept agreement has been accepted.
 
-You are in the right place when you open the lead and the focus panel at the top shows the Concept controls: a design-lock banner, a **Concept design** row of buttons, **Client emails**, a **Finishes schedule**, the **Design meeting** and **Concept presentation** cards, and a **PTSA / Plans pathway** box.
+You are in the right place when you open the lead and the focus panel at the top shows the Concept controls: a design-lock banner, a **Concept design** row of buttons, a **Finishes schedule**, the **Design meeting** and **Concept presentation** cards, a **PTSA / Plans pathway** box, then **Client correspondence** and **Move to PTSA / Plans** at the bottom.
 
 Stop using this SOP once the lead advances to **PTSA / Plans** (internal key `fee_proposal`) — from there follow the PTSA / Plans SOP.
 
@@ -59,7 +59,7 @@ The Concept stage turns "client has paid for a concept" into "client has approve
 3. If it is locked and the fee genuinely cannot be collected before design must start, ask a Director to click **Override**. The banner turns green and the override is logged. (If the fee simply hasn't been chased, collect it first — don't override by habit.)
 4. In the **Concept design** row, click the button that matches where the design is now: **With designer**, **Sent to client**, or **Approved**. Earlier steps show a green tick once you move past them. (Clicking the button that is already current clears it back to blank — see Common mistakes.)
 5. Upload the actual concept drawings in the **Documents** tab: choose document type **Concept drawings** and upload. Upload a new version each time the drawings change.
-6. Before the design meeting, send the brief-questions email: in **Client emails** click **Brief questions (pre-meeting)**. A preview opens — read it, edit the subject or message if needed, then click **Send email**. This email attaches the Blue Leaf company-profile PDF automatically.
+6. Before the design meeting, send the brief-questions email: in **Client correspondence** choose **Brief questions (pre-meeting)** in the list and click **Review email**. A preview opens — read it, edit the subject or message if needed, then click **Send email**. This email attaches the Blue Leaf company-profile PDF automatically.
 7. While the concept is being drawn, send the interim update: click **Interim update**, preview, then **Send email**.
 8. Build the **Finishes schedule** as selections firm up: click **+ Add row** and fill **Area**, **Item / finish** and **Notes**. Add a row per selection. This list carries through to Consultants and the proposal, so keep it current.
 9. Book the meetings using the **Design meeting** and **Concept presentation** cards — either copy the self-book link to the client or book a slot on their behalf.
@@ -112,7 +112,7 @@ If you don't advance, the lead stays in Concept and the follow-up cadence keeps 
 
 [insert screenshot: Concept stage focus panel — locked (amber) state with the Override button visible]
 [insert screenshot: Concept stage focus panel — unlocked (green) state with the design button row]
-[insert screenshot: Client emails section with Brief questions and Interim update buttons]
+[insert screenshot: Client correspondence with the email list showing Brief questions and Interim update]
 [insert screenshot: Brief-questions email preview modal, editable Subject and Message]
 [insert screenshot: Finishes schedule with two rows filled in]
 [insert screenshot: PTSA / Plans pathway box and the "to advance" checklist showing all three items met]

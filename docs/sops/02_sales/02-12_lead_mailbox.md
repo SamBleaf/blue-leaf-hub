@@ -23,7 +23,7 @@ Admin, Supervisor.
 Any time you want to email a lead from inside the Hub, or read their reply, without leaving the lead. All correspondence for a lead lands in one thread.
 
 ## 3. What this does
-Shows a Mail-app-style thread of every email sent to and received from the lead, and lets you compose or reply in place. Sent mail goes out over your real mail server (so it also appears in your Sent folder), and client replies are matched back to the lead and threaded automatically.
+Shows a Mail-app-style thread of every email sent to and received from the lead, on demand from the **Client correspondence** area on every stage, and lets you compose or reply in place. Sent mail goes out over your real mail server (so it also appears in your Sent folder), and client replies are matched back to the lead and threaded automatically.
 
 ## 4. Before you start
 - The lead has a valid email.
@@ -31,14 +31,14 @@ Shows a Mail-app-style thread of every email sent to and received from the lead,
 - To SEND: `LEAD_MAILBOX_ENABLED=true` on the API host. To RECEIVE: IMAP configured (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`) so the poller can match replies.
 
 ## 5. Step-by-step process
-1. Open the lead (Enquiry or Qualify stage) → the **Mailbox** panel.
-2. Read the thread — **Sent** messages are tinted, **Received** are plain.
-3. To reply, click **Reply** on a message (it prefills "Re: …" and threads to that message). To start fresh, just type a **Subject** + message.
-4. Click **Send**. Your signature is appended automatically.
+1. Open the lead at any stage → **Client correspondence** near the bottom of the "Do this now" panel. Closed, it shows the last email recorded.
+2. Click **View correspondence**. Read the thread — **Sent** messages are tinted, **Received** are plain. "Sent" means our mail server accepted it. The Hub can't see whether it was delivered or read.
+3. To reply, click **Reply** on a message (it prefills "Re: …" and threads to that message). To start fresh, click **New message**.
+4. Type your message and click **Send**. Your signature is appended automatically.
 
 > 💡 **Tip:** Replies from the client show up here on their own within ~10 minutes (the mailbox poller). You don't need to forward anything.
 
-[insert screenshot: the lead mailbox thread + compose box]
+[insert screenshot: Client correspondence open, showing the thread and New message]
 
 ## 6. What happens next
 The sent email is logged as an outbound message and appears in the thread + the lead timeline. When the client replies, the poller inserts an inbound message and (if they were mid-Qualify) suppresses the 7-day follow-up.
@@ -95,8 +95,8 @@ Next review date: 2027-02-16
 ### Test cases
 
 **TC-01 — Happy path (send)**
-1. Open the lead → Mailbox → type a subject + message → **Send**.
-2. Expected result: "Sent."; the message appears as a **Sent** bubble.
+1. Open the lead → Client correspondence → **View correspondence** → **New message** → type a subject + message → **Send**.
+2. Expected result: the note says it was sent and that delivery can't be seen; the message appears as a **Sent** bubble and on the closed status line.
 3. Expected DB: an outbound `correspondence` row with `lead_id`, `direction='outbound'`, a `message_id`.
 - [ ] Pass  [ ] Fail
 
@@ -121,8 +121,14 @@ Next review date: 2027-02-16
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Send disabled (feature-specific)**
-1. Set `LEAD_MAILBOX_ENABLED` unset/false; try to send.
-2. Expected result: 503 "Lead mailbox sending is turned off." — no `correspondence` row.
+1. Set `LEAD_MAILBOX_ENABLED` unset/false; open the thread.
+2. Expected result: the page says sending from the mailbox is off and offers no New message or Reply. Called directly, the API returns 503 "Lead mailbox sending is turned off." — no `correspondence` row.
+- [ ] Pass  [ ] Fail
+
+**TC-07 — The composer is on demand**
+1. Open a lead at any stage.
+2. Expected result: no Subject or Message box is showing. The area shows the last recorded email, or "No emails recorded for this lead yet."
+3. Force `GET /api/sales/leads/:id/mailbox` to fail. Expected result: the area says the history could not be loaded and does not say there are no emails.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -74,12 +74,12 @@ Everything is stored on the lead record, so any staff member opening the lead se
 8. When the proposal is ready, scroll to the **Proposal presentation** meeting block. Either click **Copy client booking link** to send the client a self-book link, or **Set a time yourself** to pick an open slot and book it on their behalf.
    *[insert screenshot: Proposal presentation meeting scheduler]*
 
-9. After the presentation, use the **Client emails** row. Click **Proposal follow-up (24h)** the day after presenting. A preview opens — read it, edit the wording if needed, then click **Send email**. Sending this email also moves the sub-status to **Client reviewing**.
-   *[insert screenshot: Client emails row with the four named buttons]*
+9. After the presentation, use **Client correspondence** near the bottom of the panel. Choose **Proposal follow-up (24h)** in the list the day after presenting and click **Review email**. A preview opens — read it, edit the wording if needed, then click **Send email**. Sending this email also moves the sub-status to **Client reviewing**.
+   *[insert screenshot: Client correspondence with the email list open]*
 
-10. While the client is deciding, click **Client-review follow-up** to gently check in (preview, edit, send).
+10. While the client is deciding, choose **Client-review follow-up** to gently check in (preview, edit, send).
 
-11. When the building contract goes out, click **Contract sent**. Preview and send the email; sending it also sets the contract status to **Sent** and stamps today as the sent date.
+11. When the building contract goes out, choose **Contract sent**. Preview and send the email; sending it also sets the contract status to **Sent** and stamps today as the sent date.
 
 12. If the contract is not signed after a while, click **Unsigned-contract follow-up** to chase it (preview, edit, send).
 
@@ -139,7 +139,7 @@ Everything is stored on the lead record, so any staff member opening the lead se
 - *[insert screenshot: Blue Leaf Proposal Checklist with 10 items and the readiness badge]*
 - *[insert screenshot: amber "not ready to present" warning under 80%]*
 - *[insert screenshot: Proposal presentation meeting scheduler (copy link + set a time)]*
-- *[insert screenshot: Client emails row with the four named buttons]*
+- *[insert screenshot: Client correspondence with the email list open]*
 - *[insert screenshot: email preview modal with Subject + Message + Send email]*
 - *[insert screenshot: Building contract status buttons showing sent/signed dates]*
 

@@ -244,7 +244,7 @@ Steps:
 2. Tick **Engineering complete enough for tender** and **Certification pathway confirmed**, but leave **Provisional F&F schedule issued** un-ticked.
 3. Look at the advance panel.
 
-Expected UI result: the **Move to Tender →** button stays **disabled**; the requirement list shows "Provisional F&F schedule issued" as not met; the message "Complete the requirements above to advance." is shown.
+Expected UI result: the **Move to Tender →** button stays **disabled**; the requirement list shows "Provisional F&F schedule issued" as not met; the message "Finish the items above to move on." is shown.
 
 Expected DB record: `leads.stage` remains `consultants` (unchanged); `leads.provisional_ff_issued` = `false`.
 

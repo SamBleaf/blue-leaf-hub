@@ -110,3 +110,71 @@ Also fixed from the review: attaching a PDF stamped today as a signed date nobod
 ### Next dependency
 
 Owner: apply migration 217 with the rest of the R05 migrations; P7's release package lists it. P2 makes the advisory wording explicit (D4) and consolidates progression controls. P6 adds `plans_supplied` to `resolveEngagementPathway` and the applicability table in `stageGates.js`, which is seeded with `design_build` and `architect_tender`.
+
+---
+
+## P2 — Sales interface consolidation (2026-11-09)
+
+**Outcome.** The lead page now shows one next action and has one way forward. The header on desktop and the sticky bar on a phone name the next task and jump to that control. They never move the lead. The only control on this page that moves a lead forward is at the bottom of the stage's work, and it says what is required and what is recommended. Each stage has one Client correspondence area, closed by default, that states only what was recorded. Nothing here is deployed.
+
+**Commits.** `becccdb` (code and tests) and the docs commit carrying this entry.
+
+### What changed
+
+| Area | Behaviour now |
+|---|---|
+| Next action | `computeLeadNextAction` (`src/lib/leadNextAction.js`) gives one short task, a target and a mobile tab. Hard gates come before recommended ones. It reports ready only when the Move button would really be live. |
+| Pointer | Scrolls to the element tagged `data-next-target`, opens anything collapsed, flashes a ring, and switches tab on a phone. Focus goes to the file picker or the single right button. A group of choices takes focus on its wrapper, so a stray Enter can't answer a question or change a status. |
+| Stage-advance area | `LeadStageAdvance` at the bottom of the "Do this now" card, after correspondence. Removed: the header advance, the rail card, the Action-tab copy, Enquiry's "Proceed". The stage moves only from here, the pipeline card's Move ▾ and the corrective stepper. |
+| Required vs recommended (D4) | Two labelled groups from `gateRows` in `stageGates.js`. Semantics unchanged: the button still waits for everything listed. The wording says so, and says a Director can skip recommended items with Move ▾ and the skip is logged. |
+| Reference rail | 300px, was 360. Key details stays open. Temperature & risks, Trust, Blueprint, Notes, Documents and Nurture are closed sections. Temperature, a stuck reason and the risk count show on the closed row. |
+| Blueprint | Makes its AI call when opened, not on every page load. |
+| Score | Once: on the scorecard at Enquiry and Qualify, then on the Earlier stages row. Removed from the header and Key details. Warning text no longer repeats the number. |
+| Correspondence | `LeadCorrespondence` holds each stage's emails: one button, or one list and one button when a stage has several. All sends go through `StageEmailButton`. Removed the separate senders in `QualifyActions`, `DiscoveryActions`, `ConceptStage`, `TenderStage` and the PTSA card. `StageEmailBox` is deleted and its templates moved here. Every stage now has the thread, including Concept onward, which had none. |
+| Composer | `LeadMailbox` opens only from View correspondence, then New message or Reply. |
+| Status line | From the correspondence log. Sent reads as accepted by our mail server, with a note that delivery can't be seen. A failed read says so instead of looking like an empty history. |
+| Per-template record | A row is tied to its template by the Message-ID each family already writes, so an edited subject still counts. Falls back to the lead's sent stamp where the family has one. |
+| Sending switched off | `GET /mailbox` now returns `sending`, one boolean per family. The page says when sending is off and the preview window can't send. The server's own 503 is unchanged. |
+| Kept deliberately | Qualify's contextual "Move to Nurture" under 5 (QUA-06). Header Nurture and Mark Lost. The discovery designer rule and the attach option, which moved into the preview window. Tender's two email side effects, now `patchAfterStageEmail`. |
+| Won | The bottom area is the hand-off. The rail card and its "Lead won" banner are gone. The pointer goes to the Ops Ready checklist until that is done, and the dashboard button stays secondary until then. The handover truth work is still P6. |
+
+### What the code shows about D4
+
+D4 describes the admin stepper as able to pass non-hard requirements. On a real lead the stepper only goes backward (`LeadStageStepper`, `canClick`). The route that passes them in the UI is Move ▾ on the pipeline card and the action queue, so that is what the wording names. The server logs the skip as "Gate bypass — missing: …" on the `stage_change` activity.
+
+### Schema and API impact
+
+No migration. `GET /api/sales/leads/:id/mailbox` gains `sending`. No send route, preview, approval or permission changed.
+
+New: `src/lib/leadNextAction.js`, `src/lib/leadCorrespondence.js`, `LeadCorrespondence.jsx`, `LeadStageAdvance.jsx`, `gateRows` in `stageGates.js`. Deleted: `StageEmailBox.jsx`. Gate hints that pointed the wrong way after the move were reworded; no gate rule changed.
+
+### Tests
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/sales-next-action.test.mjs`: every stage, every gate row, and that every target is a real tagged control | 75 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sales-correspondence-status.test.mjs`: status wording, per-template record, stage email map against the real families | 39 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sales-lead-detail-render.test.mjs`: panels rendered to a string, plus page-source "only one of each" checks | 52 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sandbox-sales-correspondence.test.mjs` through the real API: flags reported, every template previews, every send refused 503 and records nothing, role and missing-recipient rejections. Refuses to run if any send switch is on. | 91 passed, 0 failed |
+| AUTOMATED | `bash SP/run-tests.sh all`: 21 suites | 864 checks, 0 failing |
+| DB | Within the sandbox suite: no correspondence row or sent stamp after a refused send; real rows read back through the API | Within the 91 |
+| BROWSER | Headless Chromium against the sandbox SPA at 1440, 1024, 768 and 375: pointer landing, one Move button, order of the page, closed composer, score once, real clicks through Qualify to Discovery, no page overflow, every mobile tab, Blueprint on demand. Evidence: `~/blh-register-evidence/r05/p2/` (`walkthrough-result.txt`, screenshots). | 75 passed, 0 failed, 0 console errors |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint` and `npm run build` pass, and `node --check` passes on the changed server file. These say nothing about behaviour.
+
+No existing test assertion changed. A real send was never exercised, because sending is off in the sandbox and must stay off.
+
+### Caveats
+
+- The browser run is not P7's evidence. The script is in the session scratchpad, not the repo. P7 adds the sandbox Playwright config. It signed in with a session from the sandbox test account placed in browser storage, so the login form itself wasn't exercised.
+- Blueprint was stubbed in the browser run, to count calls without reaching a model.
+- The Hub records sent and received only. A failed send leaves no row, so it shows at the moment of trying and not afterwards. Delivery and bounces aren't tracked at all. Recorded as a decision.
+- The Tender pointer follows the tender progress strip: estimate, then present, then contract. If staff don't move the strip, it stays on the estimate until a contract status is set. No gate depends on it.
+- The desktop and mobile layouts are both mounted, as they were before, so the mailbox loads twice per page.
+- `e2e/tests/workflows/sales-stage-gate-ladder.spec.js` and its helper look for a "Lead file" drawer and a "Next: {stage}" panel, which didn't exist before this phase either. It targets production, so it was not run or changed.
+- Enquiry guidance moved into the bottom panel. Nurture and Mark Lost are now only at the top of the page.
+
+### Next dependency
+
+P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathway, and does the Won handover truth and the per-stage content gaps. P7 takes the formal browser evidence and should cover a real send on a test recipient only if the owner allows it.

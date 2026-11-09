@@ -24,7 +24,7 @@ Admin, Staff (sales)
 - **Unified timeline:** any time you want the full history of a lead in one place — activities, notes, conversations, CRM interactions and email opens/clicks — without hunting across tabs.
 
 ## 3. What this does
-- **Trust & context rail** (Lead Detail, right side / mobile Summary): shows first touch, last touch, source category and campaign, plus a structured **objections / fears / priorities** list you can add to and mark addressed.
+- **Trust & context** (Lead Detail, a closed section in the right column / mobile Summary; click it to open): shows first touch, last touch, source category and campaign, plus a structured **objections / fears / priorities** list you can add to and mark addressed.
 - **Unified timeline** (`v_lead_timeline`): one merged, time-ordered stream across `lead_activities`, `lead_notes`, `lead_conversations`, `crm_interactions` (matched directly or via the converted contact), and email opens/clicks.
 - **CRM contact drawer:** for a converted contact, shows the same full history so nothing is hidden after conversion.
 

@@ -61,7 +61,7 @@ The Qualifying Scorecard is **not a separate tab** in Pass 3A. It is embedded di
 **Desktop:** The focus panel is at the top of the left (main) workspace column.
 **Mobile:** Tap the **Action** tab — the Qualifying Scorecard focus panel is the first content block.
 
-The **score is also shown** in the header key-facts bar: "Qualifying — X/8" in green (7–8), amber (5–6), or red (0–4).
+The **score appears once**, on the scorecard, in green (7–8), amber (5–6), or red (0–4). After Qualify the scorecard moves to **Earlier stages**, and the score shows on that row instead.
 
 ## 5. Step-by-step process
 
@@ -106,13 +106,13 @@ These are the APB qualification criteria. Each is scored using a three-button se
    - The currently selected button is filled/highlighted (primary colour)
    - Click a different button to change the score — the change saves immediately (no Save button required)
    - If you genuinely do not know, score 0 — it is a signal to find out
-4. The total score (sum/8) is shown in the scorecard header and in the header key-facts bar.
+4. The total score (sum/8) is shown in the scorecard header.
 5. If the score is below 5, a warning note appears: "Score X/8 — a score of 5+ is required to advance to Discovery. APB recommends nurturing leads that stay under 5 rather than investing discovery time."
 
 ## 6. What happens next
 - `PATCH /api/sales/leads/:id` is called on each button click with the updated field value
 - `qualify_score` is a generated column (sum of the four fields) — it updates automatically
-- The header key-facts bar re-renders with the new score colour (green / amber / red)
+- The score on the scorecard re-renders with the new colour (green / amber / red)
 - The Discovery advance gate re-evaluates immediately
 
 ## 7. Common mistakes
@@ -141,7 +141,7 @@ These are the APB qualification criteria. Each is scored using a three-button se
 
 ## 10. Screenshot placeholders
 [insert screenshot: Qualifying Scorecard in the focus panel — Enquiry stage — four ScoreGate button rows]
-[insert screenshot: Header key-facts bar showing qualifying score in amber at 4/8]
+[insert screenshot: Scorecard header showing qualifying score in red at 4/8]
 [insert screenshot: "Earlier stages" accordion with Qualifying collapsed, showing "5/8" summary]
 
 ## 11. Automation notes
@@ -173,7 +173,7 @@ Next review: 2027-01-02
 **TC-01 — Update qualifying scores via the focus panel (Enquiry stage)**
 1. Open a lead at Enquiry stage — the Qualifying Scorecard should be the first content block on desktop or the Action tab on mobile
 2. Click the ScoreGate buttons: Budget = Yes (2), Timeframe = 6–18 months (1), Site = Under contract (1), Decision maker = One of two (1)
-3. Expected result: score shows 5/8 in the scorecard header and the header key-facts bar
+3. Expected result: score shows 5/8 in the scorecard header, and nowhere else on the page
 4. Expected DB: `leads` row shows `qualify_budget=2`, `qualify_timeframe=1`, `qualify_site=1`, `qualify_decision_maker=1`, `qualify_score=5`
 - [ ] Pass  [ ] Fail
 

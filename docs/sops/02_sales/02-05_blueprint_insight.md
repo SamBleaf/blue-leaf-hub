@@ -25,7 +25,7 @@ Before any important sales conversation — discovery meeting, winning offer pre
 Also useful after a conversation to debrief: ask Blueprint what you should have done differently or what the lead's signals mean.
 
 ## 3. What this does
-Blueprint Insight is an AI coaching panel that appears in the **sticky right rail** of the Lead command centre. When you open a lead, Blueprint automatically generates a short advisory note (3–4 sentences of APB-methodology coaching) based on the lead's current stage, qualifying score, and project details.
+Blueprint Insight is an AI coaching section in the **reference rail** of the Lead command centre. It starts closed. When you open it, Blueprint generates a short advisory note (3–4 sentences of APB-methodology coaching) based on the lead's current stage, qualifying score, and project details.
 
 The panel is always visible on desktop without any click needed. On mobile it appears in the **Action** tab.
 
@@ -65,7 +65,7 @@ The auto-insight answers: "What should I do next with this lead?" — targeting 
 **Where to find Blueprint Insight:**
 
 **Desktop (lg+):**
-Blueprint Insight is a panel in the **sticky right rail** — the right column of the command centre layout. It appears below the next-action card and the Lead Summary panel. It is always visible on desktop — there is no tab or button required to open it. The panel has a blue-tinted border and header ("BLUEPRINT INSIGHT").
+Blueprint Insight is a closed section in the **reference rail** — the narrow right column of the command centre layout, below Key details. Click its heading to open it. On a phone it is on the **Summary** tab.
 
 **Mobile / tablet (< lg):**
 Tap the **Action** tab. Blueprint Insight appears below the focus panel and the next-action card.
@@ -73,8 +73,8 @@ Tap the **Action** tab. Blueprint Insight appears below the focus panel and the 
 ## 5. Step-by-step process
 
 1. Open a lead detail page from the pipeline board.
-2. **Desktop:** look at the right rail — the Blueprint Insight panel loads automatically. Wait for the loading animation (three pulsing bars) to finish.
-   **Mobile:** tap the **Action** tab, then scroll down to the Blueprint Insight panel.
+2. **Desktop:** in the right column, click **Blueprint Insight** to open it. Wait for the loading animation (three pulsing bars) to finish.
+   **Mobile:** tap the **Summary** tab, then click **Blueprint Insight**.
 3. Read the advisory note — it targets your lead's specific stage, qualifying score, and project type.
 4. If the advice seems too generic or you want a different angle, click **↺ Refresh** in the panel header to fetch a new response.
 5. To keep insights for later reference, paste them into a Note activity on the lead (SOP 02-03).
@@ -87,7 +87,7 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 
 | Mistake | Why it happens | How to avoid it |
 |---------|---------------|-----------------|
-| Not noticing Blueprint Insight | It is in the right rail — can be missed if you only look at the main workspace | On desktop, check the right column. On mobile, check the Action tab. |
+| Not noticing Blueprint Insight | It is closed until you open it | On desktop, open it in the right column. On mobile, open it on the Summary tab. |
 | Expecting Blueprint to know recent conversations | It does not read stored transcripts | Transcript analysis is separate (SOP 02-06). Blueprint reads the lead's structured fields only. |
 | Using Blueprint as a script writer | Misunderstanding the tool | Blueprint coaches you — it does not write word-for-word scripts. Apply the advice with your own voice. |
 | Refreshing before reading the first response | Curiosity | The initial auto-fetch is targeted. Refresh only if the advice seems too generic or you want a second perspective. |
@@ -100,7 +100,7 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 | No text appears after loading (blank response) | Check network connection. Try clicking ↺ Refresh. |
 | Response is generic and does not reference the lead | The lead may have very few fields filled in — the more context on the lead record, the more specific the advice. Add project type, budget, and qualifying scores. |
 | Very slow response | The AI model takes a few seconds. Responses stream progressively — text appears word by word. Wait for the stream to complete before refreshing. |
-| Blueprint panel not visible on desktop | Scroll the right rail — it appears below the Lead Summary and Trust & context panels. |
+| Blueprint panel not visible on desktop | It is a closed row in the right column, below Key details. Click it to open. |
 | Blueprint panel not visible on mobile | Tap the Action tab, then scroll down. |
 
 ## 9. Related SOPs
@@ -109,7 +109,7 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 - [Trust & context rail](02-08_lead_fit_classification.md) — SOP 02-08
 
 ## 10. Screenshot placeholders
-[insert screenshot: Desktop right rail — Blueprint Insight panel showing auto-generated advisory text, Refresh button in header]
+[insert screenshot: Desktop reference rail — Blueprint Insight section open, showing advisory text and Refresh button]
 [insert screenshot: Mobile Action tab — Blueprint Insight below the advance card]
 [insert screenshot: Blueprint Insight panel in loading state — three pulsing bars]
 
@@ -143,9 +143,9 @@ Next review: 2027-01-02
 
 ### Test cases
 
-**TC-01 — Blueprint Insight auto-loads on lead open (desktop)**
+**TC-01 — Blueprint Insight loads when opened (desktop)**
 1. Open any lead with project_type, budget, and qualifying scores set
-2. Look at the right rail — Blueprint Insight panel should be visible
+2. Confirm no `/api/blueprint/chat` request has been made, then open the Blueprint Insight section in the right column
 3. Expected result: loading animation (three pulsing bars) appears briefly, then advisory text loads
 4. Expected: text references the lead's stage, project type, or qualifying situation
 - [ ] Pass  [ ] Fail
@@ -184,7 +184,7 @@ Next review: 2027-01-02
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
-- [ ] Blueprint Insight auto-loads on lead open (desktop right rail + mobile Action tab)
+- [ ] Blueprint Insight loads when opened (desktop reference rail + mobile Summary tab), and not before
 - [ ] Responses are lead-specific (stage, project type referenced)
 - [ ] Refresh works
 - [ ] Stage advance triggers a re-fetch

@@ -31,9 +31,9 @@ Sends a warm, on-brand email outlining the whole design-and-build process (Conce
 - Templates read fine in **Settings → General → Discovery emails**.
 
 ## 5. Step-by-step process
-1. Open the Discovery lead → **Discovery — next steps** → **Preview & send discovery email**.
-2. Read the assembled preview (designer, fees inc-GST, process). Optionally tick **Attach the concept agreement PDF** (generate it first — SOP 02-16).
-3. Click **Send email**.
+1. Open the Discovery lead → **Client correspondence** → **Review discovery email**. A designer must be selected first; the page says so if one isn't.
+2. Read the assembled preview (designer, fees inc-GST, process). Optionally tick **Attach the concept agreement PDF** in the preview window (generate it first — SOP 02-16).
+3. Click **Send email**. "Sent" means our mail server accepted it. The Hub can't see whether it was delivered or read.
 
 > 💡 **Tip:** If they go quiet, the 7-day follow-up sends on its own — you don't have to chase manually.
 

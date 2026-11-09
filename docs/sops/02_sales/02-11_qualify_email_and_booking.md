@@ -33,15 +33,15 @@ Sends a warm, on-brand introduction email (built from our real "build conversati
 
 ## 5. Step-by-step process
 1. Open the Qualify-stage lead. If it came from the website it shows a **"confirm web score"** banner — review the scorecard + client details, then click **Confirm web score**.
-2. In **Qualify — next step**, click **Preview & send qualify email**.
+2. In **Build conversation**, choose how it happens. If you have already spoken to them, use **Log the build conversation as already held (no email)** and skip to step 6. Otherwise click **Go to the qualify email**, then **Review qualify email** in **Client correspondence**.
 3. Read the assembled preview (subject, body, booking link). Company profile attaches on send.
-4. Click **Send email**.
-5. The client receives the email and books a **build conversation** via the link. When they do, the panel flips to **"✓ Build conversation booked"** on its own.
+4. Click **Send email**. "Sent" means our mail server accepted it. The Hub can't see whether it was delivered or read. If sending is turned off, the page says so and the window is a preview only.
+5. The client books a **build conversation** via the link. When they do, the panel flips to **"✓ Build conversation booked"** on its own.
 6. Once the score is ≥ 5 and the meeting is booked, use **Move to Discovery →**.
 
 > 💡 **Tip:** You don't book the meeting for them — the client books via the link in the email, and the webhook marks it. If they go quiet, the 7-day follow-up sends automatically (when enabled).
 
-[insert screenshot: the Qualify action panel with Preview & send + booking status]
+[insert screenshot: the Build conversation panel and the Client correspondence area with Review qualify email]
 
 ## 6. What happens next
 The intro email is logged to the lead's mailbox/timeline. If no reply/booking in 7 days, the follow-up email sends (once per lead). When the client books, the discovery-meeting fields are stamped and the Discovery hard gate opens. Advancing to Discovery is then a single click.
@@ -103,8 +103,8 @@ Next review date: 2027-02-16
 ### Test cases
 
 **TC-01 — Happy path (preview + send)**
-1. Open the qualify lead → **Preview & send qualify email** → read preview → **Send email**.
-2. Expected result: success message; panel shows "Qualify email sent …".
+1. Open the qualify lead → **Client correspondence** → **Review qualify email** → read preview → **Send email**.
+2. Expected result: the message says it was sent and that delivery can't be seen; the Build conversation panel shows "Qualify email recorded as sent …".
 3. Expected DB: `leads.qualify_intro_sent_at` set; an outbound `correspondence` row with `lead_id`, `direction='outbound'`, a `message_id`.
 - [ ] Pass  [ ] Fail
 

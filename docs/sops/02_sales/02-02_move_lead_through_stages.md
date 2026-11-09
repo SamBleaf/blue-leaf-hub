@@ -78,11 +78,11 @@ The stage stepper is visual-only and does not accept direct clicks. Use the **"M
 
 1. Open a lead from the pipeline board (Sales Manager).
 2. Look at the **stage stepper** in the sticky header to confirm the current stage.
-3. On desktop: find the **Advance to [Next Stage]** card in the **sticky right rail**.
-   On mobile: tap the **Action** tab — the advance card appears in the action workspace.
-4. Check the gate requirements listed in the advance card (green tick = met, red cross = not met).
-5. When all gates are green, click **Move to [Next Stage] →**.
-6. The header stepper updates immediately and the "Do this now" focus panel switches to the new stage's workspace.
+3. Work down the **"Do this now"** panel. The **Next:** button (top right on desktop, bottom of the screen on a phone) names the one thing to do and jumps straight to it. It never moves the lead itself.
+4. At the bottom of the panel, find **Move to [Next Stage]**. This is the only place a lead moves forward from this page. On a phone it is at the bottom of the **Action** tab.
+5. Read the two lists. **Required**: the Hub won't allow the move until these are done. **Recommended**: the button waits for these too, but a Director can skip them with **Move ▾** on the pipeline board, and the skip is logged.
+6. When everything is ticked, click **Move to [Next Stage] →**.
+7. The header stepper updates immediately and the "Do this now" focus panel switches to the new stage's workspace.
 
 ### Advisory gates (requirements before advancing)
 
@@ -98,7 +98,7 @@ The system checks gate requirements before enabling the advance button. Gates by
 | Tender | Site address set · Job created from this lead |
 | Won | None |
 
-If a gate is not met, the "Move to [Stage] →" button is disabled and the unmet requirement is shown in red.
+If a requirement is not met, the "Move to [Stage] →" button is disabled. An unmet Required item shows a red cross. An unmet Recommended item shows an amber mark.
 
 ### Sending to Nurture or Lost
 
@@ -124,7 +124,7 @@ The board view does not enforce advisory gates — gates are only checked in the
 - `lead_activities` row inserted: `activity_type = 'stage_change'`, `summary = 'Moved from [old] to [new]'`
 - Stage stepper in the header re-renders
 - "Do this now" focus panel switches to the new stage workspace
-- Blueprint Insight (right rail) refreshes automatically with advice for the new stage
+- Blueprint Insight refreshes with advice for the new stage if you have opened it on this visit (it stays closed, and makes no AI call, until you do)
 
 ## 7. Common mistakes
 
@@ -140,7 +140,7 @@ The board view does not enforce advisory gates — gates are only checked in the
 
 | Problem | Solution |
 |---------|----------|
-| "Move to [Stage] →" button is grey/disabled | One or more gate requirements are unmet. Read the red-cross items in the advance card and complete them first. |
+| "Move to [Stage] →" button is grey/disabled | One or more gate requirements are unmet. Read the items in the Move to [Stage] area at the bottom of the panel and complete them first. |
 | Lead disappeared after moving | Check the Nurture and Lost sections of the pipeline (the board shows them as collapsed rows at the bottom of the board). Or open the lead directly via its URL. |
 | Stage history not showing | Stage history appears in the unified timeline (Activity tab / timeline in the command centre). Look for `activity_type = stage_change`. |
 | Drag-and-drop not working on mobile | Board view is desktop-only. On mobile, use the Action tab → advance card. |
@@ -152,7 +152,7 @@ The board view does not enforce advisory gates — gates are only checked in the
 - [Review qualifying score](02-04_qualifying_score.md) — SOP 02-04
 
 ## 10. Screenshot placeholders
-[insert screenshot: Lead command centre desktop — stage stepper in header, advance card in right rail]
+[insert screenshot: Lead command centre desktop — stage stepper and Next: button in header, Move to area at the bottom of the workflow]
 [insert screenshot: Stage stepper showing current stage highlighted in primary, past stages in accent tint]
 [insert screenshot: Advance card with gate requirements — some green ticks, some red crosses]
 [insert screenshot: Mobile Action tab showing focus panel and advance button]
@@ -185,7 +185,7 @@ Next review: 2027-01-02
 
 **TC-01 — Move lead forward via advance card (happy path)**
 1. Open a lead at Enquiry stage
-2. On desktop: check the right rail advance card. On mobile: tap Action tab.
+2. Scroll to the Move to Qualify area at the bottom of the "Do this now" panel. On mobile it is at the bottom of the Action tab.
 3. Gates for Qualify: none required. Click "Move to Qualify →".
 4. Expected result: stage stepper header updates to show Qualify highlighted
 5. Expected DB: `leads.stage = 'qualify'`, `stage_entered_at` = approximately now
@@ -228,7 +228,7 @@ Next review: 2027-01-02
 - [ ] Pass  [ ] Fail
 
 **TC-07 — Blueprint Insight refreshes after stage advance**
-1. Open a lead at Enquiry — note the Blueprint Insight content in the right rail
+1. Open a lead at Enquiry — open the Blueprint Insight section in the reference rail and note the advice
 2. Advance to Qualify
 3. Expected: Blueprint Insight shows a loading state briefly, then new advice referencing the Qualify stage
 - [ ] Pass  [ ] Fail
@@ -272,6 +272,19 @@ Next review: 2027-01-02
 1. Open a real lead and advance into a stage whose requirements are advisory (e.g. Concept → PTSA / Plans, or into Consultants / Tender) with an advisory item unmet
 2. Expected: the advance SUCCEEDS (advisory items never hard-block)
 3. Expected DB: the `lead_activities` stage_change row has `detail = "Gate bypass — missing: …"` naming the unmet advisory requirement(s); the server log shows a matching `[gate-bypass]` line
+- [ ] Pass  [ ] Fail
+
+**TC-10 — One way forward, and the Next button only points**
+1. Open a Qualify lead with no score. Expected: exactly one "Move to Discovery →" button on the page, at the bottom of the "Do this now" panel, disabled.
+2. Click the **Next:** button. Expected: the page jumps to the first unanswered scorecard question and flashes a ring around it. The lead does not move.
+3. Score it to 5 or more and log a build conversation. Expected: Next reads "Move to Discovery" and jumps to the bottom area. Clicking Next still does not move the lead; only the Move button does.
+4. Repeat at 375px wide. Expected: the sticky bar carries Next, and the Move button is at the bottom of the Action tab.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Required and recommended are worded differently**
+1. Open a Discovery lead with the concept agreement accepted but no discovery notes.
+2. Expected: "Concept agreement accepted" is ticked under **Required**. "Discovery notes filled" shows an amber mark under **Recommended**, and the wording says the button waits for it and that a Director can skip it with Move ▾.
+3. Use **Move ▾** on the pipeline card to move the lead to Concept. Expected: the move succeeds and the `stage_change` activity detail reads "Gate bypass — missing: …".
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

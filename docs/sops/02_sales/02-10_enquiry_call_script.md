@@ -35,7 +35,7 @@ Turns the first call into a short, guided script that captures the essentials (w
 2. Work down the question checklist on the call — keep it tight, you're checking fit and readiness, not selling.
 3. In the **Qualifying Scorecard**, set **Budget**, **Timeframe**, **Site** and **Decision maker** (each No / Unsure / Yes → 0 / 1 / 2).
 4. In **Client details**, pick the best-fit dropdowns: **Do they own the site?**, **Documents on hand**, **Finance**, **What matters most**, **Biggest worry**, and type the **Partner / other decision-maker** name if there is one.
-5. Under **Next step**, choose **Proceed to Qualify**, **Nurture**, or **Mark Lost**.
+5. Decide the outcome. To go ahead, use **Move to Qualify →** in the area at the bottom of the panel. To stop, use **→ Nurture** or **Mark Lost** at the top of the page.
 
 > 💡 **Tip:** Proceed if it fits, the budget's potentially realistic, and they're open to a structured process. Nurture (not Lost) if they only want a quick price, won't discuss budget, aren't the decision-maker, or aren't ready.
 
@@ -101,14 +101,14 @@ Next review date: 2027-02-16
 1. Open the enquiry-stage lead in Sales.
 2. Set all four scorecard components to give a total ≥ 5.
 3. Set every Client-details dropdown + a partner name.
-4. Click **Proceed to Qualify**.
-5. Expected result: the lead moves to the Qualify stage view.
+4. Click **Move to Qualify →** at the bottom of the panel.
+5. Expected result: the lead moves to the Qualify stage view. There is no separate "Proceed to Qualify" button.
 6. Expected DB: `leads.stage = 'qualify'`; `land_status`/`finance_status`/`documents_on_hand`/`partner_name` populated; a `lead_signals` row for `kind='priority'` and one for `kind='fear'`.
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Empty required field**
 1. On a fresh enquiry lead, leave the scorecard untouched.
-2. Click **Proceed to Qualify**.
+2. Click **Move to Qualify →** at the bottom of the panel.
 3. Expected result: the lead still advances (Enquiry is advisory — no hard block), and the scorecard shows "Not yet scored".
 - [ ] Pass  [ ] Fail
 
