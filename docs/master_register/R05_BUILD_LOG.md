@@ -445,6 +445,69 @@ No existing test assertion changed.
 - The browser run signs in with a session placed in browser storage, so the login form isn't exercised.
 - The answer locks are enforced by the Hub API only, as P3 recorded.
 
+### Corrections after the independent review (2026-11-10)
+
+The first version of this entry overstated several things. What it said, and what is true:
+
+| First claim | Correction |
+|---|---|
+| Works by keyboard and touch; "Enter, Space, Tab with focus held" | Tested on W-007 only, which isn't a repeat row. On every fresh repeat row the first key or tap rebuilt the row: focus dropped to the page and typing stopped after one character. Fixed, and now tested on W-011, W-010, W-003 and W-004. |
+| "None are lost"; changing an earlier answer moves dependents across or keeps them flagged | Answering a repeat row in a later room destroyed the earlier room's record. W-005 restated an inspection status against a different hazard, with no flag. Both fixed. |
+| No code path on the card can approve, verify or price | True of the fields written. But the card's N/A removed an outstanding verification with no evidence, leaving `technicalStatus` at `needs_verification`, and the report listed no such risk. Fixed. |
+| Nothing left in the P4a section | Gate 2's keyboard CHECK wasn't met on repeat rows, and Tab 21's P-005 "plus note" had no writer. On any new record the note could not reach the Client Brief. Both fixed. |
+| BROWSER: "Other and note typed key by key" | True only of rows that already existed. The first typed record row used `.fill()`, a single input event, which hid the truncation. Now key by key. |
+| The `RepeatRows` comment: "answering it keeps focus where it was" | False as written. Now true, and the comment describes what the code does. |
+| 9 typed records with owner | M-006 had no owner on the card: the control was gated on `action`. All 9 have one now. |
+| "No existing test assertion changed" | True of the first pass. This pass changes two, on purpose, below. |
+
+Confirmed by the review and still true: the generators are current, no migration, no push, the owner-untracked paths are untouched, no sideways scroll at 375.
+
+**Commits.** `eb31f9b` (the rules behind the card), `4ea1e2b` (repeat rows on screen), a one-assertion test commit, and the docs commit carrying this section.
+
+**What changed.**
+
+| Finding | Severity | Fix |
+|---|---|---|
+| A repeat row in one room overwrote another room's record (17 room questions) | Blocker | `RoomsStep` keys rows by room and question, so nothing crosses rooms, including an approval half-entered on a single row. A used id is never offered again. `upsertItem` won't write through an id held by another room or question (`seedMatchesItem`): it starts a new record instead. |
+| First input on a blank repeat row rebuilt it (12 typed cards, all 36 repeat cards for focus) | Major | Blank and saved rows are one keyed list. |
+| A removed repeat row came back, and could lose an answer | Major | Same fix. Also, a sent id that neither the server nor the screen holds any more no longer repeats an empty save forever. That loop could also be reached by removing a room within the autosave window. |
+| W-005 restated a status against another hazard | Major | `childrenBoundToParent` in the answer map, generated into the config. Only W-005 has it. W-014, K-004, B-004, B-006, D-004 and H-004 still carry a real attribute across. |
+| Card N/A hid outstanding verification | Major | N/A closes the decision only. An item needing verification stays outstanding, the same as the office path and the base commit. Action-kind items never reported verification, and still don't. |
+| P-005 note had no writer | Major | `answer.clientNote`: a named field, chosen over the description-after-`;` form so a leading `;` doesn't appear as the item's title, in the office table or as its goals line. It sits in `clientSafeAnswer`, counts as part of what the answer says (a change steps an approval back and is refused on a locked row), and is only stored when written, so existing answers keep their shape. An older record's words after `;` are still read. The card labels it as read by the client. |
+| Use again could pass a limit | Minor | Refused, and not offered at the limit. Remove stays. |
+| Not decided dead after W-007 Unsure | Minor | Taking it off also takes off the option that parks the question. |
+| M-006 had no owner on the card | Minor | Shown for `handling: record`. Done stays on actions only. |
+
+**Schema and API.** No migration. No route changed. `answer.clientNote` is one more key inside the existing `item.answer`. The option-id lock is unchanged: the answer map gained two flags, no ids.
+
+**Tests changed on purpose.** Both encoded a defect, and the rule now says the opposite:
+
+- `register-progressive-choice` "N/A drops a default verification too" is now "N/A is not evidence".
+- `register-progressive-choice` "the Not decided pill leaves its state alone while the option stands" is now "taking Not decided back takes the Unsure option with it".
+
+The browser suite's `.fill()` on W-011 is now key-by-key typing, and its W-010 first tap is now Enter with a focus check. Both are stronger. No assertion was weakened.
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-progressive-choice.test.mjs`: W-005 across all 90 category and status combinations, N/A and verification, limit, Not decided, client note including the approval step-back, seed check | 199 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-progressive-render.test.mjs`: owner on all 9 records, M-006 without Done, client note labelled and shown only on P-005 | 52 passed, 0 failed |
+| BROWSER, DB | `node scripts/tests/sandbox-register-guided.test.mjs`, headless Chromium, real SPA, API, PostgREST, Postgres, 1440 and 375 with touch. Added: key-by-key typing and focus on fresh repeat rows, Enter focus on an element row, + Note and + More detail kept through the first input, × on the only row and on a second row, the PUT bodies, no repeating saves, reload, R-010 typed across two rooms, K-008 tapped through Save & next room, a panel not crossing rooms, removing a room with an unsaved edit, the client note and staff note in the Client Brief PDF. Evidence: `~/blh-register-evidence/r05/p4a/` | 99 passed, 0 failed, 0 page errors |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`, on the final code: 29 suites | 1732 checks, 0 failing |
+| AUTOMATED | Each logic defect put back in turn against the unit suites, files restored and confirmed by checksum. Ad hoc, not committed (`SP/p4afix/mutate_unit.py`) | 13 of 13 caught |
+| BROWSER | Each screen defect put back in turn against the browser suite, files restored and confirmed by checksum. Ad hoc (`SP/p4afix/mutate_browser.py`). Two lists; a used id offered again; rooms not keyed with the guard off; a single row not keyed by room; the empty-save loop; the Client Brief ignoring the note | 6 of 6 caught |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+The reviewer's own probes (`SP/probes/p4a/unit1.mjs`, `browser1.mjs`, `browser4.mjs`) reproduced every finding before the fix.
+
+`npm run lint` and `node --check server/lib/registerDocuments.mjs` pass. The production build was run the same way as above, from the sandbox working directory into the scratchpad, and passes. None of these say anything about behaviour.
+
+**Caveats added.**
+
+- An N/A item whose flag came only from the question's default also stays in the outstanding list until staff set Technical verification to Not required. It is listed in `decisions_needed`. No rule was invented.
+- The note appears against the first priority, as it did before P4a. A note with no priorities chosen doesn't print.
+- The fallback in `upsertItem` starts a new record if an id is held by another room or question. No screen can reach it now. It is a safety net, and only its check (`seedMatchesItem`) is tested. The hook itself isn't exercised down that path.
+- A locked item still hasn't been driven in a browser. The render test covers it.
+
 ### Next dependency
 
 P4b adds the baseline config, gutters as a linked item, zone-driven defaults and performance suggestions, on `toggleOption`, `chooseZone` and `RepeatRows`. P4c merges W-004, W-006 and W-008 presentation and uses `areaIds` and `sourceQuestionIds`, which the card doesn't write yet. P4d uses `confirmRoomDefaults` and the inherited summary. P5 reads answers through `clientSafeAnswer`.

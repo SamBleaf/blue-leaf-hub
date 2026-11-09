@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -40,15 +40,15 @@ It records what the client wants, room by room, in one place. Each answer become
    2. Under **Project setup**, enter the **Current drawing set / revision (P-002)**, choose the **Delivery model (P-007)** (Design & build, Build only, Construction management or Other) and **Occupancy during works (P-008)**.
    3. Turn on **Existing-building prompts** for any renovation or extension.
    4. Under **Rooms & levels — follow the plans**, tap **+ Kitchen**, **+ Bathroom** and so on (or **+ Other**) for each room on the plan, level by level. Rename a room by typing over its name.
-   5. Tap the client's top priorities (P-005, up to three) and add the areas of work (P-006).
+   5. Tap the client's top priorities (P-005, up to three) and add the areas of work (P-006). The box under the priorities is a **note for the client brief**: the client reads it, so write it for them. Use **+ Note** for anything staff-only.
 4. **Whole house** step: set each standard once for the whole home. Tap, don't type.
    1. Tap the choice the client describes, for example **Render**. Only the choices that follow from it appear next, for example **Rendered AAC**. Stop whenever the conversation stops: you don't need an exact product.
    2. A tick and the line **Recorded:** show what is held. The card then says **Saving…** and **Saved**.
    3. To change your mind, tap the choice again, or tap a different one. If an earlier answer changes and something chosen under it no longer fits, a yellow box lists it. Tap **Use again** or **Remove**. Nothing disappears by itself.
    4. No answer yet? Tap **Not decided**. You can add why (**Client unsure**, **Decide later**, **Blue Leaf to advise**, **Designer / consultant to confirm**, **Awaiting drawings / info**) and who has it. Neither is required, and no note is required.
-   5. Tap **N/A** if the question doesn't apply. On product and finish choices you can also tap **By others** or **Excluded**.
+   5. Tap **N/A** if the question doesn't apply. On product and finish choices you can also tap **By others** or **Excluded**. N/A doesn't clear a technical check: an item marked **Needs verification** stays on the outstanding list until someone changes it in **Office fields**.
    6. **Other** opens a small box for the client's own words. **+ Note** adds a short staff-only note. **+ More detail** shows the rarer options, **Deferred**, **Existing to remain**, and finish and product boxes.
-   7. Where a question can have more than one answer on its own line (several wall systems, a floor for each zone), tap **+ Add another**.
+   7. Where a question can have more than one answer on its own line (several wall systems, a floor for each zone), tap **+ Add another**. Each row is saved once you answer it and belongs to the room you are in. Tap **×** to remove a row.
    8. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
 5. **Site & existing** step: answer access, occupancy, existing-building condition and unknowns for the whole project (not per room). Answers here are recorded as what they are. A steep driveway is a site fact, not building work.
 6. **Rooms** step:
@@ -92,6 +92,7 @@ It records what the client wants, room by room, in one place. Each answer become
 | **Written earlier** under the choices | The item was typed before the cards existed | Your words are kept. Tap the matching choice if you want it structured. The old text stays until you edit it |
 | **Earlier work status** on a site question | An older answer used the old dropdown, which didn't make sense there | Tap **Clear** if it's wrong |
 | A choice is greyed out | That question has a limit, such as three priorities, or the item is locked | Take one off first. A locked item changes through a variation |
+| **Check these** has **Remove** but no **Use again** | The question is already at its limit, such as three priorities | Take one off first, and **Use again** comes back |
 | "This brief was moved onto the project record" banner | The job/project was created | Normal — keep working; the same rows carry on |
 | No **Project brief & register** card; the old Finishes schedule shows instead | The register is switched off for this lead | Ask the director to add the lead to `REGISTER_PILOT_LEADS` (or turn on `REGISTER_ENABLED`) — rows typed in the old list are adopted when it is switched on |
 
@@ -214,12 +215,37 @@ Next review date: 2027-05-07
 **TC-13 — Keyboard and phone**
 1. Press Tab to a choice, Enter to select, Space to take it back. Expected: focus stays on the button and a follow-up row can be reached with Tab.
 2. At 375 px wide with touch: tap through a card. Expected: no sideways scroll, and buttons easy to hit.
+3. On a question that repeats and has nothing recorded (W-011): type a sentence in the box. Expected: every letter stays and the cursor stays in the box. W-010: press Enter on an element. Expected: it selects and focus stays on it.
 - [ ] Pass  [ ] Fail
 
 **TC-14 — Older typed answers**
 1. Open a lead with a typed answer on W-017.
 2. Expected: the text is under **Written earlier**, no choice is pre-selected, and tapping a choice leaves the text as it was.
 3. Expected: a custom item (**+ Scope / works** in a room) still has its typed row and work status.
+- [ ] Pass  [ ] Fail
+
+**TC-15 — A repeat row stays in its own room**
+1. Two bedrooms. In the first, R-010: answer one row, tap **+ Add another**, answer a second.
+2. Go to the second bedroom. Expected: one blank R-010 row. Answer it.
+3. Expected: the second bedroom has its own record and the first bedroom still has both of its rows, word for word.
+4. Reject path: tap **×** on the first bedroom's second row. Expected: the row goes, **+ Add another** is back, the badge reaches **Saved** and the row doesn't return after a reload.
+- [ ] Pass  [ ] Fail
+
+**TC-16 — The priorities note reaches the Client Brief**
+1. P-005: tap three priorities. Type in **Note for the client brief**. Tap **+ Note** and type a staff-only note.
+2. Preview the Client Brief. Expected: the priorities and the note for the client are printed.
+3. Reject path: Expected: the staff-only note is nowhere in the brief.
+- [ ] Pass  [ ] Fail
+
+**TC-17 — A status doesn't move to a different hazard**
+1. W-005: tap **Structural**, then **Inspected**. Then tap **Moisture**.
+2. Expected: **Recorded** says Moisture only. A yellow **Check these** box lists Structural · Inspected. Nothing says Moisture was inspected.
+- [ ] Pass  [ ] Fail
+
+**TC-18 — N/A doesn't clear a technical check**
+1. On an item marked **Needs verification** (open **Office fields**), tap **N/A**.
+2. Expected: the **Needs verification** chip stays and the item is still on the outstanding list.
+3. Reject path: in **Office fields**, set **Technical verification** to Not required. Expected: the item leaves the list.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
