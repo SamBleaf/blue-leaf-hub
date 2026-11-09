@@ -128,6 +128,14 @@ The job/project is always resolved server-side from the lead, so a browser can't
 
 `server/lib/registerDocuments.mjs` builds fixtures from register rows and renders through the existing doc engine (`docTemplates.renderDocxTemplate` + `public/templates/blb-*-template.docx`), then LibreOffice (`server/lib/docxToPdf.mjs`). Pre-issue checks: drawing basis, recipient, unevidenced approvals, unverified items, **any `$` figure**, empty schedule, template placeholders. Issue = PDF + DOCX uploaded to a new path (never overwritten), SHA-256, `register_issue_document` (advisory lock; version conflict retried once). Previous revision → `superseded`. Nothing is emailed. Coordination packs (Architect, Routleys, TLI, windows, engineer, energy, joiner) are drafts filtered by supplier / category.
 
+### Card answers and Tender Notes (R05 P5, added 2026-11-10)
+
+- **`said(item)`** is what a record says: typed words, else `answerSummary`, which reads `clientSafeAnswer`. Every client and consultant builder prints through it.
+- **`isWork(item)`** keeps facts, risks and technical checks out of scope lists, including older records that hold an Included status.
+- **`tender_scope_notes`.** `audience: internal`, def and template `blb-tender-notes-template.docx`, built from the Architect Brief template by `scripts/documents/build-tender-notes-template.mjs`. **Only `tenderNotesFixture` may read `baselineAssumptions`, `performanceSuggestions` or staff notes.** A test enforces that on the source.
+- **Migration 218** widens the `document_type` CHECK and the `register_issue_document` allow-list. Until it is applied, preview works and issue returns a plain 503 naming the migration.
+- **`renderDocxTemplate`** stamps every zip entry with a fixed date, so the same input gives the same bytes. PDF hashes still come from LibreOffice.
+
 ## 7. Tender, baseline, handover
 
 `server/lib/registerHandover.mjs`: `tenderSummary` (included / excluded / by others / unresolved / specified / needs pricing / risks; cost references are fee-proposal category and PC/PS **labels only**); `recordBaseline` requires `contract_status='signed'` and a project record, stores an immutable `register_baseline` JSON (B01, B02…), ticks `ops_ready_checklist.selections_transfer`, logs `register.baseline.recorded`. Won still needs the signed contract **and** the explicit staff action in Sales.

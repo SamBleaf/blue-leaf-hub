@@ -1,5 +1,5 @@
 ---
-sop_version: 1.4
+sop_version: 1.5
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only

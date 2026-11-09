@@ -1,5 +1,5 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-11-07
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -54,6 +54,14 @@ It makes each document from the same register rows — nothing is retyped. Befor
 [insert screenshot: Documents step with three documents and Preview draft]
 [insert screenshot: issue history showing P01 Superseded and P02 Current]
 [insert screenshot: received document under review with Set as source]
+
+### Tender Scope & Pricing Notes (internal)
+
+1. Open **Documents**. The card is marked **Internal only**.
+2. Tap **Preview**. The recipient is already set to Blue Leaf estimating.
+3. Read it against the drawings. It lists included work, existing works, excluded work, work by others, systems and materials, finishes, site facts, risks, undecided items, technical questions, Blue Leaf pricing assumptions and drawing references. Each register line carries its item ID.
+4. Tap **Issue**. It is stored as P01 and is never overwritten. Issue it again and it becomes P02, and P01 stays on file.
+5. Use it to price in Buildxact. Don't send it to the client, a consultant or a trade. It has no amounts and no quantities, because Buildxact holds the numbers.
 
 ## 6. What happens next
 - The issued PDF and DOCX are stored in the `lead-documents` bucket under `leads/<lead id>/register/<type>/` and listed in the lead's documents. They cannot be deleted from the lead Documents tab.
@@ -157,6 +165,18 @@ Next review date: 2027-05-07
 **TC-07 — Received document reconciliation**
 1. Add a received engineer document (Rev B), **Review & link**, **Mark verified by this document** on a structural action, set **Reconciled**.
 2. Expected: the action shows "Tech: verified" with the document number as its reference; the document's status is Reconciled.
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Card answers print**
+1. Answer W-013 twice (main walls and a feature), W-014 with gutters, W-001 and a W-004 row. Preview each of the three existing documents.
+2. Expected: the chosen words appear. Two wall systems are two lines. Gutters say which roof. Project defaults and room exceptions are labelled. Steep access doesn't appear as Included work.
+3. Expected: no Blue Leaf assumption, staff note or review suggestion appears in any of the three.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — Tender Scope & Pricing Notes**
+1. Preview. Expected: marked internal, no dollar sign, no quantity, pricing assumptions labelled, and draft wording says so.
+2. Issue. Expected: P01, audience internal. Change an item and issue again. Expected: P02 current, P01 superseded and still opens, and its hash is unchanged.
+3. Reject paths. No recipient: blocked. A dollar figure in a description: blocked. Changing the register after the preview: refused as stale. A client login: no document list and no row.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

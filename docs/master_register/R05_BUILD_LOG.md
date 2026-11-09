@@ -689,3 +689,33 @@ The guided suite caught a regression while this was built: the row key included 
 **Caveats.** The merged path is a presentation: `W-004`, `W-006` and `R-013` records keep separate question ids. Whether bulk confirm is what staff want remains the Tab 27 open question: it is built, and the pilot should test it. General joinery is still not read by a room prompt.
 
 **Next dependency.** P5 prints these answers.
+
+## P5 — Register outputs (2026-11-10)
+
+**Outcome.** The three existing documents now print what was chosen on the cards. A new internal Tender Scope & Pricing Notes gives the estimator one document built from the Register. Nothing here is deployed, and migration 218 is sandbox only.
+
+**Commits.** `afe3065`, and the docs commit carrying this entry.
+
+**Audit before adding a type.** `lead_documents.document_type` has a CHECK, widened with the name-agnostic, preflighted swap from 194 and 213. `register_issue_document` has its own allow-list, replaced by the same migration. No index needs changing. `audience` has no constraint. No portal route reads `lead_documents`, RLS denies clients, and the supplier pack builds only the schedule.
+
+**Decisions within the brief.** A surface's usual finish doesn't print: it was shown, never recorded. Performance goals print as intent, marked for consultant review, and the review suggestions appear in Tender Notes only (DEC-MRUX-03). Item ids were added to Client Brief scope lines, as Gate 6.1 asks. Tender Notes is portrait and derived from the Architect Brief template, because the `docx` authoring package isn't installed here and adding a dependency for one template wasn't justified.
+
+**Tests.**
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `register-documents-structured` (new): what each document may say, from the real fixture builders, plus a real render | 53 passed |
+| DB, BROWSER | `sandbox-register-documents` (new): real API, Postgres, LibreOffice, issue P01 and P02, immutability, a client token, the card at 1440 and 375. Evidence `~/blh-register-evidence/r05/p5/` | 36 passed |
+| AUTOMATED | `documents-r01`, with T13 updated on purpose from four templates to five | 13 passed |
+| AUTOMATED | `register-e2e`, `register-doc-issue-failinject`, `register-issue-stale` on the changed builders | 71, 23 and 7 passed |
+| PRODUCTION | Not available | Not verified |
+
+**Tests changed on purpose.** `register-progressive-wholehouse`, "no client document reads the pricing guide": the source now legitimately reads it in one function, so the check now requires that function to read it and everything else not to. Stricter.
+
+**Fixed along the way.** `documents-r01` T10 flake: `renderDocxTemplate` stamped zip entries with the current time. The revision history table at phone width overflowed the page.
+
+**Process note.** `afe3065` was committed while one assertion above was still failing, because the command chained the commit after the test run. The next commit fixes it.
+
+**Caveats.** Nobody at Blue Leaf has read a real Tender Notes against a real job. Long notes in the narrow column will wrap. The template is new, so its hash is recorded on each issue.
+
+**Next dependency.** P6.
