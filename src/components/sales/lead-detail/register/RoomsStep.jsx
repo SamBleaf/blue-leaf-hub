@@ -5,7 +5,7 @@
  */
 import { useEffect } from "react";
 import {
-  promptsFor, resolvePromptId, defaultItemFor, exceptionAnswerFrom, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
+  promptsFor, resolvePromptId, roomDefaultFor, exceptionAnswerFrom, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
   partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS, answerConfigFor, itemTitle,
 } from "../../../../lib/register.js";
 import { Section, Select } from "./ui.jsx";
@@ -27,7 +27,8 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const roomItems = reg.items.filter((i) => i.roomId === room.id);
   const itemsFor = (qid) => roomItems.filter((i) => resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
   const itemFor = (qid) => itemsFor(qid)[0] || null;
-  const exceptionFor = (defaultId) => roomItems.find((i) => i.overridesDefaultId === defaultId) || null;
+  // An exception stays with its question even if a closer default appears later (a scullery standard set after a kitchen one).
+  const exceptionFor = (q) => roomItems.find((i) => i.overridesDefaultId && resolvePromptId(i.promptKey) === q.id) || null;
   const promptIds = new Set(qs.map((q) => q.id));
   const custom = roomItems.filter((i) => !i.promptKey || !promptIds.has(resolvePromptId(i.promptKey)));
   const levels = [...new Set(rooms.map((r) => r.level || "—"))];
@@ -39,14 +40,13 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
     if (answerConfigFor(q.id)?.repeat) {
       return <RepeatRows key={`${room.id}:${q.id}`} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
     }
-    const def = q.inherits ? defaultItemFor(reg, q.inherits) : null;
-    const exc = def ? exceptionFor(def.id) : null;
-    const item = exc || itemFor(q.id);
+    const def = roomDefaultFor(reg, q, room.roomType);
+    const item = exceptionFor(q) || itemFor(q.id);
     return (
       <PromptRow key={`${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
         readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
         onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
-          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: exceptionAnswerFrom(def) })}
+          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: { ...exceptionAnswerFrom(def), zone: null } })}
         onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
         onDelete={item ? () => deleteItem(item.id) : null}
         onPortal={item ? (action, ev) => onPortalItem(item, action, ev) : null} />
@@ -86,7 +86,7 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
         if (!list.length) return null;
         const prim = list.filter((q) => primarySet.has(q.id));
         const more = list.filter((q) => !primarySet.has(q.id));
-        const started = list.filter((q) => itemFor(q.id) || (q.inherits && exceptionFor(defaultItemFor(reg, q.inherits)?.id))).length;
+        const started = list.filter((q) => itemFor(q.id) || exceptionFor(q)).length;
         return (
           <Section key={t.key} title={t.label} count={started ? `${started}/${list.length}` : null} defaultOpen={prim.length > 0}>
             {prim.map(renderRow)}

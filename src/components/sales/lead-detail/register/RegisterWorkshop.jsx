@@ -206,7 +206,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
             )}
             {reg && (step === "whole_house" || step === "site") && (
               <SectionStep section={step === "site" ? "site" : "project"} reg={reg} context={context} stage={stage} showDetail={showDetail} actor={profile}
-                upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} saveState={store.saveStateOf} />
+                upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} saveState={store.saveStateOf} mutateMeta={store.mutateMeta} />
             )}
             {reg && step === "rooms" && (
               <RoomsStep reg={reg} context={context} stage={stage} showDetail={showDetail} activeRoomId={activeRoomId} setActiveRoomId={selectRoom}

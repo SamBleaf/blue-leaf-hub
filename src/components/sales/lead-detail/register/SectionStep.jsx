@@ -3,34 +3,63 @@
  * or "Site & existing conditions" (Tab 21 §2). Only the prompts relevant to the project type / stage are
  * shown, grouped by topic; nothing is compulsory.
  */
-import { promptsFor, resolvePromptId, answerConfigFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
+import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
 import { Section } from "./ui.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
+import BaselineGuide, { PerformanceReview } from "./BaselineGuide.jsx";
 
-const tierOf = (q) => answerConfigFor(q.id)?.tier || "essential";
+const tierOf = (q) => { const c = answerConfigFor(q.id); return c?.standard?.tier || c?.tier || "essential"; };
+const topicOf = (q) => answerConfigFor(q.id)?.standard?.topic || q.topic;
 
-export default function SectionStep({ section, reg, context, stage, showDetail, actor, upsertItem, updateItem, deleteItem, readOnly, saveState }) {
+export default function SectionStep({ section, reg, context, stage, showDetail, actor, upsertItem, updateItem, deleteItem, readOnly, saveState, mutateMeta }) {
   const projectType = context?.projectType || "";
-  const qs = promptsFor(section === "site" ? "site" : "project", {
+  const qs = [...promptsFor(section === "site" ? "site" : "project", {
     projectType, deliveryModel: context?.deliveryModel, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail,
-  }).filter((q) => q.topic !== "brief");
+  }).filter((q) => q.topic !== "brief"), ...(section === "site" ? [] : standardPrompts())];
   const topics = section === "site" ? SITE_TOPICS : PROJECT_TOPICS.filter((t) => t.key !== "brief");
   const secKey = section === "site" ? "site" : "project";
-  const itemsFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
+  const allFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
+  const itemsFor = (qid) => allFor(qid).filter((i) => !isLinkedRow(answerConfigFor(qid), i));
   const itemFor = (qid) => itemsFor(qid)[0] || null;
+  const rowProps = { actor, saveState, assumptionOf: (it) => assumptionFor(reg, it) };
+  const store = { upsertItem, updateItem, deleteItem };
   const renderPrompt = (q) => {
-    const seed = { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: secKey, isDefault: !!q.isDefault,
+    const cfg = answerConfigFor(q.id);
+    const seed = { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: secKey, isDefault: !!q.isDefault || !!cfg?.standard,
       technicalStatus: q.technical, responsibility: q.owner || "", disposition: "undecided" };
-    if (answerConfigFor(q.id)?.repeat) {
-      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seed} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
+    if (cfg?.linked) return renderWithLinked(q, cfg, seed);
+    if (cfg?.repeat || cfg?.standard) {
+      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seed} readOnly={readOnly} {...rowProps} {...store} />;
     }
     const item = itemFor(q.id);
     return (
-      <PromptRow key={q.id} question={q} item={item} seed={seed} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
-        onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seed, partial))}
-        onDelete={item ? () => deleteItem(item.id) : null} />
+      <div key={q.id} className="space-y-1.5">
+        <PromptRow question={q} item={item} seed={seed} readOnlyReason={readOnly ? "Read-only" : null} {...rowProps}
+          onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seed, partial))}
+          onDelete={item ? () => deleteItem(item.id) : null} />
+        {cfg?.reviewSuggestions && <PerformanceReview item={item} />}
+      </div>
     );
   };
+  // A linked item (gutters) is its own record under the row it belongs to, so a roof's colour never has to say what its gutters are.
+  function renderWithLinked(q, cfg, seed) {
+    const linked = allFor(q.id).filter((i) => isLinkedRow(cfg, i));
+    const rows = itemsFor(q.id);
+    const under = (parent) => linked.filter((i) => (i.answer?.linkedItemIds || []).includes(parent.id));
+    const linkedSeed = (parent) => ({ ...seed, isDefault: false, responsibility: "", answer: { element: { id: `el_${cfg.linked.key}_${parent.id}`, key: cfg.linked.key, label: cfg.linked.label }, linkedItemIds: [parent.id] } });
+    const orphans = linked.filter((i) => !rows.some((r) => (i.answer?.linkedItemIds || []).includes(r.id)));
+    return (
+      <div key={q.id} className="space-y-2">
+        <RepeatRows question={q} items={rows} seed={seed} readOnly={readOnly} {...rowProps} {...store}
+          renderBelow={(parent) => (
+            <div className="ml-3 border-l-2 border-hairline pl-2">
+              <RepeatRows question={q} items={under(parent)} seed={linkedSeed(parent)} readOnly={readOnly} noAdd actor={actor} saveState={saveState} {...store} />
+            </div>
+          )} />
+        {orphans.length > 0 && <RepeatRows question={q} items={orphans} seed={{ ...seed, isDefault: false, answer: { element: { key: cfg.linked.key, label: cfg.linked.label } } }} readOnly={readOnly} noAdd actor={actor} saveState={saveState} {...store} />}
+      </div>
+    );
+  }
   const s = context?.site;
 
   return (
@@ -50,10 +79,10 @@ export default function SectionStep({ section, reg, context, stage, showDetail, 
         </div>
       )}
       {section !== "site" && (
-        <p className="text-xs text-muted">Set the project-wide standards once. Rooms inherit floor and wall/ceiling defaults automatically; record a <span className="font-medium text-ink">room exception</span> only where a room differs.</p>
+        <p className="text-xs text-muted">Set the project-wide standards once, starting with what the client wants the home to be. Rooms inherit floors, paint, kitchen, wet-area and laundry standards; record a <span className="font-medium text-ink">room exception</span> only where a room differs.</p>
       )}
       {topics.map((t) => {
-        const list = qs.filter((q) => q.topic === t.key);
+        const list = qs.filter((q) => topicOf(q) === t.key);
         if (!list.length) return null;
         const started = list.filter((q) => itemFor(q.id)).length;
         const lead = list.filter((q) => tierOf(q) === "essential");
@@ -70,6 +99,7 @@ export default function SectionStep({ section, reg, context, stage, showDetail, 
         );
       })}
       {!qs.length && <p className="text-xs text-muted">No prompts apply at this stage. Turn on “Show detailed prompts” to work ahead.</p>}
+      {section !== "site" && <BaselineGuide reg={reg} actor={actor} mutateMeta={mutateMeta} readOnly={readOnly} />}
     </div>
   );
 }

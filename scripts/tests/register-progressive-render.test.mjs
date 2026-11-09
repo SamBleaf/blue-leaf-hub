@@ -60,6 +60,30 @@ try {
   ok("none shows the old N/A / Excluded / Undecided row", offenders.quick.length === 0, offenders.quick.join(" "));
   ok("no choice question opens on an empty sentence box", offenders.typed.length === 0, offenders.typed.join(" "));
 
+  section("Whole House rows");
+  {
+    const floor = seed("W-017", { isDefault: true });
+    const none = rows({ question: q("W-017"), items: [], seed: floor });
+    ok("each zone is its own row with no zone to tap", ["main_floor", "bedroom_floor", "wet_area_floor"].every((z) => none.includes(`data-testid="slot-W-017-${z}"`)) && !/data-testid="zone-W-017-/.test(none));
+    ok("the question is written once, not on every row", (none.match(/General interior floor palette/g) || []).length === 1);
+    ok("the rarer zone is a button", /add-zone-W-017-other_zone/.test(none) && !/Add another/.test(none));
+    const paint = rows({ question: q("W-019"), items: [], seed: seed("W-019", { isDefault: true }) });
+    ok("every surface says what is usual, and no finish chip shows", (paint.match(/Usual finish for this surface/g) || []).length === 4 && !/choice-W-019-finish_level/.test(paint));
+    const kit = rows({ question: q("K-005"), items: [], seed: seed("K-005", { isDefault: true, section: "project" }) });
+    ok("a standard on Whole House lays out its zone and offers the rare one", /slot-K-005-kitchen/.test(kit) && /add-zone-K-005-scullery/.test(kit) && !/slot-K-005-scullery/.test(kit));
+    const inARoom = row({ question: q("K-005"), item: null, seed: seed("K-005", { roomId: "room_1" }) });
+    ok("the same question in a room has no zones", !/zone-K-005|slot-K-005|Applies to/.test(inARoom) && /card-K-005/.test(inARoom));
+    const roof = item("W-014", { isDefault: true, answer: R.toggleOption(c("W-014"), null, ["metal_roofing"]) });
+    const gutter = R.makeItem({ ...seed("W-014"), answer: { element: { key: "gutters", label: "Gutters" }, linkedItemIds: [roof.id], selected: [{ path: ["quad"], label: "Quad" }], state: "recorded", v: 1 } });
+    const g = row({ question: q("W-014"), item: gutter });
+    ok("a gutter row is titled and tested as gutters, and shows only gutter choices", />Gutters</.test(g) && /card-W-014-gutters/.test(g) && /choice-W-014-gutters-box_gutter/.test(g) && !/Metal roofing/.test(g));
+    const asg = row({ question: q("W-017"), item: null, seed: seed("W-017"), assumptionOf: () => ({ tier: "upgraded", text: "Engineered timber." }) });
+    ok("an assumption is labelled as Blue Leaf's, with what it isn't", /Blue Leaf pricing assumption \(Upgraded\)/.test(asg) && /Not a client choice, an approval or a price/.test(asg));
+    ok("and is only there when one applies", !/pricing assumption/.test(row({ question: q("W-017"), item: null, seed: seed("W-017"), assumptionOf: () => null })));
+    const w22 = rows({ question: q("W-022"), items: [], seed: seed("W-022") });
+    ok("an inclusion line has its owner on the card, and By others", /owner —/.test(w22) && />By others</.test(w22));
+  }
+
   section("Site access");
   const blank = row({ question: q("W-001"), item: null, seed: seed("W-001") });
   ok("each option is a button with a pressed state", (blank.match(/aria-pressed="false"/g) || []).length >= 9 && /Steep access/.test(blank));

@@ -19,7 +19,7 @@ import { DocumentError } from "./registerDocuments.mjs";
 import { OPS_READY_ITEMS } from "../../src/lib/constants.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, INCLUDED_DISPOSITIONS, dispositionLabel, categoryLabel,
-  QUESTION_LIBRARY_VERSION, answerSummary, contractInclusionOf,
+  QUESTION_LIBRARY_VERSION, answerSummary, contractInclusionOf, baselineAssumptions,
 } from "../../src/lib/register.js";
 
 const BUCKET = "lead-documents";
@@ -83,6 +83,7 @@ export async function tenderSummary(sb, leadId, { actor } = {}) {
     needsPricing: items.filter((i) => inScope(i) && (i.itemKind === "selection" || i.itemKind === "scope") && i.pricingStatus !== "quoted_or_confirmed"
       && !["client", "by_others"].includes(i.supplyBy) && hasPricingContent(i)).map((i) => row(reg, i)),
     risks: items.filter((i) => i.technicalStatus === "needs_verification").map((i) => row(reg, i)),
+    assumptions: baselineAssumptions(reg),           // staff-only: labelled Blue Leaf pricing assumptions, never a client choice or a price
     costRefs: await costReferences(sb, lead),
   };
 }

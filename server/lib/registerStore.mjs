@@ -212,7 +212,7 @@ function metaForCanonical(meta) {
   const m = emptyMeta(meta);
   return {
     version: 2, planRev: m.planRev, occupancy: m.occupancy, renovationOverlay: m.renovationOverlay,
-    scopeAreas: m.scopeAreas, rooms: m.rooms, lastRoomId: m.lastRoomId, lastStep: m.lastStep,
+    scopeAreas: m.scopeAreas, rooms: m.rooms, lastRoomId: m.lastRoomId, lastStep: m.lastStep, baseline: m.baseline,
     libraryVersion: QUESTION_LIBRARY_VERSION,
   };
 }
@@ -391,6 +391,7 @@ function carryRoomConfirmations(meta, stored) {
   const byId = new Map((stored?.rooms || []).map((r) => [r.id, r]));
   return { ...meta, rooms: meta.rooms.map((r) => (r && !("defaultConfirmations" in r) && byId.has(r.id) ? { ...r, defaultConfirmations: byId.get(r.id).defaultConfirmations } : r)) };
 }
+const carryBaseline = (meta, stored) => (meta && !("baseline" in meta) && stored?.baseline ? { ...meta, baseline: stored.baseline } : meta);
 
 const APPROVED_STATUSES = ["approved", "ordered", "installed"];
 
@@ -459,7 +460,7 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
 
     for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(ch, byId.get(ch.id)), updatedAt: now, sync: null }));
     for (const del of deletes) byId.delete(del.id);
-    const nextMeta = meta ? emptyMeta({ ...carryRoomConfirmations(meta, cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
+    const nextMeta = meta ? emptyMeta({ ...carryBaseline(carryRoomConfirmations(meta, cur.meta), cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
     const next = writeRegister({ meta: nextMeta, items: [...byId.values()] });
 
     // Conditional write on the lead's own updated_at — a concurrent save makes this affect 0 rows and
@@ -478,7 +479,7 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
 
 async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, actor) {
   const current = await loadCanonical(sb, target.project);
-  const meta = rawMeta ? carryRoomConfirmations(rawMeta, current.meta) : rawMeta;
+  const meta = rawMeta ? carryBaseline(carryRoomConfirmations(rawMeta, current.meta), current.meta) : rawMeta;
   const register = { meta: meta ? emptyMeta(meta) : current.meta, items: current.items };
   // Changes may reference rooms added in this same save — resolve labels against the incoming meta.
   const known = new Set(current.items.map((it) => it.id));

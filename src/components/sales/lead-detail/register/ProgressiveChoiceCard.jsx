@@ -50,12 +50,12 @@ const tidyWords = (v) => statedText(v.trim());
 
 const SAVE_TEXT = { dirty: "Saving…", saving: "Saving…", saved: "Saved", error: "Not saved", rejected: "Not saved", conflict: "Changed elsewhere" };
 
-export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState }) {
+export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState, fixedZone, usedZones }) {
   const [more, setMore] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [touched, setTouched] = useState(false);
-  const view = choiceView(config, item.answer, { showDetail: more });
-  const qid = question?.id || item.id;
+  const view = choiceView(config, item.answer, { showDetail: more, usedZones });
+  const qid = config.linkedKey ? `${question?.id}-${config.linkedKey}` : question?.id || item.id;
   const send = (patch) => { setTouched(true); onPatch(patch); };
   const write = (next, extra) => send(itemPatch(item, config, next, extra));
   const settle = settleOptions(config, { showDetail: more, current: item.disposition });
@@ -77,11 +77,14 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
           placeholder={item.itemKind === "action" ? "What needs to happen…" : "What item…"} className="inp w-full text-[11px]" />
       )}
 
-      {view.zone && (
+      {view.zone && !fixedZone && (
         <Row heading="Applies to">
-          {view.zone.options.map((o) => <Choice key={o.id} label={o.label} on={o.on} disabled={disabled} testId={`zone-${qid}-${o.id}`} onClick={() => write(chooseZone(config, item.answer, o.id))} />)}
+          {view.zone.options.map((o) => <Choice key={o.id} label={o.label} on={o.on} disabled={disabled || o.disabled} testId={`zone-${qid}-${o.id}`} onClick={() => write(chooseZone(config, item.answer, o.id))} />)}
           {view.zone.open && <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className="inp min-w-[9rem] flex-1 text-[11px]" />}
         </Row>
+      )}
+      {view.zone?.open && fixedZone && (
+        <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className="inp w-full text-[11px]" />
       )}
 
       {view.element && (
@@ -106,6 +109,8 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
           )))}
         </Row>
       ))}
+
+      {view.usual && <p className="text-[11px] text-muted" data-testid={`usual-${qid}`}>Usual finish for this surface: <span className="font-medium text-ink">{view.usual}</span>. Change it under + More detail.</p>}
 
       {config.clientNote && (!disabled || view.clientNote) && (
         <DraftInput value={view.clientNote} disabled={disabled} onCommit={(v) => write(setClientNote(config, item.answer, v))} placeholder="Note for the client brief (the client reads this)…" aria-label="Note for the client brief. The client reads this" className="inp w-full text-[11px]" data-testid={`client-note-${qid}`} />

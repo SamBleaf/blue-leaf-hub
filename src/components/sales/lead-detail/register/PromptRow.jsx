@@ -15,7 +15,7 @@ import { useRef, useState } from "react";
 import {
   makeItem, genId, REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, RESPONSIBILITIES,
   TECHNICAL_STATUSES, PRICING_STATUSES, SUPPLY_BY, ITEM_KINDS, categoryLabel, itemIssues, outstandingReasons,
-  questionById, resolvePromptId, answerConfigFor, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES,
+  questionById, resolvePromptId, configForRow, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES, BASELINE_TIERS, OPEN_OPTION_IDS,
 } from "../../../../lib/register.js";
 import { Chip, Mini, Select } from "./ui.jsx";
 import ProgressiveChoiceCard from "./ProgressiveChoiceCard.jsx";
@@ -38,7 +38,7 @@ function portalBadge(item) {
 }
 
 export default function PromptRow({
-  question: questionProp, item, seed, onChange, onDelete, inherited, onMakeException, actor, onPortal, readOnlyReason, compact, saveState,
+  question: questionProp, item, seed, onChange, onDelete, inherited, onMakeException, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf,
 }) {
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState(null);          // 'approve' | 'verify' | 'portal_approve'
@@ -47,7 +47,9 @@ export default function PromptRow({
   const [showText, setShowText] = useState(false);
   const it = item || makeItem(seed);
   const question = questionProp || questionById(resolvePromptId(it.promptKey));   // the office table opens rows by item
-  const config = answerConfigFor(question?.id);
+  const config = configForRow(question?.id, it);
+  const qid = config?.linkedKey ? `${question.id}-${config.linkedKey}` : question?.id || it.id;
+  const assumed = assumptionOf?.(it);
   const guided = isGuidedConfig(config) && answerIsEditable(it.answer);
   const noteOnly = config?.handling === "note";
   const usesDisposition = dispositionApplies(config);
@@ -74,12 +76,12 @@ export default function PromptRow({
     setAsk(null);
   }
 
-  const title = question?.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
+  const title = rowTitle || config?.linkedLabel || question?.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
   const locked = !!it.sync?.locked;
   const disabled = !!readOnlyReason;
 
   return (
-    <div className={`relative rounded-lg border p-2.5 ${started ? "border-hairline bg-page" : "border-dashed border-hairline bg-surface"}`} data-testid={`prompt-${question?.id || it.id}`}>
+    <div className={`relative rounded-lg border p-2.5 ${started ? "border-hairline bg-page" : "border-dashed border-hairline bg-surface"}`} data-testid={`prompt-${qid}`}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5 pr-24 sm:pr-0">
@@ -94,7 +96,7 @@ export default function PromptRow({
             {it.technicalStatus === "verified" && <Chip tone="green">Verified</Chip>}
             {it.pricingStatus && it.pricingStatus !== "not_reviewed" && <Chip tone="slate">{PRICING_STATUSES[it.pricingStatus]}</Chip>}
           </div>
-          {question?.text && (
+          {question?.text && !rowTitle && !config?.linkedKey && (
             <button type="button" onClick={() => setShowText((s) => !s)} className={`mt-0.5 block w-full text-left text-[11px] leading-snug text-muted ${showText ? "" : "line-clamp-1"}`}>
               {question.text}
             </button>
@@ -108,9 +110,14 @@ export default function PromptRow({
           )}
 
           {(!inherited || item) && guided && (
-            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} />
+            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} fixedZone={fixedZone} usedZones={usedZones} />
           )}
-          {(!inherited || item) && guided && (kind === "action" || config.handling === "record") && (
+          {assumed && (
+            <p className="mt-1.5 rounded border border-dashed border-hairline px-2 py-1 text-[11px] text-muted" data-testid={`assumption-${qid}`}>
+              <span className="font-semibold text-ink">Blue Leaf pricing assumption ({BASELINE_TIERS[assumed.tier]}):</span> {assumed.text} Staff only. Not a client choice, an approval or a price.
+            </p>
+          )}
+          {(!inherited || item) && guided && (kind === "action" || config.handling === "record" || config.repeat?.owner) && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
               {kind === "action" && (
@@ -258,25 +265,69 @@ export default function PromptRow({
  * saved until something is answered on it. Blank and saved rows are one keyed list and a row keeps its id when it is saved,
  * so the first answer doesn't rebuild the row: focus, typing and an open "+ More detail" all stay where they were.
  * A used id is never offered again, so a removed row stays removed. Mount one of these per room and question.
+ *
+ * Where each zone is its own default (a floor per zone, paint per surface, kitchen and scullery standards), the zones shown
+ * first are laid out as one row each, so the zone takes no tap. The rarer zones are a "+ Scullery" button away. Anything
+ * already recorded always has a row. renderBelow adds what is linked under a saved row (gutters under a roof).
  */
-export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, ...row }) {
+export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, renderBelow, noAdd, ...row }) {
   const spare = useRef(genId());                 // the open row while nothing is recorded
-  const [added, setAdded] = useState(null);      // the open row from "+ Add another"
+  const slotIds = useRef({});                    // the open row for each zone laid out, by zone
+  const [added, setAdded] = useState(null);      // the open row from "+ Add another" or "+ Scullery": { id, zone? }
   const saved = new Set(items.map((i) => i.id));
   if (saved.has(spare.current)) spare.current = genId();
-  if (added && saved.has(added)) setAdded(null);
-  const blankId = added && !saved.has(added) ? added : items.length ? null : spare.current;
-  const rows = [...items.map((item) => ({ id: item.id, item })), ...(blankId ? [{ id: blankId, item: null }] : [])];
-  const seedFor = (id) => ({ ...seed, id });
+  for (const z of Object.keys(slotIds.current)) if (saved.has(slotIds.current[z])) delete slotIds.current[z];
+  if (added && saved.has(added.id)) setAdded(null);
+  const seedFor = (id, zone) => ({ ...seed, id, ...(zone ? { answer: { ...seed.answer, zone: { key: zone.id, label: zone.label } } } : {}) });
+  const cfg = configForRow(question.id, makeItem(seed));
+  const tid = cfg?.linkedKey ? `${question.id}-${cfg.linkedKey}` : question.id;
+  const zones = cfg?.repeat?.eachZone ? cfg.zones || [] : [];
+  const zoneOf = (item) => zones.find((z) => z.id === item.answer?.zone?.key) || null;
+  const openZone = (z) => OPEN_OPTION_IDS.has(z.id);
+
+  const taken = new Set();
+  const laidOut = zones.filter((z) => !z.detail && !openZone(z)).map((zone) => {
+    const item = items.find((i) => !taken.has(i.id) && zoneOf(i)?.id === zone.id) || null;
+    if (item) taken.add(item.id);
+    if (!item && !slotIds.current[zone.id]) slotIds.current[zone.id] = genId();
+    return { id: item ? item.id : slotIds.current[zone.id], item, zone };
+  });
+  const openAdded = added && !saved.has(added.id) ? added : null;
+  const blankId = zones.length ? null : openAdded ? openAdded.id : items.length ? null : spare.current;
+  const rows = [
+    ...laidOut,
+    ...items.filter((i) => !taken.has(i.id)).map((item) => ({ id: item.id, item, zone: zoneOf(item) })),
+    ...(blankId ? [{ id: blankId, item: null, zone: null }] : []),
+    ...(zones.length && openAdded ? [{ id: openAdded.id, item: null, zone: openAdded.zone }] : []),
+  ];
+  const rowZones = new Set(rows.map((r) => r.zone?.id).filter(Boolean));
+  const moreZones = zones.filter((z) => (z.detail || openZone(z)) && (openZone(z) ? openAdded?.zone?.id !== z.id : !rowZones.has(z.id)));
+  const usedZones = zones.length ? new Set(items.map((i) => i.answer?.zone?.key).filter((k) => k && !OPEN_OPTION_IDS.has(k))) : null;
+  const addBtn = "focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]";
   return (
     <div className="space-y-2">
-      {rows.map(({ id, item }) => (
-        <PromptRow key={id} question={question} item={item} seed={seedFor(id)} readOnlyReason={readOnly ? "Read-only" : null} {...row}
-          onChange={(partial) => (item ? updateItem(id, partial) : upsertItem(seedFor(id), partial))}
-          onDelete={item ? () => deleteItem(id) : undefined} />
+      {zones.length > 0 && (
+        <div>
+          <span className="text-xs font-semibold text-ink">{question.short}</span> <span className="text-[10px] text-muted">{question.id}</span>
+          <p className="text-[11px] leading-snug text-muted">{question.text}</p>
+        </div>
+      )}
+      {rows.map(({ id, item, zone }) => (
+        <div key={id} className="space-y-1.5" data-testid={zone ? `slot-${question.id}-${zone.id}` : undefined}>
+          <PromptRow question={question} item={item} seed={seedFor(id, zone)} readOnlyReason={readOnly ? "Read-only" : null} {...row}
+            rowTitle={zone?.label} fixedZone={!!zone} usedZones={usedZones}
+            onChange={(partial) => (item ? updateItem(id, partial) : upsertItem(seedFor(id, zone), partial))}
+            onDelete={item ? () => deleteItem(id) : undefined} />
+          {item && renderBelow?.(item)}
+        </div>
       ))}
-      {!readOnly && !blankId && (
-        <button type="button" onClick={() => setAdded(genId())} className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]" data-testid={`add-another-${question.id}`}>+ Add another</button>
+      {!readOnly && !zones.length && !blankId && !noAdd && (
+        <button type="button" onClick={() => setAdded({ id: genId() })} className={addBtn} data-testid={`add-another-${tid}`}>+ Add another</button>
+      )}
+      {!readOnly && moreZones.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {moreZones.map((z) => <button key={z.id} type="button" onClick={() => setAdded({ id: genId(), zone: z })} className={addBtn} data-testid={`add-zone-${question.id}-${z.id}`}>+ {z.label}</button>)}
+        </div>
       )}
     </div>
   );

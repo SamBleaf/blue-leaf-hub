@@ -38,6 +38,7 @@ export default function TenderPanel({ lead, reg, updateItem, flush }) {
   if (err) return <p className="text-xs text-red-600">{err}</p>;
   if (!t) return <p className="text-xs text-muted">Building the tender view…</p>;
   const refOptions = t.costRefs.map((c) => [c.ref, c.label]);
+  const assumptions = t.assumptions || [];
   const linkPicker = (r) => {
     const item = reg.items.find((i) => i.id === r.id);
     if (!item) return null;
@@ -64,6 +65,19 @@ export default function TenderPanel({ lead, reg, updateItem, flush }) {
       <Section title="Products specified" count={t.specified.length}><Rows rows={t.specified} empty="No specific products yet." /></Section>
       <Section title="Needs pricing — link to the existing estimate" count={t.needsPricing.length} defaultOpen={t.needsPricing.length > 0}>
         <Rows rows={t.needsPricing} empty="No in-scope item is waiting for a price source." extra={linkPicker} />
+      </Section>
+      <Section title="Blue Leaf pricing assumptions (internal)" count={assumptions.length} defaultOpen={assumptions.length > 0}>
+        {assumptions.length === 0 ? <p className="text-[11px] text-muted">No pricing assumption is in use.</p> : (
+          <ul className="space-y-1 text-[11px]" data-testid="tender-assumptions">
+            {assumptions.map((a) => (
+              <li key={a.key}>
+                <span className="font-semibold text-ink">{a.label}: {a.tierLabel}.</span> <span className="text-ink">{a.text}</span>
+                {a.status === "part" && <span className="text-muted"> Covers only what isn&apos;t chosen{a.zoneGaps.length ? ` (${a.zoneGaps.join(", ")})` : ""}.</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[10px] text-muted">Assumptions for estimating. Not a client choice, an approval or a price. Anything the client has actually chosen replaces them.</p>
       </Section>
       <Section title="Technical risks to verify" count={t.risks.length} defaultOpen={false}><Rows rows={t.risks} empty="No open technical items." /></Section>
       <p className="text-[10px] text-muted">Links point at the existing estimate; prices stay in Buildxact / the fee proposal. “Quoted &amp; reviewed” means a builder-reviewed cost source — not a fixed contract amount.</p>
