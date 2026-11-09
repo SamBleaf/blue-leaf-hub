@@ -19,6 +19,8 @@ test_status: untested
 ## 1. Who uses this
 Admin and Supervisor. This is the stage you run once the client has approved their concept and you are ready to lock in the design and pre-construction work.
 
+**Access today:** only a Director (admin) login can open Sales or reach its API. The SPA route and the server prefix gate both stop Supervisors and Employees, even though this SOP was written for both.
+
 ## 2. When to use it
 Use this when a lead sits at the **PTSA / Plans** stage (the coloured stage chip reads "PTSA / Plans"). You get here straight after the **Concept** stage, once the concept design is approved, the PTSA / Plans pathway has been explained to the client, and the pre-construction fee has been set.
 

@@ -1,5 +1,5 @@
 ---
-sop_version: 2.1
+sop_version: 2.2
 last_reviewed: 2026-11-09
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
@@ -234,10 +234,31 @@ Next review: 2027-01-02
 
 **TC-08 — Hard gate blocks a forward advance (one canonical source)**
 1. Open a real (non-test) lead at Qualify whose qualifying score is below 5, or with no booked build conversation
-2. Try to advance to Discovery (stepper jump or board drag)
-3. Expected: the advance is refused — "Can't advance to Discovery yet — needs a qualifying score of at least 5 and/or a booked build conversation." (HTTP 422, error code `GATE_BLOCKED`)
+2. Confirm the **Move to Discovery →** button is disabled. Then use **Move ▾** on the lead's pipeline card and choose Discovery
+3. Expected: the move is refused and the alert reads exactly one of these (HTTP 422, error code `GATE_BLOCKED`):
+   - "Can't advance to Discovery yet — needs a qualifying score of at least 5 and a booked build conversation."
+   - "Can't advance to Discovery yet — needs a qualifying score of at least 5."
+   - "Can't advance to Discovery yet — needs a booked build conversation."
 4. Satisfy the requirement(s), then retry → the advance succeeds
 5. Expected: the requirements the Discovery focus panel lists as unmet are EXACTLY the ones the server enforces — they cannot disagree, because both read the one module `src/lib/stageGates.js`
+- [ ] Pass  [ ] Fail
+
+**TC-08a — A request cannot satisfy its own gate**
+1. Send `PATCH /api/sales/leads/:id` with `{ "stage": "discovery", "discovery_meeting_booked_at": "<now>", "qualify_budget": 2, "qualify_timeframe": 2, "qualify_site": 2, "qualify_decision_maker": 2 }` on a lead at Qualify with none of those stored
+2. Expected: 422 `GATE_BLOCKED`. The lead stays at Qualify and none of the sent values are saved
+- [ ] Pass  [ ] Fail
+
+**TC-08b — A jump cannot skip a gated stage**
+1. On a real lead at Enquiry, use **Move ▾** and choose Consultants
+2. Expected: refused with "Can't move to Consultants yet — Discovery still needs a qualifying score of at least 5 and a booked build conversation."
+3. Expected DB: stage unchanged, no `stage_change` row in `lead_activities`
+- [ ] Pass  [ ] Fail
+
+**TC-08c — Two people advance the same lead**
+1. Open the same lead in two browser windows, both showing the same stage
+2. Press **Move to …** in the first window, then in the second
+3. Expected: the second is told "Someone else has just moved this lead. Reload the page to see where it is now." (HTTP 409, `STAGE_CONFLICT`) and the page reloads
+4. Expected DB: one `stage_change` row, not two
 - [ ] Pass  [ ] Fail
 
 **TC-09 — Advisory requirement warns but never blocks**
@@ -247,6 +268,7 @@ Next review: 2027-01-02
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
+- [ ] A failed or lost move wrote no `stage_change` row (the row is written only after the update lands)
 - [ ] Stage changes update DB correctly (stage, stage_entered_at, last_activity_at)
 - [ ] Stage history recorded in activity log
 - [ ] Gate requirements work — hard gates block the advance server-side (422 `GATE_BLOCKED`), advisory gates warn + log a bypass; the UI and server never disagree (one source: `src/lib/stageGates.js`)

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: undefined
+sop_version: 1.1
+last_reviewed: 2026-11-09
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Supervisor
@@ -19,6 +19,8 @@ test_status: untested
 ## 1. Who uses this
 
 Admin and Supervisor staff who run the sales pipeline. This is the final Sales step for a lead — the moment a signed deal stops being a "sale" and becomes a real building job that Operations can start. You do not need any technical knowledge; you tick real-world checks that confirm the handover is genuinely done.
+
+**Access today:** only a Director (admin) login can open Sales or reach its API. The SPA route and the server prefix gate both stop Supervisors and Employees, even though this SOP was written for both.
 
 ## 2. When to use it
 
@@ -41,16 +43,15 @@ The estimating job that was created when the PTSA was signed only becomes a **li
 ## 4. Before you start
 
 - The lead is in the **Tender** stage.
-- The client has **signed the building contract**, and it is uploaded in the lead's **Documents** tab with type **"Construction contract"**.
-- In the Tender stage panel, the **Building contract** status is set to **Signed** (this is what unlocks the move to Won).
+- The client has **signed the building contract**, and the signed PDF is uploaded in the **Building contract** block of the Tender stage.
 - The lead has a **linked job** (created when the PTSA / Plans stage was signed) — if there is no job yet, add the **site address** first so the job can be created.
 - Ideally the job already has a contract value, **or** there is exactly **one accepted fee proposal** on the job so the Hub can stamp the value automatically.
-- You are signed in as **Admin** or **Supervisor**.
+- You are signed in with a **Director (admin)** login.
 
 ## 5. Step-by-step process
 
 1. Open the lead from the Sales pipeline and confirm it is in the **Tender** stage.
-2. In the **Building contract** panel, confirm the status shows **Signed**. If it does not, set it to Signed once the signed contract is uploaded in the Documents tab. (You cannot move to Won until this reads Signed.)
+2. In the **Building contract** panel, confirm it shows **✓ Signed** with the PDF linked. If it does not, upload the client-signed PDF there. (You cannot move to Won until this is done.)
    [insert screenshot: Tender stage — Building contract set to Signed]
 3. Find the **Advance to Won** panel and press its **Move to Won →** button. (On a Tender-stage lead the header's main button is **Proceed to RFQ Engine →**; the **Move to Won →** button is inside the **Advance to Won** panel below it — do not confuse the two.)
 4. The lead now shows the Won panel with the banner **"Won — contract secured"** and a **Contract secured** badge. The Hub has already flipped the job to Won, created the live Operations project, and recorded the contract value.
@@ -85,7 +86,7 @@ Note: the **Also track (advisory)** box (deposit invoice raised, council / devel
 
 | Mistake | Why it happens | How to avoid it |
 |---|---|---|
-| Trying to move to Won before the contract is signed | Staff assume signing the tender / verbal yes is enough | Set the Building contract status to **Signed** first; the move to Won is blocked until it is |
+| Trying to move to Won before the contract is signed | Staff assume signing the tender / verbal yes is enough | Upload the client-signed PDF in the Building contract block first; the move to Won is blocked until it is on file |
 | Clicking **Proceed to RFQ Engine →** instead of **Move to Won →** | On a Tender-stage lead the header's main button is Proceed to RFQ Engine → | The **Move to Won →** button is in the **Advance to Won** panel — win the lead from there |
 | Pressing Mark Ops Ready with items unticked | Rushing to "close" the lead | The button stays disabled until all 8 items pass — finish the real-world transfers first |
 | Ticking checklist items that are not actually done | Treating the list as a formality | Each tick means the real transfer happened (docs uploaded, value to Finance, start to Scheduler) — only tick what is true |
@@ -96,8 +97,11 @@ Note: the **Also track (advisory)** box (deposit invoice raised, council / devel
 
 | Problem the user sees | Most likely cause | Fix |
 |---|---|---|
-| "Can't move to Won yet — the building contract must be signed." | Contract status is not **signed** | Upload the signed contract in Documents, set Building contract to **Signed**, then move to Won |
-| Move to Won button does nothing / blocked | Lead is not the current focus stage, or an earlier gate is unmet | Confirm the lead is in **Tender** with a signed contract |
+| "Can't advance to Won yet — needs the building contract signed…" | The signed PDF has not been uploaded | Upload it in the Building contract block in the Tender stage, then move to Won |
+| "…needs the signed contract PDF on file." | Marked signed before uploads were required, or the file was removed | Attach the PDF in the Building contract block. The signed date is kept |
+| "Someone else has just moved this lead." | Another person moved it first | Reload the page and check where the lead is now |
+| Alert: the hand-off to Operations didn't finish, or the project is missing from Operations | The lead is Won but the job or project step failed | Press **Re-run the hand-off** on the Won panel. It is safe to repeat and never creates a duplicate |
+| Move to Won button blocked | The lead is not the current focus stage, or a requirement is unmet | Confirm the lead is in **Tender** and the panel shows both contract requirements ticked |
 | "Job & Ops project created" tick stays empty | The lead has no linked job | Add the **site address** and create the job from the lead, then reopen the Won panel |
 | Mark Ops Ready button is greyed out | One or more of the 8 items has not passed | Check the counter (e.g. 7/8) and tick the remaining real item(s) |
 | Won succeeded but no contract value shows | No value on the job and not exactly one accepted proposal | Set the job's contract value manually, or make sure a single accepted fee proposal exists |
@@ -202,10 +206,18 @@ Expected DB record: the unauthenticated PATCH is rejected with **401** (route gu
 
 **TC-05 — Feature-specific edge: Won hard gate on an unsigned contract**
 Steps:
-1. On a real Tender-stage lead, set Building contract status to **Sent** (not Signed).
-2. In the Advance to Won panel, press **Move to Won →**.
-Expected UI result: an alert shows "Can't move to Won yet — the building contract must be signed." and the lead stays in Tender. (The button is enabled client-side — `GATE_REQUIREMENTS.won` is empty — so the block is enforced by the server and surfaced via the alert.)
+1. On a real Tender-stage lead, set Building contract status to **Sent** with no PDF uploaded.
+2. In the Advance to Won panel, confirm **Move to Won →** is disabled and both contract requirements show as unmet with a hint.
+3. Use **Move ▾** on the pipeline card and choose Won.
+Expected UI result: an alert shows "Can't advance to Won yet — needs the building contract signed and the signed contract PDF on file." and the lead stays in Tender.
 Expected DB record: server returns **422** with code `GATE_BLOCKED`; `leads.stage` remains `tender`; `leads.won_at` and `leads.won_substatus` are unset; the linked `jobs.status` is unchanged (still `tendering`); no new `projects` row.
+- [ ] Pass  [ ] Fail
+
+**TC-05a — Re-run the hand-off**
+Steps:
+1. On a Won lead with a linked job, press **Re-run the hand-off** twice.
+Expected UI result: "Done. The job is Won and the project is in Operations."
+Expected DB record: `jobs.status = 'won'`; **exactly one** `projects` row for that `job_id`; one `lead_activities` note per press.
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Feature-specific edge: contract value stamped from a single accepted proposal**

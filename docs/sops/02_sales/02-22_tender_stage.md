@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: undefined
+sop_version: 1.1
+last_reviewed: 2026-11-09
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Supervisor
@@ -20,6 +20,8 @@ test_status: untested
 
 Admin and Supervisor staff who run a lead through the **Tender** stage — the stage where the client's **Fixed-Price Proposal** is built, presented, and the **building contract** is signed. This is the last stage before **Won**, so it is the point where a design-and-build client becomes a construction project.
 
+**Access today:** only a Director (admin) login can open Sales or reach its API. The SPA route and the server prefix gate both stop Supervisors and Employees, even though this SOP was written for both.
+
 ## 2. When to use it
 
 Use this SOP once a lead has reached the **Tender** stage (it has already passed Enquiry, Qualify, Discovery, Concept, PTSA / Plans and Consultants). You are in the Tender stage when the lead detail screen shows the **"Tender progress"** control panel. Use it to:
@@ -28,7 +30,7 @@ Use this SOP once a lead has reached the **Tender** stage (it has already passed
 - Build the estimate and generate the client Fixed-Price Proposal.
 - Quality-check the proposal against the Blue Leaf Proposal Checklist before you present it.
 - Book the proposal presentation meeting and send the four named client emails.
-- Record the building contract as it moves prepared → sent → signed.
+- Record the building contract as it moves prepared → sent, then mark it signed by uploading the client-signed PDF.
 
 ## 3. What this does
 
@@ -38,7 +40,7 @@ The Tender stage turns a single "tender" bucket into a tracked mini-pipeline. In
 - **Start the estimate** in the RFQ Engine and **generate the Fixed-Price Proposal** — the proposal is treated as a first-class client sales tool, not a file attachment.
 - **Run the Blue Leaf Proposal Checklist**, a client-facing quality gate. It shows a readiness percentage; below 80% it warns the proposal is "not ready to present".
 - **Take five named actions** (each a distinct, deliberate step, never one generic "send"): book the proposal presentation meeting, plus four separately-worded client emails.
-- **Capture the building contract** through prepared → sent → signed, which stamps the sent and signed dates. A signed contract is required before the lead can move to Won.
+- **Capture the building contract**: set Prepared or Sent, which stamps the sent date, then upload the client-signed PDF to mark it signed. A signed contract **with its PDF on file** is required before the lead can move to Won.
 
 Everything is stored on the lead record, so any staff member opening the lead sees the same live picture.
 
@@ -81,16 +83,16 @@ Everything is stored on the lead record, so any staff member opening the lead se
 
 12. If the contract is not signed after a while, click **Unsigned-contract follow-up** to chase it (preview, edit, send).
 
-13. In the **Building contract** block, click the status that matches reality: **Prepared**, **Sent**, or **Signed**. Clicking **Sent** stamps the sent date; clicking **Signed** stamps the signed date. (The "Sent … · Signed …" date line only appears once a sent date has been stamped — so click **Sent** before **Signed** if you want both dates shown.)
-    *[insert screenshot: Building contract status buttons with sent/signed dates]*
+13. In the **Building contract** block, click **Prepared** or **Sent** to match reality. Clicking **Sent** stamps the sent date. There is no Signed button: signing is recorded in the next step.
+    *[insert screenshot: Building contract status buttons and PDF upload]*
 
-14. When the client returns the signed contract, open the **Documents** tab, choose document type **Construction contract** from the type dropdown, and upload the signed PDF.
+14. When the client returns the signed contract, choose the PDF in the **Building contract** block, optionally set the date signed, and click **✓ Mark contract as signed**. The Hub stores the PDF, marks the contract signed and shows the file as a link.
 
-15. You can now move the lead to **Won** (see 02-02). The Won move is blocked until the contract status is **Signed**.
+15. You can now move the lead to **Won** (see 02-02). The move is blocked until the contract is signed **and** the signed PDF is on file.
 
 ## 6. What happens next
 
-- Once the contract status is **Signed** and the signed contract is uploaded, the Won gate opens.
+- Once the signed PDF is uploaded, the contract shows as **Signed** and the Won gate opens.
 - Moving the lead to **Won** carries the win value onto the job and enters the **Contract secured** sub-state, ready for the clean handoff to Operations.
 - Every email you send is logged on the lead's timeline, so anyone can see what has been sent and when.
 - The Fixed-Price Proposal you generated stays on the lead as the client-facing sales document, not a stray attachment.
@@ -103,7 +105,7 @@ Everything is stored on the lead record, so any staff member opening the lead se
 | Adding 10% GST to the fixed price by hand | Staff expect to type the "final" number | Enter the price ex-GST; Xero adds GST on the invoice |
 | Saying "APB" anywhere the client can see | APB is internal guidance only | Everything client-facing is Blue Leaf branded — use "Fixed-Price Proposal" and "Blue Leaf Proposal Checklist" |
 | Clicking one generic "send" and moving on | Old habit from single-button tools | Use the correct named button — each of the four emails is worded for its exact moment |
-| Marking the contract **Signed** without uploading the file | The status button feels like enough | Also upload the signed PDF in Documents as "Construction contract" — the Won handoff expects the file |
+| Looking for a **Signed** button | Older screens had one | Upload the client-signed PDF in the Building contract block. That is what marks it signed |
 | Forgetting to advance the sub-status strip | The strip is manual, not automatic | Nudge the strip each time the work moves so the whole team sees the true position |
 
 ## 8. Troubleshooting
@@ -115,8 +117,9 @@ Everything is stored on the lead record, so any staff member opening the lead se
 | Email preview opens but **Send email** returns "Tender email sending is turned off…" | `TENDER_EMAIL_ENABLED` is not set to `true` on the server | Ask an admin to set `TENDER_EMAIL_ENABLED=true`; preview still works meanwhile |
 | Email won't build a preview | The lead has no valid email address | Add a valid client email to the lead, then reopen the preview |
 | Readiness badge stuck under 80% | Not all checklist items are ticked | Tick the remaining items; readiness = ticked ÷ 10 |
-| Clicked **Signed** but no "Signed …" date line appears | The date line only renders once a **sent** date exists | Click **Sent** first (stamps the sent date), then **Signed** — both dates then show |
-| Can't move the lead to Won ("the building contract must be signed") | Contract status is not yet **Signed** | Set the contract status to **Signed** in the Building contract block first |
+| "That file isn't a complete PDF." | The file is a Word document or photo, or the PDF is damaged | Save or scan the signed contract as a PDF and upload that |
+| Can't move the lead to Won ("needs the building contract signed") | No signed PDF has been uploaded | Upload the client-signed PDF in the Building contract block |
+| Can't move the lead to Won ("needs the signed contract PDF on file") | The lead was marked signed before uploads were required, or the file was removed | The Building contract block shows an upload. Attach the PDF. The original signed date is kept |
 | A test lead moves straight to Won without the "contract must be signed" block | Test leads (`is_test = true`) bypass every hard gate by design (mig 178) | Expected behaviour — the Won gate only enforces on real (non-test) leads; test on a real lead to see the block |
 | A checklist tick or sub-status "un-saves" itself | The save round-trip failed (e.g. migration 194 not applied) | Confirm migration 194 is applied; the control reverts on a failed save so you know it did not persist |
 
@@ -154,9 +157,9 @@ Every automated action triggered from this stage:
 - **Contract sent email** → same endpoint, `{ which: "contract_sent" }` (subject "Your building contract is on its way"). On a successful send the UI also sets `leads.contract_status` to `sent` and stamps `leads.contract_sent_date` (today) if not already set. Logs to `correspondence` + `lead_activities` (summary "Contract-sent email sent").
 - **Unsigned-contract follow-up email** → same endpoint, `{ which: "contract_followup" }` (subject "Ready when you are — your building contract"). Logs to `correspondence` + `lead_activities` (summary "Unsigned-contract follow-up email sent").
 - **All four emails** are gated by env `TENDER_EMAIL_ENABLED`; when it is not `"true"` the send returns HTTP 503 ("Tender email sending is turned off. Set TENDER_EMAIL_ENABLED to send — preview still works.") and no email leaves — and none of the side-effects above run. Preview (`preview: true`) is never gated and always works. The endpoint is guarded by `requireAuth` (a valid staff session; portal `client` accounts and unauthenticated callers are rejected) — there is **no** per-staff-role restriction on it. Templates live in `server/lib/tenderEmails.mjs` (admin-editable via `user_settings` key `crm_tender_email`); emails are text-signature only (no inline logo image).
-- **Set contract status** → writes `leads.contract_status` (`prepared` / `sent` / `signed`) via `PATCH /api/sales/leads/:id`. Choosing `sent` stamps `leads.contract_sent_date`; choosing `signed` stamps `leads.contract_signed_date` (today, if not already set).
-- **Upload signed contract** (Documents tab) → stored on `lead_documents` with `document_type = 'construction_contract'` via `POST /api/sales/leads/:id/documents`.
-- **Move to Won** → `PATCH /api/sales/leads/:id` with `{ stage: "won" }`. For a real (non-test) lead moving **forward**, the server checks `leads.contract_status`; if it is not `signed` the move is refused with HTTP 422 "Can't move to Won yet — the building contract must be signed." (`GATE_BLOCKED`). On success it enters `won_substatus = 'contract_secured'` (Won dual-state, Sales Pipeline Phase 6).
+- **Set contract status** → writes `leads.contract_status` (`prepared` / `sent`) via `PATCH /api/sales/leads/:id`; choosing `sent` stamps `leads.contract_sent_date`. The PATCH refuses `contract_status: "signed"` and `contract_signed_date`. Moving a contract **away from** `signed` is director-only, clears the signed date and writes a `lead_activities` note; the PDF stays on file.
+- **Mark contract signed** → `POST /api/sales/leads/:id/contract/mark-signed` with `{ signedPdfBase64, filename, signedDate? }`. The sole writer of the signed state. Validates a real PDF, stores it in `lead-documents` at `leads/<id>/<date>-<name>.pdf`, inserts a `lead_documents` row with `document_type = 'construction_contract'`, then sets `contract_status` and `contract_signed_date`. If a later step fails the earlier ones are undone. The generic Documents upload refuses this type.
+- **Move to Won** → `PATCH /api/sales/leads/:id` with `{ stage: "won" }`. For a real (non-test) lead the server checks stored state only: `contract_status = 'signed'` and the derived `contract_evidence_present`. Otherwise it refuses with HTTP 422 "Can't advance to Won yet — needs …" (`GATE_BLOCKED`). On success it enters `won_substatus = 'contract_secured'` (Won dual-state, Sales Pipeline Phase 6). `POST /api/tender/win-finalize` applies the same Won gate to a lead-linked job, before it writes anything.
 
 ## 12. Edge cases and limits
 
@@ -164,9 +167,9 @@ Every automated action triggered from this stage:
 - The checklist readiness is a straight count of the 10 items — it does not verify the proposal content, only that a human ticked each box.
 - Previewing an email never sends and is never gated. Only the actual **Send email** is gated by `TENDER_EMAIL_ENABLED`.
 - Edited email copy in a preview applies to **that one send only** — it does not change the saved template.
-- Contract dates are stamped on the **first** transition to sent/signed; re-clicking the same status does not overwrite a date already set. The "Sent … · Signed …" line only renders once a sent date exists — jumping straight to **Signed** stamps `contract_signed_date` but shows no date line until a sent date is also set.
-- **Test leads bypass the Won gate.** A lead with `leads.is_test = true` (mig 178) bounces freely across every stage with all hard gates bypassed, so the "contract must be signed" block is only observable on a real (non-test) lead making a forward move. Any **backward** stage move is also un-gated for all leads.
-- The Won gate only enforces "contract signed" once migration 194 is applied (the `contract_status` column exists). On a database without it applied, the gate passes so nothing is blocked — but the strip, checklist and contract capture will not persist.
+- The sent date is stamped on the **first** move to sent. A lead that was already signed keeps its original signed date when its PDF is attached later.
+- **Test leads bypass the Won gate.** A lead with `leads.is_test = true` (mig 178) bounces freely across every stage with all hard gates bypassed, so the Won block is only observable on a real (non-test) lead making a forward move. Any **backward** stage move is also un-gated for all leads.
+- The Won gate only enforces the signed contract and its PDF once migration 194 is applied (the `contract_status` column exists). On a database without it applied, the gate passes so nothing is blocked — but the strip, checklist and contract capture will not persist.
 - All amounts are ex-GST throughout; GST is added by Xero on the invoice, never in the Hub.
 
 ## 13. Owner of the process
@@ -190,9 +193,10 @@ Every automated action triggered from this stage:
 1. Open the test lead at the Tender stage.
 2. In the Tender progress strip, click **Estimate review**.
 3. In the Blue Leaf Proposal Checklist, tick **Scope of works complete**.
-4. In the Building contract block, click **Sent**, then click **Signed**.
-- Expected UI: **Estimate review** turns blue with earlier steps ticked; the checklist badge increments (e.g. 1/10 · 10%); the Building contract shows **Signed** active with a date line reading "Sent [today] · Signed [today]".
-- Expected DB: `leads.tender_substatus = 'estimate_review'`; `leads.proposal_checklist->>'scope' = 'true'`; `leads.contract_status = 'signed'`; `leads.contract_sent_date =` today's date and `leads.contract_signed_date =` today's date (`YYYY-MM-DD`).
+4. In the Building contract block, click **Sent**.
+5. Choose a PDF in the Building contract block and click **✓ Mark contract as signed**.
+- Expected UI: **Estimate review** turns blue with earlier steps ticked; the checklist badge increments (e.g. 1/10 · 10%); the Building contract shows "✓ Signed [today]" with the file name as a link, and the upload is gone.
+- Expected DB: `leads.tender_substatus = 'estimate_review'`; `leads.proposal_checklist->>'scope' = 'true'`; `leads.contract_status = 'signed'`; `leads.contract_sent_date` and `leads.contract_signed_date` are today's date (`YYYY-MM-DD`); one `lead_documents` row with `document_type = 'construction_contract'` and a `storage_path`.
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Empty required field: start tender with no site address**
@@ -217,11 +221,24 @@ Every automated action triggered from this stage:
 - Expected DB: no new `correspondence` or `lead_activities` row for this lead; `leads.contract_status` unchanged.
 - [ ] Pass  [ ] Fail
 
-**TC-05 — Feature-specific edge case: Won gate blocks until contract signed (real lead)**
-1. On the **real (non-test)** lead at the Tender stage, set the Building contract status to **Prepared** (not signed).
-2. Try to move the lead to **Won** via the stage stepper.
-- Expected UI: the move is refused with the message **"Can't move to Won yet — the building contract must be signed."** The stage stays at **Tender**.
-- Expected DB / response: `leads.stage` remains `tender`; response code 422 with error code `GATE_BLOCKED`. After setting the contract status to **Signed** and retrying, the move succeeds, `leads.stage = 'won'` and `leads.won_substatus = 'contract_secured'` (the last requires the Phase-6 Won dual-state migration).
+**TC-05 — Feature-specific edge case: Won gate blocks until the signed PDF is on file (real lead)**
+1. On the **real (non-test)** lead at the Tender stage, set the Building contract status to **Prepared**.
+2. Press **Move to Won →** if it is enabled, or use **Move ▾** on the pipeline card and choose Won.
+- Expected UI: the move is refused with **"Can't advance to Won yet — needs the building contract signed and the signed contract PDF on file."** The stage stays at **Tender**.
+- Expected DB / response: `leads.stage` remains `tender`; response code 422 with error code `GATE_BLOCKED`. After uploading the signed PDF and retrying, the move succeeds, `leads.stage = 'won'` and `leads.won_substatus = 'contract_secured'` (the last requires the Phase-6 Won dual-state migration).
+- [ ] Pass  [ ] Fail
+
+**TC-05a — A non-PDF is refused**
+1. Choose a `.docx` or `.jpg` renamed to `.pdf` and click **✓ Mark contract as signed**.
+- Expected UI: "That file isn't a complete PDF. Upload the client-signed contract as a PDF." The status does not change.
+- Expected DB: no new `construction_contract` row; `leads.contract_status` unchanged.
+- [ ] Pass  [ ] Fail
+
+**TC-05b — Attach the PDF to a lead already marked signed**
+1. Pick a real lead at Tender with `contract_status = 'signed'`, a `contract_signed_date`, and no `construction_contract` document.
+- Expected UI: an amber note says the PDF is not on file, with an upload and **Attach signed PDF**.
+2. Upload a PDF.
+- Expected DB: one new `construction_contract` row; `contract_signed_date` unchanged. Won now passes.
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Feature-specific: email send gated off (preview still works)**

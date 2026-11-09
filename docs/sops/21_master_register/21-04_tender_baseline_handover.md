@@ -72,8 +72,8 @@ The **Tender** step reads the same register rows and shows the scope boundary fo
 
 | Problem the user sees | Most likely cause | Fix |
 |----------------------|-------------------|-----|
-| No **Handover** step | Not at Won and contract not recorded as Signed | Record the signed contract in the Won / contract area first |
-| "Available once the building contract is recorded as signed." | Contract status not Signed | Update the contract status |
+| No **Handover** step | Not at Won and contract not recorded as Signed | Upload the signed contract PDF in the Building contract block of the Tender stage |
+| "Available once the building contract is recorded as signed." | Contract status not Signed | Upload the signed contract PDF in the Building contract block of the Tender stage |
 | "The brief must be on the project record first …" | Brief not yet promoted (no job) | Create the job; the brief moves automatically |
 | **Needs pricing** never empties | Items without a pricing link | Add links in the Register (Pricing (link — never a price)) |
 | "Building the tender view…" stays | Slow connection / server busy | Click **Refresh**; check the API is running |
@@ -111,13 +111,13 @@ Next review date: 2027-05-07
 ### Pre-test setup
 - [ ] Sandbox running; signed in as sandbox staff
 - [ ] A lead with a job/project record, a mix of included, excluded, by-others and undecided items, at stage Tender
-- [ ] A way to set `contract_status = 'signed'` on the lead (contract area in the Won stage)
+- [ ] A signed contract PDF to upload in the Building contract block of the Tender stage (this is what sets `contract_status = 'signed'`)
 
 ### Test cases
 
 **TC-01 — Happy path (standard use)**
 1. Tender step: check every section lists the right items.
-2. Set contract Signed → Handover → **Record contract baseline & hand over**.
+2. Upload the signed contract PDF → Handover → **Record contract baseline & hand over**.
 3. Expected result: "Contract baseline B01 recorded — …" message; tile shows B01 with today's date.
 4. Expected DB record: `lead_documents` `document_type = 'register_baseline'`, `version = 1`, `status = 'current'`; `leads.ops_ready_checklist.selections_transfer = true`.
 - [ ] Pass  [ ] Fail

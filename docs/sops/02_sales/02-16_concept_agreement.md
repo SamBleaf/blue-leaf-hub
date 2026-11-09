@@ -19,6 +19,8 @@ test_status: untested
 ## 1. Who uses this
 Admin, Supervisor.
 
+**Access today:** only a Director (admin) login can open Sales or reach its API. The SPA route and the server prefix gate both stop Supervisors and Employees, even though this SOP was written for both.
+
 ## 2. When to use it
 At Discovery, once the designer + fees are set — to produce the concept agreement (process, benefits, what to expect, fees) and record the client's acceptance, which is the blocker to advance past Discovery.
 
