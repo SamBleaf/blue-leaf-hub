@@ -28,7 +28,11 @@ import { syncPortalMilestonesFromSchedule } from "./portalScheduleSync.mjs";
 import { promoteRegisterToProject } from "./registerPromotion.mjs";
 import { leadScratchpadLocked, registerEnabledFor } from "./registerStore.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
-import { isForwardMove, evaluateGate, hardBlockReason } from "../../src/lib/stageGates.js";
+import {
+  STAGE_ORDER, stagesCrossed, evaluateGate, forwardBlockReason,
+  SALES_CONTROLLED_ROLES, canPerformControlledSalesWrite, canUnsignContract,
+} from "../../src/lib/stageGates.js";
+import { CONTRACT_DOC_TYPE, withContractEvidence, decodePdfUpload } from "./leadContractEvidence.mjs";
 import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
@@ -53,9 +57,35 @@ const _GEO_QUALIFY_PLUS = new Set([
 
 // Stage gates (hard-block + advisory) are defined ONCE in the shared canonical module
 // src/lib/stageGates.js and imported above — the server enforces them and the client renders the
-// same definitions, so there is no second copy to drift (S-013 / ARCH-01). STAGE_ORDER /
-// isForwardMove / evaluateGate / hardBlockReason all come from there. A previous stale STAGE_GATES
-// "advisory mirror" lived here and had drifted from the enforced hard gates.
+// same definitions, so there is no second copy to drift (S-013 / ARCH-01). A previous stale
+// STAGE_GATES "advisory mirror" lived here and had drifted from the enforced hard gates.
+
+// Lead columns the Hub itself owns. Nothing in the UI writes these through the blanket PATCH; each has a
+// dedicated writer or is stamped by the server. discovery_meeting_booked_at is deliberately NOT here:
+// QualifyActions logs an already-held build conversation through PATCH.
+const SERVER_OWNED_LEAD_FIELDS = [
+  "id", "created_at", "stage_entered_at", "won_at", "lost_at", "is_test", "lead_type", "job_id", "fee_proposal_id",
+  "contract_signed_date", "contract_evidence_present",
+  "ptsa_signed_at", "ptsa_signed_document_path",
+  "concept_agreement_generated_at", "concept_agreement_accepted_at", "concept_agreement_document_path",
+  "concept_fee_override_at", "concept_fee_override_by",
+  "client_folder_path", "client_folder_link", "client_folder_created_at",
+  "fit_set_by", "fit_set_at",
+];
+const CONTRACT_SIGNED_ONLY_VIA_UPLOAD = "A building contract can only be marked signed by uploading the signed PDF (POST /api/sales/leads/:id/contract/mark-signed).";
+// Set legitimately when a lead is created: `lead_type` by the Architect Tender intake, `is_test` by a director.
+const SERVER_OWNED_ON_CREATE = new Set(["lead_type", "is_test"]);
+
+/** The message to refuse a lead write that names a server-owned field or claims a signed state, else null. */
+function serverOwnedFieldRejection(body, { creating = false } = {}) {
+  if (body.contract_status === "signed") return CONTRACT_SIGNED_ONLY_VIA_UPLOAD;
+  if ("contract_signed_date" in body) return CONTRACT_SIGNED_ONLY_VIA_UPLOAD;
+  const named = SERVER_OWNED_LEAD_FIELDS.filter((f) => f in body && !(creating && SERVER_OWNED_ON_CREATE.has(f)));
+  return named.length ? `These details are set by the Hub and can't be edited here: ${named.join(", ")}. Nothing was saved.` : null;
+}
+
+// Stages a lead can be moved to. The retired `accepted` stage is no longer a destination.
+const MOVABLE_STAGES = new Set([...STAGE_ORDER, "nurture", "lost"]);
 
 // Sales OS Slice 1 — advisory nurture recommendation (Lost stays a manual choice, never automatic).
 // A qualify-stage lead scoring below 5 should be nurtured, not lost. Returns null when not applicable.
@@ -440,7 +470,8 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
  *     value if already set, else the SINGLE accepted job-keyed fee proposal (verified exactly one).
  *  3. Propagate that value to the project row so Finance/Portal read the right number.
  * The estimating `job` (created at PTSA-signed) becomes a live project ONLY here — the hard boundary.
- * Non-fatal throughout: a failure never blocks the win (the stage move already succeeded).
+ * Non-fatal throughout: a failure never blocks the win (the stage move already succeeded). The result says
+ * what actually happened, and POST …/won/retry-handoff re-runs this if it did not finish.
  */
 export async function finalizeWonJob(sb, lead) {
   if (!sb || !lead?.job_id) return { ok: false, reason: "no job" };
@@ -470,7 +501,11 @@ export async function finalizeWonJob(sb, lead) {
     const jobUpdate = { status: "won" };
     if (value != null) { jobUpdate.original_contract_value = value; jobUpdate.contract_value = value; }
     if (job.status !== "won" || (value != null && job.original_contract_value == null)) {
-      await sb.from("jobs").update(jobUpdate).eq("id", jobId);
+      const { error: jobErr } = await sb.from("jobs").update(jobUpdate).eq("id", jobId);
+      if (jobErr) {
+        console.warn("[finalize-won] job update:", jobErr.message);
+        return { ok: false, reason: "job update failed", jobId };
+      }
     }
 
     // 3. Propagate the value to the project (trigger 096 makes a minimal row; enrich it).
@@ -500,10 +535,22 @@ export async function finalizeWonJob(sb, lead) {
     try { await carryConsultantCorrespondenceToJob({ sb, leadId: lead.id, jobId }); }
     catch (e) { console.warn("[finalize-won] consultant correspondence carry:", e?.message || e); }
 
-    return { ok: true, jobId, contractValue: value };
+    const { data: projects } = await sb.from("projects").select("id").eq("job_id", jobId).limit(1);
+    if (!projects?.length) return { ok: false, reason: "project missing", jobId };
+    return { ok: true, jobId, projectId: projects[0].id, contractValue: value };
   } catch (e) {
     console.warn("[finalize-won]", e?.message || e);
     return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/** Best-effort activity log entry. Checks the returned error too, since the client doesn't throw. */
+async function logLeadActivity(sb, leadId, row) {
+  try {
+    const { error } = await sb.from("lead_activities").insert({ lead_id: leadId, ...row });
+    if (error) console.warn("[lead-activity] insert failed:", error.message);
+  } catch (e) {
+    console.warn("[lead-activity] insert failed:", e?.message || e);
   }
 }
 
@@ -659,7 +706,7 @@ export function registerSalesRoutes(app) {
       .select("*")
       .eq("lead_id", req.params.id)
       .order("created_at", { ascending: false });
-    res.json({ ok: true, lead, activities: activities || [], nurtureRecommendation: nurtureRecommendation(lead) });
+    res.json({ ok: true, lead: await withContractEvidence(sb, lead), activities: activities || [], nurtureRecommendation: nurtureRecommendation(lead) });
   });
 
   // ── Test/dev harness: create + reset a TEST lead (admin only) ──────────────
@@ -1291,7 +1338,7 @@ export function registerSalesRoutes(app) {
   // Concept agreement ACCEPTED — the ONLY writer of concept_agreement_status='accepted' (the blanket
   // PATCH rejects it). On acceptance (and only then) create the client folder + backfill the lead's
   // docs into it. Supabase-primary: the status persists even if Dropbox fails. Idempotent re-accept.
-  app.post("/api/sales/leads/:id/concept-agreement/accept", requireAuth, async (req, res) => {
+  app.post("/api/sales/leads/:id/concept-agreement/accept", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Supabase not configured");
     const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).single();
@@ -1469,6 +1516,12 @@ export function registerSalesRoutes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
     const now = new Date().toISOString();
     const body = req.body;
+    // A new lead can't arrive already won or signed: those states only come from their own writers.
+    const ownedRejection = serverOwnedFieldRejection(body, { creating: true });
+    if (ownedRejection) return err(res, 400, ownedRejection, "SERVER_OWNED_FIELD");
+    if (body.ptsa_status === "signed" || body.concept_agreement_status === "accepted" || (body.stage === "won" && !body.is_test)) {
+      return err(res, 400, "A new lead can't start as won, signed or accepted. Create it, then record those steps.", "SERVER_OWNED_FIELD");
+    }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
 
@@ -1514,6 +1567,12 @@ export function registerSalesRoutes(app) {
     if (body.concept_agreement_status === "accepted") {
       return err(res, 400, "Use POST /api/sales/leads/:id/concept-agreement/accept to accept the concept agreement (it creates the client folder).");
     }
+    const ownedRejection = serverOwnedFieldRejection(body);
+    if (ownedRejection) return err(res, 400, ownedRejection, "SERVER_OWNED_FIELD");
+    if ("stage" in body && !MOVABLE_STAGES.has(body.stage)) return err(res, 400, "That isn't a stage a lead can be moved to.");
+    if (body.contract_status !== undefined && body.contract_status !== null && !["prepared", "sent"].includes(body.contract_status)) {
+      return err(res, 400, "Invalid contract status.");
+    }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
 
@@ -1541,33 +1600,42 @@ export function registerSalesRoutes(app) {
     // Fetch the whole row: the canonical gate evaluator (src/lib/stageGates.js) reads many columns,
     // and select("*") is deploy-ahead safe — an unmigrated gate column is simply absent from the row
     // so its `"col" in lead` guard passes, instead of a scoped select erroring on a missing column.
-    const { data: current } = await sb
+    const { data: storedLead } = await sb
       .from("leads")
       .select("*")
       .eq("id", req.params.id)
-      .single();
+      .maybeSingle();
+    if (!storedLead) return err(res, 404, "Lead not found", "NOT_FOUND");
+    const current = await withContractEvidence(sb, storedLead);
     // Master Register R03: once the brief has been promoted onto the project record, the lead scratchpad
     // is read-only history — a stale screen must never write a second, competing copy (Tab 23 Q5).
-    if ("selections_schedule" in body && current && (await leadScratchpadLocked(sb, current))) {
+    if ("selections_schedule" in body && (await leadScratchpadLocked(sb, current))) {
       return err(res, 409, "This brief now lives on the project record — reload the register to keep editing.", "REGISTER_PROMOTED");
     }
+    // Taking a contract back out of "signed" is a director-only correction and is always logged.
+    const unsigning = "contract_status" in body && current.contract_status === "signed" && body.contract_status !== "signed";
+    if (unsigning) {
+      if (!canUnsignContract(req.caller?.role)) return err(res, 403, "Only a director can change a signed contract.", "FORBIDDEN");
+      if ("stage" in body) return err(res, 400, "Change the contract status on its own, then move the stage.");
+      updates.contract_signed_date = null;
+    }
+
     let gateWarnings = [];
-    if (updates.stage && current?.stage && updates.stage !== current.stage) {
+    const stageChanging = !!(updates.stage && current.stage && updates.stage !== current.stage);
+    if (stageChanging) {
+      if (updates.stage === "won" && !canPerformControlledSalesWrite(req.caller?.role)) {
+        return err(res, 403, "Only a director or supervisor can move a lead to Won.", "FORBIDDEN");
+      }
       // Test/dev harness (mig 178): a TEST lead bypasses every hard gate and can jump to any stage in
-      // any direction; and for ANY lead a BACKWARD move is corrective and never gated. So hard gates
-      // apply only to a FORWARD advance on a real lead. is_test comes from the select("*") above —
-      // pre-migration-178 it is simply absent (reads as falsy), preserving today's behaviour.
+      // any direction; and for ANY lead a BACKWARD move is corrective and never gated. is_test comes from
+      // the select("*") above — pre-migration-178 it is simply absent (reads as falsy).
       const isTestLead = !!current.is_test;
-      const enforceHardGates = !isTestLead && isForwardMove(current.stage, updates.stage);
       const merged = { ...current, ...updates };
 
-      // ONE canonical gate evaluation (src/lib/stageGates.js) — the single source of truth the client
-      // renders too. A forward advance on a real lead is HARD-blocked when a hard requirement is unmet
-      // (Discovery: score + booked conversation; Concept: concept agreement accepted; Won: contract
-      // signed). Every other unmet requirement is advisory (logged + surfaced below, never blocks).
-      // Deploy-ahead safe via the requirements' `"col" in lead` guards (see the select("*") note above).
-      if (enforceHardGates) {
-        const reason = hardBlockReason(updates.stage, merged, LEAD_STAGE_LABELS[updates.stage] || updates.stage);
+      // Hard gates read `current` — what is stored — never `merged`, so a request can't satisfy its own
+      // gate, and every gate the move crosses is checked. Unmet advisory requirements are logged below.
+      if (!isTestLead) {
+        const reason = forwardBlockReason(current.stage, updates.stage, current, (s) => LEAD_STAGE_LABELS[s] || s);
         if (reason) return err(res, 422, reason, "GATE_BLOCKED");
       }
       const outcomeDate = new Date().toISOString().slice(0, 10);
@@ -1590,19 +1658,40 @@ export function registerSalesRoutes(app) {
       }
       // Advisory requirements (everything not hard-blocked above) — log + surface, never block. On a
       // backward or test move nothing is hard-enforced, so this still records what was skipped.
-      gateWarnings = evaluateGate(updates.stage, merged).missing.map(r => r.label);
+      const crossed = stagesCrossed(current.stage, updates.stage, current);
+      gateWarnings = (crossed.length ? crossed : [updates.stage]).flatMap((s) => evaluateGate(s, merged).missing.map((r) => r.label));
       if (gateWarnings.length) {
         console.warn(`[gate-bypass] lead ${req.params.id} ${current.stage}→${updates.stage} missing: ${gateWarnings.join("; ")}`);
       }
-      await sb.from("lead_activities").insert({
-        lead_id: req.params.id,
+    }
+
+    // A stage change only lands if the lead is still where we read it: two people advancing at once
+    // produce one transition, and the loser writes nothing.
+    let write = sb.from("leads").update(updates).eq("id", req.params.id);
+    if (stageChanging) write = write.eq("stage", current.stage);
+    const { data, error } = await write.select().maybeSingle();
+    if (error) return err(res, 400, translateDbError(error));
+    if (!data) {
+      if (stageChanging) return err(res, 409, "Someone else has just moved this lead. Reload the page to see where it is now.", "STAGE_CONFLICT");
+      return err(res, 404, "Lead not found", "NOT_FOUND");
+    }
+
+    // Logged only once the update has landed, so a failed or lost move leaves no ghost event. A logging
+    // failure can't undo a completed move, so it is reported to the server log and nothing else.
+    if (stageChanging) {
+      await logLeadActivity(sb, req.params.id, {
         activity_type: "stage_change",
         summary: `Moved from ${current.stage} to ${updates.stage}`,
-        detail: gateWarnings.length ? `Gate bypass — missing: ${gateWarnings.join("; ")}` : null
+        detail: gateWarnings.length ? `Gate bypass — missing: ${gateWarnings.join("; ")}` : null,
       });
     }
-    const { data, error } = await sb.from("leads").update(updates).eq("id", req.params.id).select().single();
-    if (error) return res.status(400).json({ ok: false, error: error.message });
+    if (unsigning) {
+      await logLeadActivity(sb, req.params.id, {
+        activity_type: "note",
+        summary: `Building contract changed from signed to ${body.contract_status || "no status"}`,
+        detail: `Changed by ${req.caller?.email || "unknown"}. The signed PDF stays in Documents.`,
+      });
+    }
     // Batch 1C — on win, snapshot the realised value onto enquiry_attribution so the ROI
     // view has a durable won_value (independent of later job/proposal edits). Best-effort:
     // silently skipped if migration 130's columns aren't applied yet.
@@ -1618,11 +1707,14 @@ export function registerSalesRoutes(app) {
           { onConflict: "lead_id" }
         );
       } catch { /* migration 130 not applied — non-fatal */ }
-
-      // Sales Pipeline Phase 6 — the Ops handoff: flip the linked job to won (→ trigger 096 creates
-      // the live project) + stamp original_contract_value; then enter the Contract-Secured sub-state.
-      // Both fail-soft so a plumbing hiccup never un-wins a lead.
-      try { await finalizeWonJob(sb, data); } catch (e) { console.warn("[stage→won] finalizeWonJob:", e?.message || e); }
+    }
+    // Sales Pipeline Phase 6 — the Ops handoff: flip the linked job to won (→ trigger 096 creates
+    // the live project) + stamp original_contract_value; then enter the Contract-Secured sub-state.
+    // Runs on every entry into Won (it is idempotent) and fails soft, so a plumbing hiccup never
+    // un-wins a lead; the result is returned so the UI can offer the retry.
+    let wonHandoff;
+    if (stageChanging && data.stage === "won") {
+      try { wonHandoff = await finalizeWonJob(sb, data); } catch (e) { console.warn("[stage→won] finalizeWonJob:", e?.message || e); }
       if (data?.won_substatus == null) {
         try { await sb.from("leads").update({ won_substatus: "contract_secured" }).eq("id", req.params.id); }
         catch { /* pre-migration-195 — non-blocking */ }
@@ -1639,7 +1731,8 @@ export function registerSalesRoutes(app) {
         if (refreshed) leadOut = refreshed;
       }
     }
-    res.json({ ok: true, lead: leadOut, gateWarnings, provisioning });
+    // This request can't change the evidence on file, so the value read before the gates is still true.
+    res.json({ ok: true, lead: { ...leadOut, contract_evidence_present: current.contract_evidence_present }, gateWarnings, provisioning, wonHandoff });
 
     // G0-B: geocode-on-save for stage progression to qualify+ (non-blocking, after response).
     // Only fires when:
@@ -1685,6 +1778,8 @@ export function registerSalesRoutes(app) {
       if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
 
       const { job, alreadyConverted, stampedFacts } = await convertLeadToJob(sb, lead, actorId);
+      // A lead that won before it had a job never got its Operations hand-off, so run it now.
+      if (lead.stage === "won") await finalizeWonJob(sb, { ...lead, job_id: job.id });
       if (alreadyConverted) return ok(res, { job: rowToCamel(job), alreadyConverted: true });
       return ok(res, { job: rowToCamel(job), stampedFacts });
     } catch (e) {
@@ -1762,7 +1857,7 @@ export function registerSalesRoutes(app) {
   // NON-FATAL mirror — a Dropbox outage or missing folder must never 500 this request.
   // The blanket PATCH /api/sales/leads/:id rejects ptsa_status='signed' so this is the
   // ONLY path that can mark a PTSA signed.
-  app.post("/api/sales/leads/:id/ptsa/mark-signed", requireAuth, async (req, res) => {
+  app.post("/api/sales/leads/:id/ptsa/mark-signed", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) return err(res, 503, "Database not configured.");
     const leadId = String(req.params.id || "").trim();
@@ -1920,6 +2015,105 @@ export function registerSalesRoutes(app) {
       console.error("[ptsa/mark-signed]", e);
       return err(res, 500, "Failed to mark the PTSA as signed.");
     }
+  });
+
+  // ── Mark a building contract SIGNED (sole writer of the signed state) ─────────
+  // The file comes first: (1) store the PDF, (2) record the lead_documents evidence row, (3) only then
+  // stamp the lead. If a later step fails the earlier ones are undone, so there is never a "signed"
+  // lead with no file. Also how evidence is attached to a historical signed lead (status and date stay).
+  app.post("/api/sales/leads/:id/contract/mark-signed", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const leadId = String(req.params.id || "").trim();
+    const { signedPdfBase64, filename, signedDate } = req.body || {};
+    if (!signedPdfBase64) return err(res, 400, "The signed contract PDF is required.", "PDF_REQUIRED");
+    const displayName = typeof filename === "string" ? filename.trim() : "";
+    if (!displayName) return err(res, 400, "The signed contract needs a file name.", "PDF_REQUIRED");
+    const buffer = decodePdfUpload(signedPdfBase64);
+    if (!buffer) return err(res, 400, "That file isn't a complete PDF. Upload the client-signed contract as a PDF.", "NOT_A_PDF");
+
+    let signedDateStr = new Date().toISOString().slice(0, 10);
+    if (signedDate !== undefined && signedDate !== null && signedDate !== "") {
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(signedDate) ? new Date(`${signedDate}T00:00:00Z`) : null;
+      if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== signedDate) return err(res, 400, "The date signed isn't a valid date.");
+      // One day of slack: the server clock is UTC and Adelaide is ahead of it.
+      if (parsed.getTime() > Date.now() + 24 * 60 * 60 * 1000) return err(res, 400, "The date signed can't be in the future.");
+      signedDateStr = signedDate;
+    }
+
+    try {
+      const { data: lead, error: leadErr } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (leadErr) return err(res, 400, translateDbError(leadErr));
+      if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+      const alreadySigned = lead.contract_status === "signed";
+
+      // (1) Store the PDF at the path-law location. Never overwrite earlier evidence.
+      const sanitised = displayName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9.\-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "signed-contract.pdf";
+      const stem = sanitised.replace(/\.pdf$/, "");
+      let storagePath = `leads/${leadId}/${signedDateStr}-${stem}.pdf`;
+      const store = (path) => sb.storage.from("lead-documents").upload(path, buffer, { contentType: "application/pdf", upsert: false });
+      let { error: uploadErr } = await store(storagePath);
+      if (uploadErr && /exist|duplicate/i.test(uploadErr.message || "")) {
+        storagePath = `leads/${leadId}/${signedDateStr}-${stem}-${Date.now()}.pdf`;
+        ({ error: uploadErr } = await store(storagePath));
+      }
+      if (uploadErr) {
+        console.warn("[contract/mark-signed] upload:", uploadErr.message);
+        return err(res, 502, "Couldn't store the signed contract, so nothing was changed. Please try again.", "STORAGE");
+      }
+      const removeFile = () => sb.storage.from("lead-documents").remove([storagePath]).catch(() => {});
+
+      // (2) The evidence row. Without it the upload proves nothing, so this step is not best-effort.
+      const { data: doc, error: docErr } = await sb.from("lead_documents").insert({
+        lead_id: leadId, filename: displayName, file_size: buffer.length, mime_type: "application/pdf",
+        storage_path: storagePath, document_type: CONTRACT_DOC_TYPE,
+        uploaded_by: req.caller?.email || "Unknown", created_at: new Date().toISOString(),
+      }).select().single();
+      if (docErr) {
+        await removeFile();
+        return err(res, 400, translateDbError(docErr));
+      }
+
+      // (3) Stamp the lead. A historical signed lead keeps its original date.
+      const { data: updated, error: stampErr } = await sb.from("leads").update({
+        contract_status: "signed",
+        contract_signed_date: alreadySigned && lead.contract_signed_date ? lead.contract_signed_date : signedDateStr,
+        updated_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
+      }).eq("id", leadId).select().single();
+      if (stampErr) {
+        await sb.from("lead_documents").delete().eq("id", doc.id);
+        await removeFile();
+        return err(res, 400, translateDbError(stampErr));
+      }
+
+      await logLeadActivity(sb, leadId, {
+        activity_type: "note",
+        summary: alreadySigned ? "Signed building contract PDF attached" : "Building contract marked signed",
+        detail: `${displayName} — uploaded by ${req.caller?.email || "unknown"}`,
+      });
+      return ok(res, { lead: rowToCamel({ ...updated, contract_evidence_present: true }), document: rowToCamel(doc) });
+    } catch (e) {
+      console.error("[contract/mark-signed]", e);
+      return err(res, 500, "Failed to mark the contract as signed.");
+    }
+  });
+
+  // Re-run the Operations hand-off for a lead already at Won, when it did not finish the first time.
+  // Idempotent: it never creates a second job or project.
+  app.post("/api/sales/leads/:id/won/retry-handoff", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const { data: lead, error } = await sb.from("leads").select("*").eq("id", req.params.id).maybeSingle();
+    if (error) return err(res, 400, translateDbError(error));
+    if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+    if (lead.stage !== "won") return err(res, 409, "This lead isn't at Won yet.", "NOT_WON");
+    if (!lead.job_id) return err(res, 409, "Create the job from this lead first.", "NO_JOB");
+    const handoff = await finalizeWonJob(sb, lead);
+    if (lead.won_substatus == null && handoff.ok) await sb.from("leads").update({ won_substatus: "contract_secured" }).eq("id", lead.id);
+    await logLeadActivity(sb, lead.id, { activity_type: "note", summary: handoff.ok ? "Operations hand-off re-run" : "Operations hand-off re-run did not finish", detail: `Run by ${req.caller?.email || "unknown"}` });
+    if (!handoff.ok) return err(res, 502, "The hand-off didn't finish. Nothing was duplicated. Please try again.", "HANDOFF_INCOMPLETE");
+    return ok(res, { handoff });
   });
 
   app.post("/api/sales/leads/:id/activities", requireAuth, async (req, res) => {
@@ -2297,6 +2491,9 @@ export function registerSalesRoutes(app) {
     if (!sb) return res.status(503).json({ ok: false, error: "Supabase not configured" });
 
     const { filename, data: fileDataB64, mime_type, document_type, uploaded_by } = req.body;
+    if (document_type === CONTRACT_DOC_TYPE) {
+      return err(res, 400, "Upload the signed building contract from the Building contract section of the Tender stage.", "USE_CONTRACT_WRITER");
+    }
     if (!filename?.trim()) return res.status(400).json({ ok: false, error: "filename required" });
     if (!fileDataB64) return res.status(400).json({ ok: false, error: "data (base64) required" });
 
@@ -2350,11 +2547,12 @@ export function registerSalesRoutes(app) {
     // Fetch the record first so we know the storage path
     const { data: doc, error: fetchErr } = await sb
       .from("lead_documents")
-      .select("storage_path")
+      .select("storage_path, document_type, filename")
       .eq("id", req.params.docId)
       .eq("lead_id", req.params.id)
       .single();
     if (fetchErr || !doc) return res.status(404).json({ ok: false, error: "Document not found" });
+    const isContractEvidence = doc.document_type === CONTRACT_DOC_TYPE;
 
     // An ISSUED register document (mig 213) is a permanent record — refuse BEFORE touching storage, so
     // the stored PDF can never be removed out from under its issue row. Pre-213 the column is absent.
@@ -2377,6 +2575,9 @@ export function registerSalesRoutes(app) {
       .eq("lead_id", req.params.id);
     if (dbErr) return res.status(400).json({ ok: false, error: dbErr.message });
 
+    if (isContractEvidence) {
+      await logLeadActivity(sb, req.params.id, { activity_type: "note", summary: "Signed building contract PDF removed", detail: `${doc.filename || "file"} — removed by ${req.caller?.email || "unknown"}` });
+    }
     res.json({ ok: true });
   });
 }

@@ -26,6 +26,8 @@ import { generateOutboundMessageId } from "./imapQuoteMatch.mjs";
 import { syncAcceptedQuoteToBuildexact } from "./buildexactDeepIntegration.mjs";
 import { getBrandingEmailLogo } from "./brandingAssets.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
+import { hardBlockReason, SALES_CONTROLLED_ROLES } from "../../src/lib/stageGates.js";
+import { withContractEvidence } from "./leadContractEvidence.mjs";
 import { quarterLabel, emailPoIssued } from "./tradeCommitment.mjs";
 import { setFact } from "./factsService.mjs";
 import { resolveTradeCategoryId } from "./buildexactParser.mjs";
@@ -234,7 +236,7 @@ export function registerModule4Routes(app) {
     }
   });
 
-  app.post("/api/tender/win-finalize", requireAuth, async (req, res) => {
+  app.post("/api/tender/win-finalize", requireAuth, requireRole(...SALES_CONTROLLED_ROLES), async (req, res) => {
     const sb = getServiceSupabase();
     if (!sb) {
       return res.status(503).json({ ok: false, error: "Server needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY." });
@@ -253,6 +255,15 @@ export function registerModule4Routes(app) {
       const { data: job, error: jErr } = await sb.from("jobs").select("*").eq("id", jobId).single();
       if (jErr || !job) {
         return res.status(404).json({ ok: false, error: jErr?.message || "Job not found." });
+      }
+      // This path sets the linked lead to Won too, so it honours the same Won gate as the Sales stepper.
+      // Checked before anything is written. Test leads and leads already at Won are not gated.
+      if (job.lead_id) {
+        const { data: linkedLead } = await sb.from("leads").select("*").eq("id", job.lead_id).maybeSingle();
+        if (linkedLead && !linkedLead.is_test && linkedLead.stage !== "won") {
+          const reason = hardBlockReason("won", await withContractEvidence(sb, linkedLead), "Won");
+          if (reason) return res.status(422).json({ ok: false, error: reason, code: "GATE_BLOCKED" });
+        }
       }
       const addr = String(job.address || "").trim();
 

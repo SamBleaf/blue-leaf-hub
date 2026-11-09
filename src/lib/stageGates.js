@@ -24,10 +24,20 @@
  *   blockPhrase - (hard only, optional) natural phrase used to compose the 422 message;
  *                 defaults to the lowercased label
  *
- * Which requirements are `hard` mirrors exactly what the server enforced before consolidation:
- * Discovery (score + booked conversation), Concept/winning_offer (concept agreement accepted),
- * Won (building contract signed). Promoting any advisory requirement to hard is a deliberate
- * policy change — make it here and it takes effect in both the server block and the UI at once.
+ * Hard requirements: Discovery (score + booked conversation), Concept/winning_offer (concept agreement
+ * accepted), Won (building contract signed AND the signed PDF on file). Promoting any advisory requirement
+ * to hard is a deliberate policy change — make it here and it takes effect in both the server block and
+ * the UI at once.
+ *
+ * Two rules the server relies on (R05 P1):
+ *   • Hard gates read STORED state only — pass the row as it is in the database, never the row merged with
+ *     the request body, so one request can't satisfy its own gate. Advisory warnings may use the merged view.
+ *   • A forward move checks every hard gate it crosses, not just the target (`forwardMoveBlock`), so a jump
+ *     can't skip a gated stage. Backward moves and test leads stay ungated.
+ *
+ * `contract_evidence_present` is derived, not a column: the server attaches it to the lead
+ * (server/lib/leadContractEvidence.mjs) before evaluating gates and in its GET/PATCH responses, so the
+ * client and the server read the same thing.
  */
 
 // Consultants → Tender exit: the full consultant document set must be in (every roster
@@ -87,12 +97,16 @@ export const STAGE_GATES = {
     { field: "job_id", label: "Job created from this lead", hard: false,
       check: l => !!l.job_id, hint: "Create the job from this lead (button below)" },
   ],
-  // Tender exit → Won: a signed building contract is the hard requirement (no more one-click finish).
+  // Tender exit → Won: a signed building contract WITH the signed PDF on file. Two rows on purpose, so a
+  // legacy "signed" lead with no file shows exactly what is still missing.
   // Hard once migration 194 is applied (contract_status present); pre-migration it is absent → passes.
   won: [
     { field: "contract_status", label: "Building contract signed", hard: true, blockPhrase: "the building contract signed",
       check: l => !("contract_status" in l) || l.contract_status === "signed",
-      hint: "Capture the signed building contract in the Tender stage" },
+      hint: "Upload the client-signed PDF under Building contract in the Tender stage — that marks it signed" },
+    { field: "contract_evidence_present", label: "Signed contract PDF on file", hard: true, blockPhrase: "the signed contract PDF on file",
+      check: l => !("contract_status" in l) || l.contract_evidence_present === true,
+      hint: "A \"signed\" status alone isn't proof. Upload the client-signed PDF under Building contract in the Tender stage" },
   ],
 };
 
@@ -100,9 +114,35 @@ export const STAGE_GATES = {
 // corrective BACKWARD move: hard gates apply only to forward moves on real (non-test) leads.
 export const STAGE_ORDER = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender", "won"];
 
-export function isForwardMove(from, to) {
-  const fi = STAGE_ORDER.indexOf(from), ti = STAGE_ORDER.indexOf(to);
-  return fi >= 0 && ti >= 0 && ti > fi;
+// The retired `accepted` stage sat straight after PTSA / Plans, so a legacy row counts as having got that far.
+const LEGACY_STAGE_POSITION = { accepted: "fee_proposal" };
+
+/**
+ * Which Sales stages apply to a lead. Derived, never stored — `delivery_model` plays no part in it.
+ * Architect Tender leads enter at Tender (Concept and PTSA are intentionally skipped, see mig 216).
+ */
+export function resolveEngagementPathway(lead) {
+  return lead?.lead_type === "architect_tender" ? "architect_tender" : "design_build";
+}
+
+const STAGES_NOT_APPLICABLE = {
+  design_build: [],
+  architect_tender: ["discovery", "winning_offer", "fee_proposal"],
+};
+
+/**
+ * The stages a move into `to` passes through, target included, in order. Empty for a move that is not
+ * forward: backward, same stage, or out to nurture/lost. A lead coming back from nurture/lost starts at
+ * the beginning of the pipeline, so it can't re-enter past a gate it never met.
+ * Stages that don't apply to the lead's pathway are skipped, except the target itself.
+ */
+export function stagesCrossed(from, to, lead) {
+  const toIdx = STAGE_ORDER.indexOf(to);
+  if (toIdx < 0) return [];
+  const fromIdx = STAGE_ORDER.indexOf(LEGACY_STAGE_POSITION[from] || from);
+  if (toIdx <= fromIdx) return [];
+  const notApplicable = new Set(STAGES_NOT_APPLICABLE[resolveEngagementPathway(lead)] || []);
+  return STAGE_ORDER.slice(fromIdx + 1, toIdx + 1).filter((s) => s === to || !notApplicable.has(s));
 }
 
 /**
@@ -122,13 +162,43 @@ export function evaluateGate(targetStage, lead) {
   };
 }
 
+const needsPhrase = (reqs) => reqs.map(r => r.blockPhrase || r.label.toLowerCase()).join(" and ");
+
 /**
- * Server helper: the staff-facing 422 message when a forward advance is hard-blocked, or null
- * when nothing hard is missing. `stageLabel` is the human stage name (e.g. "Discovery", "Concept").
+ * The staff-facing 422 message when entering `targetStage` is hard-blocked, or null when nothing hard is
+ * missing. `stageLabel` is the human stage name (e.g. "Discovery", "Concept").
  */
 export function hardBlockReason(targetStage, lead, stageLabel) {
   const { hardMissing } = evaluateGate(targetStage, lead);
   if (!hardMissing.length) return null;
-  const needs = hardMissing.map(r => r.blockPhrase || r.label.toLowerCase()).join(" and ");
-  return `Can't advance to ${stageLabel || targetStage} yet — needs ${needs}.`;
+  return `Can't advance to ${stageLabel || targetStage} yet — needs ${needsPhrase(hardMissing)}.`;
 }
+
+/**
+ * The first stage on a forward move from `from` to `to` with an unmet hard requirement, or null if the move
+ * is clear (or isn't a forward move at all). Pass STORED state, never the row merged with the request.
+ */
+export function forwardMoveBlock(from, to, lead) {
+  for (const stage of stagesCrossed(from, to, lead)) {
+    const { hardMissing } = evaluateGate(stage, lead || {});
+    if (hardMissing.length) return { stage, hardMissing };
+  }
+  return null;
+}
+
+/** The staff-facing 422 message for a blocked forward move, or null. `labelOf(stage)` gives the human name. */
+export function forwardBlockReason(from, to, lead, labelOf = (s) => s) {
+  const block = forwardMoveBlock(from, to, lead);
+  if (!block) return null;
+  if (block.stage === to) return hardBlockReason(to, lead, labelOf(to));
+  return `Can't move to ${labelOf(to)} yet — ${labelOf(block.stage)} still needs ${needsPhrase(block.hardMissing)}.`;
+}
+
+// Who may perform the high-consequence Sales writes: mark a contract or PTSA signed, accept a concept
+// agreement, move a lead to Won. This is the upper limit, not today's access: the prefix gate in
+// server/dev-api.mjs ("A4") and the SPA's RoleRoute open all of Sales and Tender to admins only, and they
+// run first. If Sales is ever opened to supervisors, these checks still keep employees out.
+export const SALES_CONTROLLED_ROLES = ["admin", "supervisor"];
+export const canPerformControlledSalesWrite = (role) => SALES_CONTROLLED_ROLES.includes(role);
+// Taking a contract back out of "signed" is stricter still: directors only.
+export const canUnsignContract = (role) => role === "admin";

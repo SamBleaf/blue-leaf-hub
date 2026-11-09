@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { authFetch } from "../lib/authFetch.js";
+import { apiPatch } from "../lib/apiFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
 import { LEAD_STAGES } from "../lib/constants.js";
 import {
@@ -450,11 +451,8 @@ export default function SalesPipeline() {
   useEffect(() => { load(); }, [load]);
 
   async function moveStage(lead, newStage) {
-    await authFetch(`/api/sales/leads/${lead.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage: newStage }),
-    });
+    const { ok, error } = await apiPatch(`/api/sales/leads/${lead.id}`, { stage: newStage });
+    if (!ok) alert(error || "Couldn't change the stage.");
     load();
   }
 

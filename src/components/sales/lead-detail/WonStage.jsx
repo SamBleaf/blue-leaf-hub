@@ -6,9 +6,13 @@
  * The job→live-project handoff itself is done server-side at the WIN transition (finalizeWonJob +
  * trigger 096) — this panel is the human confirmation layer on top of that automation.
  */
+import { useState } from "react";
 import { WON_SUBSTATUS, OPS_READY_ITEMS } from "../../../lib/constants.js";
+import { apiPost } from "../../../lib/apiFetch.js";
 
 export default function WonStage({ lead, patch }) {
+  const [retrying, setRetrying] = useState(false);
+  const [retryMsg, setRetryMsg] = useState(null);
   const checklist = lead.ops_ready_checklist && typeof lead.ops_ready_checklist === "object" ? lead.ops_ready_checklist : {};
   const autoState = {
     job_created: !!lead.job_id,
@@ -20,6 +24,13 @@ export default function WonStage({ lead, patch }) {
   const opsReady = lead.won_substatus === "ops_ready";
 
   function toggle(it) { if (!it.auto) patch({ ops_ready_checklist: { ...checklist, [it.key]: !checklist[it.key] } }); }
+
+  async function retryHandoff() {
+    setRetrying(true); setRetryMsg(null);
+    const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/won/retry-handoff`, {});
+    setRetrying(false);
+    setRetryMsg(ok ? { good: true, text: "Done. The job is Won and the project is in Operations." } : { good: false, text: error || "The hand-off didn't finish. Please try again." });
+  }
 
   return (
     <div className="space-y-4">
@@ -65,6 +76,15 @@ export default function WonStage({ lead, patch }) {
             {allDone ? "✓ Mark Ops Ready — hand over to Operations" : `Complete all ${OPS_READY_ITEMS.length} items to hand over`}
           </button>
         )}
+        {lead.job_id && (
+          <p className="mt-2 text-[11px] text-muted">
+            Project missing from Operations?{" "}
+            <button type="button" onClick={retryHandoff} disabled={retrying} className="font-medium text-primary hover:underline disabled:opacity-50">
+              {retrying ? "Re-running…" : "Re-run the hand-off"}
+            </button>
+          </p>
+        )}
+        {retryMsg && <p role="status" className={`mt-1 text-[11px] font-medium ${retryMsg.good ? "text-green-700" : "text-danger"}`}>{retryMsg.text}</p>}
       </div>
 
       {/* Advisory (never blocks) */}

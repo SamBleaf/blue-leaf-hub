@@ -292,7 +292,9 @@ async function main() {
   check("#20", "tender links an existing cost reference — no price copied into the register", link.ok && sinkPriced.pricing_ref === "fee_proposal:Q-TEST:pc:sink" && sinkPriced.allowance_amount === null);
 
   // Signed contract + staff approval → one handover (#21)
-  await api(staff, "PATCH", `/api/sales/leads/${leadA.id}`, { contract_status: "signed", contract_signed_date: day });
+  const signedPdf = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n").toString("base64");
+  const signedContract = await api(staff, "POST", `/api/sales/leads/${leadA.id}/contract/mark-signed`, { signedPdfBase64: signedPdf, filename: "Signed building contract.pdf", signedDate: day });
+  check("#21", "the signed contract is recorded by uploading the signed PDF", signedContract.ok && signedContract.body.lead.contractStatus === "signed", JSON.stringify(signedContract.body).slice(0, 300));
   const won = await api(staff, "PATCH", `/api/sales/leads/${leadA.id}`, { stage: "won" });
   const { data: projs } = await svc.from("projects").select("id, is_preconstruction").eq("job_id", jobId);
   check("#21", "Won graduates the SAME project (one project, no duplicate) to Operations", won.ok && projs.length === 1 && projs[0].id === projectId && projs[0].is_preconstruction === false);

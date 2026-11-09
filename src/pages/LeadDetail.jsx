@@ -1152,7 +1152,7 @@ function LeadDocumentsPanel({ leadId }) {
           value={uploadType}
           onChange={e => setUploadType(e.target.value)}
         >
-          {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => (
+          {Object.entries(DOCUMENT_TYPE_LABELS).filter(([v]) => v !== "construction_contract").map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
         </select>
@@ -1662,7 +1662,12 @@ export default function LeadDetail() {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: next }),
     });
     const j = await r.json();
-    if (!j.ok) { alert(j.error || "Couldn't advance the stage yet."); return; }
+    if (!j.ok) {
+      alert(j.error || "Couldn't advance the stage yet.");
+      if (j.code === "STAGE_CONFLICT") await load();
+      return;
+    }
+    if (j.wonHandoff && !j.wonHandoff.ok && j.lead?.job_id) alert("The lead is Won, but the hand-off to Operations didn't finish. Use \"Re-run the hand-off\" on the Won panel.");
     setLead(j.lead);
     bpFetchedFor.current = null;
     setBpInsight("");
@@ -1680,7 +1685,11 @@ export default function LeadDetail() {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: stageId }),
     });
     const j = await r.json();
-    if (!j.ok) { alert(j.error || "Couldn't change the stage."); return; }
+    if (!j.ok) {
+      alert(j.error || "Couldn't change the stage.");
+      if (j.code === "STAGE_CONFLICT") await load();
+      return;
+    }
     setLead(j.lead);
     bpFetchedFor.current = null;
     setBpInsight("");
@@ -2584,7 +2593,7 @@ export default function LeadDetail() {
   } else if (lead.stage === "tender") {
     focusContent = (
       <div className="space-y-4">
-        <TenderStage lead={lead} patch={patch} reload={load} onStartRfq={startTenderRfq} creatingJob={creatingJob} />
+        <TenderStage lead={lead} patch={patch} reload={load} onStartRfq={startTenderRfq} creatingJob={creatingJob} isAdmin={isAdmin} />
       </div>
     );
   } else if (lead.stage === "accepted") {
