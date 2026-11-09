@@ -56,10 +56,17 @@ const catchAll = everyChoice.filter((o) => /^other( zone)?$/i.test(o.label));
 ok("every catch-all in the map is one the model treats as open, so its words count as the answer", catchAll.length >= 14 && catchAll.every((o) => OPEN_OPTION_IDS.has(o.id)), catchAll.filter((o) => !OPEN_OPTION_IDS.has(o.id)).map((o) => o.id).join());
 ok("named options that only sound open stay configured", !OPEN_OPTION_IDS.has("custom") && !OPEN_OPTION_IDS.has("other_cement_sheet_system") && everyChoice.some((o) => o.id === "other_cement_sheet_system"));
 
+console.log("\nTab 27 Q4 stays open");
+const everyAction = map.questions.flatMap((q) => flat([...(q.options || []), ...(q.actions || [])]).map((o) => ({ ...o, q: q.id })));
+const clientSupply = everyAction.filter((o) => o.supplyBy === "client");
+ok("client supply records who supplies and never decides contract inclusion", clientSupply.length >= 7 && clientSupply.every((o) => !o.disposition), clientSupply.filter((o) => o.disposition).map((o) => o.q).join());
+ok("the four By client answers say why", ["W-022", "R-014", "V-005", "O-001"].every((id) => /Tab 27 Q4/.test(by.get(id).notes || "")));
+ok("the matching non-client answers keep their disposition", by.get("R-014").actions.find((a) => a.id === "other_trade").disposition === "by_others" && by.get("W-022").actions.find((a) => a.id === "included").disposition === "included");
+
 console.log("\nThe model's option paths exist in the map");
 const walk = (list, path) => { let level = list; for (const id of path) { const hit = (level || []).find((o) => o.id === id); if (!hit) return false; level = hit.children; } return true; };
 const { named } = buildStructuredRegister();
-for (const key of ["wallMain", "wallFeature", "roof", "floorMain", "floorWet", "access", "occupied", "risk", "sink"]) {
+for (const key of ["wallMain", "wallFeature", "roof", "floorMain", "floorWet", "access", "occupied", "risk", "sink", "twoOthers", "heatingOthers"]) {
   const it = named[key];
   ok(`${it.promptKey} ${it.answer.selected.map((s) => s.path.join(" > ")).join(", ")}`, it.answer.selected.every((s) => walk(by.get(it.promptKey).options, s.path)));
 }
@@ -75,6 +82,7 @@ ok("a site fact given the work disposition", failsWith((m) => { m.questions.find
 ok("an option with a bad id", failsWith((m) => { m.questions.find((q) => q.id === "W-001").options[0].id = "Not Slug"; }, /bad option id/));
 ok("two sibling options with one id", failsWith((m) => { const o = m.questions.find((q) => q.id === "W-001").options; o[1].id = o[0].id; }, /duplicate option id/));
 ok("an action pointing at a disposition that doesn't exist", failsWith((m) => { m.questions.find((q) => q.id === "W-004").actions[0].disposition = "bulldoze"; }, /unknown disposition/));
+ok("a client-supply option that decides contract inclusion", failsWith((m) => { m.questions.find((q) => q.id === "W-022").actions.find((a) => a.id === "by_client").disposition = "by_others"; }, /Tab 27 Q4/));
 ok("a select control with no options", failsWith((m) => { delete m.questions.find((q) => q.id === "W-001").options; }, /needs options/));
 ok("a room prompt moved out of the guided set", failsWith((m) => { m.questions.find((q) => q.id === "K-005").tier = "more_detail"; }, /guided primary set/));
 ok("a Sales fact turned into a question", failsWith((m) => { m.questions.find((q) => q.id === "P-001").mapping = "single_select"; }, /must stay prefilled/));

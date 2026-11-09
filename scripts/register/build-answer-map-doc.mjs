@@ -38,6 +38,7 @@ function checkOptions(list, where, errors) {
     if (!String(o?.label || "").trim()) errors.push(`${where}/${o?.id}: option has no label`);
     if (o?.disposition && !(o.disposition in REGISTER_DISPOSITIONS)) errors.push(`${where}/${o.id}: unknown disposition ${o.disposition}`);
     if (o?.supplyBy && !(o.supplyBy in SUPPLY_BY)) errors.push(`${where}/${o.id}: unknown supplyBy ${o.supplyBy}`);
+    if (o?.supplyBy === "client" && o?.disposition) errors.push(`${where}/${o.id}: client supply can't set a disposition while Tab 27 Q4 is open`);
     if (o?.children) checkOptions(o.children, `${where}/${o.id}`, errors);
   }
 }

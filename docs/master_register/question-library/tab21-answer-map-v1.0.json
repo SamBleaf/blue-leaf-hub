@@ -2134,7 +2134,6 @@
     {
      "id": "by_client",
      "label": "By client",
-     "disposition": "by_others",
      "supplyBy": "client"
     },
     {
@@ -2148,7 +2147,7 @@
      "disposition": "deferred"
     }
    ],
-   "notes": "Separate line per element with + Add another (MR-UX-01H). Never one sentence."
+   "notes": "Separate line per element with + Add another (MR-UX-01H). Never one sentence. By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet."
   },
   {
    "id": "W-023",
@@ -2879,7 +2878,6 @@
     {
      "id": "client",
      "label": "Client",
-     "disposition": "by_others",
      "supplyBy": "client"
     },
     {
@@ -2892,7 +2890,8 @@
      "label": "External consultant",
      "disposition": "by_others"
     }
-   ]
+   ],
+   "notes": "By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet."
   },
   {
    "id": "R-015",
@@ -4821,10 +4820,10 @@
     {
      "id": "by_client",
      "label": "By client",
-     "disposition": "by_others",
      "supplyBy": "client"
     }
-   ]
+   ],
+   "notes": "By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet."
   },
   {
    "id": "V-006",
@@ -5733,7 +5732,6 @@
     {
      "id": "by_client",
      "label": "By client",
-     "disposition": "by_others",
      "supplyBy": "client"
     },
     {
@@ -5741,7 +5739,8 @@
      "label": "Excluded",
      "disposition": "excluded"
     }
-   ]
+   ],
+   "notes": "By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet."
   },
   {
    "id": "O-002",
