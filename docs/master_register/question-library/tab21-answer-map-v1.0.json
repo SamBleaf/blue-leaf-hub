@@ -2289,7 +2289,18 @@
    "notes": "One row per surface. No generic sheen chip: a finish level is only offered under a surface, behind + More detail, and each surface shows its usual level until someone chooses. Usual levels are proposed for Blue Leaf to confirm.",
    "select": "groups",
    "usualGroup": "finish_level",
+   "roomReadsAll": true,
    "roomZones": {
+    "laundry": [
+     "walls",
+     "ceiling",
+     "wet_area"
+    ],
+    "mudroom": [
+     "walls",
+     "ceiling",
+     "wet_area"
+    ],
     "*": [
      "walls",
      "ceiling"

@@ -38,7 +38,7 @@ function portalBadge(item) {
 }
 
 export default function PromptRow({
-  question: questionProp, item, seed, onChange, onDelete, inherited, onMakeException, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf,
+  question: questionProp, item, seed, onChange, onDelete, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf, meeting, areaOptions,
 }) {
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState(null);          // 'approve' | 'verify' | 'portal_approve'
@@ -102,22 +102,15 @@ export default function PromptRow({
             </button>
           )}
 
-          {inherited && !item && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-violet-200 bg-violet-50/60 px-2 py-1 text-[11px] text-violet-800">
-              <span>Whole-house default: <span className="font-semibold">{inherited.description || answerSummary(inherited) || inherited.product || "set"}</span></span>
-              <button type="button" disabled={disabled} onClick={onMakeException} className="font-semibold text-violet-700 hover:underline disabled:opacity-40">Record a room exception</button>
-            </div>
-          )}
-
-          {(!inherited || item) && guided && (
-            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} fixedZone={fixedZone} usedZones={usedZones} />
+          {guided && (
+            <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} fixedZone={fixedZone} usedZones={usedZones} areaOptions={areaOptions} />
           )}
           {assumed && (
             <p className="mt-1.5 rounded border border-dashed border-hairline px-2 py-1 text-[11px] text-muted" data-testid={`assumption-${qid}`}>
               <span className="font-semibold text-ink">Blue Leaf pricing assumption ({BASELINE_TIERS[assumed.tier]}{assumptionIsDraft(assumed) ? ", draft wording" : ""}){assumed.coversOnly ? `, only for the ${assumed.coversOnly.join(" and ")}` : ""}:</span> {assumed.text} Staff only. Not a client choice, an approval or a price.
             </p>
           )}
-          {(!inherited || item) && guided && (kind === "action" || config.handling === "record" || config.repeat?.owner) && (
+          {guided && (kind === "action" || config.handling === "record" || config.repeat?.owner) && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
               {kind === "action" && (
@@ -128,7 +121,7 @@ export default function PromptRow({
             </div>
           )}
 
-          {(!inherited || item) && !guided && (
+          {!guided && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {kind === "scope" && usesDisposition && (
                 <Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} className="w-36" disabled={disabled || locked} />
@@ -155,7 +148,7 @@ export default function PromptRow({
 
           {!guided && item?.answer && answerSummary(item) && <p className="mt-1 text-[11px] text-muted">Recorded: <span className="font-medium text-ink">{answerSummary(item)}</span></p>}
 
-          {(!inherited || item) && !guided && !noteOnly && !disabled && !locked && (
+          {!guided && !noteOnly && !disabled && !locked && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
               {kind !== "action" && QUICK.filter(([k]) => kind !== "requirement" || k === "na" || k === "undecided").map(([k, l]) => (
                 <button key={k} type="button" onClick={() => set({ disposition: k })}
@@ -202,7 +195,7 @@ export default function PromptRow({
           {locked && <p className="mt-1 text-[10px] text-muted">Approved under the contract — product changes go through a variation.</p>}
         </div>
         <div className="absolute right-2.5 top-2.5 flex items-center gap-2 sm:static sm:shrink-0 sm:flex-col sm:items-end sm:gap-1">
-          {(!inherited || item) && <button type="button" onClick={() => setOpen((o) => !o)} className="text-[11px] text-primary hover:underline">{open ? "Less" : guided ? "Office fields" : "More"}</button>}
+          {<button type="button" onClick={() => setOpen((o) => !o)} className="text-[11px] text-primary hover:underline">{open ? "Less" : guided ? "Office fields" : "More"}</button>}
           {onDelete && !disabled && <button type="button" onClick={onDelete} title="Remove this item" className="text-xs text-red-500 hover:text-red-700">×</button>}
         </div>
       </div>
@@ -221,12 +214,12 @@ export default function PromptRow({
           {guided && kind === "selection" && <Mini label="Client status"><Select value={it.certainty} onChange={chooseCertainty} options={certOptions} disabled={disabled || locked} /></Mini>}
           {guided && kind === "requirement" && <Mini label="Client status"><Select value={it.certainty} onChange={chooseCertainty} options={reqCertOptions} disabled={disabled} /></Mini>}
           {(kind === "selection" || kind === "scope") && usesDisposition && <>
-            <Mini label="Quantity (blank = not measured)">
+            {!meeting && <Mini label="Quantity (blank = not measured)">
               <div className="flex gap-1">
                 <input type="number" step="any" value={it.quantity ?? ""} disabled={disabled || locked} onChange={(e) => set({ quantity: e.target.value === "" ? null : Number(e.target.value) })} className="inp w-20 text-[11px]" />
                 <input value={it.unit} disabled={disabled || locked} onChange={(e) => set({ unit: e.target.value })} placeholder="unit" className="inp w-16 text-[11px]" />
               </div>
-            </Mini>
+            </Mini>}
             <Mini label="Supplied by"><Select value={it.supplyBy} onChange={(v) => set({ supplyBy: v })} options={Object.entries(SUPPLY_BY)} placeholder="—" disabled={disabled} /></Mini>
           </>}
           {kind !== "action" && (
@@ -238,7 +231,7 @@ export default function PromptRow({
             <Select value={it.technicalStatus} onChange={chooseTechnical} options={Object.entries(TECHNICAL_STATUSES)} disabled={disabled} />
             {it.technicalEvidence?.ref && <p className="mt-0.5 text-[10px] text-muted">by {it.technicalEvidence.by} — {it.technicalEvidence.ref}</p>}
           </Mini>
-          {kind !== "action" && kind !== "requirement" && usesDisposition && (
+          {!meeting && kind !== "action" && kind !== "requirement" && usesDisposition && (
             <Mini label="Pricing (link — never a price)">
               <Select value={it.pricingStatus} onChange={(v) => set({ pricingStatus: v })} options={Object.entries(PRICING_STATUSES)} disabled={disabled} />
               <input value={it.pricingRef} disabled={disabled} onChange={(e) => set({ pricingRef: e.target.value })} placeholder="estimate line / RFQ / quote ref" className="inp mt-1 text-[11px]" />
@@ -270,7 +263,7 @@ export default function PromptRow({
  * first are laid out as one row each, so the zone takes no tap. The rarer zones are a "+ Scullery" button away. Anything
  * already recorded always has a row. renderBelow adds what is linked under a saved row (gutters under a roof).
  */
-export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, renderBelow, noAdd, ...row }) {
+export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, renderBelow, noAdd, titleOf, ...row }) {
   const spare = useRef(genId());                 // the open row while nothing is recorded
   const slotIds = useRef({});                    // the open row for each zone laid out, by zone
   const [added, setAdded] = useState(null);      // the open row from "+ Add another" or "+ Scullery": { id, zone? }
@@ -315,7 +308,7 @@ export function RepeatRows({ question, items, seed, upsertItem, updateItem, dele
       {rows.map(({ id, item, zone }) => (
         <div key={id} className="space-y-1.5" data-testid={zone ? `slot-${question.id}-${zone.id}` : undefined}>
           <PromptRow question={question} item={item} seed={seedFor(id, zone)} readOnlyReason={readOnly ? "Read-only" : null} {...row}
-            rowTitle={zone?.label} fixedZone={!!zone} usedZones={usedZones}
+            rowTitle={zone?.label || (item && titleOf?.(item)) || undefined} fixedZone={!!zone} usedZones={usedZones}
             onChange={(partial) => (item ? updateItem(id, partial) : upsertItem(seedFor(id, zone), partial))}
             onDelete={item ? () => deleteItem(id) : undefined} />
           {item && renderBelow?.(item)}

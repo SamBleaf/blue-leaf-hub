@@ -11,7 +11,7 @@ import { useState } from "react";
 import {
   choiceView, toggleOption, setOpenWords, removeChoice, reuseChoice, chooseZone, chooseElement, setZoneWords, setElementWords,
   toggleNotDecided, setClientUnsure, toggleNotApplicable, setAnswerNote, setClientNote, itemPatch, reasonPatch, settlePatch, settleOptions,
-  statedText, dispositionLabel, UNRESOLVED_REASONS, RESPONSIBILITIES,
+  statedText, dispositionLabel, UNRESOLVED_REASONS, RESPONSIBILITIES, toggleArea,
 } from "../../../../lib/register.js";
 import { Select } from "./ui.jsx";
 
@@ -50,7 +50,7 @@ const tidyWords = (v) => statedText(v.trim());
 
 const SAVE_TEXT = { dirty: "Saving…", saving: "Saving…", saved: "Saved", error: "Not saved", rejected: "Not saved", conflict: "Changed elsewhere" };
 
-export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState, fixedZone, usedZones }) {
+export default function ProgressiveChoiceCard({ question, config, item, disabled, onPatch, saveState, fixedZone, usedZones, areaOptions }) {
   const [more, setMore] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -85,6 +85,12 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
       )}
       {view.zone?.open && fixedZone && (
         <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className="inp w-full text-[11px]" />
+      )}
+
+      {config.flow?.includes("area") && areaOptions?.length > 0 && (
+        <Row heading="Where">
+          {areaOptions.map((o) => <Choice key={o.id} label={o.label} on={(item.answer?.areaIds || []).includes(o.id)} disabled={disabled} testId={`area-${qid}-${o.id}`} onClick={() => write(toggleArea(config, item.answer, o.id))} />)}
+        </Row>
       )}
 
       {view.element && (

@@ -3,6 +3,7 @@
  * or "Site & existing conditions" (Tab 21 §2). Only the prompts relevant to the project type / stage are
  * shown, grouped by topic; nothing is compulsory.
  */
+import { useState } from "react";
 import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, partAssumptionFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
 import { Section } from "./ui.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
@@ -12,6 +13,7 @@ const tierOf = (q) => { const c = answerConfigFor(q.id); return c?.standard?.tie
 const topicOf = (q) => answerConfigFor(q.id)?.standard?.topic || q.topic;
 
 export default function SectionStep({ section, reg, context, stage, showDetail, actor, upsertItem, updateItem, deleteItem, readOnly, saveState, mutateMeta }) {
+  const [showConnection, setShowConnection] = useState(false);
   const projectType = context?.projectType || "";
   const qs = [...promptsFor(section === "site" ? "site" : "project", {
     projectType, deliveryModel: context?.deliveryModel, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail,
@@ -21,12 +23,37 @@ export default function SectionStep({ section, reg, context, stage, showDetail, 
   const allFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
   const itemsFor = (qid) => allFor(qid).filter((i) => !isLinkedRow(answerConfigFor(qid), i));
   const itemFor = (qid) => itemsFor(qid)[0] || null;
-  const rowProps = { actor, saveState, assumptionOf: (it) => assumptionFor(reg, it) || partAssumptionFor(reg, it) };
+  const rowProps = { actor, saveState, meeting: true, assumptionOf: (it) => assumptionFor(reg, it) || partAssumptionFor(reg, it) };
   const store = { upsertItem, updateItem, deleteItem };
+  const areaOptions = (reg.meta.rooms || []).map((r) => ({ id: r.id, label: r.name }));
+  const qById = (id) => qs.find((q) => q.id === id);
+  // W-006 and W-008 are reached from the W-004 path (Tab 27 B06). Every record keeps its own promptKey, so nothing merges in the data.
+  const presentedElsewhere = (q) => !!answerConfigFor(q.id)?.presentedWith;
+  const existingWorks = (q, cfg, seed) => {
+    const records = reg.items.filter((i) => !i.overridesDefaultId && ["W-004", "W-006", "R-013"].includes(resolvePromptId(i.promptKey)) && (!i.roomId || resolvePromptId(i.promptKey) === "R-013"));
+    const roomOf = (i) => (i.roomId ? (reg.meta.rooms || []).find((r) => r.id === i.roomId)?.name : "");
+    const connections = qById("W-008");
+    const connection = connections && itemFor("W-008");
+    return (
+      <div key={q.id} className="space-y-2">
+        <RepeatRows question={q} items={records} seed={seed} readOnly={readOnly} areaOptions={areaOptions} titleOf={roomOf} {...rowProps} {...store} />
+        {connections && (connection || showConnection) && (
+          <PromptRow question={connections} item={connection} seed={{ itemKind: connections.itemKind, category: connections.category, promptKey: "W-008", section: secKey, technicalStatus: connections.technical, responsibility: connections.owner || "", disposition: "undecided" }}
+            readOnlyReason={readOnly ? "Read-only" : null} {...rowProps}
+            onChange={(partial) => (connection ? updateItem(connection.id, partial) : upsertItem({ itemKind: connections.itemKind, category: connections.category, promptKey: "W-008", section: secKey, technicalStatus: connections.technical, responsibility: connections.owner || "", disposition: "undecided" }, partial))}
+            onDelete={connection ? () => deleteItem(connection.id) : null} />
+        )}
+        {connections && !connection && !showConnection && !readOnly && (
+          <button type="button" onClick={() => setShowConnection(true)} data-testid="add-connection" className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]">+ New-to-existing connection</button>
+        )}
+      </div>
+    );
+  };
   const renderPrompt = (q) => {
     const cfg = answerConfigFor(q.id);
     const seed = { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: secKey, isDefault: !!q.isDefault || !!cfg?.standard,
       technicalStatus: q.technical, responsibility: q.owner || "", disposition: "undecided" };
+    if (q.id === "W-004") return existingWorks(q, cfg, seed);
     if (cfg?.linked) return renderWithLinked(q, cfg, seed);
     if (cfg?.repeat || cfg?.standard) {
       return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seed} readOnly={readOnly} {...rowProps} {...store} />;
@@ -82,7 +109,7 @@ export default function SectionStep({ section, reg, context, stage, showDetail, 
         <p className="text-xs text-muted">Set the project-wide standards once, starting with what the client wants the home to be. Rooms inherit floors, paint, kitchen, wet-area and laundry standards; record a <span className="font-medium text-ink">room exception</span> only where a room differs.</p>
       )}
       {topics.map((t) => {
-        const list = qs.filter((q) => topicOf(q) === t.key);
+        const list = qs.filter((q) => topicOf(q) === t.key && !presentedElsewhere(q));
         if (!list.length) return null;
         const started = list.filter((q) => itemFor(q.id)).length;
         const lead = list.filter((q) => tierOf(q) === "essential");

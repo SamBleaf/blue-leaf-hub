@@ -21,6 +21,7 @@ import DocumentsStep from "./DocumentsStep.jsx";
 import TenderPanel from "./TenderPanel.jsx";
 import HandoverPanel from "./HandoverPanel.jsx";
 import LegacyScheduleRows from "./LegacyScheduleRows.jsx";
+import OutstandingSummary from "./OutstandingSummary.jsx";
 
 const STEPS = [
   { key: "context", label: "Project" },
@@ -196,6 +197,10 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
               Show detailed prompts
             </label>
           </div>
+
+          {reg && ["context", "whole_house", "site", "rooms"].includes(step) && (
+            <OutstandingSummary reg={reg} onGo={(place) => { if (place.roomId) { selectRoom(place.roomId); setStep("rooms"); } else gotoStep(place.step); }} />
+          )}
 
           <div className="p-2 sm:p-4">
             {(store.loading && !reg) && <p className="text-sm text-muted">Loading the brief…</p>}

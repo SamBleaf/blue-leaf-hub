@@ -353,6 +353,7 @@ function buildAnswerConfig(e, q) {
   if (e.inherits) cfg.inherits = e.inherits;
   if (e.presentedWith) cfg.presentedWith = e.presentedWith;
   if (e.roomZones) cfg.roomZones = clean(e.roomZones);                           // which zone's default a room type reads, in order
+  if (e.roomReadsAll) cfg.roomReadsAll = true;                                    // a room reads every surface listed, not the first it finds
   if (e.standard) cfg.standard = clean(e.standard);                              // also set once on Whole House, by zone
   if (e.usualGroup) cfg.usualGroup = e.usualGroup;
   if (e.reviewSuggestions) cfg.reviewSuggestions = true;

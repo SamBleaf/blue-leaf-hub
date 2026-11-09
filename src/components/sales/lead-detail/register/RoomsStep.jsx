@@ -1,15 +1,16 @@
 /**
- * RoomsStep — the room-by-room walkthrough (Tab 18 §4, Tab 22 §I worked card). One room at a time, its
- * relevant prompts grouped by topic, project-wide defaults inherited until a room exception is recorded.
+ * RoomsStep — the room-by-room walkthrough (Tab 18 §4, Tab 22 §I worked card, Tab 27 B10). One room at a time: what it takes
+ * from Whole House in one compact list, then only the questions this room still has to answer, grouped by topic.
  * Rename / reorder never breaks links (items reference the stable room id).
  */
 import { useEffect } from "react";
 import {
-  promptsFor, resolvePromptId, roomDefaultFor, exceptionAnswerFrom, makeItem, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
+  promptsFor, resolvePromptId, roomInheritedLines, roomLinesToConfirm, confirmRoomDefaults, exceptionFieldsFrom, makeItem, questionById, ROOM_TYPES, ROOM_SCOPES, ROOM_TOPICS, ITEM_KINDS,
   partitionRoomPrompts, outstandingReasons, SETTLED_DISPOSITIONS, answerConfigFor, itemTitle,
 } from "../../../../lib/register.js";
 import { Section, Select } from "./ui.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
+import RoomDefaultsPanel from "./RoomDefaultsPanel.jsx";
 
 const NO_ROOMS = [];
 
@@ -28,7 +29,17 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const itemsFor = (qid) => roomItems.filter((i) => resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
   const itemFor = (qid) => itemsFor(qid)[0] || null;
   // An exception stays with its question even if a closer default appears later (a scullery standard set after a kitchen one).
-  const exceptionFor = (q) => roomItems.find((i) => i.overridesDefaultId && resolvePromptId(i.promptKey) === q.id) || null;
+  const exceptionsFor = (q) => roomItems.filter((i) => i.overridesDefaultId && resolvePromptId(i.promptKey) === q.id);
+  const lines = room.scope === "not_in_scope" ? [] : roomInheritedLines(reg, room, qs);
+  // A question fully answered by Whole House lives in the list above. Its row only comes back once the room differs or answers for itself.
+  const shownInPanel = (q) => lines.some((l) => l.question.id === q.id) && !exceptionsFor(q).length && !itemFor(q.id);
+  // Existing works are one record, seen here and on Site & Existing (Tab 27 B06). An older room-level R-013 row stays until it's dealt with.
+  const hiddenAlias = (q) => !!answerConfigFor(q.id)?.presentedWith && !itemsFor(q.id).length;
+  const visible = (q) => !shownInPanel(q) && !hiddenAlias(q);
+  const existingHere = reg.items.filter((i) => !i.roomId && (i.answer?.areaIds || []).includes(room.id));
+  const offersExisting = existingHere.length > 0 || qs.some((q) => q.id === "R-013");
+  const areaOptions = rooms.map((r) => ({ id: r.id, label: r.name }));
+  const existingQuestion = questionById("W-004");
   const promptIds = new Set(qs.map((q) => q.id));
   const custom = roomItems.filter((i) => !i.promptKey || !promptIds.has(resolvePromptId(i.promptKey)));
   const levels = [...new Set(rooms.map((r) => r.level || "—"))];
@@ -38,20 +49,26 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   // Keyed by room as well as question: what is open or half-entered on a row belongs to that room's record.
   const renderRow = (q) => {
     if (answerConfigFor(q.id)?.repeat) {
-      return <RepeatRows key={`${room.id}:${q.id}`} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
+      return <RepeatRows key={`${room.id}:${q.id}`} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} meeting readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
     }
-    const def = roomDefaultFor(reg, q, room.roomType);
-    const item = exceptionFor(q) || itemFor(q.id);
-    return (
-      <PromptRow key={`${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
+    const exceptions = exceptionsFor(q);
+    const items = exceptions.length ? exceptions : [itemFor(q.id)];
+    return items.map((item) => (
+      <PromptRow key={item?.overridesDefaultId ? item.id : `${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} meeting rowTitle={item?.overridesDefaultId ? item.answer?.zone?.label : undefined}
         readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
-        onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
-          manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: { ...exceptionAnswerFrom(def), zone: null } })}
         onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seedFor(q), partial))}
         onDelete={item ? () => deleteItem(item.id) : null}
         onPortal={item ? (action, ev) => onPortalItem(item, action, ev) : null} />
-    );
+    ));
   };
+  const who = actor?.full_name || actor?.email || "Blue Leaf";
+  const confirmAll = () => {
+    const pending = roomLinesToConfirm(lines).map((l) => l.def);
+    const next = confirmRoomDefaults(room, pending, { at: new Date().toISOString(), by: who });
+    mutateMeta({ rooms: rooms.map((r) => (r.id === room.id ? next : r)) });
+  };
+  const makeException = (line) => addItem({ ...seedFor(line.question), ...exceptionFieldsFrom(line.def, { keepZone: !!line.surface }) });
+  const addExistingHere = () => addItem(makeItem({ itemKind: "scope", category: existingQuestion.category, promptKey: "W-004", section: "site", disposition: "undecided", responsibility: existingQuestion.owner || "", answer: { areaIds: [room.id] } }));
 
   return (
     <div className="space-y-3">
@@ -79,14 +96,16 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
         <span className="ml-auto text-[11px] text-muted">{roomItems.length} recorded</span>
       </div>
 
+      <RoomDefaultsPanel lines={lines} onConfirm={confirmAll} onException={makeException} readOnly={readOnly} />
+
       {room.scope === "not_in_scope" ? (
         <p className="rounded border border-hairline bg-surface p-3 text-xs text-muted">This room is marked <b>not in scope</b>. Change the room scope above to record work here, or add a custom note below.</p>
       ) : ROOM_TOPICS.map((t) => {
-        const list = qs.filter((q) => q.topic === t.key);
+        const list = qs.filter((q) => q.topic === t.key && visible(q));
         if (!list.length) return null;
         const prim = list.filter((q) => primarySet.has(q.id));
         const more = list.filter((q) => !primarySet.has(q.id));
-        const started = list.filter((q) => itemFor(q.id) || exceptionFor(q)).length;
+        const started = list.filter((q) => itemFor(q.id) || exceptionsFor(q).length).length;
         return (
           <Section key={t.key} title={t.label} count={started ? `${started}/${list.length}` : null} defaultOpen={prim.length > 0}>
             {prim.map(renderRow)}
@@ -96,6 +115,17 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
           </Section>
         );
       })}
+
+      {room.scope !== "not_in_scope" && offersExisting && (
+        <Section title="Existing works here" count={existingHere.length || null} defaultOpen>
+          <p className="text-[11px] text-muted">Same record as Site &amp; existing. A change made here shows there.</p>
+          {existingHere.map((item) => (
+            <PromptRow key={item.id} question={existingQuestion} item={item} actor={actor} meeting areaOptions={areaOptions} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
+              onChange={(partial) => updateItem(item.id, partial)} onDelete={() => deleteItem(item.id)} />
+          ))}
+          {!readOnly && <button type="button" onClick={addExistingHere} data-testid="add-existing-here" className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]">+ Existing work here</button>}
+        </Section>
+      )}
 
       {room.scope !== "not_in_scope" && roomItems.length > 0 && (() => {
         // Derived end-of-room summary (no new data): what's agreed, what's still to confirm, and who owns the next move.

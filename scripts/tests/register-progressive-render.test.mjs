@@ -19,11 +19,13 @@ const REG = join(REPO, "src/components/sales/lead-detail/register");
 writeFileSync(entry, `
 import { renderToStaticMarkup } from "react-dom/server";
 import PromptRow, { RepeatRows } from ${JSON.stringify(join(REG, "PromptRow.jsx"))};
+import RoomDefaultsPanel from ${JSON.stringify(join(REG, "RoomDefaultsPanel.jsx"))};
 import { QUESTIONS, ANSWER_CONFIG } from ${JSON.stringify(join(REPO, "src/lib/registerQuestions.js"))};
 import * as R from ${JSON.stringify(join(REPO, "src/lib/register.js"))};
 export { QUESTIONS, ANSWER_CONFIG, R };
 const noop = () => {};
 export const row = (props) => renderToStaticMarkup(<PromptRow onChange={noop} {...props} />);
+export const panel = (props) => renderToStaticMarkup(<RoomDefaultsPanel onConfirm={noop} onException={noop} {...props} />);
 export const rows = (props) => renderToStaticMarkup(<RepeatRows upsertItem={noop} updateItem={noop} deleteItem={noop} {...props} />);
 `);
 await build({
@@ -37,7 +39,7 @@ const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓
 const section = (t) => console.log(`\n▸ ${t}`);
 
 try {
-  const { row, rows, QUESTIONS, ANSWER_CONFIG, R } = await import(pathToFileURL(out).href);
+  const { row, rows, panel, QUESTIONS, ANSWER_CONFIG, R } = await import(pathToFileURL(out).href);
   const q = (id) => QUESTIONS.find((x) => x.id === id);
   const c = (id) => ANSWER_CONFIG[id];
   const seed = (id, more = {}) => ({ itemKind: q(id).itemKind, category: q(id).category, promptKey: id, technicalStatus: q(id).technical, ...more });
@@ -143,7 +145,11 @@ try {
   const locked = row({ question: q("K-005"), item: item("K-005", { sync: { table: "client_selections", locked: true, status: "approved" }, answer: R.toggleOption(c("K-005"), null, ["timber"]) }) });
   ok("a locked item shows its answer and can't be changed", pressedCount(locked) === 1 && /disabled=""/.test(locked) && !/Not decided/.test(locked));
   const inh = R.makeItem({ itemKind: "selection", promptKey: "W-017", isDefault: true, answer: R.toggleOption(c("W-017"), null, ["timber"]) });
-  ok("an inherited default reads from its answer", /Whole-house default: <span[^>]*>Timber/.test(row({ question: q("R-005"), item: null, seed: seed("R-005"), inherited: inh, onMakeException: () => {} })));
+  const inhRoom = R.makeRoom({ id: "rm_a", name: "Living", roomType: "living" });
+  const inhReg = { meta: R.emptyMeta({ rooms: [inhRoom] }), items: [R.makeItem({ ...inh, promptKey: "W-017", answer: { ...inh.answer, zone: { key: "main_floor", label: "Main floor" } } })] };
+  ok("an inherited default reads from its answer", /Timber/.test(panel({ lines: R.roomInheritedLines(inhReg, inhRoom, [q("R-005")]) })));
+  const inMeeting = row({ question: q("R-009"), item: item("R-009", { itemKind: "scope" }), meeting: true });
+  ok("a question left with no default still has its own row", /card-R-009/.test(inMeeting));
 
   ok("an older N/A shows as N/A", /aria-pressed="true"[^>]*data-testid="na-W-017"|data-testid="na-W-017"[^>]*aria-pressed="true"/.test(row({ question: q("W-017"), item: item("W-017", { disposition: "na" }) })) || pressedCount(row({ question: q("W-017"), item: item("W-017", { disposition: "na" }) })) === 1);
   const pilot = row({ question: q("W-001"), item: item("W-001", { disposition: "included", description: "Tight access" }) });

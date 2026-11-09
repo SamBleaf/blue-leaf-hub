@@ -26,7 +26,7 @@
  */
 import { QUESTIONS, QUESTION_LIBRARY_VERSION, ANSWER_CONFIG } from "./registerQuestions.js";
 import {
-  normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, applyPricingAssumption, hasExplicitChoice,
+  normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, applyPricingAssumption, hasExplicitChoice, roomDefaultStatus,
   normaliseAssumption, answerMaterialChanged, stableStringify, answerSummary, ANSWER_SCHEMA_VERSION, BASELINE_TIERS,
 } from "./registerAnswer.js";
 import { BASELINE_CATEGORIES, BASELINE_VERSION, BASELINE_WORDING_STATUS, PERFORMANCE_SUGGESTIONS } from "./registerGuidance.js";
@@ -550,6 +550,51 @@ export function roomDefaultFor(register, question, roomType) {
   return defaults.find((i) => !i.answer?.zone) || null;
 }
 
+/** Every default this room reads for a question. One, except where the question covers several surfaces at once (walls and ceiling). */
+export function roomDefaultsFor(register, question, roomType) {
+  const sourceId = question?.inherits || (ANSWER_CONFIG[question?.id]?.standard ? question.id : null);
+  const cfg = ANSWER_CONFIG[sourceId];
+  if (!cfg?.roomReadsAll) { const one = roomDefaultFor(register, question, roomType); return one ? [one] : []; }
+  const defaults = defaultItemsFor(register, sourceId).filter(hasExplicitChoice);
+  const hits = (cfg.roomZones[roomType] || cfg.roomZones["*"] || []).map((z) => defaults.find((i) => i.answer?.zone?.key === z)).filter(Boolean);
+  return hits.length ? hits : defaults.filter((i) => !i.answer?.zone).slice(0, 1);
+}
+
+/**
+ * What this room takes from Whole House, one line per default (Tab 27 B10, DEC-MRUX-02). A question the room has answered for
+ * itself isn't listed. Reading this writes nothing: there is no per-room copy of a default.
+ * surface is set where one question reads several defaults, so each can be confirmed or changed by itself.
+ */
+export function roomInheritedLines(register, room, questions) {
+  const roomItems = register.items.filter((i) => i.roomId === room.id);
+  const lines = [];
+  for (const q of questions || []) {
+    const defs = roomDefaultsFor(register, q, room.roomType);
+    if (!defs.length) continue;
+    const own = roomItems.filter((i) => resolvePromptId(i.promptKey) === q.id);
+    if (own.some((i) => !i.overridesDefaultId)) continue;
+    const bySurface = !!ANSWER_CONFIG[q.inherits]?.roomReadsAll;
+    for (const def of defs) {
+      const exception = (bySurface ? own.find((i) => i.overridesDefaultId === def.id) : own.find((i) => i.overridesDefaultId)) || null;
+      lines.push({ question: q, def, exception, surface: bySurface ? def.answer?.zone?.label || "" : "", status: roomDefaultStatus(room, def, exception) });
+    }
+  }
+  return lines;
+}
+
+/** Only the defaults a person still has to look at: never confirmed for this room, or changed since. */
+export const roomLinesToConfirm = (lines) => lines.filter((l) => l.status === "inherited" || l.status === "changed");
+
+/** The fields a room exception starts from. An approval was given for the default, so it never carries across to a room that differs. */
+export function exceptionFieldsFrom(def, { keepZone = false } = {}) {
+  const answer = exceptionAnswerFrom(def);
+  return {
+    itemKind: def.itemKind, description: def.description, product: def.product, manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier,
+    certainty: def.certainty === "client_approved" ? "proposed" : def.certainty, overridesDefaultId: def.id,
+    answer: answer ? { ...answer, zone: keepZone ? answer.zone : null } : null,
+  };
+}
+
 /**
  * Apply a project-wide DEFAULT item to specific rooms as explicit, separate exception records.
  * Never mutates other rooms silently: each target gets its own item linked via overridesDefaultId.
@@ -616,6 +661,29 @@ export function outstandingReasons(item) {
 }
 export function isOutstanding(item) { return outstandingReasons(item).length > 0; }
 export function outstandingItems(register) { return register.items.filter(isOutstanding); }
+
+/** The outstanding list by where it can be dealt with, so staff can jump straight there (Tab 27 B09, Gate 5). */
+export function outstandingByPlace(register) {
+  const places = new Map();
+  const put = (key, label, step, roomId, item, order) => {
+    const p = places.get(key) || { key, label, step, roomId, order, count: 0, decision: 0, verification: 0, action: 0, titles: [] };
+    p.count += 1;
+    for (const r of outstandingReasons(item)) p[r] += 1;
+    if (p.titles.length < 3) p.titles.push(itemTitle(item));
+    places.set(key, p);
+  };
+  const rooms = register.meta.rooms || [];
+  for (const item of outstandingItems(register)) {
+    const q = questionById(resolvePromptId(item.promptKey));
+    const roomIdx = item.roomId ? rooms.findIndex((r) => r.id === item.roomId) : -1;
+    if (roomIdx >= 0) put(item.roomId, rooms[roomIdx].name, "rooms", item.roomId, item, 10 + roomIdx);
+    else if (q?.section === "tech" || q?.section === "mgmt") put("register", "Office register", "register", null, item, 9000);
+    else if (item.section === "site" || q?.section === "site") put("site", "Site & existing", "site", null, item, 2);
+    else if (q?.topic === "brief") put("context", "Project", "context", null, item, 0);
+    else put("whole_house", "Whole house", "whole_house", null, item, 1);
+  }
+  return [...places.values()].sort((a, b) => a.order - b.order);
+}
 
 // A selection settled OUT (by others / excluded / deferred / N-A) is a finished answer, not a client
 // CHOICE: it surfaces in the Client Brief scope boundary, never in the Selections schedule or portal.
@@ -690,7 +758,11 @@ export function linkedParentLabel(register, item) {
 
 /** Display name for an item's room — the LIVE room list is canonical (survives a room rename). */
 export function roomLabel(register, item) {
-  if (!item.roomId) return item.section === "site" ? "Site / existing" : "Whole house";
+  if (!item.roomId) {
+    const named = (item.answer?.areaIds || []).map((id) => (register.meta.rooms || []).find((r) => r.id === id)?.name).filter(Boolean);
+    if (named.length) return named.join(", ");
+    return item.section === "site" ? "Site / existing" : "Whole house";
+  }
   return (register.meta.rooms || []).find((r) => r.id === item.roomId)?.name || item.room || "Whole house";
 }
 

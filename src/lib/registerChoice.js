@@ -275,6 +275,13 @@ export function chooseElement(cfg, answer, key, { id } = {}) {
   return finish({ ...next, state: isParked(w.state) || w.state === "not_applicable" ? w.state : restedState(cfg, next) });
 }
 
+/** Which rooms this record covers. The same record shows on Site & Existing and in each room named (Tab 27 B06). */
+export function toggleArea(cfg, answer, areaId) {
+  const w = working(cfg, answer);
+  const areaIds = w.areaIds || [];
+  return finish({ ...w, areaIds: areaIds.includes(areaId) ? areaIds.filter((x) => x !== areaId) : [...areaIds, areaId] });
+}
+
 export function setZoneWords(cfg, answer, words) {
   const w = working(cfg, answer);
   if (!w.zone) return normaliseAnswer(answer);
@@ -350,8 +357,14 @@ const TYPED_FIELDS = ["description", "product", "manufacturer", "model", "colour
  * Certainty can only move between "not discussed" and "preference": it never reaches an approval.
  */
 export function itemPatch(item, cfg, next, extra = {}) {
-  const patch = { answer: next, ...extra };
   const prev = item.answer;
+  // Protect and Match sit on the W-004 path but answer W-006, so the record keeps saying which question it stands in for.
+  const aliasBefore = topOption(cfg, prev)?.aliasOf, aliasAfter = topOption(cfg, next)?.aliasOf;
+  if (next && aliasBefore !== aliasAfter) {
+    const others = (next.sourceQuestionIds || []).filter((id) => id !== aliasBefore);
+    next = normaliseAnswer({ ...next, sourceQuestionIds: aliasAfter ? [...others, aliasAfter] : others });
+  }
+  const patch = { answer: next, ...extra };
   const wasNa = prev?.state === "not_applicable", isNa = next?.state === "not_applicable";
   const before = topOption(cfg, prev), after = topOption(cfg, next);
   if (cfg.dispositionUse !== "none") {
