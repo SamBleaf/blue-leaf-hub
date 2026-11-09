@@ -1,5 +1,7 @@
 # Master Register R04 — Release package & GO/NO-GO
 
+> **Status note, 2026-11-10.** This package is historical. PR #1 has since merged. The current package is `R05_RELEASE_PACKAGE.md`, and the current read-only check is `R05_PRODUCTION_PREFLIGHT.sql`.
+
 **Prepared:** 2026-11-08 · **Branch:** `master-register-r02` (PR #1, not merged) · **Target:** Monday 9 Nov pilot
 **Decision owner:** Sam. This document ends at a **STOP gate** — no merge, deploy, production migration, real
 client email or portal invite happens without your explicit approval of the specific gate.

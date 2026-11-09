@@ -1,5 +1,5 @@
 ---
-sop_version: 1.0
+sop_version: 1.1
 last_reviewed: 2026-08-30
 app_version: main
 screenshot_status: placeholders_only
@@ -122,6 +122,10 @@ You need:
 [insert screenshot: Consultants stage — full panel with a two-consultant roster and the summary counts line]
 
 ---
+
+### Received, Reviewed, In the set (added 2026-11-10)
+
+A document that has only been received isn't ready. Move it on by tapping its status: Received, then **Reviewed**, then **In the set**, then Issued. Before Reviewed the Hub asks for the revision or a document reference, under **Details**. Details also holds the due date and who has it. Tender readiness counts documents In the set or Issued, and none flagged for re-issue.
 
 ## 6. What happens next
 

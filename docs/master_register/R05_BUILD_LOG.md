@@ -756,3 +756,19 @@ The guided suite caught a regression while this was built: the row key included 
 | DB, BROWSER | `sandbox-sales-pathway` (new). Evidence `~/blh-register-evidence/r05/p6/` | 49 passed |
 | AUTOMATED, BROWSER, DB | `bash SP/run-tests.sh all`, 36 suites | 0 failing |
 | PRODUCTION | Not available | Not verified |
+
+## P7 — Integrated regression and pilot readiness (2026-11-10)
+
+**Outcome.** Twelve scenarios pass on the sandbox, and server and screen read the same gates. The release package, a read-only production check and the Playwright walkthrough are in the repo. Nothing is deployed.
+
+| Level | What | Result |
+|---|---|---|
+| DB through API | `sandbox-r05-scenarios` (new), scenarios 1 to 11 and gate parity | 63 passed |
+| BROWSER | `r05-walkthrough.spec.mjs` (new), scenario 12: 8 Sales stages and 6 Register steps at 1440 and 375, no sideways scroll, no page errors, one way forward. Screenshots `~/blh-register-evidence/r05/p7/`, read by eye | 28 passed |
+| AUTOMATED, BROWSER, DB | `bash SP/run-tests.sh all`, all loopback suites, on the final code | 37 suites, 2,445 checks, 0 failing |
+| Build | `vite build` in production mode through the sandbox config, so the repo `.env` isn't read | Passes. Says nothing about behaviour |
+| PRODUCTION | Not available | Not verified |
+
+**Corrections.** `02-02` test cases added in P6 were renumbered TC-12 and TC-13, because TC-10 and TC-11 already existed. Parity is checked for hard refusals and advisory warnings across five transitions. Scenario 1 creates its job at Tender, because that's where the real flow creates it. A Won lead with no job reports `reason: no job` and creates nothing.
+
+**Process note.** From P4b's review onward the build ran in the main session at the owner's request, so P4c to P7 did not get the separate independent review that P1 to P4b had.

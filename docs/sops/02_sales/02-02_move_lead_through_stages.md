@@ -300,7 +300,7 @@ Next review: 2027-01-02
 3. Use **Move ▾** on the pipeline card to move the lead to Concept. Expected: the move succeeds and the `stage_change` activity detail reads "Gate bypass — missing: …".
 - [ ] Pass  [ ] Fail
 
-**TC-10 — Plans supplied skips Concept and PTSA only**
+**TC-12 — Plans supplied skips Concept and PTSA only**
 1. On a qualified lead at Discovery tap **Record plans supplied** with no note. Expected: asks what was supplied, nothing changes.
 2. Add the note. Expected: the reason shows, the stepper has no Concept or PTSA, and the next stage is Consultants.
 3. Move to Consultants, then Tender. Expected: both pass, and Tender still lists any readiness item not met.
@@ -309,7 +309,7 @@ Next review: 2027-01-02
 6. Tap **Change this** and give a reason. Expected: the design stages return and the history shows both entries.
 - [ ] Pass  [ ] Fail
 
-**TC-11 — Received isn't ready**
+**TC-13 — Received isn't ready**
 1. On a consultant document at Received. Expected: the summary doesn't count it as ready.
 2. Tap the status with no revision or reference. Expected: it asks for one and doesn't move.
 3. Add a revision and move it to In the set. Expected: it counts as ready. Mark an upstream document changed. Expected: it is flagged for re-issue and no longer counts.

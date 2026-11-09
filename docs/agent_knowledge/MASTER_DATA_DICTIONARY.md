@@ -222,6 +222,7 @@ Condensed view (key columns):
 | `address` | Identity | Versioned | Sales | Lead form | ALL | Y | Y | N |
 | `client_name` | Identity | Versioned | Sales | Lead form | finance, portal, mktg | Y | Y | N |
 | `client_email` / `client_phone` | Relationships | Versioned | Sales | Lead form | portal, claims, variations | Y | Y | N |
+| `plans_supplied_at` (+ `_by`, `_note`) | Identity | Versioned | Sales (director) | Note on the lead | sales_pipeline | Y | Y | Y |
 | `project_type` | Facts | Versioned | Sales | Lead form (enum) | all + reporting | Y | Y | N |
 | `storeys` | Facts | Static | **Project Intelligence Extraction** | Architecturals/Eng | WHS, schedule, cost, RFQ, portal, mktg | N | Y(confirm) | Y |
 | `floor_area_m2` | Facts | Static | Extraction | Architecturals | cost, RFQ, fee proposal, carpentry | N | Y | Y |
