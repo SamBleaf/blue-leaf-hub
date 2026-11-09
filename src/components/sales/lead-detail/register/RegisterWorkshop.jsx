@@ -202,16 +202,16 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
             {reg && step === "context" && (
               <ContextStep reg={reg} context={context} lead={lead} stage={stage} actor={profile} patchLead={patchLead} setDeliveryModel={setDeliveryModel}
                 mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} upsertItem={store.upsertItem} updateItem={store.updateItem}
-                deleteItem={store.deleteItem} addItem={store.addItem} openRoom={(id) => { selectRoom(id); setStep("rooms"); }} saveState={save.state} />
+                deleteItem={store.deleteItem} addItem={store.addItem} openRoom={(id) => { selectRoom(id); setStep("rooms"); }} saveState={store.saveStateOf} />
             )}
             {reg && (step === "whole_house" || step === "site") && (
               <SectionStep section={step === "site" ? "site" : "project"} reg={reg} context={context} stage={stage} showDetail={showDetail} actor={profile}
-                upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} saveState={save.state} />
+                upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} saveState={store.saveStateOf} />
             )}
             {reg && step === "rooms" && (
               <RoomsStep reg={reg} context={context} stage={stage} showDetail={showDetail} activeRoomId={activeRoomId} setActiveRoomId={selectRoom}
                 actor={profile} upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
-                mutateMeta={store.mutateMeta} gotoContext={() => gotoStep("context")} onPortalItem={onPortalItem} saveState={save.state}
+                mutateMeta={store.mutateMeta} gotoContext={() => gotoStep("context")} onPortalItem={onPortalItem} saveState={store.saveStateOf}
                 onPrev={() => { const i = rooms.findIndex((r) => r.id === activeRoomId); if (i > 0) selectRoom(rooms[i - 1].id); }}
                 onSaveNext={async () => {
                   // Flush BEFORE advancing: on a 409/500 the save fails (flush -> false) and we stay on the
@@ -225,7 +225,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
             {reg && step === "register" && (
               <RegisterTable reg={reg} context={context} stage={stage} info={info} actor={profile} baseline={baseline}
                 updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
-                onPortalItems={(action, items) => store.portal(action, items)} onPortalItem={onPortalItem} saveState={save.state} />
+                onPortalItems={(action, items) => store.portal(action, items)} onPortalItem={onPortalItem} saveState={store.saveStateOf} />
             )}
             {reg && step === "tender" && (
               <TenderPanel lead={lead} reg={reg} updateItem={store.updateItem} flush={store.flush} />

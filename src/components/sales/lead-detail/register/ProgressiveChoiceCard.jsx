@@ -58,16 +58,17 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
   const qid = question?.id || item.id;
   const send = (patch) => { setTouched(true); onPatch(patch); };
   const write = (next, extra) => send(itemPatch(item, config, next, extra));
-  const settle = settleOptions(config, { showDetail: more });
+  const settle = settleOptions(config, { showDetail: more, current: item.disposition });
   const canDetail = config.nature === "choice" && item.itemKind === "selection";
   const hasMore = view.hidden || more || canDetail || settleOptions(config, { showDetail: true }).length > settle.length;
   const showNote = noteOpen || !!view.note;
-  const hasDetails = !!(item.product || item.manufacturer || item.model || item.colour);
-  const saveText = touched ? SAVE_TEXT[saveState] : "";
+  const details = [[item.manufacturer, item.product, item.model].filter(Boolean).join(" "), item.colour].filter(Boolean).join(" · ");
+  const hasDetails = !!details;
+  const saveText = touched ? SAVE_TEXT[saveState?.(item.id)] : "";
   // An older record can hold a disposition this question doesn't show. It stays readable and can be cleared.
   const legacyNa = item.disposition === "na" && !view.notApplicable;
-  const shownOnCard = item.disposition === "undecided" || item.disposition === "na" || settleOptions(config, { showDetail: true }).some(([d]) => d === item.disposition)
-    || ((config.dispositionUse === "answer" || config.dispositionUse === "element") && view.levels.some((l) => l.key === "root" && l.options.some((o) => o.on)));
+  const pillShows = !disabled && (item.disposition === "na" ? !view.ownNotApplicable : settleOptions(config, { showDetail: true }).some(([d]) => d === item.disposition));
+  const shownOnCard = item.disposition === "undecided" || (item.disposition === "na" && view.notApplicable) || pillShows || view.chosenDisposition === item.disposition;
 
   return (
     <div className="mt-1.5 space-y-1.5" data-testid={`card-${qid}`}>
@@ -143,6 +144,10 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
         </div>
       )}
 
+      {details && !(more && canDetail) && (
+        <p className="text-[11px] text-muted" data-testid={`details-${qid}`}>Product / finish: <span className="font-medium text-ink">{details}</span></p>
+      )}
+
       {view.notDecided && !disabled && (
         <div className="rounded border border-hairline bg-surface p-1.5" data-testid={`reasons-${qid}`}>
           <Row heading="Why? (optional)">
@@ -169,7 +174,7 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
 
       {!shownOnCard && (
         <p className="text-[11px] text-muted" data-testid={`earlier-status-${qid}`}>
-          Earlier work status: <span className="font-medium text-ink">{dispositionLabel(item.disposition)}</span>
+          {disabled ? "Work status" : "Earlier work status"}: <span className="font-medium text-ink">{dispositionLabel(item.disposition)}</span>
           {!disabled && <button type="button" className={`${textLink} ml-1`} onClick={() => send({ disposition: "undecided" })}>Clear</button>}
         </p>
       )}

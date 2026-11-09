@@ -19,10 +19,12 @@ import { DocumentError } from "./registerDocuments.mjs";
 import { OPS_READY_ITEMS } from "../../src/lib/constants.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, INCLUDED_DISPOSITIONS, dispositionLabel, categoryLabel,
-  QUESTION_LIBRARY_VERSION,
+  QUESTION_LIBRARY_VERSION, answerSummary, contractInclusionOf,
 } from "../../src/lib/register.js";
 
 const BUCKET = "lead-documents";
+/** Is there anything here to price? Typed words, or a scope or choice answered on the card. A recorded site fact is never priced. */
+const hasPricingContent = (i) => !!(i.description || i.product || (!["not_scope", "not_applicable"].includes(contractInclusionOf(i)) && answerSummary(i)));
 const row = (reg, i) => ({
   id: i.id, ref: refCode(i), area: roomLabel(reg, i), kind: i.itemKind, category: categoryLabel(i.category),
   description: i.description, disposition: dispositionLabel(i.disposition), certainty: i.certainty,
@@ -79,7 +81,7 @@ export async function tenderSummary(sb, leadId, { actor } = {}) {
     unresolved: items.filter((i) => outstandingReasons(i).length && inScope(i)).map((i) => ({ ...row(reg, i), reasons: outstandingReasons(i) })),
     specified: items.filter((i) => isClientSelection(i) && (i.product || i.model)).map((i) => row(reg, i)),
     needsPricing: items.filter((i) => inScope(i) && (i.itemKind === "selection" || i.itemKind === "scope") && i.pricingStatus !== "quoted_or_confirmed"
-      && !["client", "by_others"].includes(i.supplyBy) && (i.description || i.product)).map((i) => row(reg, i)),
+      && !["client", "by_others"].includes(i.supplyBy) && hasPricingContent(i)).map((i) => row(reg, i)),
     risks: items.filter((i) => i.technicalStatus === "needs_verification").map((i) => row(reg, i)),
     costRefs: await costReferences(sb, lead),
   };

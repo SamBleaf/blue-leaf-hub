@@ -127,6 +127,29 @@ try {
   ok("a status the card shows doesn't repeat", !/Earlier work status/.test(row({ question: q("W-017"), item: item("W-017", { disposition: "by_others" }) })) && !/Earlier work status/.test(row({ question: q("K-001"), item: item("K-001", { disposition: "new", answer: R.toggleOption(c("K-001"), null, ["new_kitchen"]) }) })));
   ok("an older answer on a question that sets the disposition is still shown", /Earlier work status: <span[^>]*>New/.test(row({ question: q("K-001"), item: item("K-001", { disposition: "new" }) })));
 
+  const pressedPill = (h, id) => new RegExp(`aria-pressed="true"[^>]*data-testid="${id}"`).test(h);
+  const deferred = row({ question: q("K-005"), item: item("K-005", { disposition: "deferred", answer: { v: 1, state: "recorded", nature: "choice", selected: [] } }) });
+  ok("a saved Deferred is on the card when it opens, with More detail still shut", pressedPill(deferred, "settle-K-005-deferred") && /aria-expanded="false"[^>]*data-testid="more-K-005"/.test(deferred));
+  ok("without bringing the other rarer pill with it", !/settle-K-005-retain/.test(deferred));
+  ok("nor a second copy of the status", !/earlier-status-K-005/.test(deferred));
+  const retained = row({ question: q("K-005"), item: item("K-005", { disposition: "retain" }) });
+  ok("so is a saved Existing to remain", pressedPill(retained, "settle-K-005-retain") && !/settle-K-005-deferred/.test(retained));
+  ok("a card with neither shows neither until asked", !/settle-K-005-(deferred|retain)/.test(row({ question: q("K-005"), item: item("K-005") })));
+  const suppliedRow = (more) => row({ question: q("K-008"), item: item("K-008", { supplyBy: "client", answer: R.toggleOption(c("K-008"), R.chooseElement(c("K-008"), null, "oven"), ["client"]), ...more }) });
+  ok("a status the chosen who-supplies option doesn't say stays readable and can be cleared", /Earlier work status: <span[^>]*>Included/.test(suppliedRow({ disposition: "included" })) && /Clear/.test(suppliedRow({ disposition: "included" })));
+  ok("with none recorded there is nothing extra", !/Earlier work status/.test(suppliedRow({})));
+  const finishRow = row({ question: q("K-004"), item: item("K-004", { colour: "Dulux Natural White", product: "Polytec", manufacturer: "Laminex", model: "M1" }) });
+  ok("finish and product recorded are on the card when it opens", /data-testid="details-K-004"/.test(finishRow) && /Laminex Polytec M1 · Dulux Natural White/.test(finishRow));
+  ok("no line when there are none", !/data-testid="details-K-004"/.test(row({ question: q("K-004"), item: item("K-004") })));
+  const noStair = row({ question: q("H-001"), item: item("H-001", { disposition: "na", answer: R.toggleOption(c("H-001"), null, ["no_stair"]) }) });
+  ok("H-001 No stair shows once: no second N/A to light up", pressedCount(noStair) === 1 && !/data-testid="na-H-001"/.test(noStair) && /Not applicable/.test(noStair) && !/earlier-status-H-001/.test(noStair));
+  ok("an older N/A on a question with its own N/A option stays readable", /Earlier work status: <span[^>]*>N\/A/.test(row({ question: q("H-001"), item: item("H-001", { disposition: "na" }) })));
+  const lockedSettled = row({ question: q("K-005"), item: item("K-005", { disposition: "by_others", sync: { table: "client_selections", locked: true, status: "approved" } }) });
+  ok("a locked card can't show the pills, so the status is written out, with no Clear", /Work status: <span[^>]*>By Others/.test(lockedSettled) && !/>Clear</.test(lockedSettled));
+  const wordsKept = R.chooseZone(c("W-017"), R.setZoneWords(c("W-017"), R.chooseZone(c("W-017"), null, "other_zone"), "Rear gable"), "main_floor");
+  const wordsRow = row({ question: q("W-017"), item: item("W-017", { answer: wordsKept }) });
+  ok("words kept from an Other zone are listed to check, with Remove and no Use again", /Check these/.test(wordsRow) && /Rear gable/.test(wordsRow) && />Remove</.test(wordsRow) && !/Use again/.test(wordsRow));
+
   section("Repeating");
   const none = rows({ question: q("W-010"), items: [], seed: seed("W-010") });
   ok("with nothing recorded there is one open row and nothing to add yet", /card-W-010/.test(none) && !/add-another/.test(none) && !/Add another/.test(none));

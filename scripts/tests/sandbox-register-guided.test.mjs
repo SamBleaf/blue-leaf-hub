@@ -531,6 +531,153 @@ async function main() {
   check("the version conflict merges: both changes kept", merged.answer.selected[0].optionId === "partial_retrofit" && merged.disposition === "alter" && merged.nextAction === "Measure the old kitchen", JSON.stringify({ a: merged.answer?.selected, n: merged.nextAction }));
   await rp.context().close();
 
+  const roomCards = async (pg, roomId, { reload = false } = {}) => {
+    if (reload) {
+      await pg.reload({ waitUntil: "domcontentloaded" });
+      await by(pg, "register-workshop").first().waitFor({ timeout: 45000 });
+      const again = by(pg, "continue-brief");
+      if (await again.count()) await again.first().click();
+    }
+    await by(pg, "step-rooms").click();
+    await by(pg, "room-picker").waitFor();
+    await pg.getByTestId("room-picker").filter({ visible: true }).selectOption(roomId);
+    await pg.waitForTimeout(500);
+    await pg.evaluate(() => document.querySelectorAll("details").forEach((d) => { d.open = true; }));
+  };
+  const ROOMS = { kitchen: { id: "room_kit", name: "Kitchen", roomType: "kitchen", level: "Ground", scope: "renovated", order: 0, sheet: "" }, stairs: { id: "room_st", name: "Stairs", roomType: "stairs", level: "Ground", scope: "renovated", order: 1, sheet: "" } };
+  const inKitchen = { roomId: "room_kit", room: "Kitchen", level: "Ground" };
+
+  section("A who-supplies tap and the status already on the record");
+  const sr = await mkLead();
+  const srBase = await getReg(sr);
+  const seeded = await api("PUT", `/api/register/leads/${sr}`, { meta: { ...srBase.meta, rooms: [ROOMS.kitchen, ROOMS.stairs] }, changes: [
+    { id: "ri_oven_inc", itemKind: "scope", category: "appliances", promptKey: "K-008", ...inKitchen, disposition: "included", description: "Oven from earlier meeting" },
+  ], deletes: [] });
+  check("an item with a recorded status to start from", seeded.status === 200, JSON.stringify(seeded.body).slice(0, 200));
+  const s2 = await newPage({ viewport: { width: 1440, height: 1000 } });
+  await open(s2, sr);
+  await roomCards(s2, "room_kit");
+  await by(s2, "card-K-008").first().waitFor();
+  await by(s2, "choice-K-008-client").first().click();
+  await saved(s2);
+  let sreg = await getReg(sr);
+  let oven = sreg.items.find((i) => i.id === "ri_oven_inc");
+  check("one tap on Client records who supplies and Included stands", oven.disposition === "included" && oven.supplyBy === "client" && oven.description === "Oven from earlier meeting", JSON.stringify({ d: oven.disposition, s: oven.supplyBy }));
+  check("the status stays readable on the card", /Included/.test(await by(s2, "earlier-status-K-008").first().innerText()));
+  await by(s2, "choice-K-008-client").first().click();
+  await saved(s2);
+  sreg = await getReg(sr);
+  oven = sreg.items.find((i) => i.id === "ri_oven_inc");
+  check("taking it back leaves the status too", oven.disposition === "included" && oven.supplyBy === "");
+
+  section("Deferred, Existing to remain, finish and product after a reload");
+  await by(s2, "more-K-005").first().click();
+  await by(s2, "settle-K-005-deferred").first().click();
+  await by(s2, "more-K-004").first().click();
+  await by(s2, "card-K-004").first().locator("input[aria-label='Finish or colour']").pressSequentially("Dulux Natural White");
+  await saved(s2);
+  await roomCards(s2, "room_kit", { reload: true });
+  await by(s2, "card-K-005").first().waitFor();
+  check("a saved Deferred is lit when the card opens", await pressed(by(s2, "settle-K-005-deferred").first()));
+  check("with + More detail still shut", (await by(s2, "more-K-005").first().getAttribute("aria-expanded")) === "false");
+  check("finish typed earlier is on the card", /Dulux Natural White/.test(await by(s2, "details-K-004").first().innerText()));
+  await s2.screenshot({ path: join(EVIDENCE, "deferred-and-finish-after-reload.png"), fullPage: false });
+  await by(s2, "settle-K-005-deferred").first().click();
+  await saved(s2);
+  sreg = await getReg(sr);
+  check("the second tap undoes it, as it says it will", byPrompt(sreg, "K-005")[0].disposition === "undecided" && (await by(s2, "settle-K-005-deferred").count()) === 0);
+
+  section("H-001 No stair is the one N/A");
+  await roomCards(s2, "room_st");
+  await by(s2, "choice-H-001-no_stair").first().click();
+  check("No stair reads as selected", await pressed(by(s2, "choice-H-001-no_stair").first()));
+  check("with no second N/A beside it", (await by(s2, "na-H-001").count()) === 0);
+  await saved(s2);
+  sreg = await getReg(sr);
+  let stair = byPrompt(sreg, "H-001")[0];
+  check("stored as not applicable", stair.disposition === "na" && stair.answer.state === "not_applicable" && stair.answer.selected[0].optionId === "no_stair");
+  check("the question is closed", outstandingReasons(makeItem(stair)).length === 0);
+  await by(s2, "choice-H-001-no_stair").first().click();
+  await saved(s2);
+  stair = byPrompt(await getReg(sr), "H-001")[0];
+  check("a second tap clears it", stair.disposition === "undecided" && !stair.answer?.selected?.length);
+  await s2.context().close();
+
+  section("The Tender view reads card answers");
+  const tl = await mkLead({ stage: "enquiry" });
+  await api("PATCH", `/api/sales/leads/${tl}`, { stage: "tender" });
+  const tlBase = await getReg(tl);
+  const ans = (id, label, nature, extra = {}) => ({ v: 1, state: "recorded", nature, configVersion: "tab21-answer-map-v1.0", selected: [{ optionId: id, path: [id], label }], ...extra });
+  const oem = (id, label) => ans(id, label, "scope", { element: { id: `el_${id}`, key: "oven", label: "Oven" } });
+  const scopeRow = { itemKind: "scope", category: "appliances", ...inKitchen, disposition: "undecided" };
+  const tput = await api("PUT", `/api/register/leads/${tl}`, { meta: { ...tlBase.meta, rooms: [ROOMS.kitchen] }, changes: [
+    { ...scopeRow, id: "ri_sup_bl", promptKey: "K-008", supplyBy: "blue_leaf", answer: oem("blue_leaf", "Blue Leaf") },
+    { ...scopeRow, id: "ri_sup_tr", promptKey: "W-023", supplyBy: "trade", answer: oem("trade", "Trade (via Blue Leaf)") },
+    { ...scopeRow, id: "ri_sup_cl", promptKey: "K-008", supplyBy: "client", answer: oem("client", "Client") },
+    { ...scopeRow, id: "ri_sup_ot", promptKey: "K-008", supplyBy: "by_others", answer: oem("others", "Others") },
+    { ...scopeRow, id: "ri_scope_inc", category: "external", promptKey: "O-001", disposition: "included", answer: ans("included", "Included work", "scope") },
+    { ...scopeRow, id: "ri_fact", category: "site", promptKey: "W-001", roomId: null, room: "", section: "site", answer: ans("steep_access", "Steep access", "fact") },
+    { itemKind: "selection", category: "joinery", promptKey: "K-005", ...inKitchen, certainty: "preference", id: "ri_card_sel", answer: ans("engineered_stone", "Engineered stone", "choice") },
+    { itemKind: "selection", category: "joinery", promptKey: "K-005", ...inKitchen, certainty: "preference", id: "ri_typed_sel", description: "Typed benchtop" },
+    { itemKind: "selection", category: "joinery", promptKey: "K-006", ...inKitchen, id: "ri_card_na", disposition: "na", answer: { v: 1, state: "not_applicable", nature: "choice", configVersion: "tab21-answer-map-v1.0", selected: [{ optionId: "tile", path: ["tile"], label: "Tile", stale: true }] } },
+  ], deletes: [] });
+  check("a set of card answers to read", tput.status === 200, JSON.stringify(tput.body).slice(0, 200));
+  const tv = (await api("GET", `/api/register/leads/${tl}/tender`)).body.tender;
+  const onList = (list, id) => tv[list].some((r) => r.id === id);
+  for (const id of ["ri_sup_bl", "ri_sup_tr"]) {
+    check(`${id}: Blue Leaf or Trade supply stays unresolved and needs pricing`, onList("unresolved", id) && onList("needsPricing", id) && !onList("byOthers", id) && !onList("included", id));
+  }
+  for (const id of ["ri_sup_cl", "ri_sup_ot"]) {
+    check(`${id}: client or others supply is by others and still unresolved, and isn't priced`, onList("byOthers", id) && onList("unresolved", id) && !onList("needsPricing", id));
+  }
+  check("every supply answer is on a list staff can see", ["ri_sup_bl", "ri_sup_tr", "ri_sup_cl", "ri_sup_ot"].every((id) => Object.keys(tv).some((k) => Array.isArray(tv[k]) && tv[k].some((r) => r.id === id))));
+  check("a choice answered on the card needs pricing, as a typed one does", onList("needsPricing", "ri_card_sel") && onList("needsPricing", "ri_typed_sel"));
+  check("so does scope answered on the card", onList("needsPricing", "ri_scope_inc") && onList("included", "ri_scope_inc"));
+  check("a recorded site fact is never priced or left undecided", !onList("needsPricing", "ri_fact") && !onList("unresolved", "ri_fact"));
+  check("N/A is not priced", !onList("needsPricing", "ri_card_na"));
+  const tp = await newPage({ viewport: { width: 1440, height: 1000 } });
+  await open(tp, tl);
+  await by(tp, "step-tender").click();
+  await tp.getByText("Needs pricing — link to the existing estimate").filter({ visible: true }).first().waitFor();
+  const tenderText = await by(tp, "register-workshop").first().innerText();
+  check("the estimator sees the card answer listed, with what was chosen", /Engineered stone/.test(tenderText) && /Included work/.test(tenderText));
+  check("and no claim that everything has a price source", !/reviewed price source/.test(tenderText));
+  await tp.screenshot({ path: join(EVIDENCE, "tender-card-answers.png"), fullPage: false });
+  await tp.context().close();
+
+  section("A refused save labels its own card only");
+  const lk = await mkLead();
+  const lkBase = await getReg(lk);
+  await api("PUT", `/api/register/leads/${lk}`, { meta: { ...lkBase.meta, rooms: [ROOMS.kitchen] }, changes: [], deletes: [] });
+  await api("PATCH", `/api/sales/leads/${lk}`, { stage: "fee_proposal" });
+  await api("POST", `/api/sales/leads/${lk}/convert-to-job`);
+  await api("POST", `/api/sales/leads/${lk}/preconstruction-portal`);
+  const lp2 = await newPage({ viewport: { width: 1440, height: 1000 } });
+  await open(lp2, lk);
+  await roomCards(lp2, "room_kit");
+  await by(lp2, "card-K-004").first().waitFor();
+  await by(lp2, "choice-K-004-flat_panel").first().click();
+  await saved(lp2);
+  let lkReg = await getReg(lk);
+  let cab = byPrompt(lkReg, "K-004")[0];
+  await api("PUT", `/api/register/leads/${lk}`, { changes: [{ ...cab, product: "Test Product", model: "M1", certainty: "proposed" }], deletes: [] });
+  lkReg = await getReg(lk);
+  cab = lkReg.items.find((i) => i.id === cab.id);
+  const issued = await api("POST", `/api/register/leads/${lk}/portal/issue`, { items: [{ id: cab.id, sync: cab.sync }] });
+  check("one selection is issued to the portal", issued.status === 200, JSON.stringify(issued.body).slice(0, 200));
+  await roomCards(lp2, "room_kit", { reload: true });
+  await by(lp2, "card-K-005").first().waitFor();
+  await by(lp2, "card-K-005").first().locator("button[aria-pressed]").first().click();
+  await saved(lp2);
+  check("the card that saved says Saved", /Saved/.test(await by(lp2, "summary-K-005").first().innerText()));
+  await by(lp2, "na-K-004").first().click();
+  await by(lp2, "summary-K-004").first().filter({ hasText: "Not saved" }).waitFor({ timeout: 15000 });
+  const k5Text = await by(lp2, "summary-K-005").first().innerText();
+  check("the refused card says Not saved, and the other still says Saved", /Saved/.test(k5Text) && !/Not saved/.test(k5Text), k5Text);
+  lkReg = await getReg(lk);
+  check("and the server holds what that card says", byPrompt(lkReg, "K-005")[0].answer.selected.length === 1 && byPrompt(lkReg, "K-004")[0].disposition !== "na");
+  await lp2.context().close();
+
   check("no script errors on any page", pageErrors.length === 0, pageErrors.join(" | "));
 }
 

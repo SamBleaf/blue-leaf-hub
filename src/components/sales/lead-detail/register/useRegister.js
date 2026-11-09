@@ -84,6 +84,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
   const baseRef = useRef({ meta: null, items: new Map() });
   const dirty = useRef(new Map());          // id → edit sequence
   const deleted = useRef(new Map());        // id → item (as last loaded)
+  const refused = useRef(new Map());        // id → "rejected" | "conflict", until that item is edited again
   const metaSeq = useRef(0);
   const metaSent = useRef(0);
   const metaSaved = useRef(0);
@@ -113,7 +114,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
       return null;
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); refused.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
     setStatus({ loading: false, error: null });
     setSave({ state: "idle", at: null, message: null });
@@ -134,7 +135,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
   const commit = useCallback((next, touchedIds = [], metaTouched = false) => {
     outcome.current = null;   // a fresh user edit starts a new save cycle — drop any latched rejection/conflict badge
     regRef.current = next; setReg(next);
-    for (const id of touchedIds) dirty.current.set(id, ++seq.current);
+    for (const id of touchedIds) { dirty.current.set(id, ++seq.current); refused.current.delete(id); }
     if (metaTouched) metaSeq.current += 1;
     schedule();
   }, [schedule]);
@@ -288,13 +289,13 @@ export function useRegister(leadId, { enabled = true } = {}) {
       if (!dirty.current.has(t.id) || !mine) { out.push(t); continue; }
       const reason = byReason.get(t.id);
       if (reason && GUARD_REASONS[reason]) {
-        out.push(t); dirty.current.delete(t.id); guardRejected = true;
+        out.push(t); dirty.current.delete(t.id); guardRejected = true; refused.current.set(t.id, "rejected");
         notes.push(`“${itemTitle(mine)}” ${GUARD_REASONS[reason]}.`);
         continue;
       }
       const { item, conflicts: fields } = mergeItem(baseItems.get(t.id), mine, t);
       out.push(item);
-      if (fields.length) { versionConflict = true; notes.push(`“${itemTitle(mine)}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`); }
+      if (fields.length) { versionConflict = true; refused.current.set(t.id, "conflict"); notes.push(`“${itemTitle(mine)}” was also changed elsewhere (${fields.join(", ")}) — the latest value is shown.`); }
     }
     for (const mine of local.items) {
       if (theirs.has(mine.id)) continue;
@@ -362,8 +363,11 @@ export function useRegister(leadId, { enabled = true } = {}) {
     return { ok: true, held: r.data?.held || [] };
   }, [leadId, adopt]);
 
+  /** How one item's own save went. A refusal on another item says nothing about this one. */
+  const saveStateOf = (id) => refused.current.get(id) || (dirty.current.has(id) ? (save.state === "error" ? "error" : "dirty") : "saved");
+
   return {
-    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices,
+    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices, saveStateOf,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
     reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
   };

@@ -63,7 +63,7 @@ export default function TenderPanel({ lead, reg, updateItem, flush }) {
       </Section>
       <Section title="Products specified" count={t.specified.length}><Rows rows={t.specified} empty="No specific products yet." /></Section>
       <Section title="Needs pricing — link to the existing estimate" count={t.needsPricing.length} defaultOpen={t.needsPricing.length > 0}>
-        <Rows rows={t.needsPricing} empty="Every in-scope item has a reviewed price source." extra={linkPicker} />
+        <Rows rows={t.needsPricing} empty="No in-scope item is waiting for a price source." extra={linkPicker} />
       </Section>
       <Section title="Technical risks to verify" count={t.risks.length} defaultOpen={false}><Rows rows={t.risks} empty="No open technical items." /></Section>
       <p className="text-[10px] text-muted">Links point at the existing estimate; prices stay in Buildxact / the fee proposal. “Quoted &amp; reviewed” means a builder-reviewed cost source — not a fixed contract amount.</p>
