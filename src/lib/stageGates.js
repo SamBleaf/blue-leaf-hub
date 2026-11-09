@@ -119,7 +119,8 @@ const LEGACY_STAGE_POSITION = { accepted: "fee_proposal" };
 
 /**
  * Which Sales stages apply to a lead. Derived, never stored — `delivery_model` plays no part in it.
- * Architect Tender leads enter at Tender (Concept and PTSA are intentionally skipped, see mig 216).
+ * Architect Tender leads enter at Tender: Concept and PTSA are intentionally skipped (mig 216). Discovery
+ * still applies, like every pathway, so a move that crosses it has to meet its hard gate.
  */
 export function resolveEngagementPathway(lead) {
   return lead?.lead_type === "architect_tender" ? "architect_tender" : "design_build";
@@ -127,8 +128,16 @@ export function resolveEngagementPathway(lead) {
 
 const STAGES_NOT_APPLICABLE = {
   design_build: [],
-  architect_tender: ["discovery", "winning_offer", "fee_proposal"],
+  architect_tender: ["winning_offer", "fee_proposal"],
 };
+
+/**
+ * Architect Tender leads normally have no qualifying scorecard. One moved back before Discovery has to meet
+ * that gate to come forward again, so it gets the scorecard while it sits there.
+ */
+export function showsQualifyingScorecard(lead) {
+  return resolveEngagementPathway(lead) !== "architect_tender" || STAGE_ORDER.indexOf(lead?.stage) < STAGE_ORDER.indexOf("discovery");
+}
 
 /**
  * The stages a move into `to` passes through, target included, in order. Empty for a move that is not

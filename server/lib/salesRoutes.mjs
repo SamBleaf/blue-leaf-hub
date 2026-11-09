@@ -71,6 +71,8 @@ const SERVER_OWNED_LEAD_FIELDS = [
   "concept_fee_override_at", "concept_fee_override_by",
   "client_folder_path", "client_folder_link", "client_folder_created_at",
   "fit_set_by", "fit_set_at",
+  "schedule_signed_off_at", "schedule_signed_off_by", // POST …/schedule/sign-off
+  "delivery_model", // PUT /api/register/leads/:id/facts (the facts service owns it once there is a job)
 ];
 const CONTRACT_SIGNED_ONLY_VIA_UPLOAD = "A building contract can only be marked signed by uploading the signed PDF (POST /api/sales/leads/:id/contract/mark-signed).";
 // Set legitimately when a lead is created: `lead_type` by the Architect Tender intake, `is_test` by a director.
@@ -79,7 +81,7 @@ const SERVER_OWNED_ON_CREATE = new Set(["lead_type", "is_test"]);
 /** The message to refuse a lead write that names a server-owned field or claims a signed state, else null. */
 function serverOwnedFieldRejection(body, { creating = false } = {}) {
   if (body.contract_status === "signed") return CONTRACT_SIGNED_ONLY_VIA_UPLOAD;
-  if ("contract_signed_date" in body) return CONTRACT_SIGNED_ONLY_VIA_UPLOAD;
+  if ("contract_signed_date" in body || body.tender_substatus === "contract_signed") return CONTRACT_SIGNED_ONLY_VIA_UPLOAD;
   const named = SERVER_OWNED_LEAD_FIELDS.filter((f) => f in body && !(creating && SERVER_OWNED_ON_CREATE.has(f)));
   return named.length ? `These details are set by the Hub and can't be edited here: ${named.join(", ")}. Nothing was saved.` : null;
 }
@@ -470,8 +472,9 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
  *     value if already set, else the SINGLE accepted job-keyed fee proposal (verified exactly one).
  *  3. Propagate that value to the project row so Finance/Portal read the right number.
  * The estimating `job` (created at PTSA-signed) becomes a live project ONLY here — the hard boundary.
- * Non-fatal throughout: a failure never blocks the win (the stage move already succeeded). The result says
- * what actually happened, and POST …/won/retry-handoff re-runs this if it did not finish.
+ * Non-fatal throughout: a failure never blocks the win (the stage move already succeeded). `ok` means the
+ * project really is in Operations, and POST …/won/retry-handoff re-runs this if it did not finish.
+ * An archived or lost job is never flipped: it was closed on purpose, and only its own audited path reopens it.
  */
 export async function finalizeWonJob(sb, lead) {
   if (!sb || !lead?.job_id) return { ok: false, reason: "no job" };
@@ -497,10 +500,22 @@ export async function finalizeWonJob(sb, lead) {
       }
     }
 
-    // 1. Flip the job to won (→ trigger 096 creates the project) + stamp the value.
+    // 1. Flip the job to won (→ trigger 096 creates the project) + stamp the value. The trigger fires on any
+    //    write of status, so writing "won" again also restores a project that has gone missing, with no
+    //    second copy of its insert here. Its NOT EXISTS keeps it to one project per job.
     const jobUpdate = { status: "won" };
     if (value != null) { jobUpdate.original_contract_value = value; jobUpdate.contract_value = value; }
-    if (job.status !== "won" || (value != null && job.original_contract_value == null)) {
+    const { data: existingProjects } = await sb.from("projects").select("id").eq("job_id", jobId).limit(1);
+    const hasProject = !!existingProjects?.length;
+    const jobClosed = job.status === "archived" || job.status === "lost";
+    if (jobClosed && !hasProject) {
+      const state = job.status === "lost" ? "marked lost" : "archived";
+      return {
+        ok: false, reason: "job closed", jobId, jobStatus: job.status,
+        message: `The linked job is ${state} in the Tender Manager, so the Hub left it alone and no project went to Operations. The job has to be restored to Tendering first, then re-run the hand-off.`,
+      };
+    }
+    if (!jobClosed && (job.status !== "won" || !hasProject || (value != null && job.original_contract_value == null))) {
       const { error: jobErr } = await sb.from("jobs").update(jobUpdate).eq("id", jobId);
       if (jobErr) {
         console.warn("[finalize-won] job update:", jobErr.message);
@@ -519,15 +534,24 @@ export async function finalizeWonJob(sb, lead) {
     // 4. CV-3b: a pre-construction-portal project graduates to a live Ops project on win. Trigger 096
     //    already skips creating a duplicate (an existing project for the job), so flipping the flag off
     //    turns the SAME row into the live project — the portal, comms + client login all carry over.
-    try { await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true); }
-    catch { /* pre-migration-199 — column absent, non-fatal */ }
+    //    The result is read back at the end, so a failed flip can't pass for a finished hand-off.
+    try {
+      const { error: graduateErr } = await sb.from("projects").update({ is_preconstruction: false }).eq("job_id", jobId).eq("is_preconstruction", true);
+      if (graduateErr) console.warn("[finalize-won] graduate project:", graduateErr.message); // expected only pre-migration-199
+    } catch (e) { console.warn("[finalize-won] graduate project:", e?.message || e); }
 
     // 4.5 Master Register → project: stage the room-by-room brief into the canonical stores (mig 212).
     //     Selections land in client_selections as client_visible=false (hidden — no client action, no
     //     notification); scope/works records land in room_scope_items. Idempotent + best-effort.
+    //     A failure doesn't hold up the hand-off (the project is in Operations and the Register retries
+    //     promotion next time it opens), but it is reported rather than swallowed.
+    let registerPromoted;
     if (registerEnabledFor(lead.id)) {
-      try { await promoteRegisterToProject(sb, { leadId: lead.id }); }
-      catch (e) { console.warn("[finalize-won] register promotion:", e?.message || e); }
+      let promotion;
+      try { promotion = await promoteRegisterToProject(sb, { leadId: lead.id }); }
+      catch (e) { promotion = { ok: false, reason: e?.message || String(e) }; }
+      registerPromoted = !!promotion?.ok;
+      if (!registerPromoted) console.warn("[finalize-won] register promotion:", promotion?.reason || "failed");
     }
 
     // 5. Handover: carry consultant correspondence (files consultants emailed in, filed per-consultant
@@ -535,9 +559,11 @@ export async function finalizeWonJob(sb, lead) {
     try { await carryConsultantCorrespondenceToJob({ sb, leadId: lead.id, jobId }); }
     catch (e) { console.warn("[finalize-won] consultant correspondence carry:", e?.message || e); }
 
-    const { data: projects } = await sb.from("projects").select("id").eq("job_id", jobId).limit(1);
+    // select("*"): is_preconstruction is absent before migration 199, and absent means already live.
+    const { data: projects } = await sb.from("projects").select("*").eq("job_id", jobId).limit(1);
     if (!projects?.length) return { ok: false, reason: "project missing", jobId };
-    return { ok: true, jobId, projectId: projects[0].id, contractValue: value };
+    if (projects[0].is_preconstruction === true) return { ok: false, reason: "project not moved to Operations", jobId, projectId: projects[0].id };
+    return { ok: true, jobId, projectId: projects[0].id, contractValue: value, registerPromoted };
   } catch (e) {
     console.warn("[finalize-won]", e?.message || e);
     return { ok: false, error: e?.message || String(e) };
@@ -1519,8 +1545,13 @@ export function registerSalesRoutes(app) {
     // A new lead can't arrive already won or signed: those states only come from their own writers.
     const ownedRejection = serverOwnedFieldRejection(body, { creating: true });
     if (ownedRejection) return err(res, 400, ownedRejection, "SERVER_OWNED_FIELD");
-    if (body.ptsa_status === "signed" || body.concept_agreement_status === "accepted" || (body.stage === "won" && !body.is_test)) {
-      return err(res, 400, "A new lead can't start as won, signed or accepted. Create it, then record those steps.", "SERVER_OWNED_FIELD");
+    if (body.ptsa_status === "signed" || body.concept_agreement_status === "accepted") {
+      return err(res, 400, "A new lead can't start as signed or accepted. Create it, then record those steps.", "SERVER_OWNED_FIELD");
+    }
+    // Creating a lead further along would skip the gates. Only test leads and the Architect Tender intake start later.
+    const startStage = body.stage || "enquiry";
+    if (startStage !== "enquiry" && !body.is_test && !(body.lead_type === "architect_tender" && startStage === "tender")) {
+      return err(res, 400, "A new lead starts at Enquiry. Create it, then move it through the pipeline.", "SERVER_OWNED_FIELD");
     }
     if (body.first_name) body.first_name = body.first_name.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (body.last_name) body.last_name = body.last_name.trim().replace(/\b\w/g, c => c.toUpperCase());
@@ -1689,7 +1720,7 @@ export function registerSalesRoutes(app) {
       await logLeadActivity(sb, req.params.id, {
         activity_type: "note",
         summary: `Building contract changed from signed to ${body.contract_status || "no status"}`,
-        detail: `Changed by ${req.caller?.email || "unknown"}. The signed PDF stays in Documents.`,
+        detail: `Changed by ${req.caller?.email || "unknown"}. Signed date was ${current.contract_signed_date || "not recorded"}. The signed PDF stays in Documents.`,
       });
     }
     // Batch 1C — on win, snapshot the realised value onto enquiry_attribution so the ROI
@@ -2017,7 +2048,8 @@ export function registerSalesRoutes(app) {
     }
   });
 
-  // ── Mark a building contract SIGNED (sole writer of the signed state) ─────────
+  // ── Mark a building contract SIGNED (the only Hub route that writes the signed state) ─────────
+  // Direct writes with a browser token are refused at the database by mig 217.
   // The file comes first: (1) store the PDF, (2) record the lead_documents evidence row, (3) only then
   // stamp the lead. If a later step fails the earlier ones are undone, so there is never a "signed"
   // lead with no file. Also how evidence is attached to a historical signed lead (status and date stay).
@@ -2033,7 +2065,8 @@ export function registerSalesRoutes(app) {
     if (!buffer) return err(res, 400, "That file isn't a complete PDF. Upload the client-signed contract as a PDF.", "NOT_A_PDF");
 
     let signedDateStr = new Date().toISOString().slice(0, 10);
-    if (signedDate !== undefined && signedDate !== null && signedDate !== "") {
+    const dateGiven = signedDate !== undefined && signedDate !== null && signedDate !== "";
+    if (dateGiven) {
       const parsed = /^\d{4}-\d{2}-\d{2}$/.test(signedDate) ? new Date(`${signedDate}T00:00:00Z`) : null;
       if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== signedDate) return err(res, 400, "The date signed isn't a valid date.");
       // One day of slack: the server clock is UTC and Adelaide is ahead of it.
@@ -2074,10 +2107,11 @@ export function registerSalesRoutes(app) {
         return err(res, 400, translateDbError(docErr));
       }
 
-      // (3) Stamp the lead. A historical signed lead keeps its original date.
+      // (3) Stamp the lead. A historical signed lead keeps its original date, and one that never had a date
+      // only gets the date staff actually gave: today's upload date isn't the day the client signed.
       const { data: updated, error: stampErr } = await sb.from("leads").update({
         contract_status: "signed",
-        contract_signed_date: alreadySigned && lead.contract_signed_date ? lead.contract_signed_date : signedDateStr,
+        contract_signed_date: alreadySigned ? (lead.contract_signed_date || (dateGiven ? signedDateStr : null)) : signedDateStr,
         updated_at: new Date().toISOString(),
         last_activity_at: new Date().toISOString(),
       }).eq("id", leadId).select().single();
@@ -2111,7 +2145,12 @@ export function registerSalesRoutes(app) {
     if (!lead.job_id) return err(res, 409, "Create the job from this lead first.", "NO_JOB");
     const handoff = await finalizeWonJob(sb, lead);
     if (lead.won_substatus == null && handoff.ok) await sb.from("leads").update({ won_substatus: "contract_secured" }).eq("id", lead.id);
-    await logLeadActivity(sb, lead.id, { activity_type: "note", summary: handoff.ok ? "Operations hand-off re-run" : "Operations hand-off re-run did not finish", detail: `Run by ${req.caller?.email || "unknown"}` });
+    await logLeadActivity(sb, lead.id, {
+      activity_type: "note",
+      summary: handoff.ok ? "Operations hand-off re-run" : "Operations hand-off re-run did not finish",
+      detail: `Run by ${req.caller?.email || "unknown"}${handoff.ok ? "" : ` (${handoff.reason || "error"})`}${handoff.registerPromoted === false ? ". Register brief not on the project yet; it retries when the Register opens" : ""}`,
+    });
+    if (handoff.reason === "job closed") return err(res, 409, handoff.message, "JOB_CLOSED");
     if (!handoff.ok) return err(res, 502, "The hand-off didn't finish. Nothing was duplicated. Please try again.", "HANDOFF_INCOMPLETE");
     return ok(res, { handoff });
   });

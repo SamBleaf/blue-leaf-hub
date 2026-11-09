@@ -3,7 +3,8 @@
  *
  * Covers: same-request forged gates, forward jumps over a hard gate, contract evidence (the only way to
  * "signed" is a real PDF), the blanket-PATCH deny-list, role enforcement, stage-transition concurrency,
- * activity logging only after a successful move, and Won/job idempotency and recovery.
+ * activity logging only after a successful move, Won/job idempotency and recovery, and the database guard
+ * (mig 217) that refuses the same writes when they come straight from a browser token.
  *
  * Failure injection uses short-lived triggers named __si_* in the sandbox database, dropped in `finally`.
  * Refuses any non-loopback URL. Keys come only from ~/.blh-register-sandbox/. Credentials are never printed.
@@ -25,6 +26,8 @@ const secrets = JSON.parse(readFileSync(join(SB_DIR, "secrets.json"), "utf8"));
 const creds = JSON.parse(readFileSync(join(SB_DIR, "credentials.local.json"), "utf8"));
 const svc = createClient(GW, secrets.service_key, { auth: { persistSession: false } });
 const anon = () => createClient(GW, secrets.anon_key, { auth: { persistSession: false } });
+// The same anon key + user JWT a browser holds, straight to PostgREST with no Hub API in between.
+const asBrowser = (tok) => createClient(GW, secrets.anon_key, { auth: { persistSession: false }, global: { headers: { Authorization: `Bearer ${tok}` } } });
 
 const PSQL = `${process.env.PG_BIN || "/opt/homebrew/bin"}/psql`;
 const sql = (q) => execFileSync(PSQL, ["-h", join(SB_DIR, "run"), "-p", "54329", "-U", "postgres", "-d", "blh", "-qAt", "-v", "ON_ERROR_STOP=1", "-c", q], { encoding: "utf8" });
@@ -34,6 +37,9 @@ const PDF = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntraile
 const pdf = () => PDF.toString("base64");
 const NOT_A_PDF = Buffer.from("PK\u0003\u0004 this is a zipped Word document, not a PDF").toString("base64");
 const TRUNCATED_PDF = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog").toString("base64");
+const CUT_AFTER_EARLIER_EOF = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer<<>>\n%%EOF\n2 0 obj\n<< /Sig /Adobe.PPKLite /Contents <0a0b").toString("base64");
+const TEXT_WITH_MARKERS = Buffer.from("these are my notes. %PDF- is not a real header. %%EOF").toString("base64");
+const JPEG_WITH_MARKERS = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(" %PDF-1.4 xx %%EOF")]).toString("base64");
 const NOW = new Date().toISOString();
 const QUALIFIED = { qualify_budget: 2, qualify_timeframe: 2, qualify_site: 2, qualify_decision_maker: 2, discovery_meeting_booked_at: NOW };
 const PAST_CONCEPT = { ...QUALIFIED, concept_agreement_status: "accepted" };
@@ -137,6 +143,9 @@ async function main() {
     check("Architect Tender: Consultants ↔ Tender still moves (existing behaviour)", back.ok && fwd.ok, JSON.stringify(fwd.body));
     const archWon = await patchLead(arch, { stage: "won" });
     check("…and Architect Tender still needs the Won gate", archWon.status === 422 && /signed/.test(archWon.body?.error || ""), JSON.stringify(archWon.body));
+    const archEarly = await mkLead("enquiry", { lead_type: "architect_tender" });
+    const archJump = await patchLead(archEarly, { stage: "consultants" });
+    check("…and a jump over Discovery meets the Discovery gate (D6)", archJump.status === 422 && /Discovery/.test(archJump.body?.error || "") && (await lead(archEarly)).stage === "enquiry", JSON.stringify(archJump.body));
 
     const bad = await patchLead(a, { stage: "not_a_stage" });
     check("an unknown stage is refused", bad.status === 400 && (await lead(a)).stage === "enquiry", JSON.stringify(bad.body));
@@ -173,6 +182,10 @@ async function main() {
     check("a non-PDF is rejected", notPdf.status === 400 && notPdf.body?.code === "NOT_A_PDF", JSON.stringify(notPdf.body));
     const cut = await markSigned(id, admin, { signedPdfBase64: TRUNCATED_PDF });
     check("a truncated PDF is rejected", cut.status === 400 && cut.body?.code === "NOT_A_PDF", JSON.stringify(cut.body));
+    for (const [what, file] of [["a PDF cut off after an earlier %%EOF", CUT_AFTER_EARLIER_EOF], ["plain text holding both markers", TEXT_WITH_MARKERS], ["JPEG bytes holding both markers", JPEG_WITH_MARKERS]]) {
+      const r = await markSigned(id, admin, { signedPdfBase64: file });
+      check(`${what} is rejected`, r.status === 400 && r.body?.code === "NOT_A_PDF", JSON.stringify(r.body));
+    }
     const badDate = await markSigned(id, admin, { signedDate: "2026-13-45" });
     const future = await markSigned(id, admin, { signedDate: "2099-01-01" });
     check("an invalid or future signed date is rejected", badDate.status === 400 && future.status === 400, JSON.stringify(future.body));
@@ -209,6 +222,13 @@ async function main() {
     check("…and that is logged", (await notes(id)).some((n) => /PDF attached/.test(n.summary)));
     const won = await patchLead(id, { stage: "won" });
     check("Won then passes", won.ok, JSON.stringify(won.body));
+
+    const undated = await mkLead("tender", { ...PAST_CONCEPT, contract_status: "signed", contract_signed_date: null });
+    const noDate = await markSigned(undated);
+    check("attaching a PDF with no date leaves an unknown signed date unknown", noDate.ok && (await lead(undated)).contract_signed_date === null, (await lead(undated)).contract_signed_date);
+    const undated2 = await mkLead("tender", { ...PAST_CONCEPT, contract_status: "signed", contract_signed_date: null });
+    const withDate = await markSigned(undated2, admin, { signedDate: "2025-06-15" });
+    check("…and records the date when staff give one", withDate.ok && (await lead(undated2)).contract_signed_date === "2025-06-15", (await lead(undated2)).contract_signed_date);
   }
 
   section("One door for contract evidence");
@@ -236,14 +256,73 @@ async function main() {
       const r = await patchLead(id, body);
       check(`PATCH refuses ${Object.keys(body)[0]}`, r.status === 400 && r.body?.code === "SERVER_OWNED_FIELD", JSON.stringify(r.body));
     }
+    for (const body of [{ schedule_signed_off_at: NOW }, { schedule_signed_off_by: createdUsers[0] }, { delivery_model: "build_only" }]) {
+      const r = await patchLead(id, body);
+      check(`PATCH refuses ${Object.keys(body)[0]}`, r.status === 400 && r.body?.code === "SERVER_OWNED_FIELD", JSON.stringify(r.body));
+    }
+    const ticked = await patchLead(id, { tender_substatus: "contract_signed" });
+    check("PATCH can't tick Contract signed on the progress strip", ticked.status === 400 && /signed PDF/.test(ticked.body?.error || ""), JSON.stringify(ticked.body));
     const row = await lead(id);
-    check("…and none of them were stored", !row.is_test && !row.won_at && !row.job_id && row.lead_type !== "architect_tender");
+    check("…and none of them were stored", !row.is_test && !row.won_at && !row.job_id && row.lead_type !== "architect_tender" && !row.schedule_signed_off_at && row.delivery_model !== "build_only" && row.tender_substatus !== "contract_signed");
+    const facts = await api(admin, "PUT", `/api/register/leads/${id}/facts`, { deliveryModel: "build_only" });
+    check("delivery_model still saves through its own writer", facts.ok && (await lead(id)).delivery_model === "build_only", JSON.stringify(facts.body));
     const ok = await patchLead(id, { contract_status: "sent", contract_sent_date: "2026-10-01", tender_substatus: "contract_sent" });
     check("fields the UI really writes still save", ok.ok && ok.body.lead.contract_status === "sent", JSON.stringify(ok.body));
 
     const signedAtCreate = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} x`, lead_source: "referral", contract_status: "signed" });
     const wonAtCreate = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} x`, lead_source: "referral", stage: "won" });
     check("a new lead can't be created signed or won", signedAtCreate.status === 400 && wonAtCreate.status === 400, JSON.stringify(wonAtCreate.body));
+    const later = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} later`, lead_source: "referral", stage: "tender" });
+    check("a standard lead can't be created past Enquiry", later.status === 400 && later.body?.code === "SERVER_OWNED_FIELD", JSON.stringify(later.body));
+    const archConsultants = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} arch-early`, lead_source: "referral", lead_type: "architect_tender", stage: "consultants" });
+    check("an Architect Tender can only be created at Tender", archConsultants.status === 400, JSON.stringify(archConsultants.body));
+    const archIntake = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} arch`, site_address: addressFor(), lead_source: "referral", lead_type: "architect_tender", stage: "tender" });
+    check("the Architect Tender intake still creates at Tender", archIntake.ok && archIntake.body.lead.stage === "tender", JSON.stringify(archIntake.body));
+    const testLater = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} test-later`, site_address: addressFor(), lead_source: "referral", is_test: true, stage: "consultants" });
+    check("a test lead can still start anywhere", testLater.ok && testLater.body.lead.stage === "consultants", JSON.stringify(testLater.body));
+    const plain = await api(admin, "POST", "/api/sales/leads", { first_name: "X", name: `${MARK} plain`, lead_source: "referral" });
+    check("a normal lead starts at Enquiry", plain.ok && plain.body.lead.stage === "enquiry", JSON.stringify(plain.body));
+  }
+
+  section("Direct database writes with a browser token (mig 217)");
+  {
+    const id = await mkLead("tender", PAST_CONCEPT);
+    for (const [who, tok] of [["employee", employee], ["director", admin]]) {
+      const db = asBrowser(tok);
+      for (const change of [{ stage: "won" }, { contract_status: "signed" }, { contract_signed_date: "2026-01-01" }, { ptsa_status: "signed" }, { concept_agreement_status: null }, { lead_type: "architect_tender" }, { is_test: true }]) {
+        const r = await db.from("leads").update(change).eq("id", id).select("id");
+        check(`${who} token can't change ${Object.keys(change)[0]} directly`, !!r.error && !r.data?.length, JSON.stringify(r.data));
+      }
+    }
+    const row = await lead(id);
+    check("…the lead is exactly as it was", row.stage === "tender" && !row.contract_status && !row.contract_signed_date && row.ptsa_status !== "signed" && row.concept_agreement_status === "accepted" && row.lead_type !== "architect_tender" && !row.is_test, JSON.stringify(row.stage));
+
+    const db = asBrowser(employee);
+    const forged = await db.from("lead_documents").insert({ lead_id: id, filename: "fake.pdf", storage_path: "does/not/exist.pdf", document_type: "construction_contract" }).select("id");
+    check("a browser token can't create contract evidence", !!forged.error && (await evidenceRows(id)).length === 0 && (await getLead(id)).contract_evidence_present === false, JSON.stringify(forged.data));
+    const won = await patchLead(id, { stage: "won" });
+    check("…and the forged attempt doesn't help a lead reach Won", won.status === 422 && (await lead(id)).stage === "tender", JSON.stringify(won.body));
+
+    const ordinary = await db.from("lead_documents").insert({ lead_id: id, filename: "ordinary.pdf", storage_path: `leads/${id}/ordinary.pdf`, document_type: "other" }).select("id").single();
+    check("other document types are not affected", !ordinary.error, ordinary.error?.message);
+    const promote = await db.from("lead_documents").update({ document_type: "construction_contract" }).eq("id", ordinary.data?.id).select("id");
+    check("an ordinary document can't be relabelled as the contract", !!promote.error && (await evidenceRows(id)).length === 0, JSON.stringify(promote.data));
+
+    await markSigned(id);
+    const [real] = await evidenceRows(id);
+    const del = await db.from("lead_documents").delete().eq("id", real.id).select("id");
+    check("a browser token can't remove the signed contract", !!del.error && (await evidenceRows(id)).length === 1, JSON.stringify(del.data));
+    const relabel = await db.from("lead_documents").update({ document_type: "other" }).eq("id", real.id).select("id");
+    check("…or relabel it", !!relabel.error && (await evidenceRows(id)).length === 1, JSON.stringify(relabel.data));
+
+    const direct = await asBrowser(admin).from("leads").insert({ first_name: "X", name: `${MARK} direct`, lead_source: "referral", lead_source_category: "referral", stage: "won" }).select("id");
+    check("a browser token can't insert a lead past Enquiry", !!direct.error, JSON.stringify(direct.data));
+
+    const { data: job } = await svc.from("jobs").insert({ address: addressFor().trim(), client_name: `${MARK} guard`, project_type: "renovation", status: "tendering" }).select("id").single();
+    const link = await asBrowser(admin).from("leads").update({ job_id: job.id }).eq("id", id).is("job_id", null).select("job_id").single();
+    check("RfqEngine's direct job_id link still works", !link.error && link.data?.job_id === job.id, link.error?.message);
+    const service = await svc.from("leads").update({ contract_status: "sent" }).eq("id", id).select("contract_status").single();
+    check("the Hub's service role is not affected", !service.error && service.data.contract_status === "sent", service.error?.message);
   }
 
   // Every /api/sales and /api/tender route is admin-only at the prefix gate in dev-api.mjs ("A4"), which runs
@@ -281,6 +360,8 @@ async function main() {
     const unsign = await patchLead(id, { contract_status: "sent" });
     check("a director can un-sign", unsign.ok && unsign.body.lead.contract_status === "sent" && unsign.body.lead.contract_signed_date === null, JSON.stringify(unsign.body));
     check("…it is logged with who did it", (await notes(id)).some((n) => /changed from signed to sent/.test(n.summary) && new RegExp(creds.staff.email.split("@")[0]).test(n.detail || "")));
+    const signedOn = new Date().toISOString().slice(0, 10);
+    check("…and the log keeps the date that was cleared", (await notes(id)).some((n) => /changed from signed to sent/.test(n.summary) && (n.detail || "").includes(`Signed date was ${signedOn}`)), JSON.stringify(await notes(id)));
     check("…and the PDF stays on file", (await getLead(id)).contract_evidence_present === true);
     const stale = await patchLead(id, { stage: "won" });
     check("old evidence alone doesn't reach Won", stale.status === 422 && /building contract signed/.test(stale.body?.error || "") && !/PDF on file/.test(stale.body?.error || ""), JSON.stringify(stale.body));
@@ -370,6 +451,53 @@ async function main() {
     dropped.splice(dropped.indexOf(dropJobFail), 1);
     const fixed = await api(admin, "POST", `/api/sales/leads/${flaky}/won/retry-handoff`, {});
     check("the retry finishes the job", fixed.ok && (await svc.from("jobs").select("status").eq("id", flakyJob).single()).data.status === "won" && (await projectsFor(flakyJob)).length === 1, JSON.stringify(fixed.body));
+
+    // The state the Won panel's link names: job already won, project gone.
+    await svc.from("projects").delete().eq("job_id", flakyJob);
+    const restored = await api(admin, "POST", `/api/sales/leads/${flaky}/won/retry-handoff`, {});
+    check("the retry restores a project missing from Operations", restored.ok && (await projectsFor(flakyJob)).length === 1, JSON.stringify(restored.body));
+    const restoredAgain = await api(admin, "POST", `/api/sales/leads/${flaky}/won/retry-handoff`, {});
+    check("…and only ever one", restoredAgain.ok && (await projectsFor(flakyJob)).length === 1, JSON.stringify(restoredAgain.body));
+
+    // A pre-construction portal project that can't graduate isn't in Operations, whatever the row count says.
+    const pre = await mkLead("tender", PAST_CONCEPT);
+    const preJob = (await api(admin, "POST", `/api/sales/leads/${pre}/convert-to-job`)).body.job.id;
+    await markSigned(pre);
+    await svc.from("projects").insert({ job_id: preJob, address: addressFor().trim(), status: "active", is_preconstruction: true });
+    sql(`CREATE OR REPLACE FUNCTION public.__si_grad_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure'; END $$;
+         CREATE TRIGGER __si_grad_fail_tr BEFORE UPDATE OF is_preconstruction ON public.projects FOR EACH ROW WHEN (OLD.job_id = '${preJob}') EXECUTE FUNCTION public.__si_grad_fail();`);
+    const dropGradFail = `DROP TRIGGER IF EXISTS __si_grad_fail_tr ON public.projects; DROP FUNCTION IF EXISTS public.__si_grad_fail();`;
+    dropped.push(dropGradFail);
+    const notGraduated = await patchLead(pre, { stage: "won" });
+    check("a project that failed to graduate is reported, not called done", notGraduated.ok && notGraduated.body.wonHandoff?.ok === false && (await projectsFor(preJob))[0].is_preconstruction === true, JSON.stringify(notGraduated.body?.wonHandoff));
+    const gradStill = await api(admin, "POST", `/api/sales/leads/${pre}/won/retry-handoff`, {});
+    check("…the retry says so while it still can't finish", gradStill.status === 502 && gradStill.body?.code === "HANDOFF_INCOMPLETE", JSON.stringify(gradStill.body));
+    sql(dropGradFail);
+    dropped.splice(dropped.indexOf(dropGradFail), 1);
+    const graduated = await api(admin, "POST", `/api/sales/leads/${pre}/won/retry-handoff`, {});
+    const preProjects = await projectsFor(preJob);
+    check("…and finishes once it can", graduated.ok && preProjects.length === 1 && preProjects[0].is_preconstruction === false, JSON.stringify(graduated.body));
+
+    // A won job that was later archived from the Tender board has already handed over.
+    await svc.from("jobs").update({ status: "archived" }).eq("id", flakyJob);
+    const afterArchive = await api(admin, "POST", `/api/sales/leads/${flaky}/won/retry-handoff`, {});
+    check("the retry on a won job archived later reports done and doesn't un-archive it", afterArchive.ok && (await svc.from("jobs").select("status").eq("id", flakyJob).single()).data.status === "archived" && (await projectsFor(flakyJob)).length === 1, JSON.stringify(afterArchive.body));
+
+    // An archived or lost job was closed on purpose. Won and the retry leave it alone.
+    for (const closedStatus of ["archived", "lost"]) {
+      const closed = await mkLead("tender", PAST_CONCEPT);
+      const closedJob = (await api(admin, "POST", `/api/sales/leads/${closed}/convert-to-job`)).body.job.id;
+      await markSigned(closed);
+      await svc.from("jobs").update({ status: closedStatus }).eq("id", closedJob);
+      const entered = await patchLead(closed, { stage: "won" });
+      check(`moving to Won leaves a ${closedStatus} job closed and says so`, entered.ok && entered.body.wonHandoff?.ok === false && !!entered.body.wonHandoff?.message && (await svc.from("jobs").select("status").eq("id", closedJob).single()).data.status === closedStatus, JSON.stringify(entered.body?.wonHandoff));
+      const retried = await api(admin, "POST", `/api/sales/leads/${closed}/won/retry-handoff`, {});
+      check(`…the retry refuses in plain words (${closedStatus})`, retried.status === 409 && retried.body?.code === "JOB_CLOSED" && /Tender Manager/.test(retried.body?.error || ""), JSON.stringify(retried.body));
+      check(`…the job is still ${closedStatus} with no project`, (await svc.from("jobs").select("status").eq("id", closedJob).single()).data.status === closedStatus && (await projectsFor(closedJob)).length === 0);
+      await svc.from("jobs").update({ status: "tendering" }).eq("id", closedJob);
+      const reopened = await api(admin, "POST", `/api/sales/leads/${closed}/won/retry-handoff`, {});
+      check(`…and restoring it lets the hand-off finish (${closedStatus})`, reopened.ok && (await projectsFor(closedJob)).length === 1, JSON.stringify(reopened.body));
+    }
 
     // Won with no job: creating the job afterwards must still complete the hand-off, even onto an existing job.
     const addr = addressFor();

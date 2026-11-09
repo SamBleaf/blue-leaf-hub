@@ -7,7 +7,7 @@ import {
   LEAD_ACTION_TYPE_LABELS,
   LEAD_SOURCE_CATEGORY_LABELS,
 } from "../lib/constants.js";
-import { STAGE_GATES, STAGE_ORDER } from "../lib/stageGates.js";
+import { STAGE_GATES, STAGE_ORDER, showsQualifyingScorecard } from "../lib/stageGates.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -1667,7 +1667,7 @@ export default function LeadDetail() {
       if (j.code === "STAGE_CONFLICT") await load();
       return;
     }
-    if (j.wonHandoff && !j.wonHandoff.ok && j.lead?.job_id) alert("The lead is Won, but the hand-off to Operations didn't finish. Use \"Re-run the hand-off\" on the Won panel.");
+    if (j.wonHandoff && !j.wonHandoff.ok && j.lead?.job_id) alert(j.wonHandoff.message ? `The lead is Won. ${j.wonHandoff.message}` : "The lead is Won, but the hand-off to Operations didn't finish. Use \"Re-run the hand-off\" on the Won panel.");
     setLead(j.lead);
     bpFetchedFor.current = null;
     setBpInsight("");
@@ -1875,7 +1875,7 @@ export default function LeadDetail() {
     lead.qualify_decision_maker == null && "Decision maker",
   ].filter(Boolean);
 
-  const qualifyingBlock = !isArchTender && (
+  const qualifyingBlock = showsQualifyingScorecard(lead) && (
             <div className="rounded-card border border-hairline bg-surface p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="section-label">Qualifying Scorecard</h3>

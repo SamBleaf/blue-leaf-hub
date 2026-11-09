@@ -130,7 +130,7 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
           <input type="file" accept="application/pdf,.pdf" aria-label="Signed building contract PDF"
             onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); }}
             className="mb-2 block w-full text-xs text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink" />
-          {!signed && (
+          {(!signed || !lead.contract_signed_date) && (
             <label className="mb-2 flex items-center justify-between gap-2 text-xs text-muted">
               <span>Date signed <span className="font-normal">(optional)</span></span>
               <input type="date" value={signedDate} onChange={(e) => setSignedDate(e.target.value)} className="rounded border border-hairline bg-surface px-2 py-1 text-xs text-ink" />
@@ -151,8 +151,43 @@ export function BuildingContract({ lead, patch, reload, isAdmin }) {
   );
 }
 
+// "Contract signed" reads the building contract. A row saved before that rule can still claim it with no
+// signed contract, and shows the step before instead.
+function currentTenderStep(lead) {
+  if (lead.contract_status === "signed") return "contract_signed";
+  return lead.tender_substatus === "contract_signed" ? "contract_sent" : lead.tender_substatus || null;
+}
+
+/** Where the tender is up to. Staff set every step except the last, which only the signed PDF can set. */
+export function TenderProgress({ lead, onSet }) {
+  const signed = lead.contract_status === "signed";
+  const current = currentTenderStep(lead);
+  const currentIdx = current ? TENDER_SUBSTATUS_ORDER.indexOf(current) : -1;
+  return (
+    <div className="rounded-card border border-hairline bg-surface p-4">
+      <h3 className="section-label mb-2">Tender progress</h3>
+      <div className="flex flex-wrap gap-1.5">
+        {TENDER_SUBSTATUS_ORDER.map((s, i) => {
+          const on = current === s;
+          const done = currentIdx >= 0 && i < currentIdx;
+          const tone = on ? "bg-primary text-white" : done ? "bg-green-100 text-green-700" : "border border-hairline text-muted";
+          const text = `${done ? "✓ " : ""}${TENDER_SUBSTATUS[s]}`;
+          if (s === "contract_signed") return <span key={s} className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{text}</span>;
+          return (
+            <button key={s} type="button" disabled={signed} onClick={() => onSet(s)}
+              className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition disabled:cursor-default ${tone} ${on || done ? "" : "enabled:hover:bg-page"}`}>
+              {text}
+            </button>
+          );
+        })}
+      </div>
+      {!signed && <p className="mt-2 text-[11px] text-muted">&ldquo;Contract signed&rdquo; ticks itself when the signed PDF is uploaded under Building contract.</p>}
+    </div>
+  );
+}
+
 export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJob, isAdmin = false }) {
-  const sub = lead.tender_substatus || null;
+  const sub = currentTenderStep(lead);
   const subIdx = sub ? TENDER_SUBSTATUS_ORDER.indexOf(sub) : -1;
   const checklist = lead.proposal_checklist && typeof lead.proposal_checklist === "object" ? lead.proposal_checklist : {};
   const [testimonials, setTestimonials] = useState(checklist._testimonials || "");
@@ -174,21 +209,7 @@ export default function TenderStage({ lead, patch, reload, onStartRfq, creatingJ
   return (
     <div className="space-y-4">
       {/* Sub-status strip */}
-      <div className="rounded-card border border-hairline bg-surface p-4">
-        <h3 className="section-label mb-2">Tender progress</h3>
-        <div className="flex flex-wrap gap-1.5">
-          {TENDER_SUBSTATUS_ORDER.map((s, i) => {
-            const on = sub === s;
-            const done = subIdx >= 0 && i < subIdx;
-            return (
-              <button key={s} type="button" onClick={() => setSub(s)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${on ? "bg-primary text-white" : done ? "bg-green-100 text-green-700" : "border border-hairline text-muted hover:bg-page"}`}>
-                {done ? "✓ " : ""}{TENDER_SUBSTATUS[s]}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <TenderProgress lead={lead} onSet={setSub} />
 
       {/* Estimate & Fixed-Price Proposal */}
       <div className="rounded-card border border-primary bg-primary/[0.06] p-4">

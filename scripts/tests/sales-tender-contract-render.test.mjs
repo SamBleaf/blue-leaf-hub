@@ -19,9 +19,12 @@ const out = join(REPO, "node_modules", ".cache", `tender-render-${process.pid}.m
 const entry = join(dir, "entry.jsx");
 writeFileSync(entry, `
 import { renderToStaticMarkup } from "react-dom/server";
-import { BuildingContract } from ${JSON.stringify(join(REPO, "src/components/sales/lead-detail/TenderStage.jsx"))};
+import { BuildingContract, TenderProgress } from ${JSON.stringify(join(REPO, "src/components/sales/lead-detail/TenderStage.jsx"))};
 export function render(lead, isAdmin) {
   return renderToStaticMarkup(<BuildingContract lead={lead} patch={() => {}} reload={() => {}} isAdmin={isAdmin} />);
+}
+export function renderStrip(lead) {
+  return renderToStaticMarkup(<TenderProgress lead={lead} onSet={() => {}} />);
 }
 `);
 
@@ -38,7 +41,7 @@ function t(name, fn) {
 }
 
 try {
-  const { render } = await import(pathToFileURL(out).href);
+  const { render, renderStrip } = await import(pathToFileURL(out).href);
   const base = { id: "lead-1", stage: "tender", site_address: "1 Test St", proposal_checklist: {}, selections_schedule: [] };
   
 
@@ -56,6 +59,8 @@ try {
   t("says the PDF is missing and why it matters", () => assert.match(legacy, /isn.{1,8}t on file\. Upload it to move this lead to Won/));
   t("offers the upload", () => assert.match(legacy, /Attach signed PDF/));
   t("doesn't ask for a date it already has", () => assert.doesNotMatch(legacy, /Date signed/));
+  const undated = render({ ...base, contract_status: "signed", contract_signed_date: null, contract_evidence_present: false }, true);
+  t("asks for the date when none was ever recorded", () => assert.match(undated, /Date signed/));
 
   console.log("\n▸ Signed with the PDF on file");
   const done = render({ ...base, contract_status: "signed", contract_signed_date: "2026-10-03", contract_evidence_present: true }, true);
@@ -65,6 +70,19 @@ try {
   t("a director can undo it", () => assert.match(done, /Undo signed status/));
   const notAdmin = render({ ...base, contract_status: "signed", contract_evidence_present: true }, false);
   t("nobody else is offered the undo", () => assert.doesNotMatch(notAdmin, /Undo signed status/));
+
+  console.log("\n▸ Tender progress strip");
+  const chip = (html, label) => html.match(new RegExp(`<(button|span)[^>]*>(?:✓ )?${label}<`))?.[1];
+  const stripOpen = renderStrip({ ...base, contract_status: "sent", tender_substatus: "contract_sent" });
+  t("earlier steps are still buttons", () => assert.equal(chip(stripOpen, "Contract sent"), "button"));
+  t("Contract signed can't be pressed", () => assert.equal(chip(stripOpen, "Contract signed"), "span"));
+  t("and it isn't lit before the upload", () => assert.doesNotMatch(stripOpen, /bg-primary[^>]*>Contract signed/));
+  t("says what sets it", () => assert.match(stripOpen, /uploaded under Building contract/));
+  const stripSigned = renderStrip({ ...base, contract_status: "signed", tender_substatus: "contract_sent", contract_evidence_present: true });
+  t("the upload lights Contract signed without any stored step", () => assert.match(stripSigned, /bg-primary[^>]*>Contract signed/));
+  t("once signed the earlier steps show done and can't be pressed", () => { assert.match(stripSigned, /✓ Contract sent/); assert.match(stripSigned, /<button[^>]*disabled=""[^>]*>✓ Contract sent/); });
+  const stripForged = renderStrip({ ...base, contract_status: "sent", tender_substatus: "contract_signed" });
+  t("a row that says Contract signed with no signed contract doesn't show as signed", () => { assert.doesNotMatch(stripForged, /bg-primary[^>]*>Contract signed/); assert.match(stripForged, /bg-primary[^>]*>Contract sent/); });
 } finally {
   rmSync(dir, { recursive: true, force: true });
   rmSync(out, { force: true });

@@ -29,7 +29,7 @@ export default function WonStage({ lead, patch }) {
     setRetrying(true); setRetryMsg(null);
     const { ok, error } = await apiPost(`/api/sales/leads/${lead.id}/won/retry-handoff`, {});
     setRetrying(false);
-    setRetryMsg(ok ? { good: true, text: "Done. The job is Won and the project is in Operations." } : { good: false, text: error || "The hand-off didn't finish. Please try again." });
+    setRetryMsg(ok ? { good: true, text: "Done. The project is in Operations." } : { good: false, text: error || "The hand-off didn't finish. Please try again." });
   }
 
   return (
