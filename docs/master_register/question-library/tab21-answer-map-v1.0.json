@@ -244,7 +244,8 @@
     }
    ],
    "max": 3,
-   "notes": "Existing records hold a comma string in description: read as legacy text, never parsed."
+   "clientNote": true,
+   "notes": "Existing records hold a comma string in description: read as legacy text, never parsed. The note is written for the client and printed in the Client Brief, so it is answer.clientNote and never the staff-only note."
   },
   {
    "id": "P-006",
@@ -786,7 +787,8 @@
      "label": "Needs test"
     }
    ],
-   "notes": "Risk and investigation with an owner and source."
+   "childrenBoundToParent": true,
+   "notes": "Risk and investigation with an owner and source. Inspected, Assumed and Needs test are statements about the condition above them, so they never carry across to a different condition."
   },
   {
    "id": "W-006",

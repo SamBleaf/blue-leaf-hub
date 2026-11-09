@@ -13,7 +13,7 @@ import {
   makeItem, outstandingReasons, isClientSelection, contractInclusionOf, answerMaterialChanged, editOutrunsApproval, normaliseAnswer, clientSafeAnswer,
   answerConfigFor, isGuidedConfig, dispositionApplies, settleOptions, toggleOption, setOpenWords, removeChoice, reuseChoice, chooseZone, chooseElement, setZoneWords,
   setElementWords, toggleNotDecided, setClientUnsure, setUnresolvedReason, toggleNotApplicable, setAnswerNote, itemPatch, reasonPatch, settlePatch, choiceView,
-  itemTitle, natureOf, ANSWER_MAP_VERSION, UNRESOLVED_REASONS, answerSummary, promptsFor,
+  itemTitle, natureOf, ANSWER_MAP_VERSION, UNRESOLVED_REASONS, answerSummary, promptsFor, setClientNote, seedMatchesItem,
 } from "../../src/lib/register.js";
 import { validateAnswerMap, JSON_PATH } from "../register/build-answer-map-doc.mjs";
 
@@ -81,6 +81,11 @@ section("Choosing, and the words kept");
   let p = null; for (const o of ["space", "comfort", "storage"]) p = toggleOption(pr, p, [o]);
   ok("priorities stop at three", paths(toggleOption(pr, p, ["privacy"])).length === 3);
   ok("the view disables the rest at three", choiceView(pr, p).levels[0].options.find((o) => o.id === "privacy").disabled === true && choiceView(pr, p).levels[0].options.find((o) => o.id === "space").disabled === false);
+  const overLimit = (() => { let x = toggleNotApplicable(pr, toggleNotApplicable(pr, p)); for (const o of ["privacy", "entertaining", "natural_light"]) x = toggleOption(pr, x, [o]); return x; })();
+  ok("Use again can't take priorities past three", paths(reuseChoice(pr, overLimit, overLimit.selected.find((s) => s.stale))).length === 3);
+  ok("so the view doesn't offer it at the limit, and Remove stays", choiceView(pr, overLimit).kept.every((k) => !k.canReuse) && choiceView(pr, overLimit).kept.length === 3);
+  const roomMade = toggleOption(pr, overLimit, ["privacy"]);
+  ok("once one comes off, Use again is back", choiceView(pr, roomMade).kept.some((k) => k.canReuse) && paths(reuseChoice(pr, roomMade, roomMade.selected.find((s) => s.stale))).length === 3);
   const groups = pick("W-018", ["door_height", "2340"], ["jamb_or_edge_detail", "p50_shadowline"]);
   ok("grouped choices sit side by side", paths(groups).join() === "door_height/2340,jamb_or_edge_detail/p50_shadowline" && live(groups)[0].label.includes("·"));
   const swapped = toggleOption(cfg("W-018"), groups, ["door_height", "floor_to_ceiling"]);
@@ -128,6 +133,15 @@ section("Changing an earlier answer never loses a later one");
   const k = cfg("K-004");
   const moved = toggleOption(k, pick("K-004", ["flat_panel"], ["flat_panel", "laminate"]), ["profile"]);
   ok("where the new branch has the same option it moves across", paths(moved).join() === "profile/laminate" && stale(moved).length === 0 && live(moved)[0].label === "Profile · Laminate");
+  const w5 = cfg("W-005");
+  const inspected = pick("W-005", ["structural"], ["structural", "inspected"]);
+  const hazard = toggleOption(w5, inspected, ["asbestos_or_contamination"]);
+  ok("a status about one hazard is never restated about another (W-005)", paths(hazard).join() === "asbestos_or_contamination" && !answerSummary({ answer: hazard }).includes("Inspected"));
+  ok("the old status stays on the record, flagged for Use again or Remove", stale(hazard).join() === "structural/inspected" && choiceView(w5, hazard).kept[0].canReuse && choiceView(w5, hazard).kept[0].label === "Structural · Inspected");
+  ok("Use again puts it back on its own hazard", paths(reuseChoice(w5, hazard, hazard.selected.find((s) => s.stale))).join() === "structural/inspected");
+  const pairs = w5.options.flatMap((from) => w5.options.filter((to) => to.id !== from.id).flatMap((to) => from.children.map((st) => [from.id, to.id, st.id])));
+  ok(`no switch of W-005 category gives a live status (${pairs.length} combinations)`, pairs.every(([from, to, st]) => { const a = toggleOption(w5, pick("W-005", [from], [from, st]), [to]); return paths(a).join() === to && stale(a).join() === `${from}/${st}`; }));
+  ok("only W-005 is bound this way: a real attribute still carries across", Object.entries(ANSWER_CONFIG).filter(([, x]) => x.childrenBoundToParent).map(([id]) => id).join() === "W-005" && !cfg("K-004").childrenBoundToParent);
   const withProduct = toggleOption(cfg("W-017"), pick("W-017", ["timber"]), ["tile"], { keepReplaced: true });
   ok("with product details entered, even a plain replaced answer is kept for review", stale(withProduct).join() === "timber" && paths(withProduct).join() === "tile");
   ok("extending an answer isn't replacing it", stale(toggleOption(c, pick("W-013", ["masonry"]), ["masonry", "face_brick"], { keepReplaced: true })).length === 0);
@@ -179,7 +193,10 @@ section("Not decided, reasons and owner (B09)");
   const unsure = pick("W-007", ["unsure"]);
   ok("W-007 Unsure is client-unsure, not a recorded fact", unsure.state === "client_unsure" && paths(unsure).join() === "unsure");
   ok("taking it back clears the state", toggleOption(cfg("W-007"), unsure, ["unsure"]) === null);
-  ok("the Not decided pill leaves its state alone while the option stands", toggleNotDecided(cfg("W-007"), unsure).state === "client_unsure");
+  ok("taking Not decided back takes the Unsure option with it, so the tap isn't dead", toggleNotDecided(cfg("W-007"), unsure) === null);
+  ok("and the view agrees it is off", !choiceView(cfg("W-007"), toggleNotDecided(cfg("W-007"), unsure)).notDecided);
+  ok("an ordinary answer stays when Not decided comes off", paths(toggleNotDecided(cfg("W-007"), toggleNotDecided(cfg("W-007"), pick("W-007", ["yes"])))).join() === "yes");
+  ok("Unsure beside a flagged answer: the flagged one stays", (() => { const a2 = toggleOption(cfg("W-007"), pick("W-007", ["yes"], ["yes", "temporary_kitchen"]), ["unsure"]); const off2 = toggleNotDecided(cfg("W-007"), a2); return stale(off2).join() === "yes/temporary_kitchen" && paths(off2).length === 0 && !choiceView(cfg("W-007"), off2).notDecided; })());
   const note = setAnswerNote(c, a, "Client wants to see samples");
   ok("a note is optional and stays staff only", note.note === "Client wants to see samples" && !JSON.stringify(clientSafeAnswer({ answer: note })).includes("samples"));
 }
@@ -304,7 +321,13 @@ section("Outstanding: what the record says");
   ok("it closes on client approval only", reasons({ ...choice, certainty: "client_approved" }) === "");
   ok("settled out, it isn't open", reasons({ ...choice, disposition: "by_others" }) === "");
   ok("N/A isn't open", reasons(seedOf("K-005", { answer: toggleNotApplicable(cfg("K-005"), null) })) === "");
-  ok("N/A drops a default verification too", reasons(seedOf("W-015", { technicalStatus: "needs_verification", answer: toggleNotApplicable(cfg("W-015"), null) })) === "");
+  const naCard = seedOf("W-020", { technicalStatus: "needs_verification", answer: toggleNotApplicable(cfg("W-020"), null) });
+  ok("N/A is not evidence: an item still needing verification stays outstanding", reasons(naCard) === "verification" && naCard.technicalStatus === "needs_verification");
+  ok("the same answer reads the same on the card and in the office", reasons(naCard) === reasons(seedOf("W-020", { technicalStatus: "needs_verification", disposition: "na" })));
+  ok("a default flag and one set by hand are treated alike", reasons(seedOf("W-015", { technicalStatus: "needs_verification", answer: toggleNotApplicable(cfg("W-015"), null) })) === "verification");
+  ok("staff clear it visibly, by changing the technical status", reasons({ ...naCard, technicalStatus: "not_required" }) === "");
+  ok("N/A with verification and a follow-up keeps both", reasons({ ...naCard, nextAction: "Ask the engineer" }) === "verification,action");
+  ok("an action answered N/A is still finished", reasons(seedOf("W-005", { technicalStatus: "needs_verification", answer: toggleNotApplicable(cfg("W-005"), null) })) === "");
   ok("N/A with a follow-up keeps the follow-up", reasons(seedOf("K-005", { nextAction: "Ask", answer: toggleNotApplicable(cfg("K-005"), null) })) === "action");
   ok("a requirement answered isn't nagged", reasons(seedOf("K-002", { answer: pick("K-002", ["island"]), certainty: "preference" })) === "");
   ok("a requirement parked is open", reasons(seedOf("K-002", { answer: toggleNotDecided(cfg("K-002"), null) })) === "decision");
@@ -319,6 +342,32 @@ section("Outstanding: what the record says");
   ok("legacy: an undecided scope item is still open", reasons(makeItem({ itemKind: "scope", description: "Something" })) === "decision");
   ok("a record from a newer schema is read the old way", reasons(makeItem({ itemKind: "scope", answer: { v: 99, state: "not_applicable" } })) === "decision");
   ok("nature comes from the answer, else the question", natureOf(seedOf("W-001")) === "fact" && natureOf(makeItem({ itemKind: "scope" })) === null);
+}
+
+section("A note written for the client (P-005)");
+{
+  const c = cfg("P-005");
+  const a = setClientNote(c, toggleOption(c, null, ["comfort"]), "Growing family");
+  ok("it sits in its own field, apart from the staff note", a.clientNote === "Growing family" && a.note === "");
+  ok("the client view carries it", clientSafeAnswer({ answer: a }).clientNote === "Growing family");
+  ok("the staff note still doesn't", !JSON.stringify(clientSafeAnswer({ answer: setAnswerNote(c, a, "Staff only") })).includes("Staff only"));
+  ok("a note alone is not thrown away", setClientNote(c, null, "Growing family")?.clientNote === "Growing family");
+  ok("clearing it leaves no key behind", !("clientNote" in setClientNote(c, a, "")));
+  ok("an answer with no note keeps the shape it always had", !("clientNote" in normaliseAnswer(toggleOption(c, null, ["comfort"]))) && !("clientNote" in clientSafeAnswer({ answer: toggleOption(c, null, ["comfort"]) })));
+  ok("it survives a reload", makeItem(JSON.parse(JSON.stringify({ answer: a }))).answer.clientNote === "Growing family");
+  ok("the client reads it, so changing it counts as a change", answerMaterialChanged(a, setClientNote(c, a, "Empty nesters")));
+  ok("changing the staff note still doesn't", !answerMaterialChanged(a, setAnswerNote(c, a, "Staff only")));
+  ok("the view reads it back", choiceView(c, a).clientNote === "Growing family");
+  ok("only P-005 asks for one", Object.entries(ANSWER_CONFIG).filter(([, x]) => x.clientNote).map(([id]) => id).join() === "P-005");
+}
+
+section("A blank row's id");
+{
+  const seed = { id: "ri_x", roomId: "room_b", promptKey: "R-010" };
+  ok("the same room and question is the same record", seedMatchesItem(makeItem({ id: "ri_x", roomId: "room_b", promptKey: "R-010" }), seed));
+  ok("another room's record is not", !seedMatchesItem(makeItem({ id: "ri_x", roomId: "room_a", promptKey: "R-010" }), seed));
+  ok("nor another question's", !seedMatchesItem(makeItem({ id: "ri_x", roomId: "room_b", promptKey: "R-009" }), seed));
+  ok("project-wide rows match on no room", seedMatchesItem(makeItem({ id: "ri_y", promptKey: "W-010" }), { id: "ri_y", promptKey: "W-010" }));
 }
 
 section("Round trip and legacy");

@@ -7,7 +7,8 @@
  * The rules that matter:
  *   • A tap writes option ids and copies the label once. Rewording the config later never changes a stored answer.
  *   • Changing an earlier choice never loses a later one. A dependent answer moves across if the new branch has the
- *     same option; otherwise it stays on the record flagged stale, to be reused or removed by a person.
+ *     same option; otherwise it stays on the record flagged stale, to be reused or removed by a person. Where a
+ *     follow-up is a statement about the option above it (W-005: this hazard was inspected), it never moves across.
  *   • Nothing here can approve, verify or price: no function writes those fields. The strongest thing a choice can
  *     do to item.certainty is move "not discussed" to "preference".
  *   • A question whose dispositionUse is "none" never writes item.disposition, whatever is tapped.
@@ -118,8 +119,8 @@ function resolveSiblings(cfg, entries, parent, here, ctx, keepReplaced) {
     const sibling = known && !e.stale && e.path.length > parent.length && isPrefix(parent, e.path) && e.path[parent.length] !== here[parent.length];
     if (!sibling) { out.push(e); continue; }
     if (e.path.length > here.length) {                                    // something was chosen further down that branch
-      const moved = [...here, ...e.path.slice(here.length)];
-      if (optionAt(cfg, moved, ctx)) out.push({ ...e, path: moved, optionId: moved[moved.length - 1], label: hasWords(e) ? e.label : labelFor(cfg, moved, ctx) });
+      const moved = cfg.childrenBoundToParent ? null : [...here, ...e.path.slice(here.length)];
+      if (moved && optionAt(cfg, moved, ctx)) out.push({ ...e, path: moved, optionId: moved[moved.length - 1], label: hasWords(e) ? e.label : labelFor(cfg, moved, ctx) });
       else out.push({ ...e, stale: true });
     } else if (hasWords(e) || keepReplaced) {
       out.push({ ...e, stale: true });                                    // the person's own words, or product details entered against it
@@ -156,6 +157,9 @@ function limitReached(cfg, selected) {
   if (!cfg.max) return false;
   return new Set(selected.filter((e) => !e.stale).map((e) => e.path[0])).size >= cfg.max;
 }
+
+/** Would bringing this entry back take the question past its limit? Not if its top-level choice is already counted. */
+const reuseBlocked = (cfg, selected, path) => limitReached(cfg, selected) && !selected.some((e) => !e.stale && e.path[0] === path[0]);
 
 /**
  * One tap on an option, by its full path. An unknown path, or one past the limit, changes nothing.
@@ -201,13 +205,13 @@ export function removeChoice(cfg, answer, { path, label }) {
   return finish({ ...next, state: isParked(w.state) || w.state === "not_applicable" ? w.state : restedState(cfg, next) });
 }
 
-/** Bring a flagged answer back. It takes its place as if it had just been chosen. */
+/** Bring a flagged answer back. It takes its place as if it had just been chosen, so the question's limit still holds. */
 export function reuseChoice(cfg, answer, { path, label }) {
   const w = working(cfg, answer);
   const ctx = ctxOf(w);
   const opt = optionAt(cfg, path, ctx);
   const entry = w.selected.find((e) => e.stale && samePath(e.path, path) && e.label === label);
-  if (!opt || !entry) return normaliseAnswer(answer);
+  if (!opt || !entry || reuseBlocked(cfg, w.selected, path)) return normaliseAnswer(answer);
   const rest = w.selected.filter((e) => e !== entry);
   return finish({ ...w, selected: switchOn(cfg, rest, path, ctx, entry.label), unresolved: null, state: opt.state || "recorded" });
 }
@@ -261,11 +265,17 @@ export function setElementWords(cfg, answer, words) {
 
 // ── No answer yet (Tab 27 B09) ────────────────────────────────────────────────────────────────────
 
-/** "Not decided". What has been chosen so far stays: a conversation may stop at any level (B02). */
+/**
+ * "Not decided". What has been chosen so far stays: a conversation may stop at any level (B02). The exception is taking
+ * it off when a chosen option is what parks the question ("Unsure"): that option comes off too, or the tap would do nothing.
+ */
 export function toggleNotDecided(cfg, answer) {
   const w = working(cfg, answer);
-  if (isParked(w.state)) { const next = { ...w, unresolved: null }; return finish({ ...next, state: restedState(cfg, next) }); }
-  return finish({ ...w, state: "unresolved" });
+  if (!isParked(w.state)) return finish({ ...w, state: "unresolved" });
+  const ctx = ctxOf(w);
+  const parking = w.selected.filter((e) => !e.stale && isParked(optionAt(cfg, e.path, ctx)?.state));
+  const next = { ...w, unresolved: null, selected: parking.reduce((list, e) => switchOff(cfg, list, e.path, ctx), w.selected) };
+  return finish({ ...next, state: restedState(cfg, next) });
 }
 
 export function setClientUnsure(cfg, answer) {
@@ -289,6 +299,11 @@ export function toggleNotApplicable(cfg, answer) {
 
 export function setAnswerNote(cfg, answer, note) {
   return finish({ ...working(cfg, answer), note: String(note || "") });
+}
+
+/** A note written for the client to read. Separate from the staff note, which never leaves the office. */
+export function setClientNote(cfg, answer, words) {
+  return finish({ ...working(cfg, answer), clientNote: String(words || "") });
 }
 
 // ── From an answer to the item ────────────────────────────────────────────────────────────────────
@@ -401,13 +416,13 @@ export function choiceView(cfg, answer, { showDetail = false } = {}) {
   const element = pick(cfg.elements, a?.element?.key, a?.element?.label);
 
   const kept = selected.filter((e) => e.stale || !optionAt(cfg, e.path, ctx)).map((e) => ({
-    path: e.path, label: e.label, stale: !!e.stale, canReuse: !!e.stale && !!optionAt(cfg, e.path, ctx), key: `${e.path.join("/")}|${e.label}`,
+    path: e.path, label: e.label, stale: !!e.stale, canReuse: !!e.stale && !!optionAt(cfg, e.path, ctx) && !reuseBlocked(cfg, selected, e.path), key: `${e.path.join("/")}|${e.label}`,
   }));
   const state = a?.state || "not_discussed";
   return {
     levels, zone, element, kept, state, hidden, maxReached: atLimit,
     notDecided: isParked(state), clientUnsure: state === "client_unsure", notApplicable: state === "not_applicable",
-    reason: state === "unresolved" ? a?.unresolved?.reason || "" : "", note: a?.note || "",
+    reason: state === "unresolved" ? a?.unresolved?.reason || "" : "", note: a?.note || "", clientNote: a?.clientNote || "",
     summary: state === "not_applicable" ? "" : answerSummary({ answer: a }),
     ownNotApplicable: (cfg.options || []).some((o) => o.state === "not_applicable"),
   };

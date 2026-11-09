@@ -348,6 +348,8 @@ function buildAnswerConfig(e, q) {
   if (e.linked) cfg.linked = clean(e.linked);
   if (e.flow) cfg.flow = clean(e.flow);
   if (e.max) cfg.max = e.max;
+  if (e.clientNote) cfg.clientNote = true;
+  if (from?.options ? from.childrenBoundToParent : e.childrenBoundToParent) cfg.childrenBoundToParent = true;   // a follow-up here says something about the option above it
   if (e.inherits) cfg.inherits = e.inherits;
   if (e.presentedWith) cfg.presentedWith = e.presentedWith;
   if (handling === "record" || (handling === "choice" && e.actions && !e.elements)) cfg.asksWhat = true;   // the thing acted on is project-specific, so it is typed
@@ -395,7 +397,7 @@ export const QUESTIONS = ${JSON.stringify(out, null, 1)};
  * How each question is answered (Tab 27 Gate 2). handling: choice | record | note | context | folded | prefill.
  * dispositionUse: none = the generic work disposition is not a valid answer; settled_only = only to settle an item
  * out; answer / element = the chosen option or action is the disposition.
- * @type {Record<string, {handling:string,mapping:string,nature:string,tier:string,control:string,dispositionUse:string,select:string,childSelect?:string,options?:Array<object>,optionLevel?:string,zones?:Array<object>,elements?:Array<object>,constructionTypes?:object,repeat?:{key:string,by:string},linked?:object,flow?:string[],max?:number,inherits?:string,presentedWith?:string,asksWhat?:boolean}>}
+ * @type {Record<string, {handling:string,mapping:string,nature:string,tier:string,control:string,dispositionUse:string,select:string,childSelect?:string,options?:Array<object>,optionLevel?:string,zones?:Array<object>,elements?:Array<object>,constructionTypes?:object,repeat?:{key:string,by:string},linked?:object,flow?:string[],max?:number,clientNote?:boolean,childrenBoundToParent?:boolean,inherits?:string,presentedWith?:string,asksWhat?:boolean}>}
  */
 export const ANSWER_CONFIG = {
 ${configLines}

@@ -335,6 +335,9 @@ const oneOf = (v, set, def) => (v && Object.prototype.hasOwnProperty.call(set, v
 const numOrNull = (v) => (v === "" || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
 /** A register item. Only id/kind are required; everything else is optional and defaulted. */
+/** Is this seed the same record? A blank row's id belongs to one room and one question, and must never write to another. */
+export const seedMatchesItem = (item, seed) => (item?.roomId || null) === (seed?.roomId || null) && (item?.promptKey || null) === (seed?.promptKey || null);
+
 export function makeItem(partial = {}) {
   const itemKind = oneOf(partial.itemKind, ITEM_KINDS, "selection");
   const roomId = partial.roomId || null;                        // null ⇒ project-wide (whole house / site)
@@ -551,7 +554,7 @@ const parkedAnswer = (a) => a && (a.state === "unresolved" || a.state === "clien
  * (a designer / engineer / trade must confirm), 'action' (an open follow-up). [] = settled.
  *
  * Read from what the record says, not from the fact that a disposition is blank:
- *   • N/A is finished, unless someone has left a follow-up on it;
+ *   • N/A closes the decision, but it isn't evidence: a verification flag and any follow-up stay open;
  *   • "Not decided", "Client unsure" or an answer flagged after an earlier choice changed is an open decision;
  *   • a recorded fact, requirement or risk is not an undecided piece of scope;
  *   • a choice stays open until the client approves it. Picking an option on the card is not an approval.
@@ -560,7 +563,11 @@ export function outstandingReasons(item) {
   const reasons = [];
   const openAction = !!(item.nextAction && item.nextAction.trim()) && !item.resolved;
   const answer = item.answer && Number(item.answer.v) <= ANSWER_SCHEMA_VERSION ? item.answer : null;
-  if (answer?.state === "not_applicable") return openAction ? ["action"] : [];
+  if (answer?.state === "not_applicable") {
+    if (item.itemKind !== "action" && item.technicalStatus === "needs_verification") reasons.push("verification");
+    if (openAction) reasons.push("action");
+    return reasons;
+  }
   if (item.itemKind === "action") return item.resolved ? [] : ["action"];
   if (item.technicalStatus === "needs_verification") reasons.push("verification");
   if (parkedAnswer(answer)) reasons.push("decision");

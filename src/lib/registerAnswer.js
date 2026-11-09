@@ -41,6 +41,8 @@
  *   assumption     { origin, tier, baselineVersion, categoryKey, text, at, by } — INTERNAL pricing assumption
  *   delivery       { method, trade, note } — INTERNAL, decided at Tender, independent of contract inclusion
  *   note           short INTERNAL staff note
+ *   clientNote     words written FOR the client, where a question asks for them (P-005 "plus note"). Only present
+ *                  when something was written. Printed in the Client Brief, so it counts as what the answer says
  *
  * INTERNAL means staff only. `clientSafeAnswer` is an allow-list: anything not named there cannot reach a
  * client projection, including fields added later.
@@ -162,7 +164,7 @@ function normDelivery(d) {
   return out.method || out.trade || out.note ? out : null;
 }
 
-const KNOWN_KEYS = ["v", "state", "nature", "configVersion", "selected", "element", "zone", "areaIds", "sourceQuestionIds", "linkedItemIds", "unresolved", "assumption", "delivery", "note"];
+const KNOWN_KEYS = ["v", "state", "nature", "configVersion", "selected", "element", "zone", "areaIds", "sourceQuestionIds", "linkedItemIds", "unresolved", "assumption", "delivery", "note", "clientNote"];
 
 /**
  * The one canonical form of an answer. Returns null when there is nothing in it. Same input in any key
@@ -181,9 +183,10 @@ export function normaliseAnswer(raw) {
     selected, element: normElement(raw.element), zone: normZone(raw.zone), areaIds: uniqueIds(raw.areaIds),
     sourceQuestionIds: uniqueIds(raw.sourceQuestionIds), linkedItemIds: uniqueIds(raw.linkedItemIds),
     unresolved, assumption: normAssumption(raw.assumption), delivery: normDelivery(raw.delivery), note: text(raw.note),
+    ...(text(raw.clientNote) ? { clientNote: text(raw.clientNote) } : {}),
   };
   const blank = state === "not_discussed" && !selected.length && !a.element && !a.zone && !a.areaIds.length && !a.sourceQuestionIds.length
-    && !a.linkedItemIds.length && !unresolved && !a.assumption && !a.delivery && !a.note && !Object.keys(omit(raw, KNOWN_KEYS)).length;
+    && !a.linkedItemIds.length && !unresolved && !a.assumption && !a.delivery && !a.note && !a.clientNote && !Object.keys(omit(raw, KNOWN_KEYS)).length;
   return blank ? null : sortKeys(a);
 }
 
@@ -210,7 +213,8 @@ export function unresolvedOf(item) {
 
 /**
  * The ONLY view of an answer a client document, portal row or notification may use. An allow-list of what
- * was chosen and where. Internal notes, assumptions, unresolved reasons, delivery and links can't appear.
+ * was chosen and where, plus a note staff wrote for the client. Internal notes, assumptions, unresolved reasons,
+ * delivery and links can't appear.
  */
 export function clientSafeAnswer(item) {
   const a = item?.answer;
@@ -220,6 +224,7 @@ export function clientSafeAnswer(item) {
     selected: liveSelected(a).map((s) => ({ label: shownLabel(s) })),
     element: a.element?.label || "",
     zone: a.zone?.label || "",
+    ...(text(a.clientNote) ? { clientNote: text(a.clientNote) } : {}),
   };
 }
 
@@ -245,7 +250,8 @@ const placeOf = (thing) => (thing ? { id: thing.id || "", key: thing.key || "", 
  * The part of an answer a client decision or agreed scope rests on: what was chosen and the words shown for
  * it, which element and zone it covers and the words shown for those, and what kind of record it is. It
  * compares what people read, not only the ids behind it. Stored labels are copied when someone chooses an
- * option, so rewording an option in the config never touches them. Notes, assumptions and delivery don't count.
+ * option, so rewording an option in the config never touches them. A note written for the client counts, because
+ * the client reads it. Staff notes, assumptions and delivery don't count.
  */
 function materialOf(raw) {
   const a = normaliseAnswer(raw);
@@ -255,7 +261,7 @@ function materialOf(raw) {
   const element = placeOf(a?.element), zone = placeOf(a?.zone), areaIds = [...(a?.areaIds || [])].sort();
   // Stamping a nature on an answer that says nothing yet (a note on an old record) isn't a change.
   const saysSomething = state !== "not_discussed" || selected.length || element || zone || areaIds.length;
-  return { state, nature: saysSomething ? a?.nature || "" : "", selected, element, zone, areaIds };
+  return { state, nature: saysSomething ? a?.nature || "" : "", selected, element, zone, areaIds, ...(a?.clientNote ? { clientNote: a.clientNote } : {}) };
 }
 export const answerMaterialChanged = (a, b) => stableStringify(materialOf(a)) !== stableStringify(materialOf(b));
 

@@ -117,7 +117,7 @@ function clientBriefFixture(input) {
   // Chosen priorities come from the typed answer. Older records hold them as text, read without changing them.
   const chosenPriorities = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
   const priorities = (chosenPriorities.length ? chosenPriorities : (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean)).slice(0, 3);
-  const priorityNote = (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
+  const priorityNote = clientSafeAnswer(pItem)?.clientNote || (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
   const reqs = items.filter((i) => i.itemKind === "requirement" && !i.roomId && i.description && resolvePromptId(i.promptKey) !== "P-005");
   const intentions = priorities.length
     ? priorities.map((p, idx) => ({ label: p, text: idx === 0 ? priorityNote : "" }))

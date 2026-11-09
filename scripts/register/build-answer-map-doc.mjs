@@ -119,6 +119,8 @@ function optionCell(e) {
   if (e.inherits) parts.push(`Inherits ${e.inherits}`);
   if (e.optionsFrom) parts.push(`Options from ${e.optionsFrom}`);
   if (e.presentedWith) parts.push(`Shown with ${e.presentedWith}`);
+  if (e.clientNote) parts.push("Plus a note for the client");
+  if (e.childrenBoundToParent) parts.push("Follow-ups never carry across to another option");
   if (e.optionSource) parts.push(`_source: ${e.optionSource}_`);
   if (e.notes) parts.push(e.notes);
   return esc(parts.join(" · ")) || "—";
