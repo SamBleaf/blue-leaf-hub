@@ -25,11 +25,16 @@
  * Pure module — no React, no network. Safe to import in the browser (Vite) and in Node tests/server.
  */
 import { QUESTIONS, QUESTION_LIBRARY_VERSION, ANSWER_CONFIG } from "./registerQuestions.js";
-import { normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, answerMaterialChanged, stableStringify, answerSummary, ANSWER_SCHEMA_VERSION } from "./registerAnswer.js";
+import {
+  normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, applyPricingAssumption, hasExplicitChoice,
+  normaliseAssumption, answerMaterialChanged, stableStringify, answerSummary, ANSWER_SCHEMA_VERSION, BASELINE_TIERS,
+} from "./registerAnswer.js";
+import { BASELINE_CATEGORIES, BASELINE_VERSION, PERFORMANCE_SUGGESTIONS } from "./registerGuidance.js";
 
 export { QUESTION_LIBRARY_VERSION };
 export * from "./registerAnswer.js";
 export * from "./registerChoice.js";
+export * from "./registerGuidance.js";
 
 // ── Vocabulary ────────────────────────────────────────────────────────────────────────────────────
 
@@ -250,6 +255,9 @@ export const PROJECT_TOPICS = [
   { key: "brief", label: "Brief" },
   { key: "envelope", label: "Envelope & external materials" },
   { key: "internal", label: "Internal standards (defaults)" },
+  { key: "kitchen_joinery", label: "Kitchen & joinery standards" },
+  { key: "wet_areas", label: "Wet-area standards" },
+  { key: "laundry", label: "Laundry standards" },
   { key: "services", label: "Services & performance" },
   { key: "inclusions", label: "Inclusions & responsibilities" },
 ];
@@ -448,6 +456,7 @@ export function emptyMeta(partial = {}) {
     rooms: Array.isArray(partial.rooms) ? partial.rooms.map((r) => makeRoom(r)) : [],
     lastRoomId: partial.lastRoomId || null,
     lastStep: partial.lastStep || null,
+    baseline: normaliseBaseline(partial.baseline),             // staff-only pricing guide (below). Never reaches a client
   };
 }
 
@@ -498,7 +507,8 @@ export function writeRegister(register) {
   const meta = register?.meta ? { ...emptyMeta(register.meta) } : null;
   const items = Array.isArray(register?.items) ? register.items.map((i) => { const it = makeItem(i); delete it.sync; if (!it.answer) delete it.answer; return it; }) : [];
   const metaStarted = meta && (meta.rooms.length || meta.planRev || meta.deliveryModel ||
-    meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId || meta.lastStep);
+    meta.occupancy || meta.renovationOverlay || meta.scopeAreas.length || meta.lastRoomId || meta.lastStep ||
+    meta.baseline.projectTier || Object.keys(meta.baseline.categories).length);
   return [...(metaStarted ? [meta] : []), ...items];
 }
 
@@ -514,6 +524,30 @@ export function defaultItemFor(register, questionId, { zoneKey } = {}) {
   const all = defaultItemsFor(register, questionId);
   if (zoneKey) return all.find((i) => i.answer?.zone?.key === zoneKey) || all.find((i) => !i.answer?.zone) || null;
   return all[0] || null;
+}
+
+/** The room questions also set once on Whole House, per zone: kitchen and joinery, wet areas, laundry (Tab 27 B03). */
+export function standardPrompts() {
+  return QUESTIONS.filter((q) => ANSWER_CONFIG[q.id]?.standard);
+}
+
+/**
+ * The whole-house default a room reads for this question, or null. Zone-driven: a bedroom reads the bedroom floor, a
+ * scullery reads the scullery standard and then the kitchen's. A room with nothing to read asks the question itself,
+ * and a default nobody has chosen anything for ("Not decided", blank) isn't something a room can inherit.
+ */
+export function roomDefaultFor(register, question, roomType) {
+  const sourceId = question?.inherits || (ANSWER_CONFIG[question?.id]?.standard ? question.id : null);
+  if (!sourceId) return null;
+  const defaults = defaultItemsFor(register, sourceId).filter(hasExplicitChoice);
+  const cfg = ANSWER_CONFIG[sourceId];
+  const table = cfg?.standard?.roomZones || cfg?.roomZones;
+  if (!table) return defaults[0] || null;
+  for (const zone of table[roomType] || table["*"] || []) {
+    const hit = defaults.find((i) => i.answer?.zone?.key === zone);
+    if (hit) return hit;
+  }
+  return defaults.find((i) => !i.answer?.zone) || null;
 }
 
 /**
@@ -711,6 +745,109 @@ export const pricingLabel = (k) => PRICING_STATUSES[k] || k || "—";
 export const supplyLabel = (k) => SUPPLY_BY[k] || k || "—";
 export const itemKindLabel = (k) => ITEM_KINDS[k] || k || "—";
 export const deliveryLabel = (k) => DELIVERY_MODELS[k] || k || "—";
+
+// ── Blue Leaf baseline guide (Tab 27 B05, Gate 1.4, Gate 3.2) ──────────────────────────────────────
+//
+// What is stored: which tier guides each category, in register meta, with the wording copied at the time. Nothing here
+// writes to an item, so a tier can't overwrite a choice or become a preference, an approval or a price. Whether an
+// assumption applies is worked out each time from what the items say. It is never stored as a second answer.
+
+/** The stored guide, in its one shape. A tier the guide doesn't know is dropped. Wording is kept as it was copied. */
+export function normaliseBaseline(raw) {
+  const b = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const categories = {};
+  const given = b.categories && typeof b.categories === "object" ? b.categories : {};
+  for (const key of Object.keys(given).sort()) {
+    if (!BASELINE_TIERS[given[key]?.tier]) continue;
+    const a = normaliseAssumption({ ...given[key], categoryKey: key });
+    if (a) categories[key] = a;
+  }
+  return { projectTier: BASELINE_TIERS[b.projectTier] ? b.projectTier : "", categories };
+}
+
+/** The broad guide for the project. It moves nothing by itself: categories are set separately (B05). A second tap clears it. */
+export function setProjectTier(raw, tier) {
+  const b = normaliseBaseline(raw);
+  if (!BASELINE_TIERS[tier]) return b;
+  return { ...b, projectTier: b.projectTier === tier ? "" : tier };
+}
+
+/** One category's tier. Independent of every other category and of the project guide. A second tap clears it. */
+export function setCategoryTier(raw, key, tier, { at = "", by = "" } = {}) {
+  const b = normaliseBaseline(raw);
+  const cat = BASELINE_CATEGORIES.find((c) => c.key === key);
+  if (!cat || !BASELINE_TIERS[tier]) return b;
+  const categories = { ...b.categories };
+  if (categories[key]?.tier === tier) delete categories[key];
+  else categories[key] = { origin: "blue_leaf_baseline", tier, baselineVersion: BASELINE_VERSION, categoryKey: key, text: cat.tiers[tier], at, by };
+  return normaliseBaseline({ ...b, categories });
+}
+
+const settledOut = (i) => i.answer?.state === "not_applicable" || SETTLED_DISPOSITIONS.has(i.disposition);
+const zoneKeyOf = (i) => i.answer?.zone?.key || "";
+
+/**
+ * Each category as staff and estimators read it. status: open (nothing chosen, the assumption is all there is) · part
+ * (some chosen, the assumption covers only the gaps) · chosen (explicit choices cover it, the assumption isn't used) ·
+ * settled (by others, excluded or N/A). Whole-house records only: a room exception doesn't settle the standard.
+ */
+export function baselineView(register) {
+  const b = normaliseBaseline(register?.meta?.baseline);
+  const wholeHouse = (register?.items || []).filter((i) => !i.roomId);
+  return BASELINE_CATEGORIES.map((c) => {
+    const rows = wholeHouse.filter((i) => c.questions.includes(resolvePromptId(i.promptKey)));
+    const settled = rows.filter(settledOut);
+    const live = rows.filter((i) => !settledOut(i));
+    const chosen = live.filter(hasExplicitChoice);
+    const open = live.filter((i) => !hasExplicitChoice(i));
+    const decided = [...chosen, ...settled];
+    const zoneCfg = ANSWER_CONFIG[c.questions[0]]?.zones || [];
+    const gaps = decided.some((i) => !zoneKeyOf(i)) ? [] : (c.pricedZones || []).filter((z) => !decided.some((i) => zoneKeyOf(i) === z));
+    const hasGaps = open.length > 0 || gaps.length > 0;
+    const status = !decided.length ? "open" : hasGaps ? "part" : chosen.length ? "chosen" : "settled";
+    return {
+      key: c.key, label: c.label, status, held: b.categories[c.key] || null, tiers: c.tiers,
+      chosen: chosen.map((i) => ({ id: i.id, title: itemTitle(i) })), openItemIds: open.map((i) => i.id),
+      zoneGaps: gaps.map((z) => zoneCfg.find((o) => o.id === z)?.label || z),
+    };
+  });
+}
+
+/** One tap: give the project guide to the categories with no tier yet and something still to price. Never touches one already set. */
+export function applyProjectGuide(register, { at = "", by = "" } = {}) {
+  let next = normaliseBaseline(register?.meta?.baseline);
+  if (!next.projectTier) return next;
+  for (const c of baselineView(register)) {
+    if (!c.held && (c.status === "open" || c.status === "part")) next = setCategoryTier(next, c.key, next.projectTier, { at, by });
+  }
+  return next;
+}
+
+/** The assumption an estimator may use for this record, or null. An explicit choice, N/A or a settled status always wins. */
+export function assumptionFor(register, item) {
+  if (!item || settledOut(item)) return null;
+  if (item.answer?.assumption) return activeAssumption(item);
+  const id = resolvePromptId(item.promptKey);
+  const cat = BASELINE_CATEGORIES.find((c) => c.questions.includes(id));
+  const held = cat ? normaliseBaseline(register?.meta?.baseline).categories[cat.key] : null;
+  return held ? activeAssumption(applyPricingAssumption(item, held)) : null;
+}
+
+/** The assumptions in force, for the staff Tender view and internal Tender Notes. Staff-only by construction: no client code reads this. */
+export function baselineAssumptions(register) {
+  return baselineView(register).filter((c) => c.held && (c.status === "open" || c.status === "part")).map((c) => ({
+    key: c.key, label: c.label, tier: c.held.tier, tierLabel: BASELINE_TIERS[c.held.tier], text: c.held.text, baselineVersion: c.held.baselineVersion,
+    status: c.status, zoneGaps: c.zoneGaps, chosen: c.chosen, openItemIds: c.openItemIds,
+  }));
+}
+
+// ── Envelope performance review (DEC-MRUX-03) ─────────────────────────────────────────────────────
+
+/** What the chosen goals may prompt someone to review. Derived from the answer every time and never stored. */
+export function performanceSuggestions(answer) {
+  return (answer?.selected || []).filter((s) => !s.stale && PERFORMANCE_SUGGESTIONS[s.optionId])
+    .map((s) => ({ goal: s.optionId, goalLabel: s.label, suggestions: PERFORMANCE_SUGGESTIONS[s.optionId] }));
+}
 
 const TBC = "TBC";
 

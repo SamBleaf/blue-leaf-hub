@@ -151,7 +151,8 @@ function normUnresolved(u) {
   const out = { ...omit(u, ["reason", "note"]), reason: keyIn(UNRESOLVED_REASONS, u.reason), note: text(u.note) };
   return out.reason || out.note ? out : null;
 }
-function normAssumption(a) {
+/** One pricing assumption, in its one stored shape. Null when it says nothing. */
+export function normaliseAssumption(a) {
   if (!a || typeof a !== "object") return null;
   const known = ["origin", "tier", "baselineVersion", "categoryKey", "text", "at", "by"];
   const out = {
@@ -184,7 +185,7 @@ export function normaliseAnswer(raw) {
     v: ANSWER_SCHEMA_VERSION, state, nature: keyIn(ANSWER_NATURES, raw.nature) || null, configVersion: text(raw.configVersion),
     selected, element: normElement(raw.element), zone: normZone(raw.zone), areaIds: uniqueIds(raw.areaIds),
     sourceQuestionIds: uniqueIds(raw.sourceQuestionIds), linkedItemIds: uniqueIds(raw.linkedItemIds),
-    unresolved, assumption: normAssumption(raw.assumption), delivery: normDelivery(raw.delivery), note: text(raw.note),
+    unresolved, assumption: normaliseAssumption(raw.assumption), delivery: normDelivery(raw.delivery), note: text(raw.note),
     ...(text(raw.clientNote) ? { clientNote: text(raw.clientNote) } : {}),
   };
   const blank = state === "not_discussed" && !selected.length && !a.element && !a.zone && !a.areaIds.length && !a.sourceQuestionIds.length

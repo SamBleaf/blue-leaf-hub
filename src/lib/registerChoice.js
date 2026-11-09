@@ -23,6 +23,23 @@ export { ANSWER_CONFIG_VERSION };
 /** The control config for a Tab 21 question id, or null. */
 export const answerConfigFor = (id) => ANSWER_CONFIG[id] || null;
 
+/** Is this item the separate record linked under another (gutters under a roof), rather than an answer to the question itself? */
+export const isLinkedRow = (cfg, item) => !!cfg?.linked && (item?.answer?.element?.key === cfg.linked.key || (item?.answer?.linkedItemIds || []).length > 0);
+
+/**
+ * The control config for this particular row. The linked item has its own choices. A room question that is also a
+ * whole-house standard takes its zones only on the whole-house record: inside a room the room is the zone.
+ */
+export function configForRow(questionId, item) {
+  const cfg = answerConfigFor(questionId);
+  if (!cfg) return null;
+  if (isLinkedRow(cfg, item)) {
+    return { handling: "choice", mapping: "single_select", nature: "choice", tier: cfg.tier, control: "single", dispositionUse: "settled_only", select: "single", options: cfg.linked.options, linkedKey: cfg.linked.key, linkedLabel: cfg.linked.label };
+  }
+  if (cfg.standard && !item?.roomId) return { ...cfg, zones: cfg.standard.zones, repeat: cfg.standard.repeat };
+  return cfg;
+}
+
 /** Can this answer be edited by the card? One written by a newer schema is left alone. */
 export const answerIsEditable = (answer) => !answer || Number(answer.v) <= ANSWER_SCHEMA_VERSION;
 
@@ -44,7 +61,7 @@ export function settleOptions(cfg, { showDetail = false, current = "" } = {}) {
 
 const samePath = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
 const isPrefix = (prefix, path) => prefix.length <= path.length && prefix.every((id, i) => id === path[i]);
-const ctxOf = (a) => ({ elementKey: a?.element?.key || "" });
+const ctxOf = (a) => ({ elementKey: a?.element?.key || "", zoneKey: a?.zone?.key || "" });
 const newElementId = () => {
   try { if (globalThis.crypto?.randomUUID) return "el_" + globalThis.crypto.randomUUID(); } catch { /* fall through */ }
   return "el_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -387,7 +404,7 @@ function openRows(live, path) {
 }
 
 /** The rows to draw for this answer. No decisions are left to the component. */
-export function choiceView(cfg, answer, { showDetail = false } = {}) {
+export function choiceView(cfg, answer, { showDetail = false, usedZones = null } = {}) {
   const a = normaliseAnswer(answer);
   const selected = a?.selected || [];
   const live = selected.filter((e) => !e.stale);
@@ -400,9 +417,11 @@ export function choiceView(cfg, answer, { showDetail = false } = {}) {
     hidden = true;
     return false;
   };
+  // A group that belongs to one surface (a ceiling type, a finish level) shows on that surface only. Whatever is on the record always shows.
+  const inZone = (o, path) => isOn(live, path) || !o.onlyZones || (ctx.zoneKey ? o.onlyZones.includes(ctx.zoneKey) : !o.needsZone);
   const walk = (list, parent, heading) => {
     const headingsOnly = cfg.select === "groups" && !parent.length;
-    const rows = (headingsOnly ? list.filter((o) => !childrenOf(cfg, o, ctx)) : list).filter((o) => showing(o, [...parent, o.id]));
+    const rows = (headingsOnly ? list.filter((o) => !childrenOf(cfg, o, ctx)) : list).filter((o) => inZone(o, [...parent, o.id]) && showing(o, [...parent, o.id]));
     if (rows.length) {
       levels.push({
         key: parent.join("/") || "root", path: parent, heading: heading || (cfg.optionLevel === "action" && cfg.elements ? "What's happening" : null), mode: modeAt(cfg, parent, ctx),
@@ -416,14 +435,16 @@ export function choiceView(cfg, answer, { showDetail = false } = {}) {
     for (const o of list) {
       const path = [...parent, o.id];
       const kids = childrenOf(cfg, o, ctx);
-      if (kids && (headingsOnly || isOn(live, path))) walk(kids, path, o.label);
+      if (kids && headingsOnly && !(inZone(o, path) && showing(o, path))) continue;
+      if (kids && (headingsOnly || isOn(live, path))) walk(kids, path, o.childHeading || o.label);
     }
   };
   walk(cfg.options || [], [], null);
 
   const pick = (list, key, label) => {
     if (!list) return null;
-    const options = list.filter((o) => { if (!o.detail || showDetail || o.id === key) return true; hidden = true; return false; }).map((o) => ({ id: o.id, label: o.label, on: o.id === key }));
+    const options = list.filter((o) => { if (!o.detail || showDetail || o.id === key) return true; hidden = true; return false; })
+      .map((o) => ({ id: o.id, label: o.label, on: o.id === key, disabled: !!usedZones?.has(o.id) && o.id !== key && list === cfg.zones }));
     return { options, key: key || "", open: OPEN_OPTION_IDS.has(key), words: OPEN_OPTION_IDS.has(key) ? statedText(label) : "" };
   };
   const zone = pick(cfg.zones, a?.zone?.key, a?.zone?.label);
@@ -433,8 +454,10 @@ export function choiceView(cfg, answer, { showDetail = false } = {}) {
     path: e.path, label: e.label, stale: !!e.stale, canReuse: !!e.stale && !!optionAt(cfg, e.path, ctx) && !reuseBlocked(cfg, selected, e.path), key: `${e.path.join("/")}|${e.label}`,
   }));
   const state = a?.state || "not_discussed";
+  // The usual finish for this surface, until someone chooses one. Shown to staff, never recorded by being shown.
+  const usual = cfg.usualGroup && !live.some((e) => e.path[0] === cfg.usualGroup) ? (cfg.zones || []).find((z) => z.id === ctx.zoneKey)?.usual || "" : "";
   return {
-    levels, zone, element, kept, state, hidden, maxReached: atLimit,
+    levels, zone, element, kept, state, hidden, maxReached: atLimit, usual,
     notDecided: isParked(state), clientUnsure: state === "client_unsure", notApplicable: state === "not_applicable",
     reason: state === "unresolved" ? a?.unresolved?.reason || "" : "", note: a?.note || "", clientNote: a?.clientNote || "",
     summary: state === "not_applicable" ? "" : answerSummary({ answer: a }),

@@ -42,7 +42,7 @@ ok("walls hold several systems by zone (B01)", by.get("W-013").repeat.by === "zo
 ok("gutters are a separate linked item (MR-UX-01B)", by.get("W-014").linked?.key === "gutters");
 ok("floors have main, bedroom and wet zones (MR-UX-01E)", ["main_floor", "bedroom_floor", "wet_area_floor"].every((z) => by.get("W-017").zones.some((o) => o.id === z)));
 ok("doors offer 2040, 2340, floor to ceiling and P50 shadowline (MR-UX-01F)", ["2040", "2340", "floor_to_ceiling", "p50_shadowline"].every((id) => flat(by.get("W-018").options).some((o) => o.id === id)));
-ok("paint has no generic sheen option (MR-UX-01G)", !flat(by.get("W-019").options).some((o) => /sheen/i.test(o.label)) && !flat(by.get("W-019").zones).some((o) => /sheen/i.test(o.label)));
+ok("paint has no generic sheen option (MR-UX-01G): only a finish level under a surface", by.get("W-019").options.filter((g) => flat([g]).some((o) => /sheen/i.test(o.label))).map((g) => g.id).join() === "finish_level" && by.get("W-019").options.find((g) => g.id === "finish_level").needsZone === true && !flat(by.get("W-019").zones).some((o) => /sheen/i.test(o.label)));
 ok("performance goals are independent and not certification (MR-UX-01D)", by.get("W-016").control === "multi" && by.get("W-016").options.length === 4 && /not certification/i.test(by.get("W-016").notes));
 ok("the client's quality priority is kept apart from the Blue Leaf baseline tier", /Not the Blue Leaf baseline/.test(by.get("W-009").notes));
 ok("no option can record an approval, a verification or a price", !map.questions.some((q) => JSON.stringify(q.options || []).match(/client_approved|verified|\$\s?\d/)));
@@ -86,6 +86,15 @@ ok("a client-supply option that decides contract inclusion", failsWith((m) => { 
 ok("a select control with no options", failsWith((m) => { delete m.questions.find((q) => q.id === "W-001").options; }, /needs options/));
 ok("a room prompt moved out of the guided set", failsWith((m) => { m.questions.find((q) => q.id === "K-005").tier = "more_detail"; }, /guided primary set/));
 ok("a Sales fact turned into a question", failsWith((m) => { m.questions.find((q) => q.id === "P-001").mapping = "single_select"; }, /must stay prefilled/));
+ok("a sheen option that doesn't need a surface", failsWith((m) => { delete m.questions.find((q) => q.id === "W-019").options.find((o) => o.id === "finish_level").needsZone; }, /sheen option may only sit under a surface/));
+ok("a room table pointing at a zone that doesn't exist", failsWith((m) => { m.questions.find((q) => q.id === "W-017").roomZones.bedroom = ["attic"]; }, /points at unknown zone attic/));
+ok("a group limited to a surface that doesn't exist", failsWith((m) => { m.questions.find((q) => q.id === "W-019").options.find((o) => o.id === "ceiling").onlyZones = ["roof"]; }, /onlyZones points at unknown zone roof/));
+ok("a surface with no usual finish", failsWith((m) => { delete m.questions.find((q) => q.id === "W-019").zones[0].usual; }, /needs its usual value/));
+ok("a whole-house standard with no zones", failsWith((m) => { delete m.questions.find((q) => q.id === "K-005").standard.zones; }, /standard needs zones/));
+ok("a whole-house standard on a topic the page doesn't have", failsWith((m) => { m.questions.find((q) => q.id === "K-005").standard.topic = "garage"; }, /unknown standard topic/));
+ok("a whole-house standard naming a room that never asks the question", failsWith((m) => { m.questions.find((q) => q.id === "K-005").standard.roomZones.pantry = ["kitchen"]; }, /never asks this question/));
+ok("a whole-house standard with every zone hidden", failsWith((m) => { for (const z of m.questions.find((q) => q.id === "K-005").standard.zones) z.detail = true; }, /zone shown first/));
+ok("one row per zone with no zones", failsWith((m) => { delete m.questions.find((q) => q.id === "W-017").zones; }, /needs zones/));
 
 console.log("\nReadable document");
 ok("TAB21_ANSWER_MAP.md matches the JSON", readFileSync(MD_PATH, "utf8") === renderAnswerMap(map));

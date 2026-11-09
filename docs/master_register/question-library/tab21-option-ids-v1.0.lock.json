@@ -197,6 +197,7 @@
    "lightweight_cladding",
    "lightweight_cladding/aac",
    "lightweight_cladding/fibre_cement_sheet",
+   "lightweight_cladding/metal_cladding",
    "lightweight_cladding/other_cement_sheet_system",
    "lightweight_cladding/weatherboard",
    "masonry",
@@ -217,21 +218,51 @@
    "zone:upper_level"
   ],
   "W-014": [
+   "linked:box_gutter",
+   "linked:fascia_integrated",
+   "linked:half_round",
+   "linked:other",
+   "linked:quad",
    "metal_roofing",
    "metal_roofing/flat_or_low_pitch",
    "metal_roofing/flat_or_low_pitch/deck_profile",
+   "metal_roofing/flat_or_low_pitch/deck_profile/dark_tone",
+   "metal_roofing/flat_or_low_pitch/deck_profile/light_tone",
+   "metal_roofing/flat_or_low_pitch/deck_profile/mid_tone",
    "metal_roofing/flat_or_low_pitch/other",
    "metal_roofing/flat_or_low_pitch/standing_seam",
+   "metal_roofing/flat_or_low_pitch/standing_seam/dark_tone",
+   "metal_roofing/flat_or_low_pitch/standing_seam/light_tone",
+   "metal_roofing/flat_or_low_pitch/standing_seam/mid_tone",
    "metal_roofing/pitched",
    "metal_roofing/pitched/corrugated",
+   "metal_roofing/pitched/corrugated/dark_tone",
+   "metal_roofing/pitched/corrugated/light_tone",
+   "metal_roofing/pitched/corrugated/mid_tone",
    "metal_roofing/pitched/other",
    "metal_roofing/pitched/standing_seam",
+   "metal_roofing/pitched/standing_seam/dark_tone",
+   "metal_roofing/pitched/standing_seam/light_tone",
+   "metal_roofing/pitched/standing_seam/mid_tone",
    "metal_roofing/pitched/trapezoidal",
+   "metal_roofing/pitched/trapezoidal/dark_tone",
+   "metal_roofing/pitched/trapezoidal/light_tone",
+   "metal_roofing/pitched/trapezoidal/mid_tone",
    "other",
    "tile_roofing",
    "tile_roofing/concrete_tile",
+   "tile_roofing/concrete_tile/dark_tone",
+   "tile_roofing/concrete_tile/light_tone",
+   "tile_roofing/concrete_tile/mid_tone",
    "tile_roofing/other",
-   "tile_roofing/terracotta_tile"
+   "tile_roofing/terracotta_tile",
+   "tile_roofing/terracotta_tile/dark_tone",
+   "tile_roofing/terracotta_tile/light_tone",
+   "tile_roofing/terracotta_tile/mid_tone",
+   "zone:alfresco_or_verandah",
+   "zone:garage",
+   "zone:main_roof",
+   "zone:other"
   ],
   "W-015": [
    "frame",
@@ -240,10 +271,21 @@
    "frame/thermally_broken_aluminium",
    "frame/timber",
    "frame/upvc",
+   "frame_colour",
+   "frame_colour/dark",
+   "frame_colour/light",
+   "frame_colour/natural",
+   "frame_colour/other",
    "glazing",
    "glazing/double_glazing",
    "glazing/other",
    "glazing/single_glazing",
+   "opening_style",
+   "opening_style/awning",
+   "opening_style/casement",
+   "opening_style/fixed",
+   "opening_style/sliding",
+   "opening_style/stacking",
    "priorities",
    "priorities/acoustic_performance",
    "priorities/frame_appearance",
@@ -261,12 +303,18 @@
   ],
   "W-017": [
    "carpet",
+   "carpet/nylon",
+   "carpet/wool",
    "hybrid",
    "laminate",
    "other",
    "polished_concrete",
    "tile",
+   "tile/natural_stone",
+   "tile/porcelain",
    "timber",
+   "timber/engineered",
+   "timber/solid",
    "zone:bedroom_floor",
    "zone:main_floor",
    "zone:other_zone",
@@ -301,8 +349,17 @@
   "W-019": [
    "ceiling",
    "ceiling/cornice",
+   "ceiling/raked_or_feature",
+   "ceiling/shadowline",
    "ceiling/square_set",
    "feature_areas",
+   "finish_level",
+   "finish_level/flat",
+   "finish_level/gloss",
+   "finish_level/low_sheen",
+   "finish_level/matt",
+   "finish_level/satin",
+   "finish_level/semi_gloss",
    "palette",
    "palette/cool",
    "palette/warm",
@@ -337,11 +394,13 @@
   ],
   "W-022": [
    "by_client",
+   "by_others",
    "element:appliances",
    "element:automation",
    "element:fireplaces",
    "element:landscaping",
    "element:loose_furniture",
+   "element:other",
    "element:security",
    "element:window_furnishings",
    "excluded",
@@ -403,18 +462,33 @@
   ],
   "R-005": [
    "carpet",
+   "carpet/nylon",
+   "carpet/wool",
    "hybrid",
    "laminate",
    "other",
    "polished_concrete",
    "tile",
-   "timber"
+   "tile/natural_stone",
+   "tile/porcelain",
+   "timber",
+   "timber/engineered",
+   "timber/solid"
   ],
   "R-006": [
    "ceiling",
    "ceiling/cornice",
+   "ceiling/raked_or_feature",
+   "ceiling/shadowline",
    "ceiling/square_set",
    "feature_areas",
+   "finish_level",
+   "finish_level/flat",
+   "finish_level/gloss",
+   "finish_level/low_sheen",
+   "finish_level/matt",
+   "finish_level/satin",
+   "finish_level/semi_gloss",
    "palette",
    "palette/cool",
    "palette/warm"
@@ -422,6 +496,9 @@
   "R-007": [
    "external_door",
    "internal_door",
+   "internal_door/acoustic",
+   "internal_door/different_height",
+   "internal_door/fire_rated",
    "opening_alteration",
    "screen",
    "window"
@@ -492,7 +569,10 @@
    "profile",
    "profile/laminate",
    "profile/paint",
-   "profile/timber_veneer"
+   "profile/timber_veneer",
+   "zone:general_joinery",
+   "zone:kitchen",
+   "zone:scullery"
   ],
   "K-005": [
    "engineered_stone",
@@ -500,13 +580,17 @@
    "natural_stone",
    "other",
    "porcelain",
-   "timber"
+   "timber",
+   "zone:kitchen",
+   "zone:scullery"
   ],
   "K-006": [
    "glass",
    "other",
    "stone",
-   "tile"
+   "tile",
+   "zone:kitchen",
+   "zone:scullery"
   ],
   "K-007": [
    "hot_tap",
@@ -581,7 +665,10 @@
    "back_to_wall",
    "concealed_cistern",
    "existing_retained",
-   "wall_hung"
+   "wall_hung",
+   "zone:bathroom",
+   "zone:ensuite",
+   "zone:powder"
   ],
   "B-004": [
    "floorstanding",
@@ -589,7 +676,10 @@
    "floorstanding/two_basins",
    "wall_hung",
    "wall_hung/one_basin",
-   "wall_hung/two_basins"
+   "wall_hung/two_basins",
+   "zone:bathroom",
+   "zone:ensuite",
+   "zone:powder"
   ],
   "B-005": [
    "above_counter",
@@ -616,12 +706,18 @@
    "brushed_nickel",
    "chrome",
    "matte_black",
-   "other"
+   "other",
+   "zone:bathroom",
+   "zone:ensuite",
+   "zone:powder"
   ],
   "B-009": [
    "feature_tile",
    "full_height",
-   "partial_height"
+   "partial_height",
+   "zone:bathroom",
+   "zone:ensuite",
+   "zone:powder"
   ],
   "B-010": [
    "exhaust_fan",
@@ -659,16 +755,24 @@
    "drying_rail",
    "mixer",
    "splashback",
-   "trough"
+   "trough",
+   "zone:laundry",
+   "zone:mudroom"
   ],
   "L-004": [
    "carpet",
+   "carpet/nylon",
+   "carpet/wool",
    "hybrid",
    "laminate",
    "other",
    "polished_concrete",
    "tile",
-   "timber"
+   "tile/natural_stone",
+   "tile/porcelain",
+   "timber",
+   "timber/engineered",
+   "timber/solid"
   ],
   "L-005": [],
   "L-006": [

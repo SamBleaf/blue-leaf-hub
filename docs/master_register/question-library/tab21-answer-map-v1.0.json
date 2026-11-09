@@ -1,7 +1,7 @@
 {
  "version": "tab21-answer-map-v1.0",
  "libraryVersion": "tab21-v1.0",
- "status": "Proposed mapping (Tab 27 Gate 0.2), R05 P3, extended with the P4a control fields. build-question-library.mjs turns this into ANSWER_CONFIG in src/lib/registerQuestions.js. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable from P4a: tab21-option-ids-v1.0.lock.json holds them, and a test fails if one goes.",
+ "status": "Proposed mapping (Tab 27 Gate 0.2), R05 P3, extended with the P4a control fields. build-question-library.mjs turns this into ANSWER_CONFIG in src/lib/registerQuestions.js. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. P4b added the whole-house standards, zone-driven defaults, surface finishes and linked gutters. Option ids are stable from P4a: tab21-option-ids-v1.0.lock.json holds them, and a test fails if one goes.",
  "legend": {
   "mapping": {
    "fact_prefill": "Read from Sales or the project. Never re-asked.",
@@ -1347,6 +1347,10 @@
        "label": "Weatherboard"
       },
       {
+       "id": "metal_cladding",
+       "label": "Metal cladding"
+      },
+      {
        "id": "other_cement_sheet_system",
        "label": "Other cement-sheet system",
        "detail": true
@@ -1435,11 +1439,41 @@
        "children": [
         {
          "id": "standing_seam",
-         "label": "Standing seam"
+         "label": "Standing seam",
+         "childHeading": "Colour",
+         "children": [
+          {
+           "id": "light_tone",
+           "label": "Light tone"
+          },
+          {
+           "id": "mid_tone",
+           "label": "Mid tone"
+          },
+          {
+           "id": "dark_tone",
+           "label": "Dark tone"
+          }
+         ]
         },
         {
          "id": "deck_profile",
-         "label": "Deck profile"
+         "label": "Deck profile",
+         "childHeading": "Colour",
+         "children": [
+          {
+           "id": "light_tone",
+           "label": "Light tone"
+          },
+          {
+           "id": "mid_tone",
+           "label": "Mid tone"
+          },
+          {
+           "id": "dark_tone",
+           "label": "Dark tone"
+          }
+         ]
         },
         {
          "id": "other",
@@ -1453,15 +1487,60 @@
        "children": [
         {
          "id": "corrugated",
-         "label": "Corrugated"
+         "label": "Corrugated",
+         "childHeading": "Colour",
+         "children": [
+          {
+           "id": "light_tone",
+           "label": "Light tone"
+          },
+          {
+           "id": "mid_tone",
+           "label": "Mid tone"
+          },
+          {
+           "id": "dark_tone",
+           "label": "Dark tone"
+          }
+         ]
         },
         {
          "id": "standing_seam",
-         "label": "Standing seam"
+         "label": "Standing seam",
+         "childHeading": "Colour",
+         "children": [
+          {
+           "id": "light_tone",
+           "label": "Light tone"
+          },
+          {
+           "id": "mid_tone",
+           "label": "Mid tone"
+          },
+          {
+           "id": "dark_tone",
+           "label": "Dark tone"
+          }
+         ]
         },
         {
          "id": "trapezoidal",
-         "label": "Trapezoidal"
+         "label": "Trapezoidal",
+         "childHeading": "Colour",
+         "children": [
+          {
+           "id": "light_tone",
+           "label": "Light tone"
+          },
+          {
+           "id": "mid_tone",
+           "label": "Mid tone"
+          },
+          {
+           "id": "dark_tone",
+           "label": "Dark tone"
+          }
+         ]
         },
         {
          "id": "other",
@@ -1477,11 +1556,41 @@
      "children": [
       {
        "id": "concrete_tile",
-       "label": "Concrete tile"
+       "label": "Concrete tile",
+       "childHeading": "Colour",
+       "children": [
+        {
+         "id": "light_tone",
+         "label": "Light tone"
+        },
+        {
+         "id": "mid_tone",
+         "label": "Mid tone"
+        },
+        {
+         "id": "dark_tone",
+         "label": "Dark tone"
+        }
+       ]
       },
       {
        "id": "terracotta_tile",
-       "label": "Terracotta tile"
+       "label": "Terracotta tile",
+       "childHeading": "Colour",
+       "children": [
+        {
+         "id": "light_tone",
+         "label": "Light tone"
+        },
+        {
+         "id": "mid_tone",
+         "label": "Mid tone"
+        },
+        {
+         "id": "dark_tone",
+         "label": "Dark tone"
+        }
+       ]
       },
       {
        "id": "other",
@@ -1499,10 +1608,11 @@
     "by": "zone"
    },
    "flow": [
+    "zone",
     "material",
     "pitch",
     "profile",
-    "finish"
+    "colour"
    ],
    "linked": {
     "key": "gutters",
@@ -1530,7 +1640,25 @@
      }
     ]
    },
-   "notes": "Gutters are a separate linked item, not hidden in the roof colour. Pitch and profile compatibility verified against plans and manufacturer data."
+   "notes": "One row per roof system, told apart by zone, so a pitched main roof and a low-pitch alfresco are separate records. Gutters are a separate linked item under each roof, not hidden in the roof colour. Pitch and profile compatibility verified against plans and manufacturer data. Colour tones are proposed for Blue Leaf to confirm.",
+   "zones": [
+    {
+     "id": "main_roof",
+     "label": "Main roof"
+    },
+    {
+     "id": "alfresco_or_verandah",
+     "label": "Alfresco or verandah"
+    },
+    {
+     "id": "garage",
+     "label": "Garage"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ]
   },
   {
    "id": "W-015",
@@ -1600,6 +1728,28 @@
      ]
     },
     {
+     "id": "frame_colour",
+     "label": "Frame colour",
+     "children": [
+      {
+       "id": "dark",
+       "label": "Dark"
+      },
+      {
+       "id": "light",
+       "label": "Light"
+      },
+      {
+       "id": "natural",
+       "label": "Natural"
+      },
+      {
+       "id": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
      "id": "priorities",
      "label": "Priorities",
      "children": [
@@ -1634,6 +1784,34 @@
       }
      ],
      "multi": true
+    },
+    {
+     "id": "opening_style",
+     "label": "Opening style",
+     "detail": true,
+     "multi": true,
+     "children": [
+      {
+       "id": "sliding",
+       "label": "Sliding"
+      },
+      {
+       "id": "awning",
+       "label": "Awning"
+      },
+      {
+       "id": "casement",
+       "label": "Casement"
+      },
+      {
+       "id": "fixed",
+       "label": "Fixed"
+      },
+      {
+       "id": "stacking",
+       "label": "Stacking"
+      }
+     ]
     }
    ],
    "flow": [
@@ -1683,7 +1861,8 @@
      "label": "Passive House target"
     }
    ],
-   "notes": "Independent goals, not certification decisions. Later suggestions are staff-only and marked review required (DEC-MRUX-03). No product is specified by selecting a goal."
+   "notes": "Independent goals, not certification decisions. The card lists staff-only suggestions, marked review required, derived from the goals chosen and never stored (DEC-MRUX-03). No product is specified by selecting a goal.",
+   "reviewSuggestions": true
   },
   {
    "id": "W-017",
@@ -1710,7 +1889,17 @@
    "options": [
     {
      "id": "timber",
-     "label": "Timber"
+     "label": "Timber",
+     "children": [
+      {
+       "id": "engineered",
+       "label": "Engineered"
+      },
+      {
+       "id": "solid",
+       "label": "Solid"
+      }
+     ]
     },
     {
      "id": "laminate",
@@ -1722,11 +1911,31 @@
     },
     {
      "id": "tile",
-     "label": "Tile"
+     "label": "Tile",
+     "children": [
+      {
+       "id": "porcelain",
+       "label": "Porcelain"
+      },
+      {
+       "id": "natural_stone",
+       "label": "Natural stone"
+      }
+     ]
     },
     {
      "id": "carpet",
-     "label": "Carpet"
+     "label": "Carpet",
+     "children": [
+      {
+       "id": "wool",
+       "label": "Wool"
+      },
+      {
+       "id": "nylon",
+       "label": "Nylon"
+      }
+     ]
     },
     {
      "id": "polished_concrete",
@@ -1739,7 +1948,8 @@
    ],
    "repeat": {
     "key": "floor_zone",
-    "by": "zone"
+    "by": "zone",
+    "eachZone": true
    },
    "flow": [
     "zone",
@@ -1765,7 +1975,25 @@
      "label": "Other zone"
     }
    ],
-   "notes": "One default item per zone. Rooms inherit by zone. Exceptions are explicit."
+   "notes": "One default item per zone, shown as one row each. Rooms inherit by zone, from roomZones. A room with no default for its zone asks the question. Exceptions are explicit.",
+   "roomZones": {
+    "bedroom": [
+     "bedroom_floor"
+    ],
+    "wir": [
+     "bedroom_floor"
+    ],
+    "laundry": [
+     "wet_area_floor"
+    ],
+    "mudroom": [
+     "wet_area_floor"
+    ],
+    "garage": [],
+    "*": [
+     "main_floor"
+    ]
+   }
   },
   {
    "id": "W-018",
@@ -1824,7 +2052,8 @@
        "id": "feature",
        "label": "Feature"
       }
-     ]
+     ],
+     "detail": true
     },
     {
      "id": "jamb_or_edge_detail",
@@ -1856,7 +2085,8 @@
        "id": "other",
        "label": "Other"
       }
-     ]
+     ],
+     "detail": true
     },
     {
      "id": "architraves",
@@ -1870,7 +2100,8 @@
        "id": "other",
        "label": "Other"
       }
-     ]
+     ],
+     "detail": true
     },
     {
      "id": "cornice",
@@ -1884,7 +2115,8 @@
        "id": "no",
        "label": "No"
       }
-     ]
+     ],
+     "detail": true
     },
     {
      "id": "hardware_style",
@@ -1901,15 +2133,11 @@
      ]
     }
    ],
-   "repeat": {
-    "key": "door_trim_standard",
-    "by": "element"
-   },
    "flow": [
     "element",
     "option"
    ],
-   "notes": "Separate defaults per element. Fire, acoustic and door-height exceptions stay possible per room.",
+   "notes": "One record, with each group its own default (MR-UX-01F). Door height, jamb and hardware first; the rest behind + More detail. Fire, acoustic and door-height exceptions are recorded per room on R-007.",
    "select": "groups"
   },
   {
@@ -1947,6 +2175,11 @@
        "id": "cool",
        "label": "Cool"
       }
+     ],
+     "onlyZones": [
+      "walls",
+      "trim",
+      "wet_area"
      ]
     },
     {
@@ -1960,17 +2193,72 @@
       {
        "id": "cornice",
        "label": "Cornice"
+      },
+      {
+       "id": "shadowline",
+       "label": "Shadowline",
+       "detail": true
+      },
+      {
+       "id": "raked_or_feature",
+       "label": "Raked or feature",
+       "detail": true
       }
+     ],
+     "onlyZones": [
+      "ceiling"
      ]
     },
     {
      "id": "feature_areas",
-     "label": "Feature areas"
+     "label": "Feature areas",
+     "onlyZones": [
+      "walls"
+     ]
+    },
+    {
+     "id": "finish_level",
+     "label": "Finish level",
+     "detail": true,
+     "needsZone": true,
+     "onlyZones": [
+      "walls",
+      "ceiling",
+      "trim",
+      "wet_area"
+     ],
+     "children": [
+      {
+       "id": "flat",
+       "label": "Flat"
+      },
+      {
+       "id": "matt",
+       "label": "Matt"
+      },
+      {
+       "id": "low_sheen",
+       "label": "Low sheen"
+      },
+      {
+       "id": "satin",
+       "label": "Satin"
+      },
+      {
+       "id": "semi_gloss",
+       "label": "Semi-gloss"
+      },
+      {
+       "id": "gloss",
+       "label": "Gloss"
+      }
+     ]
     }
    ],
    "repeat": {
     "key": "paint_surface",
-    "by": "zone"
+    "by": "zone",
+    "eachZone": true
    },
    "flow": [
     "surface",
@@ -1979,23 +2267,34 @@
    "zones": [
     {
      "id": "walls",
-     "label": "Walls"
+     "label": "Walls",
+     "usual": "Low sheen"
     },
     {
      "id": "ceiling",
-     "label": "Ceiling"
+     "label": "Ceiling",
+     "usual": "Flat"
     },
     {
      "id": "trim",
-     "label": "Trim"
+     "label": "Trim",
+     "usual": "Semi-gloss"
     },
     {
      "id": "wet_area",
-     "label": "Wet area"
+     "label": "Wet area",
+     "usual": "Semi-gloss"
     }
    ],
-   "notes": "No generic sheen chip. Sheen follows the surface with an editable default rule.",
-   "select": "groups"
+   "notes": "One row per surface. No generic sheen chip: a finish level is only offered under a surface, behind + More detail, and each surface shows its usual level until someone chooses. Usual levels are proposed for Blue Leaf to confirm.",
+   "select": "groups",
+   "usualGroup": "finish_level",
+   "roomZones": {
+    "*": [
+     "walls",
+     "ceiling"
+    ]
+   }
   },
   {
    "id": "W-020",
@@ -2160,7 +2459,8 @@
    "optionSource": "tab21",
    "repeat": {
     "key": "inclusion",
-    "by": "element"
+    "by": "element",
+    "owner": true
    },
    "elements": [
     {
@@ -2192,6 +2492,10 @@
      "id": "automation",
      "label": "Automation",
      "detail": true
+    },
+    {
+     "id": "other",
+     "label": "Other"
     }
    ],
    "actions": [
@@ -2204,6 +2508,11 @@
      "id": "by_client",
      "label": "By client",
      "supplyBy": "client"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
     },
     {
      "id": "excluded",
@@ -2242,7 +2551,8 @@
    "optionSource": "proposed",
    "repeat": {
     "key": "supply_install",
-    "by": "element"
+    "by": "element",
+    "owner": true
    },
    "notes": "Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided.",
    "elements": [
@@ -2684,7 +2994,22 @@
    "options": [
     {
      "id": "internal_door",
-     "label": "Internal door"
+     "label": "Internal door",
+     "multi": true,
+     "children": [
+      {
+       "id": "fire_rated",
+       "label": "Fire rated"
+      },
+      {
+       "id": "acoustic",
+       "label": "Acoustic"
+      },
+      {
+       "id": "different_height",
+       "label": "Different height"
+      }
+     ]
     },
     {
      "id": "external_door",
@@ -3282,7 +3607,45 @@
       }
      ]
     }
-   ]
+   ],
+   "standard": {
+    "topic": "kitchen_joinery",
+    "tier": "essential",
+    "repeat": {
+     "key": "cabinetry_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "kitchen",
+      "label": "Kitchen"
+     },
+     {
+      "id": "scullery",
+      "label": "Scullery",
+      "detail": true
+     },
+     {
+      "id": "general_joinery",
+      "label": "General joinery",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "kitchen": [
+      "kitchen"
+     ],
+     "scullery": [
+      "scullery",
+      "kitchen"
+     ],
+     "pantry": [
+      "scullery",
+      "kitchen"
+     ]
+    }
+   }
   },
   {
    "id": "K-005",
@@ -3335,7 +3698,36 @@
      "label": "Other"
     }
    ],
-   "notes": "Final product, edge and joints after PTSA."
+   "notes": "Final product, edge and joints after PTSA.",
+   "standard": {
+    "topic": "kitchen_joinery",
+    "tier": "essential",
+    "repeat": {
+     "key": "benchtop_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "kitchen",
+      "label": "Kitchen"
+     },
+     {
+      "id": "scullery",
+      "label": "Scullery",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "kitchen": [
+      "kitchen"
+     ],
+     "scullery": [
+      "scullery",
+      "kitchen"
+     ]
+    }
+   }
   },
   {
    "id": "K-006",
@@ -3379,7 +3771,36 @@
      "id": "other",
      "label": "Other"
     }
-   ]
+   ],
+   "standard": {
+    "topic": "kitchen_joinery",
+    "tier": "more_detail",
+    "repeat": {
+     "key": "splashback_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "kitchen",
+      "label": "Kitchen"
+     },
+     {
+      "id": "scullery",
+      "label": "Scullery",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "kitchen": [
+      "kitchen"
+     ],
+     "scullery": [
+      "scullery",
+      "kitchen"
+     ]
+    }
+   }
   },
   {
    "id": "K-007",
@@ -3934,7 +4355,45 @@
      "id": "existing_retained",
      "label": "Existing retained"
     }
-   ]
+   ],
+   "standard": {
+    "topic": "wet_areas",
+    "tier": "more_detail",
+    "repeat": {
+     "key": "toilet_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "bathroom",
+      "label": "Bathroom"
+     },
+     {
+      "id": "ensuite",
+      "label": "Ensuite",
+      "detail": true
+     },
+     {
+      "id": "powder",
+      "label": "Powder / WC",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "bathroom": [
+      "bathroom"
+     ],
+     "ensuite": [
+      "ensuite",
+      "bathroom"
+     ],
+     "wc": [
+      "powder",
+      "bathroom"
+     ]
+    }
+   }
   },
   {
    "id": "B-004",
@@ -3991,7 +4450,45 @@
       }
      ]
     }
-   ]
+   ],
+   "standard": {
+    "topic": "wet_areas",
+    "tier": "more_detail",
+    "repeat": {
+     "key": "vanity_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "bathroom",
+      "label": "Bathroom"
+     },
+     {
+      "id": "ensuite",
+      "label": "Ensuite",
+      "detail": true
+     },
+     {
+      "id": "powder",
+      "label": "Powder / WC",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "bathroom": [
+      "bathroom"
+     ],
+     "ensuite": [
+      "ensuite",
+      "bathroom"
+     ],
+     "wc": [
+      "powder",
+      "bathroom"
+     ]
+    }
+   }
   },
   {
    "id": "B-005",
@@ -4186,7 +4683,45 @@
      "id": "other",
      "label": "Other"
     }
-   ]
+   ],
+   "standard": {
+    "topic": "wet_areas",
+    "tier": "essential",
+    "repeat": {
+     "key": "tapware_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "bathroom",
+      "label": "Bathroom"
+     },
+     {
+      "id": "ensuite",
+      "label": "Ensuite",
+      "detail": true
+     },
+     {
+      "id": "powder",
+      "label": "Powder / WC",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "bathroom": [
+      "bathroom"
+     ],
+     "ensuite": [
+      "ensuite",
+      "bathroom"
+     ],
+     "wc": [
+      "powder",
+      "bathroom"
+     ]
+    }
+   }
   },
   {
    "id": "B-009",
@@ -4229,7 +4764,45 @@
     }
    ],
    "notes": "Aesthetic choice only. Waterproofing stays in B-012 (B03).",
-   "select": "multi"
+   "select": "multi",
+   "standard": {
+    "topic": "wet_areas",
+    "tier": "essential",
+    "repeat": {
+     "key": "tile_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "bathroom",
+      "label": "Bathroom"
+     },
+     {
+      "id": "ensuite",
+      "label": "Ensuite",
+      "detail": true
+     },
+     {
+      "id": "powder",
+      "label": "Powder / WC",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "bathroom": [
+      "bathroom"
+     ],
+     "ensuite": [
+      "ensuite",
+      "bathroom"
+     ],
+     "wc": [
+      "powder",
+      "bathroom"
+     ]
+    }
+   }
   },
   {
    "id": "B-010",
@@ -4585,7 +5158,36 @@
      "label": "Drying rail",
      "detail": true
     }
-   ]
+   ],
+   "standard": {
+    "topic": "laundry",
+    "tier": "essential",
+    "repeat": {
+     "key": "laundry_standard",
+     "by": "zone",
+     "eachZone": true
+    },
+    "zones": [
+     {
+      "id": "laundry",
+      "label": "Laundry"
+     },
+     {
+      "id": "mudroom",
+      "label": "Mudroom",
+      "detail": true
+     }
+    ],
+    "roomZones": {
+     "laundry": [
+      "laundry"
+     ],
+     "mudroom": [
+      "mudroom",
+      "laundry"
+     ]
+    }
+   }
   },
   {
    "id": "L-004",
@@ -4612,37 +5214,8 @@
     "overlay": null
    },
    "optionSource": "tab21",
-   "options": [
-    {
-     "id": "timber",
-     "label": "Timber"
-    },
-    {
-     "id": "laminate",
-     "label": "Laminate"
-    },
-    {
-     "id": "hybrid",
-     "label": "Hybrid"
-    },
-    {
-     "id": "tile",
-     "label": "Tile"
-    },
-    {
-     "id": "carpet",
-     "label": "Carpet"
-    },
-    {
-     "id": "polished_concrete",
-     "label": "Polished concrete"
-    },
-    {
-     "id": "other",
-     "label": "Other"
-    }
-   ],
-   "notes": "Default suggestion comes from the W-017 wet-area zone once P4d links it."
+   "notes": "Tree comes from W-017. Inherits the W-017 wet-area zone. An exception is a separate item linked by overridesDefaultId.",
+   "inherits": "W-017"
   },
   {
    "id": "L-005",

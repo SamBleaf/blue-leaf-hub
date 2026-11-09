@@ -47,6 +47,45 @@ function checkOptions(list, where, errors) {
   }
 }
 
+const STANDARD_TOPICS = ["kitchen_joinery", "wet_areas", "laundry"];
+const walkOptions = (list) => (list || []).flatMap((o) => [o, ...walkOptions(o.children)]);
+
+/** Zones, surfaces and whole-house standards (P4b): every reference has to name something real. */
+function checkStandards(e, errors) {
+  const zoneIds = new Set((e.zones || []).map((z) => z.id));
+  const checkRoomZones = (table, known, where) => {
+    for (const [room, list] of Object.entries(table)) {
+      if (room !== "*" && !Array.isArray(list)) errors.push(`${where}: ${room} must list its zones in order`);
+      for (const z of list || []) if (!known.has(z)) errors.push(`${where}: ${room} points at unknown zone ${z}`);
+    }
+  };
+  if (e.roomZones) { if (!e.zones) errors.push(`${e.id}: roomZones needs zones`); checkRoomZones(e.roomZones, zoneIds, `${e.id}.roomZones`); }
+  if (e.repeat?.eachZone && !e.zones) errors.push(`${e.id}: one row per zone needs zones`);
+  for (const o of walkOptions(e.options)) {
+    for (const z of o.onlyZones || []) if (!zoneIds.has(z)) errors.push(`${e.id}/${o.id}: onlyZones points at unknown zone ${z}`);
+    if (o.needsZone && !o.onlyZones) errors.push(`${e.id}/${o.id}: needsZone must say which zones`);
+  }
+  if (e.usualGroup) {
+    if (!(e.options || []).some((o) => o.id === e.usualGroup)) errors.push(`${e.id}: usualGroup points at unknown group ${e.usualGroup}`);
+    if (!(e.zones || []).every((z) => z.usual)) errors.push(`${e.id}: every surface needs its usual value`);
+  }
+  if (e.family === "W" && e.id === "W-019") {
+    for (const g of e.options || []) if (walkOptions([g]).some((o) => /sheen/i.test(o.label)) && !(g.needsZone && g.detail)) errors.push(`${e.id}/${g.id}: a sheen option may only sit under a surface, behind More detail`);
+  }
+  if (e.standard) {
+    const s = e.standard;
+    if (e.section !== "room") errors.push(`${e.id}: only a room question can also be a whole-house standard`);
+    if (!STANDARD_TOPICS.includes(s.topic)) errors.push(`${e.id}: unknown standard topic ${s.topic}`);
+    if (!TIERS.includes(s.tier) || s.tier === "office_only") errors.push(`${e.id}: a whole-house standard needs a meeting tier`);
+    if (!s.repeat?.key || !s.repeat?.eachZone) errors.push(`${e.id}: a whole-house standard needs a repeat key and one row per zone`);
+    if (!Array.isArray(s.zones) || !s.zones.length) { errors.push(`${e.id}: a whole-house standard needs zones`); return; }
+    checkOptions(s.zones, `${e.id}.standard.zones`, errors);
+    if (!s.zones.some((z) => !z.detail)) errors.push(`${e.id}: a whole-house standard needs at least one zone shown first`);
+    checkRoomZones(s.roomZones || {}, new Set(s.zones.map((z) => z.id)), `${e.id}.standard.roomZones`);
+    for (const room of Object.keys(s.roomZones || {})) if (room !== "*" && Array.isArray(e.relevance?.rooms) && !e.relevance.rooms.includes(room)) errors.push(`${e.id}: standard names ${room}, which never asks this question`);
+  }
+}
+
 /** Every problem with a map, as plain strings. [] means it is sound. */
 export function validateAnswerMap(map, questions = QUESTIONS) {
   const errors = [];
@@ -86,6 +125,7 @@ export function validateAnswerMap(map, questions = QUESTIONS) {
     if (q.section === "room" && !q.detail && e.mapping !== "fact_prefill" && !e.presentedWith && (e.tier === "essential") !== ROOM_PRIMARY_PROMPT_IDS.has(q.id)) errors.push(`${e.id}: room tier disagrees with the guided primary set`);
     for (const k of ["options", "actions", "elements", "zones", "perOption"]) if (e[k]) checkOptions(e[k], `${e.id}.${k}`, errors);
     if (e.linked) checkOptions(e.linked.options, `${e.id}.linked`, errors);
+    checkStandards(e, errors);
     for (const [el, list] of Object.entries(e.constructionTypes || {})) {
       checkOptions(list, `${e.id}.constructionTypes.${el}`, errors);
       if (!(e.elements || []).some((x) => x.id === el)) errors.push(`${e.id}: construction types for unknown element ${el}`);
@@ -117,6 +157,9 @@ function optionCell(e) {
   if (e.perOption) parts.push(`Each: ${tree(e.perOption)}`);
   if (e.constructionTypes) parts.push(`Types: ${Object.entries(e.constructionTypes).map(([k, v]) => `${k}: ${tree(v)}`).join("; ")}`);
   if (e.linked) parts.push(`Linked ${e.linked.label}: ${tree(e.linked.options)}`);
+  if (e.standard) parts.push(`Also set once on Whole House (${e.standard.topic}): ${tree(e.standard.zones)}`);
+  if (e.repeat?.eachZone) parts.push("One row per zone");
+  if (e.reviewSuggestions) parts.push("Lists staff-only suggestions, review required");
   if (e.inherits) parts.push(`Inherits ${e.inherits}`);
   if (e.optionsFrom) parts.push(`Options from ${e.optionsFrom}`);
   if (e.presentedWith) parts.push(`Shown with ${e.presentedWith}`);

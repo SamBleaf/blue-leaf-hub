@@ -177,7 +177,7 @@ const META = {
   "L-002": { short: "Washer / dryer layout", section: "room", topic: "layout", cat: "layout", rooms: ["laundry"],
     opts: ["Stacked", "Side-by-side", "Underbench"] },
   "L-003": { short: "Cabinetry, bench & trough", section: "room", topic: "fixtures", cat: "joinery", rooms: LAUNDRY, coord: "routleys" },
-  "L-004": { short: "Flooring & splash protection", section: "room", topic: "finishes", cat: "flooring", rooms: LAUNDRY },
+  "L-004": { short: "Flooring & splash protection", section: "room", topic: "finishes", cat: "flooring", inherits: "W-017", rooms: LAUNDRY },
   "L-005": { short: "Waste, taps, hot water & power", section: "room", topic: "technical", cat: "plumbing", rooms: ["laundry"], owner: "trade" },
   "L-006": { short: "Appliance supply responsibility", section: "room", topic: "fixtures", cat: "procurement", rooms: ["laundry"] },
   "L-007": { short: "Unknowns & retained services", section: "room", topic: "decisions", cat: "notes", rooms: LAUNDRY },
@@ -352,6 +352,10 @@ function buildAnswerConfig(e, q) {
   if (from?.options ? from.childrenBoundToParent : e.childrenBoundToParent) cfg.childrenBoundToParent = true;   // a follow-up here says something about the option above it
   if (e.inherits) cfg.inherits = e.inherits;
   if (e.presentedWith) cfg.presentedWith = e.presentedWith;
+  if (e.roomZones) cfg.roomZones = clean(e.roomZones);                           // which zone's default a room type reads, in order
+  if (e.standard) cfg.standard = clean(e.standard);                              // also set once on Whole House, by zone
+  if (e.usualGroup) cfg.usualGroup = e.usualGroup;
+  if (e.reviewSuggestions) cfg.reviewSuggestions = true;
   if (handling === "record" || (handling === "choice" && e.actions && !e.elements)) cfg.asksWhat = true;   // the thing acted on is project-specific, so it is typed
   return cfg;
 }
@@ -367,7 +371,7 @@ for (const id of mapById.keys()) if (!answerConfig[id]) throw new Error(`The ans
 /** Every option id as a path. Stored answers point at these, so an id may be added but never renamed or removed. */
 function optionIdsOf(cfg) {
   const walk = (list, prefix) => (list || []).flatMap((o) => [prefix + o.id, ...walk(o.children, `${prefix}${o.id}/`)]);
-  const ids = [...walk(cfg.options, ""), ...walk(cfg.zones, "zone:"), ...walk(cfg.elements, "element:")];
+  const ids = [...walk(cfg.options, ""), ...walk(cfg.zones, "zone:"), ...walk(cfg.standard?.zones, "zone:"), ...walk(cfg.elements, "element:"), ...walk(cfg.linked?.options, "linked:")];
   for (const [el, list] of Object.entries(cfg.constructionTypes || {})) ids.push(...walk(list, `type:${el}/`));
   return [...new Set(ids)].sort();
 }
@@ -397,7 +401,8 @@ export const QUESTIONS = ${JSON.stringify(out, null, 1)};
  * How each question is answered (Tab 27 Gate 2). handling: choice | record | note | context | folded | prefill.
  * dispositionUse: none = the generic work disposition is not a valid answer; settled_only = only to settle an item
  * out; answer / element = the chosen option or action is the disposition.
- * @type {Record<string, {handling:string,mapping:string,nature:string,tier:string,control:string,dispositionUse:string,select:string,childSelect?:string,options?:Array<object>,optionLevel?:string,zones?:Array<object>,elements?:Array<object>,constructionTypes?:object,repeat?:{key:string,by:string},linked?:object,flow?:string[],max?:number,clientNote?:boolean,childrenBoundToParent?:boolean,inherits?:string,presentedWith?:string,asksWhat?:boolean}>}
+ * standard: the question is also set once on Whole House, per zone. roomZones: which zones' defaults a room type reads, in order.
+ * @type {Record<string, {handling:string,mapping:string,nature:string,tier:string,control:string,dispositionUse:string,select:string,childSelect?:string,options?:Array<object>,optionLevel?:string,zones?:Array<object>,elements?:Array<object>,constructionTypes?:object,repeat?:{key:string,by:string,eachZone?:boolean,owner?:boolean},linked?:object,flow?:string[],max?:number,clientNote?:boolean,childrenBoundToParent?:boolean,inherits?:string,presentedWith?:string,asksWhat?:boolean,roomZones?:object,standard?:{topic:string,tier:string,repeat:object,zones:Array<object>,roomZones:object},usualGroup?:string,reviewSuggestions?:boolean}>}
  */
 export const ANSWER_CONFIG = {
 ${configLines}

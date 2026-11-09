@@ -53,14 +53,19 @@ ok("room floor and wall finishes reuse the whole-house choices", cfg("R-005").op
 
 section("Option ids stay put and labels are safe");
 const lock = JSON.parse(readFileSync(join(REPO, "docs/master_register/question-library/tab21-option-ids-v1.0.lock.json"), "utf8"));
-const idsOf = (c) => { const w = (l, p) => (l || []).flatMap((o) => [p + o.id, ...w(o.children, `${p}${o.id}/`)]); const out = [...w(c.options, ""), ...w(c.zones, "zone:"), ...w(c.elements, "element:")]; for (const [e, l] of Object.entries(c.constructionTypes || {})) out.push(...w(l, `type:${e}/`)); return new Set(out); };
+const idsOf = (c) => { const w = (l, p) => (l || []).flatMap((o) => [p + o.id, ...w(o.children, `${p}${o.id}/`)]); const out = [...w(c.options, ""), ...w(c.zones, "zone:"), ...w(c.standard?.zones, "zone:"), ...w(c.elements, "element:"), ...w(c.linked?.options, "linked:")]; for (const [e, l] of Object.entries(c.constructionTypes || {})) out.push(...w(l, `type:${e}/`)); return new Set(out); };
 const missing = Object.entries(lock.ids).flatMap(([q, ids]) => ids.filter((id) => !idsOf(cfg(q)).has(id)).map((id) => `${q}:${id}`));
 ok("every locked option id still exists", missing.length === 0, missing.join(" "));
 ok("the lock covers every question", Object.keys(lock.ids).length === 147);
 const allOptions = Object.entries(ANSWER_CONFIG).flatMap(([q, c]) => { const w = (l) => (l || []).flatMap((o) => [{ q, ...o }, ...w(o.children)]); return [...w(c.options), ...w(c.zones), ...w(c.elements), ...Object.values(c.constructionTypes || {}).flatMap(w)]; });
 ok("every label is short and plain", allOptions.every((o) => o.label && o.label.length <= 40 && !/[<>{}$]/.test(o.label)), allOptions.filter((o) => !o.label || o.label.length > 40 || /[<>{}$]/.test(o.label)).map((o) => o.q + ":" + o.label).join());
 ok("no label claims an approval, a certificate or a price", !allOptions.some((o) => /approved|certifi(ed|cate|cation)|verified|complian|guarantee|warrant(ed|y)\b/i.test(o.label)), allOptions.filter((o) => /approved|certifi(ed|cate|cation)|verified|complian|guarantee|warrant(ed|y)\b/i.test(o.label)).map((o) => o.q + ":" + o.label).join());
-ok("paint has no generic sheen choice (MR-UX-01G)", !allOptions.some((o) => o.q === "W-019" && /sheen/i.test(o.label)));
+{
+  const groups = cfg("W-019").options;
+  const finish = groups.find((g) => g.id === "finish_level");
+  ok("paint has no generic sheen choice (MR-UX-01G): every sheen option sits in the one group that needs a surface", groups.filter((g) => /sheen/i.test(JSON.stringify(g))).map((g) => g.id).join() === "finish_level" && finish.needsZone === true && finish.detail === true);
+  ok("and with no surface chosen it isn't offered at all, even with More detail open", !choiceView(cfg("W-019"), null, { showDetail: true }).levels.some((l) => l.options.some((o) => /sheen/i.test(o.label))));
+}
 ok("essential and detail are flagged on the options", allOptions.some((o) => o.detail) && allOptions.filter((o) => o.detail).length < allOptions.length / 4);
 
 section("Choosing, and the words kept");
