@@ -110,12 +110,14 @@ export default function PromptRow({
           {(!inherited || item) && guided && (
             <ProgressiveChoiceCard question={question} config={config} item={it} disabled={disabled || locked} onPatch={set} saveState={saveState} />
           )}
-          {(!inherited || item) && guided && kind === "action" && (
+          {(!inherited || item) && guided && (kind === "action" || config.handling === "record") && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Select value={it.responsibility} onChange={(v) => set({ responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" className="w-36" disabled={disabled} />
-              <label className="flex min-h-[40px] items-center gap-1 text-[11px] text-ink sm:min-h-0">
-                <input type="checkbox" className="h-4 w-4 accent-primary" checked={it.resolved} disabled={disabled} onChange={(e) => set({ resolved: e.target.checked })} /> Done
-              </label>
+              {kind === "action" && (
+                <label className="flex min-h-[40px] items-center gap-1 text-[11px] text-ink sm:min-h-0">
+                  <input type="checkbox" className="h-4 w-4 accent-primary" checked={it.resolved} disabled={disabled} onChange={(e) => set({ resolved: e.target.checked })} /> Done
+                </label>
+              )}
             </div>
           )}
 
@@ -252,27 +254,29 @@ export default function PromptRow({
 }
 
 /**
- * One row per item for a question that repeats (Tab 27 B01, MR-UX-01H): "+ Add another" opens a fresh row. A row isn't
- * saved until something is answered on it, and its id is fixed up front, so answering it keeps focus where it was.
+ * One row per item for a question that repeats (Tab 27 B01, MR-UX-01H). "+ Add another" opens a fresh row, and a row isn't
+ * saved until something is answered on it. Blank and saved rows are one keyed list and a row keeps its id when it is saved,
+ * so the first answer doesn't rebuild the row: focus, typing and an open "+ More detail" all stay where they were.
+ * A used id is never offered again, so a removed row stays removed. Mount one of these per room and question.
  */
 export function RepeatRows({ question, items, seed, upsertItem, updateItem, deleteItem, readOnly, ...row }) {
-  const first = useRef(genId());
-  const [added, setAdded] = useState([]);
+  const spare = useRef(genId());                 // the open row while nothing is recorded
+  const [added, setAdded] = useState(null);      // the open row from "+ Add another"
   const saved = new Set(items.map((i) => i.id));
-  if (saved.has(first.current)) first.current = genId();
-  const open = added.filter((id) => !saved.has(id));
-  const blanks = items.length || open.length ? open : [first.current];
+  if (saved.has(spare.current)) spare.current = genId();
+  if (added && saved.has(added)) setAdded(null);
+  const blankId = added && !saved.has(added) ? added : items.length ? null : spare.current;
+  const rows = [...items.map((item) => ({ id: item.id, item })), ...(blankId ? [{ id: blankId, item: null }] : [])];
   const seedFor = (id) => ({ ...seed, id });
   return (
     <div className="space-y-2">
-      {items.map((item) => (
-        <PromptRow key={item.id} question={question} item={item} onChange={(partial) => updateItem(item.id, partial)} onDelete={() => deleteItem(item.id)} readOnlyReason={readOnly ? "Read-only" : null} {...row} />
+      {rows.map(({ id, item }) => (
+        <PromptRow key={id} question={question} item={item} seed={seedFor(id)} readOnlyReason={readOnly ? "Read-only" : null} {...row}
+          onChange={(partial) => (item ? updateItem(id, partial) : upsertItem(seedFor(id), partial))}
+          onDelete={item ? () => deleteItem(id) : undefined} />
       ))}
-      {blanks.map((id) => (
-        <PromptRow key={id} question={question} item={null} seed={seedFor(id)} onChange={(partial) => upsertItem(seedFor(id), partial)} readOnlyReason={readOnly ? "Read-only" : null} {...row} />
-      ))}
-      {!readOnly && blanks.length === 0 && (
-        <button type="button" onClick={() => setAdded((a) => [...a, genId()])} className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]" data-testid={`add-another-${question.id}`}>+ Add another</button>
+      {!readOnly && !blankId && (
+        <button type="button" onClick={() => setAdded(genId())} className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]" data-testid={`add-another-${question.id}`}>+ Add another</button>
       )}
     </div>
   );

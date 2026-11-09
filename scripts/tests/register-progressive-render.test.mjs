@@ -94,6 +94,14 @@ try {
   ok("an action on the card keeps its owner and Done", (() => { const h = row({ question: q("W-011"), item: null, seed: seed("W-011") }); return /owner —/.test(h) && /Done/.test(h); })());
   ok("a choice has no Done box", !/Done/.test(row({ question: q("K-005"), item: null, seed: seed("K-005") })));
   ok("a decision record asks what it is about", /What needs to happen/.test(row({ question: q("W-025"), item: null, seed: seed("W-025") })));
+  const records = QUESTIONS.filter((x) => c(x.id).handling === "record");
+  ok(`all ${records.length} typed records offer an owner on the card`, records.length === 9 && records.every((x) => /owner —/.test(row({ question: x, item: null, seed: seed(x.id) }))), records.filter((x) => !/owner —/.test(row({ question: x, item: null, seed: seed(x.id) }))).map((x) => x.id).join());
+  ok("M-006 has the owner without an action's Done box", (() => { const h = row({ question: q("M-006"), item: null, seed: seed("M-006") }); return /owner —/.test(h) && !/Done/.test(h); })());
+  const pri = row({ question: q("P-005"), item: null, seed: seed("P-005") });
+  ok("priorities offer a note, and say the client reads it", /data-testid="client-note-P-005"/.test(pri) && /the client reads this/.test(pri));
+  ok("no other card shows it", !/client-note/.test(row({ question: q("W-013"), item: null, seed: seed("W-013") })));
+  ok("a locked record with no note shows no empty box", !/client-note/.test(row({ question: q("P-005"), item: item("P-005"), readOnlyReason: "Read-only" })));
+  ok("a locked record with a note still shows it", /Growing family/.test(row({ question: q("P-005"), item: item("P-005", { answer: R.setClientNote(c("P-005"), null, "Growing family") }), readOnlyReason: "Read-only" })));
   ok("a choice shows the settle-outs", (() => { const h = row({ question: q("K-005"), item: null, seed: seed("K-005") }); return /By others/.test(h) && /Excluded/.test(h); })());
 
   section("Existing records");

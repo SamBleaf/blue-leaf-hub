@@ -34,15 +34,16 @@ export default function RoomsStep({ reg, context, stage, showDetail, activeRoomI
   const setRoom = (partial) => mutateMeta({ rooms: rooms.map((r) => (r.id === room.id ? { ...r, ...partial } : r)) });
   const seedFor = (q) => ({ itemKind: q.itemKind, category: q.category, promptKey: q.id, roomId: room.id, level: room.level, room: room.name,
     technicalStatus: q.technical, responsibility: q.owner || "", source: room.sheet || "" });
+  // Keyed by room as well as question: what is open or half-entered on a row belongs to that room's record.
   const renderRow = (q) => {
     if (answerConfigFor(q.id)?.repeat) {
-      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
+      return <RepeatRows key={`${room.id}:${q.id}`} question={q} items={itemsFor(q.id)} seed={seedFor(q)} actor={actor} readOnly={readOnly} saveState={saveState} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} />;
     }
     const def = q.inherits ? defaultItemFor(reg, q.inherits) : null;
     const exc = def ? exceptionFor(def.id) : null;
     const item = exc || itemFor(q.id);
     return (
-      <PromptRow key={q.id} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
+      <PromptRow key={`${room.id}:${q.id}`} question={q} item={item} seed={seedFor(q)} actor={actor} inherited={def && !item ? def : null}
         readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
         onMakeException={() => def && addItem({ ...seedFor(q), itemKind: def.itemKind, description: def.description, product: def.product,
           manufacturer: def.manufacturer, model: def.model, colour: def.colour, supplier: def.supplier, certainty: def.certainty, overridesDefaultId: def.id, answer: exceptionAnswerFrom(def) })}

@@ -10,7 +10,7 @@
 import { useState } from "react";
 import {
   choiceView, toggleOption, setOpenWords, removeChoice, reuseChoice, chooseZone, chooseElement, setZoneWords, setElementWords,
-  toggleNotDecided, setClientUnsure, toggleNotApplicable, setAnswerNote, itemPatch, reasonPatch, settlePatch, settleOptions,
+  toggleNotDecided, setClientUnsure, toggleNotApplicable, setAnswerNote, setClientNote, itemPatch, reasonPatch, settlePatch, settleOptions,
   statedText, dispositionLabel, UNRESOLVED_REASONS, RESPONSIBILITIES,
 } from "../../../../lib/register.js";
 import { Select } from "./ui.jsx";
@@ -105,6 +105,10 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
           )))}
         </Row>
       ))}
+
+      {config.clientNote && (!disabled || view.clientNote) && (
+        <DraftInput value={view.clientNote} disabled={disabled} onCommit={(v) => write(setClientNote(config, item.answer, v))} placeholder="Note for the client brief (the client reads this)…" aria-label="Note for the client brief. The client reads this" className="inp w-full text-[11px]" data-testid={`client-note-${qid}`} />
+      )}
 
       {view.kept.length > 0 && (
         <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900" data-testid={`kept-${qid}`}>

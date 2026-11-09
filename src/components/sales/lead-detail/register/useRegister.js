@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle } from "../../../../lib/register.js";
+import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
 
 const AUTOSAVE_MS = 1200;
 const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
@@ -159,8 +159,9 @@ export function useRegister(leadId, { enabled = true } = {}) {
   }, [commit]);
   const upsertItem = useCallback((seed, partial) => {
     const cur = regRef.current; if (!cur) return;
-    if (cur.items.some((i) => i.id === seed.id)) return updateItem(seed.id, partial);
-    addItem({ ...seed, ...partial });
+    const held = seed.id ? cur.items.find((i) => i.id === seed.id) : null;
+    if (held && seedMatchesItem(held, seed)) return updateItem(seed.id, partial);   // the same record, answered twice before the screen caught up
+    addItem({ ...seed, ...partial, ...(held ? { id: genId() } : {}) });              // an id taken by another room or question is never written through
   }, [addItem, updateItem]);
   const deleteItem = useCallback((id) => {
     const cur = regRef.current; if (!cur) return;
@@ -221,6 +222,8 @@ export function useRegister(leadId, { enabled = true } = {}) {
       // items created locally during the flight (not yet on the server) stay as they are
       for (const i of local.items) if (!items.some((x) => x.id === i.id) && dirty.current.has(i.id) && !sentSeq.has(i.id)) items.push(i);
       for (const d of deletes) deleted.current.delete(d.id);
+      // A sent id that neither the server nor this screen holds any more is finished with. Left here it repeats an empty save forever.
+      for (const id of sentSeq.keys()) if (!items.some((x) => x.id === id)) dirty.current.delete(id);
       const metaChangedInFlight = metaSeq.current !== metaSent.current;
       metaSaved.current = metaSent.current;
       const meta = metaChangedInFlight ? emptyMeta({ ...local.meta, rev: server.meta.rev }) : server.meta;
