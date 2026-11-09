@@ -4,7 +4,7 @@
 
 **Map:** tab21-answer-map-v1.0 · **Question library:** tab21-v1.0 · **Questions mapped:** 147
 
-Proposed mapping (Tab 27 Gate 0.2), R05 P3. No screen reads this yet: P4a turns it into the versioned choice trees. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable once P4a ships.
+Proposed mapping (Tab 27 Gate 0.2), R05 P3, extended with the P4a control fields. build-question-library.mjs turns this into ANSWER_CONFIG in src/lib/registerQuestions.js. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable from P4a: tab21-option-ids-v1.0.lock.json holds them, and a test fails if one goes.
 
 ## Totals
 
@@ -29,18 +29,37 @@ Proposed mapping (Tab 27 Gate 0.2), R05 P3. No screen reads this yet: P4a turns 
 |---|---|
 | action | 9 |
 | choice | 29 |
-| fact | 12 |
+| fact | 13 |
 | requirement | 25 |
 | risk | 4 |
-| scope | 31 |
+| scope | 30 |
 | technical | 37 |
 
 ## How the work disposition is used
 
-- **none** (87): The generic work disposition is not a valid answer to this question.
-- **element** (22): Each repeated element carries its own disposition.
+- **none** (88): The generic work disposition is not a valid answer to this question.
+- **element** (21): Each repeated element carries its own disposition.
 - **answer** (9): The chosen option is the disposition.
 - **settled_only** (29): Disposition is only used to settle an item out: excluded, by others, deferred, N/A or retained.
+
+## How each question family is handled on screen
+
+Every question has one. None is left to the generic work dropdown.
+
+| Family | Card | Typed record with owner | Office note | Project step | Folded into another card | Prefilled, not asked |
+|---|---|---|---|---|---|---|
+| P | 1 | 1 | 0 | 2 | 0 | 6 |
+| W | 22 | 2 | 1 | 0 | 0 | 0 |
+| R | 9 | 1 | 2 | 0 | 1 | 2 |
+| K | 12 | 0 | 2 | 0 | 0 | 0 |
+| B | 12 | 1 | 2 | 0 | 0 | 0 |
+| L | 5 | 1 | 1 | 0 | 0 | 0 |
+| V | 6 | 1 | 1 | 0 | 0 | 0 |
+| D | 6 | 1 | 0 | 0 | 0 | 0 |
+| H | 7 | 0 | 1 | 0 | 0 | 0 |
+| O | 8 | 0 | 1 | 0 | 0 | 0 |
+| E | 0 | 0 | 23 | 0 | 0 | 0 |
+| M | 4 | 1 | 1 | 0 | 0 | 0 |
 
 ## One card, several source ids
 
@@ -78,7 +97,7 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 | W-003 | **Trees, retaining & external structures.** Trees, retaining walls, external structures and landscaping affected by construction? Include/retain/protect/remove/by others. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage C; when scoped | Elements: Trees, Retaining walls, External structures, Landscaping · Actions: Include → included, Retain → retain, Protect → retain, Remove → remove, By others → by_others · _source: tab21_ |
 | W-004 | **Demolish / retain / alter / make good.** What is being demolished, retained, altered and made good in the existing building? Record by area, not one vague demolition line. | repeatable_scope | scope | repeat | element | essential | Renovation; stage C | Elements: Walls, Roof, Floors, Ceilings, Windows and doors, Joinery, Fixtures, Services, Other · Actions: Demolish → remove, Retain → retain, Alter → alter, Make good → make_good, Protect → retain, Match → make_good, By others → by_others, Included → included, Excluded → excluded · _source: mr-ux-02_ · One path for W-004, W-006 and W-008. No meeting-stage measurement. Each entry is its own item with its own id. |
 | W-005 | **Existing condition risks.** Existing structural, moisture, termite, asbestos/contamination, roof and foundation conditions: inspected / assumed / needs test; source. | action_risk | risk | repeat | none | more_detail | Renovation; stage D | Structural, Moisture, Termite, Asbestos or contamination, Roof, Foundations · Each: Inspected, Assumed, Needs test · _source: tab21_ · Risk and investigation with an owner and source. |
-| W-006 | **Protect / match existing finishes.** What existing finishes and fixtures must be protected and/or matched? Note acceptable variation or inability to match exact old products. | repeatable_scope | scope | repeat | element | essential | Renovation; stage C | Shown with W-004 · _source: tab21_ · Reached through the Protect and Match actions on the W-004 path. Items keep promptKey W-006, so the source id survives. |
+| W-006 | **Protect / match existing finishes.** What existing finishes and fixtures must be protected and/or matched? Note acceptable variation or inability to match exact old products. | repeatable_scope | scope | repeat | element | essential | Renovation; stage C | Elements: Walls, Roof, Floors, Ceilings, Windows and doors, Joinery, Fixtures, Services, Other · Actions: Protect → retain, Match → make_good · Shown with W-004 · _source: proposed_ · Reached through the Protect and Match actions on the W-004 path. Items keep promptKey W-006, so the source id survives. |
 | W-007 | **Living on site during works.** Will the family live on site? Work zones, temporary kitchen/bathroom, dust separation, service outages and safe access. | progressive_branch | fact | tree | none | essential | Renovation; stage C | Yes (Work zones, Temporary kitchen, Temporary bathroom, Dust and noise separation, Service outages, Safe access), No, Unsure · _source: mr-ux-02_ · A client answer is never New or Remove. Yes opens the branch. |
 | W-008 | **New-to-existing connections.** Where do new and existing work connect: roof, wall, floor, drainage, electrical, thermal envelope? Add interface action and drawing ref. | technical_only | technical | multi | none | more_detail | Renovation; stage D | Roof, Wall, Floor, Drainage, Electrical, Thermal envelope · Shown with W-004 · _source: tab21_ · Optional driver on the W-004 path. Records an interface action and a drawing reference, not a demolition measurement. |
 | W-009 | **Quality priorities.** Overall project quality priorities: standard / upgraded / individually specified, and where is investment most important? Do not fabricate a universal inclusions package. | requirement | requirement | single | none | essential | All projects; stage C | Standard, Upgraded, Individually specified · _source: tab21_ · The client's own quality priority. Not the Blue Leaf baseline pricing tier (P4b), which is a separate labelled assumption and is never read from this answer. |
@@ -95,7 +114,7 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 | W-020 | **Heating, cooling, ventilation & hot water.** Heating/cooling, ventilation and hot water preference; any required comfort zones or special rooms? | requirement | requirement | multi | none | essential | All projects; stage C | Heating and cooling (Ducted, Split system, Hydronic, Other), Ventilation (Mechanical ventilation, Natural, Other), Hot water (Heat pump, Gas continuous, Electric storage, Other), Comfort zones or special rooms · _source: proposed_ · Preference only. Sizing and design by the trade. |
 | W-021 | **Electrical, smart home, solar & EV.** Electrical, smart home, data, solar/battery/EV charging ambitions; note special requirements, not layouts yet. | requirement | requirement | multi | none | essential | All projects; stage C | Smart home, Data, Solar, Battery, EV charging · _source: tab21_ |
 | W-022 | **Furnishings, appliances & extras — who?.** Window furnishings, appliances, loose furniture, fireplaces, landscaping, security and automation: included, by client, excluded or future? | repeatable_scope | scope | repeat | element | essential | All projects; stage C | Elements: Window furnishings, Appliances, Loose furniture, Fireplaces, Landscaping, Security, Automation · Actions: Included → included, By client → client, Excluded → excluded, Future → deferred · _source: tab21_ · Separate line per element with + Add another (MR-UX-01H). Never one sentence. By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet. |
-| W-023 | **Supply & install responsibilities.** Standard supply/installation responsibilities for selected products and any client-supplied items; warranty and lead time implications noted internally. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage D | _source: tab21_ · Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided. |
+| W-023 | **Supply & install responsibilities.** Standard supply/installation responsibilities for selected products and any client-supplied items; warranty and lead time implications noted internally. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage D | Elements: Fixtures, Finishes, Appliances, Joinery, Other · Actions: Blue Leaf → blue_leaf, Trade (via Blue Leaf) → trade, Client → client, Others → by_others · _source: proposed_ · Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided. |
 | W-024 | **Performance goal & consultant checks.** Document current building performance goal and required consultant checks (energy, thermal, fire, acoustic, moisture, accessibility as applicable). No automatic certification label. | technical_only | technical | multi | none | office_only | All projects; stage D | Energy, Thermal, Fire, Acoustic, Moisture, Accessibility · _source: tab21_ · No automatic certification label. |
 | W-025 | **Outstanding whole-house decision.** Identify outstanding whole-house decision that materially changes cost/design and allocate owner. | action_risk | action | repeat | none | essential | All projects; stage C | — |
 
@@ -115,7 +134,7 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 | R-010 | **Undecided / follow-up.** What's undecided, what changes the scope, and who follows up? Record only meaningful actions. | action_risk | action | repeat | none | essential | All projects; stage C | — |
 | R-011 | **Source document.** Reference relevant drawing/consultant/supplier document and version; don't type from memory when source exists. | fact_prefill | fact | readonly | none | office_only | All projects; stage D | — |
 | R-012 | **Detail, price & documentation status.** Detail development and price/documentation status: design verified? trade quote/allowance? who is coordinating? | technical_only | technical | note | none | office_only | All projects; stage D | — |
-| R-013 | **Existing-to-new junctions & make good.** Existing-to-new floor/wall/ceiling/service junction and matching/make-good requirements. | repeatable_scope | scope | repeat | element | more_detail | Renovation; stage C; kitchen, scullery, pantry, bathroom, ensuite, wc, laundry, mudroom, living, dining, family, theatre, bedroom, wir, study, stairs, hall, garage, generic | Elements: Floor junction, Wall junction, Ceiling junction, Service junction · Shown with W-004 · _source: tab21_ · Same physical items as the W-004 path, edited by item id from either view. |
+| R-013 | **Existing-to-new junctions & make good.** Existing-to-new floor/wall/ceiling/service junction and matching/make-good requirements. | repeatable_scope | scope | repeat | element | more_detail | Renovation; stage C; kitchen, scullery, pantry, bathroom, ensuite, wc, laundry, mudroom, living, dining, family, theatre, bedroom, wir, study, stairs, hall, garage, generic | Elements: Floor junction, Wall junction, Ceiling junction, Service junction · Actions: Make good → make_good, Alter → alter, Retain → retain, By others → by_others, Excluded → excluded · Shown with W-004 · _source: proposed_ · Same physical items as the W-004 path, edited by item id from either view. |
 | R-014 | **Supplied / installed by others?.** Any scope item supplied or installed by the client, other trade or external consultant? | repeatable_scope | scope | repeat | element | more_detail | All projects; stage C | Actions: Client → client, Other trade → by_others, External consultant → by_others · _source: tab21_ · By client records who supplies. Whether that puts it outside the contract is Tab 27 Q4, still open, so it sets no disposition yet. |
 | R-015 | **Tolerances & installation constraints.** Tolerances and installation constraints that drive joinery/fixture/structural coordination (not client engineering choices). | technical_only | technical | note | none | office_only | All projects; stage D; when scoped; kitchen, scullery, bathroom, ensuite, laundry, stairs | Tab 21: not client engineering choices. |
 
@@ -135,7 +154,7 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 | K-010 | **Power, lighting & data.** Power, feature lighting, LED strips and data/charging; location layout by electrician later. | requirement | requirement | multi | none | more_detail | All projects; stage C; kitchen, scullery, pantry | Power, Feature lighting, LED strips, Data or charging · _source: tab21_ |
 | K-011 | **Joinery hardware & setouts.** Joinery hardware/drawers, handles/push-to-open, panels, plinths, clearances, stone shop drawings, service setouts and quantities. | technical_only | technical | note | none | office_only | All projects; stage D; kitchen, scullery | — |
 | K-012 | **Budget drivers & unresolved choices.** Main budget drivers or unresolved choices: kitchen footprint, stone choice, appliance tier, specialty hardware, scullery scope. | action_risk | action | multi | none | essential | All projects; stage C; kitchen, scullery | Kitchen footprint, Stone choice, Appliance tier, Specialty hardware, Scullery scope · _source: tab21_ |
-| K-013 | **Appliance procurement & warranty.** Appliance procurement, supplier selections, long-lead items, installation and warranty responsibility. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; kitchen, scullery | — |
+| K-013 | **Appliance procurement & warranty.** Appliance procurement, supplier selections, long-lead items, installation and warranty responsibility. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; kitchen, scullery | Elements: Cooktop, Oven, Rangehood, Dishwasher, Fridge, Microwave, Wine storage · Actions: Blue Leaf → blue_leaf, Trade (via Blue Leaf) → trade, Client → client, Others → by_others · _source: proposed_ |
 | K-014 | **Coordinate product dimensions.** Coordinate supplier product dimensions with cabinetry, electrical, plumbing and drawings; verify, don't auto-approve. | technical_only | technical | note | none | office_only | All projects; stage D; kitchen, scullery | — |
 
 ### B: ROOM-SPECIFIC: BATHROOM / ENSUITE / WC / POWDER
@@ -201,10 +220,10 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 |---|---|---|---|---|---|---|---|---|
 | H-001 | **Stair type & responsibility.** Stair type/location, change to existing stair, new stair or no stair; engineering/design responsibility. | single_select | scope | single | answer | essential | All projects; stage C; stairs | New stair, Change existing stair, No stair · _source: tab21_ |
 | H-002 | **Treads, balustrade & handrail.** Stair treads/risers, balustrade/handrail material, finish and lighting intent. | progressive_branch | choice | tree | settled_only | essential | All projects; stage C; stairs | Treads and risers (Timber, Carpet, Other), Balustrade (Glass, Metal, Timber, Other), Handrail (Timber, Metal, Other) · _source: proposed_ |
-| H-003 | **Hall / entry finishes & joinery.** Hall/entry flooring transitions, feature cladding, joinery, door and hardware. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage C; hall | Elements: Flooring transitions, Feature cladding, Joinery, Door and hardware · _source: tab21_ |
+| H-003 | **Hall / entry finishes & joinery.** Hall/entry flooring transitions, feature cladding, joinery, door and hardware. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage C; hall | Elements: Flooring transitions, Feature cladding, Joinery, Door and hardware · Actions: New → new, Alter → alter, Retain → retain, By others → by_others, Excluded → excluded · _source: proposed_ |
 | H-004 | **Front entry door.** Front entry door: material, glazing, pivot/hinged, hardware, security and thresholds. | progressive_branch | choice | tree | settled_only | essential | All projects; stage C; hall | Pivot (Glazed, Solid), Hinged (Glazed, Solid) · _source: tab21_ |
 | H-005 | **Entry storage & lighting.** Entry storage, coats/shoes and visitor movement/lighting. | requirement | requirement | multi | none | essential | All projects; stage C; hall | Coats, Shoes, Visitor movement, Lighting · _source: tab21_ |
-| H-006 | **Garage scope.** Garage: size, door motor/finish, storage, access door, slab/finish, insulation and services. | repeatable_scope | scope | repeat | element | essential | All projects; stage C; garage | Elements: Door motor, Door finish, Storage, Access door, Slab or finish, Insulation, Services · _source: tab21_ |
+| H-006 | **Garage scope.** Garage: size, door motor/finish, storage, access door, slab/finish, insulation and services. | repeatable_scope | scope | repeat | element | essential | All projects; stage C; garage | Elements: Door motor, Door finish, Storage, Access door, Slab or finish, Insulation, Services · Actions: New → new, Alter → alter, Retain → retain, By others → by_others, Excluded → excluded · _source: proposed_ |
 | H-007 | **Garage services & EV.** EV charger, workshop power, hot/cold water, garage floor coating, security and ventilation. | requirement | requirement | multi | none | essential | All projects; stage C; garage | EV charger, Workshop power, Hot and cold water, Floor coating, Security, Ventilation · _source: tab21_ |
 | H-008 | **Stair compliance & structure.** Stair geometry/balustrade compliance, structural and fire/acoustic design to responsible consultant. | technical_only | technical | note | none | office_only | All projects; stage D; stairs | — |
 
@@ -255,8 +274,8 @@ Presentation only. Each item keeps the Tab 21 id it was captured under.
 | ID | Question (Tab 21 wording) | Maps to | Records as | Control | Disposition | Show | Applies to | Options and notes |
 |---|---|---|---|---|---|---|---|---|
 | M-001 | **Design coordination owner.** Who owns design coordination: client architect, Blue Leaf, other? Design deliverables and communication route. | single_select | fact | single | none | more_detail | All projects; stage C; management delivery only | Client architect, Blue Leaf, Other · _source: tab21_ |
-| M-002 | **Who engages & pays consultants.** Who engages and pays each consultant, surveyor, certifier and authority? Record contract responsibility, not just contact. | repeatable_scope | scope | repeat | element | more_detail | All projects; stage C; management delivery only | Elements: Consultant, Surveyor, Certifier, Authority · _source: tab21_ |
-| M-003 | **Who sources, orders & installs.** Who sources, orders, stores and warrants each fixture/finish/major component? Who installs it? Avoid 'client supplied' ambiguity. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; management delivery only | Tab 27 Q4 (client supplied versus installed by Blue Leaf) is still open. |
-| M-004 | **Direct costs, fees & packages.** Which items are direct client costs, construction management fees, trade packages or excluded? Link commercial terms; do not invent pricing. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; management delivery only | Direct client cost, Construction management fee, Trade package, Excluded · _source: tab21_ · Links commercial terms. Invents no pricing. |
+| M-002 | **Who engages & pays consultants.** Who engages and pays each consultant, surveyor, certifier and authority? Record contract responsibility, not just contact. | repeatable_scope | fact | repeat | none | more_detail | All projects; stage C; management delivery only | Elements: Consultant, Surveyor, Certifier, Authority · Actions: Blue Leaf → recorded, Client → recorded, Other party → recorded · _source: proposed_ · Records who engages and pays. A fact about responsibility, not a work disposition. |
+| M-003 | **Who sources, orders & installs.** Who sources, orders, stores and warrants each fixture/finish/major component? Who installs it? Avoid 'client supplied' ambiguity. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; management delivery only | Elements: Fixtures, Finishes, Major components, Other · Actions: Blue Leaf → blue_leaf, Trade (via Blue Leaf) → trade, Client → client, Others → by_others · _source: proposed_ · Tab 27 Q4 (client supplied versus installed by Blue Leaf) is still open. |
+| M-004 | **Direct costs, fees & packages.** Which items are direct client costs, construction management fees, trade packages or excluded? Link commercial terms; do not invent pricing. | repeatable_scope | scope | repeat | element | office_only | All projects; stage D; management delivery only | Actions: Direct client cost → recorded, Construction management fee → recorded, Trade package → recorded, Excluded → excluded · _source: tab21_ · Links commercial terms. Invents no pricing. |
 | M-005 | **Who can approve what.** What approvals/decisions can Blue Leaf give versus those requiring client/designer signature? | action_risk | action | note | none | office_only | All projects; stage D; management delivery only | — |
 | M-006 | **Programme & interface responsibility.** Programme and interface responsibility between other trades and Blue Leaf; site access/occupation risks. | action_risk | risk | repeat | none | more_detail | All projects; stage C; management delivery only | — |

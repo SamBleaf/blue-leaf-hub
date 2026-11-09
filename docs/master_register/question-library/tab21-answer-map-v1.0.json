@@ -1,7 +1,7 @@
 {
  "version": "tab21-answer-map-v1.0",
  "libraryVersion": "tab21-v1.0",
- "status": "Proposed mapping (Tab 27 Gate 0.2), R05 P3. No screen reads this yet: P4a turns it into the versioned choice trees. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable once P4a ships.",
+ "status": "Proposed mapping (Tab 27 Gate 0.2), R05 P3, extended with the P4a control fields. build-question-library.mjs turns this into ANSWER_CONFIG in src/lib/registerQuestions.js. Question wording is verbatim from Tab 21. Child options beyond the source wording are proposals for Blue Leaf to confirm in P4. Option ids are stable from P4a: tab21-option-ids-v1.0.lock.json holds them, and a test fails if one goes.",
  "legend": {
   "mapping": {
    "fact_prefill": "Read from Sales or the project. Never re-asked.",
@@ -53,6 +53,11 @@
    "mr-ux-02": "Tab 27 MR-UX-02.",
    "existing": "The value already stored by the Hub.",
    "proposed": "Not in the source documents. For Blue Leaf to confirm in P4."
+  },
+  "select": {
+   "single": "One answer at this level.",
+   "multi": "Several answers at this level.",
+   "groups": "The top level is headings, each with its own choices."
   }
  },
  "presentationGroups": [
@@ -804,13 +809,63 @@
     "stage": "C",
     "overlay": null
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "existing_work",
     "by": "element"
    },
    "presentedWith": "W-004",
-   "notes": "Reached through the Protect and Match actions on the W-004 path. Items keep promptKey W-006, so the source id survives."
+   "notes": "Reached through the Protect and Match actions on the W-004 path. Items keep promptKey W-006, so the source id survives.",
+   "elements": [
+    {
+     "id": "walls",
+     "label": "Walls"
+    },
+    {
+     "id": "roof",
+     "label": "Roof"
+    },
+    {
+     "id": "floors",
+     "label": "Floors"
+    },
+    {
+     "id": "ceilings",
+     "label": "Ceilings"
+    },
+    {
+     "id": "windows_and_doors",
+     "label": "Windows and doors"
+    },
+    {
+     "id": "joinery",
+     "label": "Joinery"
+    },
+    {
+     "id": "fixtures",
+     "label": "Fixtures"
+    },
+    {
+     "id": "services",
+     "label": "Services"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "actions": [
+    {
+     "id": "protect",
+     "label": "Protect",
+     "disposition": "retain"
+    },
+    {
+     "id": "match",
+     "label": "Match",
+     "disposition": "make_good"
+    }
+   ]
   },
   {
    "id": "W-007",
@@ -871,10 +926,12 @@
     },
     {
      "id": "unsure",
-     "label": "Unsure"
+     "label": "Unsure",
+     "state": "client_unsure"
     }
    ],
-   "notes": "A client answer is never New or Remove. Yes opens the branch."
+   "notes": "A client answer is never New or Remove. Yes opens the branch.",
+   "childSelect": "multi"
   },
   {
    "id": "W-008",
@@ -1289,7 +1346,8 @@
       },
       {
        "id": "other_cement_sheet_system",
-       "label": "Other cement-sheet system"
+       "label": "Other cement-sheet system",
+       "detail": true
       }
      ]
     },
@@ -1569,16 +1627,19 @@
       },
       {
        "id": "insect_screens",
-       "label": "Insect screens"
+       "label": "Insect screens",
+       "detail": true
       }
-     ]
+     ],
+     "multi": true
     }
    ],
    "flow": [
     "group",
     "option"
    ],
-   "notes": "A preference claims no compliance with energy, acoustic, bushfire or consent requirements."
+   "notes": "A preference claims no compliance with energy, acoustic, bushfire or consent requirements.",
+   "select": "groups"
   },
   {
    "id": "W-016",
@@ -1846,7 +1907,8 @@
     "element",
     "option"
    ],
-   "notes": "Separate defaults per element. Fire, acoustic and door-height exceptions stay possible per room."
+   "notes": "Separate defaults per element. Fire, acoustic and door-height exceptions stay possible per room.",
+   "select": "groups"
   },
   {
    "id": "W-019",
@@ -1930,7 +1992,8 @@
      "label": "Wet area"
     }
    ],
-   "notes": "No generic sheen chip. Sheen follows the surface with an editable default rule."
+   "notes": "No generic sheen chip. Sheen follows the surface with an editable default rule.",
+   "select": "groups"
   },
   {
    "id": "W-020",
@@ -2019,10 +2082,12 @@
     },
     {
      "id": "comfort_zones_or_special_rooms",
-     "label": "Comfort zones or special rooms"
+     "label": "Comfort zones or special rooms",
+     "detail": true
     }
    ],
-   "notes": "Preference only. Sizing and design by the trade."
+   "notes": "Preference only. Sizing and design by the trade.",
+   "childSelect": "multi"
   },
   {
    "id": "W-021",
@@ -2118,11 +2183,13 @@
     },
     {
      "id": "security",
-     "label": "Security"
+     "label": "Security",
+     "detail": true
     },
     {
      "id": "automation",
-     "label": "Automation"
+     "label": "Automation",
+     "detail": true
     }
    ],
    "actions": [
@@ -2170,12 +2237,56 @@
     "stage": "D",
     "overlay": null
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "supply_install",
     "by": "element"
    },
-   "notes": "Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided."
+   "notes": "Who supplies and who installs is open policy (Tab 27 Q4). Uses the existing supplyBy field until decided.",
+   "elements": [
+    {
+     "id": "fixtures",
+     "label": "Fixtures"
+    },
+    {
+     "id": "finishes",
+     "label": "Finishes"
+    },
+    {
+     "id": "appliances",
+     "label": "Appliances"
+    },
+    {
+     "id": "joinery",
+     "label": "Joinery"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "trade",
+     "label": "Trade (via Blue Leaf)",
+     "supplyBy": "trade"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ]
   },
   {
    "id": "W-024",
@@ -2347,7 +2458,8 @@
     {
      "id": "n_a",
      "label": "N/A",
-     "disposition": "na"
+     "disposition": "na",
+     "state": "not_applicable"
     }
    ],
    "presentedWith": "R-003",
@@ -2822,7 +2934,7 @@
     "stage": "C",
     "overlay": null
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "existing_work",
     "by": "element"
@@ -2846,7 +2958,34 @@
      "label": "Service junction"
     }
    ],
-   "notes": "Same physical items as the W-004 path, edited by item id from either view."
+   "notes": "Same physical items as the W-004 path, edited by item id from either view.",
+   "actions": [
+    {
+     "id": "make_good",
+     "label": "Make good",
+     "disposition": "make_good"
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter"
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
+    }
+   ]
   },
   {
    "id": "R-014",
@@ -3069,7 +3208,8 @@
     },
     {
      "id": "pantry_shelving",
-     "label": "Pantry shelving"
+     "label": "Pantry shelving",
+     "detail": true
     },
     {
      "id": "integrated_appliances",
@@ -3301,7 +3441,8 @@
      "id": "hot_tap",
      "label": "Hot tap"
     }
-   ]
+   ],
+   "select": "multi"
   },
   {
    "id": "K-008",
@@ -3355,11 +3496,13 @@
     },
     {
      "id": "microwave",
-     "label": "Microwave"
+     "label": "Microwave",
+     "detail": true
     },
     {
      "id": "wine_storage",
-     "label": "Wine storage"
+     "label": "Wine storage",
+     "detail": true
     }
    ],
    "actions": [
@@ -3569,7 +3712,60 @@
    "repeat": {
     "key": "procurement",
     "by": "element"
-   }
+   },
+   "elements": [
+    {
+     "id": "cooktop",
+     "label": "Cooktop"
+    },
+    {
+     "id": "oven",
+     "label": "Oven"
+    },
+    {
+     "id": "rangehood",
+     "label": "Rangehood"
+    },
+    {
+     "id": "dishwasher",
+     "label": "Dishwasher"
+    },
+    {
+     "id": "fridge",
+     "label": "Fridge"
+    },
+    {
+     "id": "microwave",
+     "label": "Microwave"
+    },
+    {
+     "id": "wine_storage",
+     "label": "Wine storage"
+    }
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "trade",
+     "label": "Trade (via Blue Leaf)",
+     "supplyBy": "trade"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ],
+   "optionSource": "proposed"
   },
   {
    "id": "K-014",
@@ -3898,7 +4094,8 @@
       }
      ]
     }
-   ]
+   ],
+   "childSelect": "multi"
   },
   {
    "id": "B-007",
@@ -4029,7 +4226,8 @@
      "label": "Feature tile"
     }
    ],
-   "notes": "Aesthetic choice only. Waterproofing stays in B-012 (B03)."
+   "notes": "Aesthetic choice only. Waterproofing stays in B-012 (B03).",
+   "select": "multi"
   },
   {
    "id": "B-010",
@@ -4377,11 +4575,13 @@
     },
     {
      "id": "broom_cupboard",
-     "label": "Broom cupboard"
+     "label": "Broom cupboard",
+     "detail": true
     },
     {
      "id": "drying_rail",
-     "label": "Drying rail"
+     "label": "Drying rail",
+     "detail": true
     }
    ]
   },
@@ -4698,7 +4898,8 @@
      "id": "cornice_or_trim_exception",
      "label": "Cornice or trim exception"
     }
-   ]
+   ],
+   "select": "multi"
   },
   {
    "id": "V-004",
@@ -4760,7 +4961,9 @@
      "id": "other",
      "label": "Other"
     }
-   ]
+   ],
+   "select": "multi",
+   "childSelect": "multi"
   },
   {
    "id": "V-005",
@@ -5077,7 +5280,8 @@
      "label": "Doors and hardware"
     }
    ],
-   "notes": "Reads the whole-house defaults once P4d links them."
+   "notes": "Reads the whole-house defaults once P4d links them.",
+   "select": "multi"
   },
   {
    "id": "D-004",
@@ -5157,7 +5361,8 @@
       }
      ]
     }
-   ]
+   ],
+   "childSelect": "multi"
   },
   {
    "id": "D-005",
@@ -5411,7 +5616,8 @@
       }
      ]
     }
-   ]
+   ],
+   "select": "groups"
   },
   {
    "id": "H-003",
@@ -5436,7 +5642,7 @@
     "stage": "C",
     "overlay": null
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "room_supply",
     "by": "element"
@@ -5457,6 +5663,33 @@
     {
      "id": "door_and_hardware",
      "label": "Door and hardware"
+    }
+   ],
+   "actions": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter"
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
     }
    ]
   },
@@ -5581,7 +5814,7 @@
     "stage": "C",
     "overlay": null
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "garage_element",
     "by": "element"
@@ -5601,7 +5834,8 @@
     },
     {
      "id": "access_door",
-     "label": "Access door"
+     "label": "Access door",
+     "detail": true
     },
     {
      "id": "slab_or_finish",
@@ -5609,11 +5843,39 @@
     },
     {
      "id": "insulation",
-     "label": "Insulation"
+     "label": "Insulation",
+     "detail": true
     },
     {
      "id": "services",
      "label": "Services"
+    }
+   ],
+   "actions": [
+    {
+     "id": "new",
+     "label": "New",
+     "disposition": "new"
+    },
+    {
+     "id": "alter",
+     "label": "Alter",
+     "disposition": "alter"
+    },
+    {
+     "id": "retain",
+     "label": "Retain",
+     "disposition": "retain"
+    },
+    {
+     "id": "by_others",
+     "label": "By others",
+     "disposition": "by_others"
+    },
+    {
+     "id": "excluded",
+     "label": "Excluded",
+     "disposition": "excluded"
     }
    ]
   },
@@ -5889,7 +6151,8 @@
      "id": "cladding_finish",
      "label": "Cladding finish"
     }
-   ]
+   ],
+   "select": "multi"
   },
   {
    "id": "O-005",
@@ -5987,7 +6250,8 @@
     },
     {
      "id": "gates",
-     "label": "Gates"
+     "label": "Gates",
+     "detail": true
     },
     {
      "id": "boundary_wall",
@@ -6003,11 +6267,13 @@
     },
     {
      "id": "turf",
-     "label": "Turf"
+     "label": "Turf",
+     "detail": true
     },
     {
      "id": "irrigation",
-     "label": "Irrigation"
+     "label": "Irrigation",
+     "detail": true
     }
    ],
    "actions": [
@@ -6771,10 +7037,10 @@
    "libraryKind": "SCOPE",
    "itemKind": "scope",
    "mapping": "repeatable_scope",
-   "nature": "scope",
+   "nature": "fact",
    "tier": "more_detail",
    "control": "repeat",
-   "disposition": "element",
+   "disposition": "none",
    "relevance": {
     "projects": "all",
     "optional": false,
@@ -6782,7 +7048,7 @@
     "stage": "C",
     "overlay": "management_delivery"
    },
-   "optionSource": "tab21",
+   "optionSource": "proposed",
    "repeat": {
     "key": "engagement",
     "by": "element"
@@ -6804,7 +7070,22 @@
      "id": "authority",
      "label": "Authority"
     }
-   ]
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf"
+    },
+    {
+     "id": "client",
+     "label": "Client"
+    },
+    {
+     "id": "other_party",
+     "label": "Other party"
+    }
+   ],
+   "notes": "Records who engages and pays. A fact about responsibility, not a work disposition."
   },
   {
    "id": "M-003",
@@ -6831,7 +7112,48 @@
     "key": "supply_install",
     "by": "element"
    },
-   "notes": "Tab 27 Q4 (client supplied versus installed by Blue Leaf) is still open."
+   "notes": "Tab 27 Q4 (client supplied versus installed by Blue Leaf) is still open.",
+   "elements": [
+    {
+     "id": "fixtures",
+     "label": "Fixtures"
+    },
+    {
+     "id": "finishes",
+     "label": "Finishes"
+    },
+    {
+     "id": "major_components",
+     "label": "Major components"
+    },
+    {
+     "id": "other",
+     "label": "Other"
+    }
+   ],
+   "actions": [
+    {
+     "id": "blue_leaf",
+     "label": "Blue Leaf",
+     "supplyBy": "blue_leaf"
+    },
+    {
+     "id": "trade",
+     "label": "Trade (via Blue Leaf)",
+     "supplyBy": "trade"
+    },
+    {
+     "id": "client",
+     "label": "Client",
+     "supplyBy": "client"
+    },
+    {
+     "id": "others",
+     "label": "Others",
+     "supplyBy": "by_others"
+    }
+   ],
+   "optionSource": "proposed"
   },
   {
    "id": "M-004",
@@ -6855,7 +7177,12 @@
     "overlay": "management_delivery"
    },
    "optionSource": "tab21",
-   "options": [
+   "repeat": {
+    "key": "commercial_class",
+    "by": "element"
+   },
+   "notes": "Links commercial terms. Invents no pricing.",
+   "actions": [
     {
      "id": "direct_client_cost",
      "label": "Direct client cost"
@@ -6870,14 +7197,10 @@
     },
     {
      "id": "excluded",
-     "label": "Excluded"
+     "label": "Excluded",
+     "disposition": "excluded"
     }
-   ],
-   "repeat": {
-    "key": "commercial_class",
-    "by": "element"
-   },
-   "notes": "Links commercial terms. Invents no pricing."
+   ]
   },
   {
    "id": "M-005",

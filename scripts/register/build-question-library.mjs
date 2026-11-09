@@ -12,6 +12,12 @@
  * adjust META for any new / removed IDs, and re-run:  node scripts/register/build-question-library.mjs
  * Stable question IDs are the join key stored on every register item (item.promptKey), so a re-wording
  * never orphans captured data.
+ *
+ * ANSWER CONTROLS (R05 P4a, Tab 27 Gate 2). The typed choice trees come from
+ * docs/master_register/question-library/tab21-answer-map-<v>.json and are written to ANSWER_CONFIG. Every question
+ * gets an explicit handling, so none can fall through to the generic work disposition by accident.
+ * `--lock` rewrites tab21-option-ids-<v>.lock.json. Only do that to ADD ids: stored answers are keyed on them.
+ * `--check` writes nothing and fails if the generated file is out of date.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -21,6 +27,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const VERSION = "tab21-v1.0";
 const SRC = join(__dirname, "../../docs/master_register/question-library/tab21-parsed-v1.0.json");
 const OUT = join(__dirname, "../../src/lib/registerQuestions.js");
+const MAP_SRC = join(__dirname, "../../docs/master_register/question-library/tab21-answer-map-v1.0.json");
+const LOCK = join(__dirname, "../../docs/master_register/question-library/tab21-option-ids-v1.0.lock.json");
 
 // ── room-type sets (src/lib/register.js ROOM_TYPES) ─────────────────────────────────────────────
 const KITCHEN = ["kitchen", "scullery"];
@@ -297,6 +305,75 @@ for (const q of parsed) {
 }
 for (const id of Object.keys(META)) if (!seen.has(id)) throw new Error(`META has ${id} but Tab 21 does not — remove or re-parse.`);
 
+// ── Answer controls ──────────────────────────────────────────────────────────────────────────────
+const answerMap = JSON.parse(readFileSync(MAP_SRC, "utf8"));
+const mapById = new Map(answerMap.questions.map((e) => [e.id, e]));
+const SELECT_DEFAULT = { single: "single", multi: "multi", tree: "single", repeat: "single" };
+
+function handlingOf(e, q) {
+  if (e.control === "readonly") return "prefill";
+  if (String(q.render || "").startsWith("disposition_of:")) return "folded";     // answered on the card it is folded into
+  if (q.render === "areas" || q.render === "occupancy") return "context";        // owned by the Project step
+  if (e.control === "note") return "note";
+  if (e.repeat?.by === "record") return "record";
+  return "choice";
+}
+
+const clean = (o) => JSON.parse(JSON.stringify(o));
+function withChildren(list, perOption) {
+  return perOption ? list.map((o) => ({ ...o, children: o.children || clean(perOption) })) : list;
+}
+
+/** One question's control config. Throws rather than leave a question without a meaningful answer. */
+function buildAnswerConfig(e, q) {
+  const handling = handlingOf(e, q);
+  const from = e.inherits ? mapById.get(e.inherits) : e.optionsFrom ? mapById.get(e.optionsFrom) : null;
+  const src = from?.options ? from : e;
+  const base = e.actions ? clean(e.actions) : clean(src.options || []);
+  const options = withChildren(base, src.perOption);
+  if (handling === "choice" && !options.length && !e.elements) throw new Error(`${q.id}: a choice question needs options, actions or elements.`);
+  if (e.disposition === "element" && !e.actions) throw new Error(`${q.id}: its answer sets the work disposition, so it needs actions that say what each one means.`);
+  const cfg = {
+    handling, mapping: e.mapping, nature: e.nature, tier: e.tier, control: e.control, dispositionUse: e.disposition,
+    select: from?.options ? (from.select || SELECT_DEFAULT[from.control]) : (e.select || SELECT_DEFAULT[e.control] || "single"),
+  };
+  const childSelect = from?.options ? from.childSelect : e.childSelect;
+  if (childSelect) cfg.childSelect = childSelect;
+  if (options.length) cfg.options = options;
+  if (e.actions) cfg.optionLevel = "action";
+  if (!e.inherits && e.zones) cfg.zones = clean(e.zones);
+  if (e.elements) cfg.elements = clean(e.elements);
+  if (e.constructionTypes) cfg.constructionTypes = clean(e.constructionTypes);
+  if (e.repeat) cfg.repeat = clean(e.repeat);
+  if (e.linked) cfg.linked = clean(e.linked);
+  if (e.flow) cfg.flow = clean(e.flow);
+  if (e.max) cfg.max = e.max;
+  if (e.inherits) cfg.inherits = e.inherits;
+  if (e.presentedWith) cfg.presentedWith = e.presentedWith;
+  if (handling === "record" || (handling === "choice" && e.actions && !e.elements)) cfg.asksWhat = true;   // the thing acted on is project-specific, so it is typed
+  return cfg;
+}
+
+const answerConfig = {};
+for (const q of out) {
+  const e = mapById.get(q.id);
+  if (!e) throw new Error(`No answer map entry for ${q.id} — add it to the answer map before regenerating.`);
+  answerConfig[q.id] = buildAnswerConfig(e, q);
+}
+for (const id of mapById.keys()) if (!answerConfig[id]) throw new Error(`The answer map has ${id} but Tab 21 does not.`);
+
+/** Every option id as a path. Stored answers point at these, so an id may be added but never renamed or removed. */
+function optionIdsOf(cfg) {
+  const walk = (list, prefix) => (list || []).flatMap((o) => [prefix + o.id, ...walk(o.children, `${prefix}${o.id}/`)]);
+  const ids = [...walk(cfg.options, ""), ...walk(cfg.zones, "zone:"), ...walk(cfg.elements, "element:")];
+  for (const [el, list] of Object.entries(cfg.constructionTypes || {})) ids.push(...walk(list, `type:${el}/`));
+  return [...new Set(ids)].sort();
+}
+if (process.argv.includes("--lock")) {
+  writeFileSync(LOCK, JSON.stringify({ version: answerMap.version, ids: Object.fromEntries(Object.entries(answerConfig).map(([id, cfg]) => [id, optionIdsOf(cfg)])) }, null, 1) + "\n");
+  console.log(`wrote ${LOCK}`);
+}
+
 const header = `/**
  * registerQuestions.js — GENERATED by scripts/register/build-question-library.mjs. DO NOT EDIT BY HAND.
  *
@@ -307,10 +384,27 @@ const header = `/**
  * column per question. FACT questions are read-only Sales context, never re-asked.
  */
 `;
+const configLines = Object.entries(answerConfig).map(([id, cfg]) => ` ${JSON.stringify(id)}: ${JSON.stringify(cfg)}`).join(",\n");
 const body = `export const QUESTION_LIBRARY_VERSION = ${JSON.stringify(VERSION)};
+export const ANSWER_CONFIG_VERSION = ${JSON.stringify(answerMap.version)};
 
 /** @type {Array<{id:string,group:string,kind:string,stage:string,projects:string,optional:boolean,itemKind:(string|null),section:string,topic:string,category:(string|null),short:string,text:string,rooms?:(string[]|null),technical:string,owner:(string|null),coord:(string|null),inherits:(string|null),isDefault:boolean,render:(string|null),prefill:(string|null),options:(string[]|null),priceRef:boolean,detail:boolean}>} */
 export const QUESTIONS = ${JSON.stringify(out, null, 1)};
+
+/**
+ * How each question is answered (Tab 27 Gate 2). handling: choice | record | note | context | folded | prefill.
+ * dispositionUse: none = the generic work disposition is not a valid answer; settled_only = only to settle an item
+ * out; answer / element = the chosen option or action is the disposition.
+ * @type {Record<string, {handling:string,mapping:string,nature:string,tier:string,control:string,dispositionUse:string,select:string,childSelect?:string,options?:Array<object>,optionLevel?:string,zones?:Array<object>,elements?:Array<object>,constructionTypes?:object,repeat?:{key:string,by:string},linked?:object,flow?:string[],max?:number,inherits?:string,presentedWith?:string,asksWhat?:boolean}>}
+ */
+export const ANSWER_CONFIG = {
+${configLines}
+};
 `;
+if (process.argv.includes("--check")) {
+  if (readFileSync(OUT, "utf8") !== header + body) { console.error("src/lib/registerQuestions.js is out of date. Run npm run register:questions."); process.exit(1); }
+  console.log(`registerQuestions.js is current — ${out.length} questions (${answerMap.version})`);
+  process.exit(0);
+}
 writeFileSync(OUT, header + body);
-console.log(`wrote ${OUT} — ${out.length} questions (${VERSION})`);
+console.log(`wrote ${OUT} — ${out.length} questions (${VERSION}, ${answerMap.version})`);

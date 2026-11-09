@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { QUESTIONS, QUESTION_LIBRARY_VERSION } from "../../src/lib/registerQuestions.js";
+import { QUESTIONS, QUESTION_LIBRARY_VERSION, ANSWER_CONFIG } from "../../src/lib/registerQuestions.js";
 import { REGISTER_DISPOSITIONS, SUPPLY_BY, ROOM_PRIMARY_PROMPT_IDS, ANSWER_NATURES, ANSWER_MAP_VERSION } from "../../src/lib/register.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +27,8 @@ const TIERS = ["essential", "more_detail", "office_only"];
 const CONTROLS = ["readonly", "single", "multi", "tree", "repeat", "note"];
 const DISPOSITION_USE = ["none", "element", "answer", "settled_only"];
 const ID_RX = /^[a-z0-9]+(_[a-z0-9]+)*$/;
+const SELECTS = ["single", "multi", "groups"];
+const OPTION_STATES = ["client_unsure", "not_applicable"];
 
 function checkOptions(list, where, errors) {
   if (!Array.isArray(list)) { errors.push(`${where}: options must be a list`); return; }
@@ -39,6 +41,7 @@ function checkOptions(list, where, errors) {
     if (o?.disposition && !(o.disposition in REGISTER_DISPOSITIONS)) errors.push(`${where}/${o.id}: unknown disposition ${o.disposition}`);
     if (o?.supplyBy && !(o.supplyBy in SUPPLY_BY)) errors.push(`${where}/${o.id}: unknown supplyBy ${o.supplyBy}`);
     if (o?.supplyBy === "client" && o?.disposition) errors.push(`${where}/${o.id}: client supply can't set a disposition while Tab 27 Q4 is open`);
+    if (o?.state && !OPTION_STATES.includes(o.state)) errors.push(`${where}/${o.id}: unknown state ${o.state}`);
     if (o?.children) checkOptions(o.children, `${where}/${o.id}`, errors);
   }
 }
@@ -73,6 +76,11 @@ export function validateAnswerMap(map, questions = QUESTIONS) {
     if (["fact", "risk", "action", "requirement", "technical"].includes(e.nature) && e.disposition !== "none") errors.push(`${e.id}: a ${e.nature} can't use the generic work disposition`);
     if (e.mapping === "repeatable_scope" && (e.control !== "repeat" || !e.repeat?.key)) errors.push(`${e.id}: repeatable scope needs a repeat key`);
     if (["single", "multi", "tree"].includes(e.control) && !e.options && !e.inherits && !e.optionsFrom) errors.push(`${e.id}: a ${e.control} control needs options`);
+    if (e.select && !SELECTS.includes(e.select)) errors.push(`${e.id}: unknown select ${e.select}`);
+    if (e.childSelect && !["single", "multi"].includes(e.childSelect)) errors.push(`${e.id}: unknown childSelect ${e.childSelect}`);
+    if (e.select === "groups" && !(e.options || []).some((o) => o.children)) errors.push(`${e.id}: grouped choices need at least one group with children`);
+    if (e.disposition === "element" && !e.actions) errors.push(`${e.id}: an answer that sets the disposition needs actions`);
+    if (e.control === "repeat" && e.repeat?.by !== "record" && !e.options && !e.actions && !e.elements) errors.push(`${e.id}: a repeated answer needs elements, actions or options`);
     if (e.family === "E" && (e.mapping !== "technical_only" || e.tier !== "office_only")) errors.push(`${e.id}: element prompts are office technical checks`);
     if (q.section === "room" && !q.detail && e.mapping !== "fact_prefill" && !e.presentedWith && (e.tier === "essential") !== ROOM_PRIMARY_PROMPT_IDS.has(q.id)) errors.push(`${e.id}: room tier disagrees with the guided primary set`);
     for (const k of ["options", "actions", "elements", "zones", "perOption"]) if (e[k]) checkOptions(e[k], `${e.id}.${k}`, errors);
@@ -103,7 +111,7 @@ function optionCell(e) {
   const parts = [];
   if (e.zones) parts.push(`Zones: ${tree(e.zones)}`);
   if (e.elements) parts.push(`Elements: ${tree(e.elements)}`);
-  if (e.actions) parts.push(`Actions: ${e.actions.map((a) => `${a.label} → ${a.disposition || a.supplyBy}`).join(", ")}`);
+  if (e.actions) parts.push(`Actions: ${e.actions.map((a) => `${a.label} → ${a.disposition || a.supplyBy || "recorded"}`).join(", ")}`);
   if (e.options) parts.push(tree(e.options));
   if (e.perOption) parts.push(`Each: ${tree(e.perOption)}`);
   if (e.constructionTypes) parts.push(`Types: ${Object.entries(e.constructionTypes).map(([k, v]) => `${k}: ${tree(v)}`).join("; ")}`);
@@ -134,6 +142,13 @@ export function renderAnswerMap(map) {
     ...count("nature").sort().map(([k, v]) => `| ${k} | ${v} |`), "",
     "## How the work disposition is used", "",
     ...DISPOSITION_USE.map((d) => `- **${d}** (${qs.filter((q) => q.disposition === d).length}): ${map.legend.disposition[d]}`), "",
+    "## How each question family is handled on screen", "",
+    "Every question has one. None is left to the generic work dropdown.", "",
+    "| Family | Card | Typed record with owner | Office note | Project step | Folded into another card | Prefilled, not asked |", "|---|---|---|---|---|---|---|",
+    ...FAMILY_ORDER.map((fam) => {
+      const n = (h) => qs.filter((q) => q.family === fam && ANSWER_CONFIG[q.id]?.handling === h).length;
+      return `| ${fam} | ${n("choice")} | ${n("record")} | ${n("note")} | ${n("context")} | ${n("folded")} | ${n("prefill")} |`;
+    }), "",
     "## One card, several source ids", "",
     "Presentation only. Each item keeps the Tab 21 id it was captured under.", "",
     "| Group | Leads with | Also covers | Why |", "|---|---|---|---|",

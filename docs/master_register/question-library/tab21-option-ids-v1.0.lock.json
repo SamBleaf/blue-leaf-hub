@@ -1,0 +1,977 @@
+{
+ "version": "tab21-answer-map-v1.0",
+ "ids": {
+  "P-001": [],
+  "P-002": [],
+  "P-003": [],
+  "P-004": [],
+  "P-005": [
+   "accessibility",
+   "comfort",
+   "energy_use",
+   "entertaining",
+   "low_maintenance",
+   "natural_light",
+   "privacy",
+   "space",
+   "storage"
+  ],
+  "P-006": [
+   "deferred",
+   "excluded",
+   "included",
+   "optional"
+  ],
+  "P-007": [],
+  "P-008": [
+   "occupied",
+   "partly",
+   "vacant"
+  ],
+  "P-009": [],
+  "P-010": [],
+  "W-001": [
+   "crane_or_plant_access",
+   "delivery_constraints",
+   "limited_parking",
+   "narrow_or_restricted_access",
+   "other",
+   "shared_or_neighbour_access",
+   "standard_driveway",
+   "steep_access"
+  ],
+  "W-002": [
+   "boundaries",
+   "boundaries/on_file",
+   "boundaries/required",
+   "easements",
+   "easements/on_file",
+   "easements/required",
+   "geotech",
+   "geotech/on_file",
+   "geotech/required",
+   "services",
+   "services/on_file",
+   "services/required",
+   "site_levels",
+   "site_levels/on_file",
+   "site_levels/required",
+   "survey",
+   "survey/on_file",
+   "survey/required"
+  ],
+  "W-003": [
+   "by_others",
+   "element:external_structures",
+   "element:landscaping",
+   "element:retaining_walls",
+   "element:trees",
+   "include",
+   "protect",
+   "remove",
+   "retain"
+  ],
+  "W-004": [
+   "alter",
+   "by_others",
+   "demolish",
+   "element:ceilings",
+   "element:fixtures",
+   "element:floors",
+   "element:joinery",
+   "element:other",
+   "element:roof",
+   "element:services",
+   "element:walls",
+   "element:windows_and_doors",
+   "excluded",
+   "included",
+   "make_good",
+   "match",
+   "protect",
+   "retain"
+  ],
+  "W-005": [
+   "asbestos_or_contamination",
+   "asbestos_or_contamination/assumed",
+   "asbestos_or_contamination/inspected",
+   "asbestos_or_contamination/needs_test",
+   "foundations",
+   "foundations/assumed",
+   "foundations/inspected",
+   "foundations/needs_test",
+   "moisture",
+   "moisture/assumed",
+   "moisture/inspected",
+   "moisture/needs_test",
+   "roof",
+   "roof/assumed",
+   "roof/inspected",
+   "roof/needs_test",
+   "structural",
+   "structural/assumed",
+   "structural/inspected",
+   "structural/needs_test",
+   "termite",
+   "termite/assumed",
+   "termite/inspected",
+   "termite/needs_test"
+  ],
+  "W-006": [
+   "element:ceilings",
+   "element:fixtures",
+   "element:floors",
+   "element:joinery",
+   "element:other",
+   "element:roof",
+   "element:services",
+   "element:walls",
+   "element:windows_and_doors",
+   "match",
+   "protect"
+  ],
+  "W-007": [
+   "no",
+   "unsure",
+   "yes",
+   "yes/dust_and_noise_separation",
+   "yes/safe_access",
+   "yes/service_outages",
+   "yes/temporary_bathroom",
+   "yes/temporary_kitchen",
+   "yes/work_zones"
+  ],
+  "W-008": [
+   "drainage",
+   "electrical",
+   "floor",
+   "roof",
+   "thermal_envelope",
+   "wall"
+  ],
+  "W-009": [
+   "individually_specified",
+   "standard",
+   "upgraded"
+  ],
+  "W-010": [
+   "alter",
+   "by_others",
+   "deferred",
+   "element:boundary_work",
+   "element:driveway",
+   "element:fencing",
+   "element:landscaping",
+   "element:paths",
+   "element:pergola",
+   "element:pool",
+   "element:retaining",
+   "excluded",
+   "new",
+   "replace",
+   "retain",
+   "type:driveway/exposed_aggregate",
+   "type:driveway/other",
+   "type:driveway/pavers",
+   "type:driveway/plain_concrete",
+   "type:fencing/masonry",
+   "type:fencing/other",
+   "type:fencing/steel",
+   "type:fencing/timber",
+   "type:paths/concrete",
+   "type:paths/gravel",
+   "type:paths/other",
+   "type:paths/pavers",
+   "type:retaining/masonry",
+   "type:retaining/other",
+   "type:retaining/sleeper"
+  ],
+  "W-011": [
+   "alternate_scope",
+   "contingency",
+   "exclusion",
+   "investigation"
+  ],
+  "W-012": [],
+  "W-013": [
+   "lightweight_cladding",
+   "lightweight_cladding/aac",
+   "lightweight_cladding/fibre_cement_sheet",
+   "lightweight_cladding/other_cement_sheet_system",
+   "lightweight_cladding/weatherboard",
+   "masonry",
+   "masonry/block",
+   "masonry/face_brick",
+   "masonry/painted_brick",
+   "other",
+   "render",
+   "render/rendered_aac",
+   "render/rendered_lightweight_sheet",
+   "render/rendered_masonry",
+   "timber_feature",
+   "timber_feature/timber_cladding",
+   "timber_feature/timber_look_cladding",
+   "zone:feature",
+   "zone:main_walls",
+   "zone:other",
+   "zone:upper_level"
+  ],
+  "W-014": [
+   "metal_roofing",
+   "metal_roofing/flat_or_low_pitch",
+   "metal_roofing/flat_or_low_pitch/deck_profile",
+   "metal_roofing/flat_or_low_pitch/other",
+   "metal_roofing/flat_or_low_pitch/standing_seam",
+   "metal_roofing/pitched",
+   "metal_roofing/pitched/corrugated",
+   "metal_roofing/pitched/other",
+   "metal_roofing/pitched/standing_seam",
+   "metal_roofing/pitched/trapezoidal",
+   "other",
+   "tile_roofing",
+   "tile_roofing/concrete_tile",
+   "tile_roofing/other",
+   "tile_roofing/terracotta_tile"
+  ],
+  "W-015": [
+   "frame",
+   "frame/aluminium",
+   "frame/other",
+   "frame/thermally_broken_aluminium",
+   "frame/timber",
+   "frame/upvc",
+   "glazing",
+   "glazing/double_glazing",
+   "glazing/other",
+   "glazing/single_glazing",
+   "priorities",
+   "priorities/acoustic_performance",
+   "priorities/frame_appearance",
+   "priorities/insect_screens",
+   "priorities/opening_use",
+   "priorities/privacy",
+   "priorities/sun_and_shading",
+   "priorities/thermal_performance"
+  ],
+  "W-016": [
+   "airtightness",
+   "comfort_and_energy_efficiency",
+   "passive_house_target",
+   "weather_tightness_system"
+  ],
+  "W-017": [
+   "carpet",
+   "hybrid",
+   "laminate",
+   "other",
+   "polished_concrete",
+   "tile",
+   "timber",
+   "zone:bedroom_floor",
+   "zone:main_floor",
+   "zone:other_zone",
+   "zone:wet_area_floor"
+  ],
+  "W-018": [
+   "architraves",
+   "architraves/other",
+   "architraves/standard",
+   "cornice",
+   "cornice/no",
+   "cornice/yes",
+   "door_height",
+   "door_height/2040",
+   "door_height/2340",
+   "door_height/floor_to_ceiling",
+   "door_height/other",
+   "door_type",
+   "door_type/feature",
+   "door_type/standard",
+   "hardware_style",
+   "hardware_style/feature",
+   "hardware_style/standard",
+   "jamb_or_edge_detail",
+   "jamb_or_edge_detail/architrave",
+   "jamb_or_edge_detail/other",
+   "jamb_or_edge_detail/p50_shadowline",
+   "skirting",
+   "skirting/other",
+   "skirting/standard"
+  ],
+  "W-019": [
+   "ceiling",
+   "ceiling/cornice",
+   "ceiling/square_set",
+   "feature_areas",
+   "palette",
+   "palette/cool",
+   "palette/warm",
+   "zone:ceiling",
+   "zone:trim",
+   "zone:walls",
+   "zone:wet_area"
+  ],
+  "W-020": [
+   "comfort_zones_or_special_rooms",
+   "heating_and_cooling",
+   "heating_and_cooling/ducted",
+   "heating_and_cooling/hydronic",
+   "heating_and_cooling/other",
+   "heating_and_cooling/split_system",
+   "hot_water",
+   "hot_water/electric_storage",
+   "hot_water/gas_continuous",
+   "hot_water/heat_pump",
+   "hot_water/other",
+   "ventilation",
+   "ventilation/mechanical_ventilation",
+   "ventilation/natural",
+   "ventilation/other"
+  ],
+  "W-021": [
+   "battery",
+   "data",
+   "ev_charging",
+   "smart_home",
+   "solar"
+  ],
+  "W-022": [
+   "by_client",
+   "element:appliances",
+   "element:automation",
+   "element:fireplaces",
+   "element:landscaping",
+   "element:loose_furniture",
+   "element:security",
+   "element:window_furnishings",
+   "excluded",
+   "future",
+   "included"
+  ],
+  "W-023": [
+   "blue_leaf",
+   "client",
+   "element:appliances",
+   "element:finishes",
+   "element:fixtures",
+   "element:joinery",
+   "element:other",
+   "others",
+   "trade"
+  ],
+  "W-024": [
+   "accessibility",
+   "acoustic",
+   "energy",
+   "fire",
+   "moisture",
+   "thermal"
+  ],
+  "W-025": [],
+  "R-001": [],
+  "R-002": [
+   "alter",
+   "by_others",
+   "deferred",
+   "excluded",
+   "make_good",
+   "n_a",
+   "new",
+   "remove",
+   "renovate",
+   "retain_existing"
+  ],
+  "R-003": [
+   "alter",
+   "by_others",
+   "deferred",
+   "excluded",
+   "make_good",
+   "n_a",
+   "new",
+   "remove",
+   "renovate",
+   "retain_existing"
+  ],
+  "R-004": [
+   "accessibility",
+   "circulation",
+   "durability",
+   "entertaining",
+   "light_and_privacy",
+   "storage"
+  ],
+  "R-005": [
+   "carpet",
+   "hybrid",
+   "laminate",
+   "other",
+   "polished_concrete",
+   "tile",
+   "timber"
+  ],
+  "R-006": [
+   "ceiling",
+   "ceiling/cornice",
+   "ceiling/square_set",
+   "feature_areas",
+   "palette",
+   "palette/cool",
+   "palette/warm"
+  ],
+  "R-007": [
+   "external_door",
+   "internal_door",
+   "opening_alteration",
+   "screen",
+   "window"
+  ],
+  "R-008": [
+   "comfort_or_ventilation",
+   "data",
+   "lighting",
+   "power"
+  ],
+  "R-009": [
+   "by_others",
+   "element:appliances",
+   "element:equipment",
+   "element:fixtures",
+   "element:joinery",
+   "element:loose_furniture",
+   "included",
+   "owner_supplied"
+  ],
+  "R-010": [],
+  "R-011": [],
+  "R-012": [],
+  "R-013": [
+   "alter",
+   "by_others",
+   "element:ceiling_junction",
+   "element:floor_junction",
+   "element:service_junction",
+   "element:wall_junction",
+   "excluded",
+   "make_good",
+   "retain"
+  ],
+  "R-014": [
+   "client",
+   "external_consultant",
+   "other_trade"
+  ],
+  "R-015": [],
+  "K-001": [
+   "new_kitchen",
+   "partial_retrofit",
+   "replace_fronts"
+  ],
+  "K-002": [
+   "circulation",
+   "family_use",
+   "island",
+   "pantry",
+   "peninsula",
+   "scullery"
+  ],
+  "K-003": [
+   "appliance_garage",
+   "bins",
+   "drawers",
+   "full_height",
+   "integrated_appliances",
+   "pantry_shelving",
+   "walk_in"
+  ],
+  "K-004": [
+   "flat_panel",
+   "flat_panel/laminate",
+   "flat_panel/paint",
+   "flat_panel/timber_veneer",
+   "profile",
+   "profile/laminate",
+   "profile/paint",
+   "profile/timber_veneer"
+  ],
+  "K-005": [
+   "engineered_stone",
+   "laminate",
+   "natural_stone",
+   "other",
+   "porcelain",
+   "timber"
+  ],
+  "K-006": [
+   "glass",
+   "other",
+   "stone",
+   "tile"
+  ],
+  "K-007": [
+   "hot_tap",
+   "topmount",
+   "topmount/double_bowl",
+   "topmount/single_bowl",
+   "undermount",
+   "undermount/double_bowl",
+   "undermount/single_bowl",
+   "water_filter"
+  ],
+  "K-008": [
+   "blue_leaf",
+   "client",
+   "element:cooktop",
+   "element:dishwasher",
+   "element:fridge",
+   "element:microwave",
+   "element:oven",
+   "element:rangehood",
+   "element:wine_storage",
+   "others"
+  ],
+  "K-009": [
+   "gas",
+   "induction",
+   "outdoor_connection",
+   "ventilation"
+  ],
+  "K-010": [
+   "data_or_charging",
+   "feature_lighting",
+   "led_strips",
+   "power"
+  ],
+  "K-011": [],
+  "K-012": [
+   "appliance_tier",
+   "kitchen_footprint",
+   "scullery_scope",
+   "specialty_hardware",
+   "stone_choice"
+  ],
+  "K-013": [
+   "blue_leaf",
+   "client",
+   "element:cooktop",
+   "element:dishwasher",
+   "element:fridge",
+   "element:microwave",
+   "element:oven",
+   "element:rangehood",
+   "element:wine_storage",
+   "others",
+   "trade"
+  ],
+  "K-014": [],
+  "B-001": [
+   "full_renovation",
+   "new",
+   "retained"
+  ],
+  "B-002": [
+   "accessibility",
+   "bath",
+   "double_vanity",
+   "separate_wc",
+   "shower_only",
+   "storage"
+  ],
+  "B-003": [
+   "back_to_wall",
+   "concealed_cistern",
+   "existing_retained",
+   "wall_hung"
+  ],
+  "B-004": [
+   "floorstanding",
+   "floorstanding/one_basin",
+   "floorstanding/two_basins",
+   "wall_hung",
+   "wall_hung/one_basin",
+   "wall_hung/two_basins"
+  ],
+  "B-005": [
+   "above_counter",
+   "inset",
+   "undermount"
+  ],
+  "B-006": [
+   "enclosed",
+   "enclosed/hobless",
+   "enclosed/niche",
+   "enclosed/seat",
+   "walk_in",
+   "walk_in/hobless",
+   "walk_in/niche",
+   "walk_in/seat"
+  ],
+  "B-007": [
+   "built_in",
+   "freestanding",
+   "none"
+  ],
+  "B-008": [
+   "brushed_brass",
+   "brushed_nickel",
+   "chrome",
+   "matte_black",
+   "other"
+  ],
+  "B-009": [
+   "feature_tile",
+   "full_height",
+   "partial_height"
+  ],
+  "B-010": [
+   "exhaust_fan",
+   "heated_towel_rail",
+   "underfloor_heating",
+   "window"
+  ],
+  "B-011": [
+   "lighting",
+   "mirror",
+   "power_outlets",
+   "shaving_cabinet"
+  ],
+  "B-012": [],
+  "B-013": [],
+  "B-014": [
+   "blue_leaf",
+   "client",
+   "others"
+  ],
+  "B-015": [],
+  "L-001": [
+   "new",
+   "retained"
+  ],
+  "L-002": [
+   "side_by_side",
+   "stacked",
+   "underbench"
+  ],
+  "L-003": [
+   "bench",
+   "broom_cupboard",
+   "cabinetry",
+   "drying_rail",
+   "mixer",
+   "splashback",
+   "trough"
+  ],
+  "L-004": [
+   "carpet",
+   "hybrid",
+   "laminate",
+   "other",
+   "polished_concrete",
+   "tile",
+   "timber"
+  ],
+  "L-005": [],
+  "L-006": [
+   "blue_leaf",
+   "client",
+   "element:built_in_whitegoods",
+   "element:dryer",
+   "element:washing_machine",
+   "others"
+  ],
+  "L-007": [],
+  "V-001": [
+   "altered",
+   "new",
+   "retained"
+  ],
+  "V-002": [
+   "acoustics",
+   "dining_layout",
+   "indoor_outdoor_connection",
+   "seating_layout",
+   "storage",
+   "tv_position"
+  ],
+  "V-003": [
+   "ceiling_finish",
+   "cornice_or_trim_exception",
+   "feature_wall",
+   "floor_finish"
+  ],
+  "V-004": [
+   "other",
+   "slider",
+   "slider/flyscreens",
+   "slider/window_coverings",
+   "stacker",
+   "stacker/flyscreens",
+   "stacker/window_coverings"
+  ],
+  "V-005": [
+   "by_client",
+   "element:built_in_cabinetry",
+   "element:fireplace",
+   "element:shelving",
+   "element:tv_wall",
+   "included"
+  ],
+  "V-006": [
+   "daylight_control",
+   "fans",
+   "heating_or_cooling",
+   "lighting_modes",
+   "power_data_or_av"
+  ],
+  "V-007": [],
+  "V-008": [],
+  "D-001": [
+   "existing_retained",
+   "new",
+   "refurbished"
+  ],
+  "D-002": [
+   "access",
+   "bed_placement",
+   "desk_placement",
+   "future_furniture",
+   "privacy",
+   "storage"
+  ],
+  "D-003": [
+   "doors_and_hardware",
+   "feature_wall",
+   "floor_finish",
+   "general_paint",
+   "trim"
+  ],
+  "D-004": [
+   "custom",
+   "custom/drawers",
+   "custom/hanging",
+   "custom/lighting",
+   "custom/robe_doors",
+   "custom/shelves",
+   "standard",
+   "standard/drawers",
+   "standard/hanging",
+   "standard/lighting",
+   "standard/robe_doors",
+   "standard/shelves"
+  ],
+  "D-005": [
+   "acoustic_privacy",
+   "blackout",
+   "glazing",
+   "screens",
+   "window_furnishings",
+   "windows"
+  ],
+  "D-006": [
+   "ceiling_fan",
+   "lighting",
+   "power_or_data",
+   "reverse_cycle_zone"
+  ],
+  "D-007": [],
+  "H-001": [
+   "change_existing_stair",
+   "new_stair",
+   "no_stair"
+  ],
+  "H-002": [
+   "balustrade",
+   "balustrade/glass",
+   "balustrade/metal",
+   "balustrade/other",
+   "balustrade/timber",
+   "handrail",
+   "handrail/metal",
+   "handrail/other",
+   "handrail/timber",
+   "treads_and_risers",
+   "treads_and_risers/carpet",
+   "treads_and_risers/other",
+   "treads_and_risers/timber"
+  ],
+  "H-003": [
+   "alter",
+   "by_others",
+   "element:door_and_hardware",
+   "element:feature_cladding",
+   "element:flooring_transitions",
+   "element:joinery",
+   "excluded",
+   "new",
+   "retain"
+  ],
+  "H-004": [
+   "hinged",
+   "hinged/glazed",
+   "hinged/solid",
+   "pivot",
+   "pivot/glazed",
+   "pivot/solid"
+  ],
+  "H-005": [
+   "coats",
+   "lighting",
+   "shoes",
+   "visitor_movement"
+  ],
+  "H-006": [
+   "alter",
+   "by_others",
+   "element:access_door",
+   "element:door_finish",
+   "element:door_motor",
+   "element:insulation",
+   "element:services",
+   "element:slab_or_finish",
+   "element:storage",
+   "excluded",
+   "new",
+   "retain"
+  ],
+  "H-007": [
+   "ev_charger",
+   "floor_coating",
+   "hot_and_cold_water",
+   "security",
+   "ventilation",
+   "workshop_power"
+  ],
+  "H-008": [],
+  "O-001": [
+   "by_client",
+   "excluded",
+   "future",
+   "included"
+  ],
+  "O-002": [
+   "all_season_use",
+   "bbq_or_outdoor_kitchen",
+   "covered",
+   "open",
+   "orientation_and_shade",
+   "privacy"
+  ],
+  "O-003": [
+   "concrete",
+   "deck",
+   "pavers",
+   "tiles"
+  ],
+  "O-004": [
+   "ceiling_fan_or_heater",
+   "cladding_finish",
+   "posts",
+   "roof",
+   "screens",
+   "soffit"
+  ],
+  "O-005": [
+   "drain",
+   "gas",
+   "lighting",
+   "power",
+   "sink_fridge_or_bbq",
+   "water"
+  ],
+  "O-006": [
+   "alter",
+   "by_others",
+   "deferred",
+   "element:boundary_wall",
+   "element:driveway",
+   "element:fences",
+   "element:gates",
+   "element:irrigation",
+   "element:landscaping",
+   "element:paths",
+   "element:retaining",
+   "element:turf",
+   "excluded",
+   "new",
+   "replace",
+   "retain"
+  ],
+  "O-007": [
+   "alter",
+   "by_others",
+   "deferred",
+   "element:fire_pit",
+   "element:future_additions",
+   "element:outdoor_shower",
+   "element:pool",
+   "element:sauna",
+   "element:shed",
+   "excluded",
+   "new",
+   "replace",
+   "retain"
+  ],
+  "O-008": [],
+  "O-009": [
+   "boundary",
+   "drainage",
+   "existing_to_new",
+   "staging_or_contract_exclusion"
+  ],
+  "E-001": [],
+  "E-002": [],
+  "E-003": [],
+  "E-004": [],
+  "E-005": [],
+  "E-006": [],
+  "E-007": [],
+  "E-008": [],
+  "E-009": [],
+  "E-010": [],
+  "E-011": [],
+  "E-012": [],
+  "E-013": [],
+  "E-014": [],
+  "E-015": [],
+  "E-016": [],
+  "E-017": [],
+  "E-018": [],
+  "E-019": [],
+  "E-020": [],
+  "E-021": [],
+  "E-022": [],
+  "E-023": [],
+  "M-001": [
+   "blue_leaf",
+   "client_architect",
+   "other"
+  ],
+  "M-002": [
+   "blue_leaf",
+   "client",
+   "element:authority",
+   "element:certifier",
+   "element:consultant",
+   "element:surveyor",
+   "other_party"
+  ],
+  "M-003": [
+   "blue_leaf",
+   "client",
+   "element:finishes",
+   "element:fixtures",
+   "element:major_components",
+   "element:other",
+   "others",
+   "trade"
+  ],
+  "M-004": [
+   "construction_management_fee",
+   "direct_client_cost",
+   "excluded",
+   "trade_package"
+  ],
+  "M-005": [],
+  "M-006": []
+ }
+}
