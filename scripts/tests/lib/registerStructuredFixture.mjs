@@ -53,19 +53,25 @@ export function buildStructuredRegister() {
   const sink = makeItem({ itemKind: "selection", category: "sanitary", promptKey: "K-007", roomId: kitchen.id, room: "Kitchen", product: "Example undermount 500", certainty: "proposed",
     answer: choice([{ path: ["undermount", "single_bowl"], label: "Single bowl" }], internal) });
 
+  // Two Other answers on one question: the words are the only thing that tells them apart.
+  const twoOthers = makeItem({ itemKind: "selection", category: "benchtop", promptKey: "K-006", roomId: kitchen.id, room: "Kitchen",
+    answer: choice([{ path: ["other"], label: "Pressed tin" }, { path: ["other"], label: "Recycled brick" }]) });
+  const heatingOthers = makeItem({ itemKind: "requirement", category: "services", promptKey: "W-020", section: "project",
+    answer: { v: 1, state: "recorded", nature: "requirement", selected: [{ path: ["heating_and_cooling", "other"], label: "Geothermal loop" }, { path: ["heating_and_cooling", "other"], label: "Wood heater" }] } });
+
   const excluded = makeItem({ itemKind: "selection", category: "procurement", promptKey: "W-022", section: "project", disposition: "excluded",
     answer: choice([{ path: ["window_furnishings"], label: "Window furnishings" }]) });
   const notApplicable = makeItem({ itemKind: "selection", category: "joinery", promptKey: "D-004", roomId: bed2.id, room: "Bed 2",
     answer: { v: 1, state: "not_applicable", nature: "choice" } });
   const misfiledFact = makeItem({ itemKind: "selection", category: "site", section: "site", answer: { v: 1, state: "recorded", nature: "fact", selected: [{ path: ["other"], label: "Other" }] } });
 
-  const named = { wallMain, wallFeature, roof, gutter, floorMain, floorWet, kitchenFloor, access, occupied, driveway, fence, demolish, risk, assumed, parked, sink, excluded, notApplicable, misfiledFact };
+  const named = { wallMain, wallFeature, roof, gutter, floorMain, floorWet, kitchenFloor, access, occupied, driveway, fence, demolish, risk, assumed, parked, sink, twoOthers, heatingOthers, excluded, notApplicable, misfiledFact };
   const confirmedBed1 = confirmRoomDefaults(bed1, [floorMain, wallMain], { at: "2026-11-10T01:00:00.000Z", by: `Sandbox Staff ${INTERNAL_MARK}` });
   const meta = emptyMeta({ planRev: "Concept set B", rooms: [kitchen, confirmedBed1, bed2] });
   return {
     meta, rooms: { kitchen, bed1: confirmedBed1, bed2 }, named, items: Object.values(named),
-    selectionKeys: ["wallMain", "wallFeature", "roof", "gutter", "floorMain", "floorWet", "kitchenFloor", "assumed", "parked", "sink"],
-    scopeStoreKeys: ["access", "occupied", "driveway", "fence", "demolish", "risk", "excluded", "notApplicable", "misfiledFact"],
+    selectionKeys: ["wallMain", "wallFeature", "roof", "gutter", "floorMain", "floorWet", "kitchenFloor", "assumed", "parked", "sink", "twoOthers"],
+    scopeStoreKeys: ["access", "occupied", "driveway", "fence", "demolish", "risk", "heatingOthers", "excluded", "notApplicable", "misfiledFact"],
   };
 }
 

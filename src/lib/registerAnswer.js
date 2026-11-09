@@ -25,10 +25,14 @@
  *   nature         ANSWER_NATURES: a recorded fact is not construction scope
  *   configVersion  the answer-map version the option ids came from
  *   selected[]     { optionId, path[], label, stale? } — several allowed, partial paths allowed (B02).
+ *                  optionId is always the path's last step. One entry per path, except on an open option
+ *                  (OPEN_OPTION_IDS, "Other"), where the label holds the person's own words, so two Other
+ *                  answers with different words are two entries.
  *                  stale = kept after an upstream choice changed, awaiting review; never silently dropped.
- *                  On an open option (OPEN_OPTION_IDS, "Other") the label holds the person's own words
+ *                  The label is copied once, when the option is chosen, and is what people read from then on
  *   element        { id, key, label } — the physical thing a repeatable item is about. key = its type
- *                  (driveway), id = which one (stable across edits, separates two driveways)
+ *                  (driveway), id = which one (stable across edits, separates two driveways), label = the
+ *                  words people read ("Front driveway")
  *   zone           { key, label } — main floor / bedrooms / wet areas, façade zone, paint surface …
  *   areaIds[]      room / project-area ids this item covers (same item from Site & Existing and Rooms)
  *   sourceQuestionIds[]  Tab 21 ids a merged card stands in for (W-004 / W-006 / W-008)
@@ -97,23 +101,33 @@ function sortKeys(v) {
 /** JSON with sorted keys. Postgres jsonb reorders keys, so plain JSON.stringify can't compare stored values. */
 export const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
 
+/**
+ * The catch-all options. Their label isn't configured wording: it is what the person actually said, and the
+ * only place that text lives ("Other: spotted gum shiplap"). Never put it in the staff-only note.
+ */
+export const OPEN_OPTION_IDS = new Set(["other", "other_zone"]);
+
+/** The words on an open option. The bare word "Other" says nothing. */
+const statedText = (label) => (/^other( zone)?$/i.test(label || "") ? "" : label || "");
+
 function normSelected(list) {
   if (!Array.isArray(list)) return [];
-  const seen = new Set();
-  const out = [];
+  const byKey = new Map();
   for (const raw of list) {
     const e = typeof raw === "string" ? { optionId: raw } : raw;
     if (!e || typeof e !== "object") continue;
     const given = pathIds(e.path);
-    const optionId = text(e.optionId) || given[given.length - 1] || "";
+    // The path decides. A separate optionId could otherwise change what is shown without changing the path.
+    const optionId = given[given.length - 1] || text(e.optionId);
     if (!optionId) continue;
     const path = given.length ? given : [optionId];
-    const key = path.join("\u0001");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ ...omit(e, ["optionId", "path", "label", "stale"]), optionId, path, label: text(e.label), ...(e.stale ? { stale: true } : {}) });
+    const label = text(e.label);
+    const key = path.join("\u0001") + (OPEN_OPTION_IDS.has(optionId) ? `\u0002${statedText(label)}` : "");
+    const entry = { ...omit(e, ["optionId", "path", "label", "stale"]), optionId, path, label, ...(e.stale ? { stale: true } : {}) };
+    const held = byKey.get(key);
+    if (!held || (held.stale && !entry.stale)) byKey.set(key, entry);   // a live entry outranks a flagged copy; order holds
   }
-  return out;
+  return [...byKey.values()];
 }
 // A path may repeat an id at different levels ("other" under "other"), so it is never de-duplicated.
 function pathIds(list) { return Array.isArray(list) ? list.map(text).filter(Boolean) : []; }
@@ -177,6 +191,8 @@ export function normaliseAnswer(raw) {
 
 const liveSelected = (a) => (Array.isArray(a?.selected) ? a.selected.filter((s) => !s.stale) : []);
 const humanise = (id) => { const s = String(id || "").replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
+/** What a chosen option reads as, everywhere it is shown. */
+const shownLabel = (s) => s.label || humanise(s.optionId);
 
 /** "legacy_text" for an old free-text record, otherwise the answer state. */
 export function answerStateOf(item) {
@@ -201,7 +217,7 @@ export function clientSafeAnswer(item) {
   if (!a || !(Number(a.v) <= ANSWER_SCHEMA_VERSION)) return null;
   return {
     state: a.state,
-    selected: liveSelected(a).map((s) => ({ label: s.label || humanise(s.optionId) })),
+    selected: liveSelected(a).map((s) => ({ label: shownLabel(s) })),
     element: a.element?.label || "",
     zone: a.zone?.label || "",
   };
@@ -222,36 +238,21 @@ export function answerAllowsClientSelection(answer) {
 
 // ── Change detection ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * The catch-all options. Their label isn't configured wording: it is what the person actually said, and the
- * only place that text lives ("Other: spotted gum shiplap"). Never put it in the staff-only note.
- */
-export const OPEN_OPTION_IDS = new Set(["other", "other_zone"]);
-
-/** The words on an open option. The bare word "Other" says nothing. */
-const statedText = (label) => (/^other( zone)?$/i.test(label || "") ? "" : label || "");
-
-/** Which element or zone this is. A label counts only when no configured key stands behind it. */
-function identityOf(thing) {
-  if (!thing) return "";
-  const key = thing.key || "";
-  return { id: thing.id || "", key, label: !key || OPEN_OPTION_IDS.has(key) ? statedText(thing.label) : "" };
-}
+/** Which element or zone this is, including the words people read for it. */
+const placeOf = (thing) => (thing ? { id: thing.id || "", key: thing.key || "", label: thing.label || "" } : "");
 
 /**
- * The part of an answer a client decision or agreed scope rests on: what was chosen (including the words of
- * an Other answer), which physical element and zone it covers, and what kind of record it is. Tidying a
- * configured label, notes, assumptions and delivery don't count.
+ * The part of an answer a client decision or agreed scope rests on: what was chosen and the words shown for
+ * it, which element and zone it covers and the words shown for those, and what kind of record it is. It
+ * compares what people read, not only the ids behind it. Stored labels are copied when someone chooses an
+ * option, so rewording an option in the config never touches them. Notes, assumptions and delivery don't count.
  */
 function materialOf(raw) {
   const a = normaliseAnswer(raw);
   if (a && Number(a.v) > ANSWER_SCHEMA_VERSION) return a;
   const state = a?.state || "not_discussed";
-  const selected = liveSelected(a).map((s) => {
-    const path = s.path.join("/");
-    return OPEN_OPTION_IDS.has(s.path[s.path.length - 1]) ? `${path}=${statedText(s.label)}` : path;
-  }).sort();
-  const element = identityOf(a?.element), zone = identityOf(a?.zone), areaIds = [...(a?.areaIds || [])].sort();
+  const selected = liveSelected(a).map((s) => `${s.path.join("/")}=${shownLabel(s)}`).sort();
+  const element = placeOf(a?.element), zone = placeOf(a?.zone), areaIds = [...(a?.areaIds || [])].sort();
   // Stamping a nature on an answer that says nothing yet (a note on an old record) isn't a change.
   const saysSomething = state !== "not_discussed" || selected.length || element || zone || areaIds.length;
   return { state, nature: saysSomething ? a?.nature || "" : "", selected, element, zone, areaIds };
@@ -263,6 +264,7 @@ export function answerFingerprint(item) {
   const basis = stableStringify({
     material: materialOf(item?.answer), description: text(item?.description), product: text(item?.product), manufacturer: text(item?.manufacturer),
     model: text(item?.model), colour: text(item?.colour), supplier: text(item?.supplier), disposition: item?.disposition || "",
+    supplyBy: item?.supplyBy || "", responsibility: item?.responsibility || "",
   });
   let h = 5381;
   for (let i = 0; i < basis.length; i++) h = ((h << 5) + h + basis.charCodeAt(i)) >>> 0;

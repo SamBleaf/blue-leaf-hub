@@ -112,6 +112,9 @@ async function main() {
   ok("the exception still points at its default", itemOf(proj1, N.kitchenFloor.id).overridesDefaultId === N.floorMain.id);
   ok("room confirmations survive into register_meta", same(proj1.register.meta.rooms.find((r) => r.id === fx.rooms.bed1.id).defaultConfirmations, fx.rooms.bed1.defaultConfirmations));
   ok("legacy text survives promotion", itemOf(proj1, "ri_w017_plain_text").description === "Engineered oak, matt, living zones" && itemOf(proj1, "ri_w017_plain_text").answer === null);
+  const othersOf = (id) => itemOf(proj1, id).answer.selected.map((s) => s.label).join("|");
+  ok("two Other answers both survive to the client store", othersOf(N.twoOthers.id) === "Pressed tin|Recycled brick" && itemOf(proj1, N.twoOthers.id).sync.table === "client_selections", othersOf(N.twoOthers.id));
+  ok("and to the internal store", othersOf(N.heatingOthers.id) === "Geothermal loop|Wood heater" && itemOf(proj1, N.heatingOthers.id).sync.table === "room_scope_items", othersOf(N.heatingOthers.id));
   ok("recording an answer approved nothing", fx.items.every((i) => itemOf(proj1, i.id).certainty === i.certainty) && !proj1.register.items.some((i) => i.certainty === "client_approved"));
   ok("an assumption stayed out of every product column", !sels.find((r) => r.source_register_item_id === N.assumed.id).selected_product && !JSON.stringify({ ...sels.find((r) => r.source_register_item_id === N.assumed.id), register_detail: null }).includes(INTERNAL_MARK));
 
@@ -172,10 +175,11 @@ async function main() {
   const recorded = (nature, selected, more = {}) => ({ v: 1, state: "recorded", nature, selected, ...more });
   // Each has typed text, so item_name and description can't change. If one of these is refused, the answer lock refused it.
   const probe = {
-    ordered: makeItem({ itemKind: "selection", category: "flooring", promptKey: "W-017", section: "project", description: "Bedroom floor finish", product: "Probe floor", answer: recorded("choice", [{ path: ["timber"], label: "Timber" }]) }),
+    ordered: makeItem({ itemKind: "selection", category: "flooring", promptKey: "W-017", section: "project", description: "Bedroom floor finish", product: "Probe floor", answer: recorded("choice", [{ path: ["timber"], label: "Timber" }], { zone: { key: "bedroom_floor", label: "Upstairs bedrooms" } }) }),
     other: makeItem({ itemKind: "selection", category: "cladding", promptKey: "W-013", section: "project", description: "Feature wall", product: "Probe board", certainty: "client_approved", evidence: E, answer: recorded("choice", [{ path: ["other"], label: "Spotted gum shiplap" }]) }),
     element: makeItem({ itemKind: "scope", category: "external", promptKey: "W-010", section: "site", disposition: "new", description: "Second driveway", answer: recorded("scope", [{ path: ["concrete"], label: "Concrete" }], { element: { id: "el_drive_side", key: "driveway", label: "Side driveway" } }) }),
     requirement: makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", description: "Envelope goal", certainty: "client_approved", evidence: E, answer: recorded("requirement", [{ path: ["airtightness"], label: "Airtightness" }]) }),
+    untyped: makeItem({ itemKind: "selection", category: "cladding", promptKey: "W-013", section: "project", certainty: "client_approved", evidence: E, answer: recorded("choice", [{ path: ["timber_feature", "timber_cladding"], label: "Timber cladding" }]) }),
   };
   const addedProbes = await put(leadId, { changes: Object.values(probe) });
   ok("items for the lock checks added on the project", addedProbes.ok, JSON.stringify(addedProbes.body).slice(0, 300));
@@ -200,12 +204,22 @@ async function main() {
   const foreignDel = await put(leadId, { changes: [], deletes: [{ id: FORGED_ID, sync: ord.sync }] });
   ok("a delete naming the wrong item is refused", foreignDel.status === 409 && reasonOf(foreignDel) === "item_mismatch", JSON.stringify(foreignDel.body).slice(0, 300));
   ok("the ordered selection is unchanged and still there", !(await isCarpet()));
+  const ordWords = await put(leadId, { changes: [{ ...ord, answer: { ...ord.answer, selected: [{ path: ["timber"], label: "Carpet" }] } }] });
+  ok("an ordered selection's option words can't change", ordWords.status === 409 && reasonOf(ordWords) === "post_contract_locked", JSON.stringify(ordWords.body).slice(0, 300));
+  const ordZone = await put(leadId, { changes: [{ ...ord, answer: { ...ord.answer, zone: { key: "bedroom_floor", label: "Downstairs bedrooms" } } }] });
+  ok("an ordered selection's zone words can't change", ordZone.status === 409 && reasonOf(ordZone) === "post_contract_locked", JSON.stringify(ordZone.body).slice(0, 300));
+  const stillOrd = await answerIn("client_selections", probe.ordered.id);
+  ok("and it still reads what was ordered", stillOrd.selected[0].label === "Timber" && stillOrd.zone.label === "Upstairs bedrooms");
   const { count: forgedEvents } = await svc.from("job_events").select("*", { count: "exact", head: true }).eq("job_id", jobId).eq("metadata->>item_id", FORGED_ID);
   ok("nothing was filed in history under the made-up id", forgedEvents === 0, forgedEvents);
   const ordNoted = await put(leadId, { changes: [{ ...ord, answer: { ...ord.answer, note: "Delivery booked" } }] });
   ok("an honest note on that row still saves", ordNoted.ok, JSON.stringify(ordNoted.body).slice(0, 300));
   const ordHist = await api(staff, "GET", `/api/register/leads/${leadId}/history?itemId=${probe.ordered.id}`);
   ok("and is filed under the real item", ordHist.ok && ordHist.body.events.some((e) => e.event === "register.item.updated"));
+  const ordFresh = itemOf(await getReg(leadId), probe.ordered.id);
+  const ordSwap = await put(leadId, { changes: [{ ...ordFresh, answer: { ...ordFresh.answer, selected: [{ optionId: "carpet", path: ["timber"], label: "Timber" }] } }] });
+  const afterSwap = await answerIn("client_selections", probe.ordered.id);
+  ok("an option id that disagrees with the path changes nothing: it stores what the path names", ordSwap.ok && afterSwap.selected[0].optionId === "timber" && afterSwap.selected[0].label === "Timber", JSON.stringify(afterSwap.selected));
 
   const elm = itemOf(regL, probe.element.id);
   const elmAnswer = async () => answerIn("room_scope_items", probe.element.id);
@@ -219,12 +233,21 @@ async function main() {
   const elForeign = await put(leadId, { changes: [{ ...elTimber, id: FORGED_ID }] });
   ok("baselined scope can't be reached through a made-up id", elForeign.status === 409 && reasonOf(elForeign) === "item_mismatch", JSON.stringify(elForeign.body).slice(0, 300));
   ok("baselined scope is unchanged", same(await elmAnswer(), elm.answer));
-  const elRenamed = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, element: { ...elm.answer.element, label: "Driveway on the side" } } }] });
-  ok("renaming the element under its stable id is still allowed", elRenamed.ok, JSON.stringify(elRenamed.body).slice(0, 300));
+  const elRenamed = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, element: { ...elm.answer.element, label: "Rear driveway" } } }] });
+  ok("baselined scope can't be renamed to a different element under the same id", elRenamed.status === 409 && reasonOf(elRenamed) === "baseline_locked", JSON.stringify(elRenamed.body).slice(0, 300));
+  const elWords = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, selected: [{ path: ["concrete"], label: "Exposed aggregate" }] } }] });
+  ok("baselined scope can't change the words of its option", elWords.status === 409 && reasonOf(elWords) === "baseline_locked", JSON.stringify(elWords.body).slice(0, 300));
+  ok("baselined scope still reads what was agreed", same(await elmAnswer(), elm.answer));
+  const elNote = await put(leadId, { changes: [{ ...elm, answer: { ...elm.answer, note: "Survey booked" } }] });
+  ok("a staff note on baselined scope still saves", elNote.ok, JSON.stringify(elNote.body).slice(0, 300));
 
   const oth = itemOf(regL, probe.other.id);
   ok("an approved Other selection is approved on real rows", oth.certainty === "client_approved" && oth.sync.status === "approved");
   const othReworded = { ...oth, answer: { ...oth.answer, selected: [{ path: ["other"], label: "Painted fibre cement" }] } };
+  const othCrossed = await put(leadId, { changes: [{ ...othReworded, sync: null, answer: { ...othReworded.answer, nature: "scope" } }], deletes: [{ id: oth.id, sync: oth.sync }] });
+  ok("an approved selection can't be swapped by delete plus re-insert", othCrossed.status === 409 && reasonOf(othCrossed) === "exists", JSON.stringify(othCrossed.body).slice(0, 300));
+  const othStill = itemOf(await getReg(leadId), probe.other.id);
+  ok("it stays where it was, approved, saying the same thing", othStill.sync.table === "client_selections" && othStill.certainty === "client_approved" && othStill.answer.selected[0].label === "Spotted gum shiplap");
   const othSame = await put(leadId, { changes: [othReworded] });
   ok("changing what an approved Other says on the old evidence is refused", othSame.status === 409 && reasonOf(othSame) === "reapproval_required", JSON.stringify(othSame.body).slice(0, 300));
   ok("and it still says what the client approved", (await answerIn("client_selections", probe.other.id)).selected[0].label === "Spotted gum shiplap");
@@ -235,12 +258,22 @@ async function main() {
   const rq = itemOf(regL, probe.requirement.id);
   ok("an approved requirement is approved in the internal store", rq.sync.table === "room_scope_items" && rq.certainty === "client_approved");
   const rqSwap = { ...rq, answer: { ...rq.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } };
+  const rqCrossed = await put(leadId, { changes: [{ ...rqSwap, sync: null, itemKind: "selection", answer: { ...rqSwap.answer, nature: "choice" } }], deletes: [{ id: rq.id, sync: rq.sync }] });
+  ok("an approved requirement can't be swapped by delete plus re-insert", rqCrossed.status === 409 && reasonOf(rqCrossed) === "exists", JSON.stringify(rqCrossed.body).slice(0, 300));
+  const rqStill = itemOf(await getReg(leadId), probe.requirement.id);
+  ok("it stays where it was, saying the same thing", rqStill.sync.table === "room_scope_items" && rqStill.answer.selected[0].optionId === "airtightness");
   const rqSame = await put(leadId, { changes: [rqSwap] });
   ok("swapping an approved requirement's answer on the old evidence is refused", rqSame.status === 409 && reasonOf(rqSame) === "reapproval_required", JSON.stringify(rqSame.body).slice(0, 300));
   ok("and it still says what the client approved", (await answerIn("room_scope_items", probe.requirement.id)).selected[0].optionId === "airtightness");
   const rqFresh = await put(leadId, { changes: [{ ...rqSwap, evidence: { at: new Date().toISOString(), by: "Sandbox Staff", method: "signed", ref: "Variation 3" } }] });
   const rqAfter = itemOf(await getReg(leadId), probe.requirement.id);
   ok("fresh evidence allows it", rqFresh.ok && rqAfter.certainty === "client_approved" && rqAfter.answer.selected[0].optionId === "passive_house_target", JSON.stringify(rqFresh.body).slice(0, 300));
+
+  const unt = itemOf(regL, probe.untyped.id);
+  const untWords = await put(leadId, { changes: [{ ...unt, answer: { ...unt.answer, selected: [{ path: ["timber_feature", "timber_cladding"], label: "Painted fibre cement" }] } }] });
+  ok("an approved selection's words can't change on the old evidence", untWords.status === 409 && reasonOf(untWords) === "reapproval_required", JSON.stringify(untWords.body).slice(0, 300));
+  const { data: untRow } = await svc.from("client_selections").select("item_name").eq("project_id", projectId).eq("source_register_item_id", probe.untyped.id).single();
+  ok("so the title the client would see is unchanged", untRow.item_name === "Timber cladding", untRow.item_name);
 
   console.log("\nPortal projection");
   await svc.from("project_client_users").insert({ project_id: projectId, user_id: creds.client.id, role: "primary", is_active: true });

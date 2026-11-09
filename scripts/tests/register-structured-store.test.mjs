@@ -139,6 +139,9 @@ console.log("\nLead → promotion → project → reload → document input");
   const plain = after.find((b) => b.id === "ri_w017_plain_text");
   ok("legacy free text survives promotion untouched", plain?.answer === null && plain.description === "Engineered oak, matt, living zones");
   ok("a legacy concept row survives promotion", after.some((b) => b.answer === null && /Blackbutt boards/.test(b.description)));
+  const othersOf = (id) => after.find((b) => b.id === id).answer.selected.map((s) => s.label).join("|");
+  ok("two Other answers both survive promotion, in the client store", othersOf(N.twoOthers.id) === "Pressed tin|Recycled brick" && w.db.client_selections.some((r) => r.source_register_item_id === N.twoOthers.id));
+  ok("and in the internal store", othersOf(N.heatingOthers.id) === "Geothermal loop|Wood heater" && w.db.room_scope_items.some((r) => r.source_register_item_id === N.heatingOthers.id));
   ok("the zone default lookup works after promotion", after.filter((b) => b.isDefault && b.promptKey === "W-017" && b.answer?.zone).length === 2);
 
   const context = { identity: { clientName: "Test Client", siteAddress: "1 Example St", suburb: "Stirling" }, projectType: "renovation", consultants: [], goals: {}, drawings: [] };
@@ -190,7 +193,8 @@ async function guardCase({ table = "client_selections", item, rowPatch }) {
   const loaded = await loadRegister(w.sb, LEAD_ID);
   return { w, it: loaded.register.items[0], calls: () => w.rpcCalls.length };
 }
-const attempt = async (w, change) => { try { await saveRegister(w.sb, LEAD_ID, { changes: [change] }, { actor: { name: "Staff" } }); return null; } catch (e) { return e; } };
+const attemptBody = async (w, body) => { try { await saveRegister(w.sb, LEAD_ID, body, { actor: { name: "Staff" } }); return null; } catch (e) { return e; } };
+const attempt = (w, change) => attemptBody(w, { changes: [change] });
 const carpet = (it) => ({ ...it, answer: { ...it.answer, selected: [{ path: ["carpet"], label: "Carpet" }] } });
 {
   const { w, it, calls } = await guardCase({ item: N.floorMain, rowPatch: { status: "ordered", certainty: "client_approved" } });
@@ -297,8 +301,11 @@ const reasonOf = (e) => e?.conflicts?.[0]?.reason;
   const foreign = await attempt(w, { ...it, id: "ri_forged_scope", answer: { ...it.answer, selected: [{ path: ["pavers"], label: "Pavers" }] } });
   ok("baselined scope can't be reached through a made-up item id", reasonOf(foreign) === "item_mismatch", foreign?.message);
   ok("and nothing was written", calls() === before && same(w.db.room_scope_items[0].register_detail.answer, N.driveway.answer));
-  const renamed = await attempt(w, { ...it, answer: { ...it.answer, element: { ...it.answer.element, label: "Driveway at the front" } } });
-  ok("renaming the element under its id is still allowed", renamed === null, renamed?.message);
+  const renamed = await attempt(w, { ...it, answer: { ...it.answer, element: { ...it.answer.element, label: "Rear driveway" } } });
+  ok("baselined scope can't be renamed to a different element under the same id", reasonOf(renamed) === "baseline_locked", renamed?.message);
+  const relabelled = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ path: it.answer.selected[0].path, label: "Pavers" }] } });
+  ok("baselined scope can't change the words of its option", reasonOf(relabelled) === "baseline_locked", relabelled?.message);
+  ok("neither was written", calls() === before && same(w.db.room_scope_items[0].register_detail.answer, N.driveway.answer));
 }
 {
   const req = makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", certainty: "client_approved", evidence: EV,
@@ -323,6 +330,58 @@ const reasonOf = (e) => e?.conflicts?.[0]?.reason;
   const before = calls();
   const e = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ path: ["passive_house_target"], label: "Passive House target" }] } });
   ok("a requirement that isn't approved is free to change", e === null && calls() === before + 1, e?.message);
+}
+
+console.log("\nThe words people read are locked too (refused before anything is written)");
+{
+  const zonedTyped = makeItem({ ...N.floorMain, description: "Main floor finish" });     // typed text, so only the answer lock can refuse
+  const { w, it, calls } = await guardCase({ item: zonedTyped, rowPatch: { status: "ordered", certainty: "client_approved" } });
+  const before = calls();
+  const reworded = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ path: ["timber"], label: "Carpet" }] } });
+  ok("an ordered selection's option words can't change", reasonOf(reworded) === "post_contract_locked", reworded?.message);
+  const rezoned = await attempt(w, { ...it, answer: { ...it.answer, zone: { key: "main_floor", label: "Rear living floor" } } });
+  ok("an ordered selection's zone words can't change", reasonOf(rezoned) === "post_contract_locked", rezoned?.message);
+  ok("none of that reached the database", calls() === before && same(w.db.client_selections[0].register_detail.answer, zonedTyped.answer));
+  const swapped = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ optionId: "carpet", path: ["timber"], label: "Timber" }] } });
+  ok("a mismatched option id saves as the option the path names", swapped === null && w.db.client_selections[0].register_detail.answer.selected[0].optionId === "timber", swapped?.message);
+}
+{
+  const untyped = makeItem({ itemKind: "selection", category: "cladding", promptKey: "W-013", section: "project", answer: { v: 1, state: "recorded", nature: "choice", selected: [{ path: ["timber_feature", "timber_cladding"], label: "Timber cladding" }] } });
+  const { w, it, calls } = await guardCase({ item: untyped, rowPatch: { status: "approved", certainty: "client_approved", approval_evidence: EV } });
+  const before = calls();
+  const e = await attempt(w, { ...it, answer: { ...it.answer, selected: [{ path: ["timber_feature", "timber_cladding"], label: "Painted fibre cement" }] } });
+  ok("an approved selection's words can't change on the old evidence", reasonOf(e) === "reapproval_required" && calls() === before, e?.message);
+  ok("so the title the client sees can't change either", w.db.client_selections[0].item_name === "Timber cladding");
+}
+
+console.log("\nA save that names no row can't replace a stored item");
+{
+  const { w, it, calls } = await guardCase({ item: N.floorMain, rowPatch: { status: "approved", certainty: "client_approved", approval_evidence: EV } });
+  const before = calls();
+  const scopeAnswer = { ...it.answer, nature: "scope", selected: [{ path: ["carpet"], label: "Carpet" }] };
+  const crossed = await attemptBody(w, { changes: [{ ...it, sync: null, answer: scopeAnswer }], deletes: [{ id: it.id, sync: it.sync }] });
+  ok("an approved selection can't be swapped by delete plus re-insert", crossed?.status === 409 && reasonOf(crossed) === "exists", crossed?.message);
+  const noSync = await attempt(w, { ...carpet(it), sync: null });
+  ok("nor by leaving the row out", reasonOf(noSync) === "exists", noSync?.message);
+  const otherMode = await attempt(w, { ...carpet(it), sync: { mode: "lead", version: "x" } });
+  ok("nor by claiming a lead-mode copy", reasonOf(otherMode) === "exists", otherMode?.message);
+  ok("nothing reached the database", calls() === before && same(w.db.client_selections[0].register_detail.answer, N.floorMain.answer));
+}
+{
+  const req = makeItem({ itemKind: "requirement", category: "insulation", promptKey: "W-016", section: "project", certainty: "client_approved", evidence: EV,
+    answer: { v: 1, state: "recorded", nature: "requirement", selected: [{ path: ["airtightness"], label: "Airtightness" }] } });
+  const { w, it, calls } = await guardCase({ table: "room_scope_items", item: req, rowPatch: {} });
+  const before = calls();
+  const crossed = await attemptBody(w, { changes: [{ ...it, sync: null, itemKind: "selection", answer: { v: 1, state: "recorded", nature: "choice", selected: [{ path: ["passive_house"], label: "Passive House" }] } }], deletes: [{ id: it.id, sync: it.sync }] });
+  ok("an approved requirement can't be swapped that way", reasonOf(crossed) === "exists" && calls() === before, crossed?.message);
+}
+{
+  const { w, it } = await guardCase({ item: N.floorMain, rowPatch: {} });
+  const brandNew = makeItem({ itemKind: "selection", category: "flooring", promptKey: "W-017", section: "project", description: "A new one" });
+  const added = await attempt(w, brandNew);
+  ok("a genuinely new item still saves", added === null && w.db.client_selections.some((r) => r.source_register_item_id === brandNew.id), added?.message);
+  const moved = await attempt(w, { ...it, disposition: "excluded" });
+  ok("a real move between stores still saves", moved === null && w.db.room_scope_items.some((r) => r.source_register_item_id === it.id), moved?.message);
 }
 
 console.log("\nLead-mode save");

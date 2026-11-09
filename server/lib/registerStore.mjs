@@ -496,6 +496,11 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
       const before = storedByRow.get(sync.rowId);
       const guard = rowClaimReason(before, it.id) || answerGuardReason(before, it, sync);
       if (guard) guarded.push({ itemId: it.id, reason: guard });
+    } else if (stored.has(it.id)) {
+      // Names no row, but this item is already on the project. register_apply says "exists" too, except when
+      // the same request deletes it from the other store, which would swap an answer past the check above.
+      // A real move between stores carries sync.rowId and goes through that check.
+      guarded.push({ itemId: it.id, reason: "exists" });
     }
     // Existing rows keep their sort_order (null ⇒ unchanged); new rows append after the current list.
     const sortOrder = known.has(it.id) ? null : nextOrder++;
