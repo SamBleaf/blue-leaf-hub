@@ -36,6 +36,8 @@ Shows a Mail-app-style thread of every email sent to and received from the lead,
 3. To reply, click **Reply** on a message (it prefills "Re: …" and threads to that message). To start fresh, click **New message**.
 4. Type your message and click **Send**. Your signature is appended automatically.
 
+The stage's prepared emails are in the same area: pick one in the list and click **Review email**. Each meeting's booking email is in that list too. If a send fails, the review window stays open with a red message inside it and your edits are kept. Nothing records a failed send, so that message is the only sign of it.
+
 > 💡 **Tip:** Replies from the client show up here on their own within ~10 minutes (the mailbox poller). You don't need to forward anything.
 
 [insert screenshot: Client correspondence open, showing the thread and New message]
@@ -129,6 +131,12 @@ Next review date: 2027-02-16
 1. Open a lead at any stage.
 2. Expected result: no Subject or Message box is showing. The area shows the last recorded email, or "No emails recorded for this lead yet."
 3. Force `GET /api/sales/leads/:id/mailbox` to fail. Expected result: the area says the history could not be loaded and does not say there are no emails.
+- [ ] Pass  [ ] Fail
+
+**TC-08 — A failed send can be read (feature-specific)**
+1. With sending on and the send call forced to fail, open a stage email, edit the subject and click **Send email**.
+2. Expected result: a red "Send failed: …" message shows inside the window, not behind it, at desktop and phone width. The window stays open with the edited subject, and **Send email** can be pressed again. No `correspondence` row is written.
+3. Click **Close**. Expected result: the failure still shows beside the Review button.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

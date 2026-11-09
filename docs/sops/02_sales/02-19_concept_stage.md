@@ -62,7 +62,7 @@ The Concept stage turns "client has paid for a concept" into "client has approve
 6. Before the design meeting, send the brief-questions email: in **Client correspondence** choose **Brief questions (pre-meeting)** in the list and click **Review email**. A preview opens — read it, edit the subject or message if needed, then click **Send email**. This email attaches the Blue Leaf company-profile PDF automatically.
 7. While the concept is being drawn, send the interim update: click **Interim update**, preview, then **Send email**.
 8. Build the **Finishes schedule** as selections firm up: click **+ Add row** and fill **Area**, **Item / finish** and **Notes**. Add a row per selection. This list carries through to Consultants and the proposal, so keep it current.
-9. Book the meetings using the **Design meeting** and **Concept presentation** cards — either copy the self-book link to the client or book a slot on their behalf.
+9. Book the meetings using the **Design meeting** and **Concept presentation** cards — copy the self-book link, use **Go to the booking email** to send it from Client correspondence, or book a slot on their behalf.
 10. When the client approves the concept, set **Concept design** to **Approved** (step 4).
 11. In the **PTSA / Plans pathway** box at the bottom, enter the **Pre-construction fee (ex GST)** and tick **PTSA / Plans pathway explained to the client** once you have talked the client through what happens next.
 12. When all three exit requirements are met (design **Approved**, pathway ticked, pre-con fee set), the **Move to PTSA / Plans →** button becomes active. Click it to advance the lead.

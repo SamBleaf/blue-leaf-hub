@@ -64,7 +64,7 @@ The one thing that unlocks the next stage (Consultants) is the **PTSA being sign
 7. In the **Design & pre-construction fee invoice (Xero)** card, click **Create invoice in Xero**. Confirm the amount (shown ex-GST and inc-GST). This raises the design & pre-construction fee as a real Xero invoice. Use **Send to client** to email it, or **Download PDF** / **Pay link** as needed.
    [insert screenshot: Design fee Xero invoice card after creation]
 8. Go to the **Documents** tab. Upload the working drawings, elevations and 3D render, choosing document type **Working drawings**. They carry to the job's PLANS folder.
-9. Back in the focus panel, use **Plan presentation** to book the meeting (or copy the booking link). Present the plans, capture any layout/opening changes, and fold them into the working drawings **before** engineering.
+9. Back in the focus panel, use **Plan presentation** to book the meeting, copy the booking link, or use **Go to the booking email** to send it from Client correspondence. Present the plans, capture any layout/opening changes, and fold them into the working drawings **before** engineering.
 10. When the PTSA is signed, the **Move to Consultants** area at the bottom of the panel shows a green "PTSA signed" tick. Advance the lead to **Consultants**.
 
 ## 6. What happens next

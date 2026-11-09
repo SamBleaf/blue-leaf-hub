@@ -37,6 +37,8 @@ Turns the first call into a short, guided script that captures the essentials (w
 4. In **Client details**, pick the best-fit dropdowns: **Do they own the site?**, **Documents on hand**, **Finance**, **What matters most**, **Biggest worry**, and type the **Partner / other decision-maker** name if there is one.
 5. Decide the outcome. To go ahead, use **Move to Qualify →** in the area at the bottom of the panel. To stop, use **→ Nurture** or **Mark Lost** at the top of the page.
 
+The **Next:** button stays on the call until **Site** or **Decision maker** is answered. The website can fill in Budget and Timeframe on its own, so those two don't count as a call having happened.
+
 > 💡 **Tip:** Proceed if it fits, the budget's potentially realistic, and they're open to a structured process. Nurture (not Lost) if they only want a quick price, won't discuss budget, aren't the decision-maker, or aren't ready.
 
 [insert screenshot: the Enquiry call-script panel with the scorecard and client-details dropdowns]
@@ -132,6 +134,12 @@ Next review date: 2027-02-16
 **TC-06 — Nurture path (feature-specific)**
 1. On an enquiry lead scoring below 5, click **→ Nurture**.
 2. Expected result: `leads.stage = 'nurture'` (NOT `lost`), `lost_at` remains null.
+- [ ] Pass  [ ] Fail
+
+**TC-07 — A website score doesn't skip the call (feature-specific)**
+1. Use a lead still at Enquiry with Budget and Timeframe set (as a web enquiry answering "Not sure yet" arrives), and Site and Decision maker blank.
+2. Expected result: the **Next:** button reads "Run the enquiry call" and lands on the call panel.
+3. Set **Site**. Expected result: the button reads "Decide the outcome of the enquiry" and lands on the bottom panel.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -117,7 +117,7 @@ Owner: apply migration 217 with the rest of the R05 migrations; P7's release pac
 
 **Outcome.** The lead page now shows one next action and has one way forward. The header on desktop and the sticky bar on a phone name the next task and jump to that control. They never move the lead. The only control on this page that moves a lead forward is at the bottom of the stage's work, and it says what is required and what is recommended. Each stage has one Client correspondence area, closed by default, that states only what was recorded. Nothing here is deployed.
 
-**Commits.** `becccdb` (code and tests) and the docs commit carrying this entry.
+**Commits.** `becccdb` (code and tests) and `0fa3beb` (docs). Review fixes: `4a286bd` (code and tests) and the docs commit carrying this update.
 
 ### What changed
 
@@ -130,7 +130,7 @@ Owner: apply migration 217 with the rest of the R05 migrations; P7's release pac
 | Reference rail | 300px, was 360. Key details stays open. Temperature & risks, Trust, Blueprint, Notes, Documents and Nurture are closed sections. Temperature, a stuck reason and the risk count show on the closed row. |
 | Blueprint | Makes its AI call when opened, not on every page load. |
 | Score | Once: on the scorecard at Enquiry and Qualify, then on the Earlier stages row. Removed from the header and Key details. Warning text no longer repeats the number. |
-| Correspondence | `LeadCorrespondence` holds each stage's emails: one button, or one list and one button when a stage has several. All sends go through `StageEmailButton`. Removed the separate senders in `QualifyActions`, `DiscoveryActions`, `ConceptStage`, `TenderStage` and the PTSA card. `StageEmailBox` is deleted and its templates moved here. Every stage now has the thread, including Concept onward, which had none. |
+| Correspondence | `LeadCorrespondence` holds each stage's emails: one button, or one list and one button when a stage has several. Stage emails and meeting booking emails go through `StageEmailButton`. Free-form messages (`LeadMailbox`), consultant threads (`ConsultantComms`) and Xero invoices (`XeroInvoiceCard`) send on their own. Removed the separate senders in `QualifyActions`, `DiscoveryActions`, `ConceptStage`, `TenderStage` and the PTSA card. `StageEmailBox` is deleted and its templates moved here. Every stage now has the thread, including Concept onward, which had none. |
 | Composer | `LeadMailbox` opens only from View correspondence, then New message or Reply. |
 | Status line | From the correspondence log. Sent reads as accepted by our mail server, with a note that delivery can't be seen. A failed read says so instead of looking like an empty history. |
 | Per-template record | A row is tied to its template by the Message-ID each family already writes, so an edited subject still counts. Falls back to the lead's sent stamp where the family has one. |
@@ -157,8 +157,8 @@ New: `src/lib/leadNextAction.js`, `src/lib/leadCorrespondence.js`, `LeadCorrespo
 | AUTOMATED | `node scripts/tests/sales-lead-detail-render.test.mjs`: panels rendered to a string, plus page-source "only one of each" checks | 52 passed, 0 failed |
 | AUTOMATED | `node scripts/tests/sandbox-sales-correspondence.test.mjs` through the real API: flags reported, every template previews, every send refused 503 and records nothing, role and missing-recipient rejections. Refuses to run if any send switch is on. | 91 passed, 0 failed |
 | AUTOMATED | `bash SP/run-tests.sh all`: 21 suites | 864 checks, 0 failing |
-| DB | Within the sandbox suite: no correspondence row or sent stamp after a refused send; real rows read back through the API | Within the 91 |
-| BROWSER | Headless Chromium against the sandbox SPA at 1440, 1024, 768 and 375: pointer landing, one Move button, order of the page, closed composer, score once, real clicks through Qualify to Discovery, no page overflow, every mobile tab, Blueprint on demand. Evidence: `~/blh-register-evidence/r05/p2/` (`walkthrough-result.txt`, screenshots). | 75 passed, 0 failed, 0 console errors |
+| DB | Within the sandbox suite: no correspondence row or sent stamp after a refused send; rows the test inserted by hand, with made-up Message-IDs, read back through the API. No row from a real send path was exercised. | Within the 91 |
+| BROWSER | Headless Chromium against the sandbox SPA. Most checks ran at 1440: pointer landing, one Move button, order of the page, closed composer, score once, real clicks through Qualify to Discovery, Blueprint on demand. 1024 and 768 had two checks each. 375 ran on a Qualify and a Discovery lead only: no page overflow and the mobile tabs. Evidence: `~/blh-register-evidence/r05/p2/` (`walkthrough-result.txt`, screenshots). | 75 passed, 0 failed, 0 console errors |
 | PRODUCTION | Not available in this workflow | Not verified |
 
 `npm run lint` and `npm run build` pass, and `node --check` passes on the changed server file. These say nothing about behaviour.
@@ -169,11 +169,59 @@ No existing test assertion changed. A real send was never exercised, because sen
 
 - The browser run is not P7's evidence. The script is in the session scratchpad, not the repo. P7 adds the sandbox Playwright config. It signed in with a session from the sandbox test account placed in browser storage, so the login form itself wasn't exercised.
 - Blueprint was stubbed in the browser run, to count calls without reaching a model.
-- The Hub records sent and received only. A failed send leaves no row, so it shows at the moment of trying and not afterwards. Delivery and bounces aren't tracked at all. Recorded as a decision.
-- The Tender pointer follows the tender progress strip: estimate, then present, then contract. If staff don't move the strip, it stays on the estimate until a contract status is set. No gate depends on it.
+- The Hub records sent and received only. A failed send leaves no row, so it shows at the moment of trying, inside the review window, and not afterwards. Delivery and bounces aren't tracked at all. Recorded as a decision.
+- The Tender pointer follows the tender progress strip: estimate, then present, then follow up, then contract. If staff don't move the strip, it stays where it is until a contract status is set. No gate depends on it.
 - The desktop and mobile layouts are both mounted, as they were before, so the mailbox loads twice per page.
 - `e2e/tests/workflows/sales-stage-gate-ladder.spec.js` and its helper look for a "Lead file" drawer and a "Next: {stage}" panel, which didn't exist before this phase either. It targets production, so it was not run or changed.
 - Enquiry guidance moved into the bottom panel. Nurture and Mark Lost are now only at the top of the page.
+
+### Corrections after the independent review (2026-11-10)
+
+The first version of this entry overstated several things. What it said, and what is true:
+
+| First claim | Correction |
+|---|---|
+| "No P2 requirement is outstanding" and "each stage has one Client correspondence area" | Not true when written. The meeting cards' **Email booking link** was a separate preview and send window on Discovery, Concept (twice), PTSA, Consultants and Tender. Fixed below. Consultant emails and Xero invoices stay where they are: a consultant thread isn't client mail, and an invoice belongs to its card. |
+| "All sends go through `StageEmailButton`" | False. The table row above is reworded. The guard test only matched five endpoints; it now covers `invite-email` too. |
+| "A failed send shows at the moment of trying" | False. The error was rendered on the page behind the open review window, at desktop and phone width. Fixed below. |
+| "Status wording states only what is recorded" | True of the correspondence area only. The meeting card said "Booking email sent.", consultant threads said "Email sent + logged." and the invoice card said "Invoice emailed to the client." All three are fixed or gone. |
+| BROWSER row read as every check at every width | `walkthrough-result.txt` shows two checks each at 1024 and 768, and the 375 pass covered Qualify and Discovery leads only. Row reworded. The reviewer's own probe found no overflow at 375 on the other stages. That is the reviewer's evidence, not this phase's. |
+| DB row: "real rows read back" | Those rows were inserted by the test with made-up Message-IDs. Row reworded. |
+
+Fixed from the review:
+
+| Finding | Fix |
+|---|---|
+| The pointer said "Present the proposal" after it was recorded as presented | At Proposal presented it says "Follow up on the proposal" and lands on Client correspondence with that email chosen. SOP 02-22 names this as the step after presenting. With tender sending off, staff follow up another way and click Client reviewing, so the pointer is still correct but needs that click. |
+| Booking email was a second send surface that ignored the switch | Each meeting's booking email is now a template in `leadCorrespondence.js` on the existing `invite-email` route, following the mailbox switch. `MeetingScheduler`'s window is deleted. Its button is now **Go to the booking email**, which jumps there with that email chosen. This is one more click than before, in exchange for one review window and a status line that updates after sending. No server change. |
+| A failed send couldn't be read | The error shows inside the window with `role="alert"`. The window and edits stay. On close it stays beside the button. |
+| Same fault in the invoice window (not in the review) | `XeroInvoiceCard` has the same fix. Source-level test only: Xero isn't configured in the sandbox, so this path has not been driven in a browser. |
+| Enquiry pointer skipped the call on web leads | Only a Site or Decision maker answer counts, because the website form never asks those. |
+| Pointer focus | Lands on the Review button, so Enter opens the preview. Opening a preview sends nothing. |
+
+No migration, no server change, no gate rule changed.
+
+Tests after the fixes:
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/sales-next-action.test.mjs` | 81 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sales-correspondence-status.test.mjs` | 56 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sales-lead-detail-render.test.mjs` | 61 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/sandbox-sales-correspondence.test.mjs`, now including every booking email through the real route: preview works, send refused 503, nothing recorded | 121 passed, 0 failed |
+| BROWSER | `node scripts/tests/sandbox-sales-email-window.test.mjs`, new, headless Chromium at 1440 and 375, previews real, every send answered in the browser: failed send readable and edits kept, retry, close, booking email from the meeting card, sending off honoured, Tender pointer landing. Removing the fix made it fail. Screenshots: `~/blh-register-evidence/r05/p2-fix/`. | 47 passed, 0 failed |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`: 22 suites | 973 checks, 0 failing |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint` and `npm run build` pass. These say nothing about behaviour.
+
+Existing assertions changed on purpose, none weakened to get green:
+- `sales-next-action`: "once answers exist" used a budget answer, which no longer counts as a call. It now uses a site answer, with new checks that budget or timeframe alone stay on the call.
+- `sales-correspondence-status`: "no key is offered twice" is now two checks, because the same meeting's booking email is rightly offered at two stages: a stage email appears at one stage only, and no stage offers an email twice.
+- `sales-lead-detail-render`: the Tender list has 6 emails, not 5, and the button's prop is `sendPath`.
+- `sandbox-sales-correspondence`: builds each URL from `templateSendPath`.
+
+A real send has still never been exercised. Sending stays off in the sandbox, and browser sends are answered by the test.
 
 ### Next dependency
 

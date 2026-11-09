@@ -46,9 +46,10 @@ Every pipeline meeting becomes bookable two ways: the client **self-books** from
 
 ## 5. Step-by-step process (day-to-day)
 **Client self-books (the default for client-facing meetings):**
-1. Open the lead. On the stage's **meeting card** (e.g. "Designer concept meeting" on a Discovery lead), click **Copy client booking link**.
-2. Paste it into an email/message to the client — or, for the designer meeting, it's already embedded in the Discovery email as a clickable link.
-3. When they book, the card flips to **"✓ Scheduled"** with the time, on its own.
+1. Open the lead and find the stage's **meeting card** (e.g. "Designer concept meeting" on a Discovery lead).
+2. To email the link from the Hub, click **Go to the booking email**. The page jumps to **Client correspondence** with this meeting's booking email chosen. Click **Review email**, edit it if you like, then **Send email**. If sending is turned off, the window says so and can only preview. "Sent" means our mail server accepted it; the Hub can't see whether it was delivered.
+3. To send it yourself, click **Copy client booking link** and paste it into your own message. For the designer meeting, the link is also in the Discovery email.
+4. When they book, the card flips to **"✓ Scheduled"** with the time, on its own.
 
 **You book it yourself:**
 1. On the meeting card, click **Set a time yourself**.
@@ -93,6 +94,7 @@ The meeting is stored in `lead_meetings` and appears on the lead's card + the Sa
 - Client books → `/api/webhooks/calcom` (`calcomWebhook.mjs`, HMAC-verified) upserts a `lead_meetings` row keyed `(lead_id, meeting_type)`; for the build conversation it also stamps the legacy `discovery_meeting_*` columns.
 - Set a time yourself → `POST /api/sales/leads/:id/meetings/schedule`; creates a Cal.com booking when `CAL_API_KEY` is set (`calcomApi.mjs`), else records `booking_source='manual'`.
 - Agenda → `GET /api/sales/meetings/upcoming?days=N` from `lead_meetings`.
+- Booking email → `POST /api/sales/leads/:id/meetings/:meetingType/invite-email`, previewed and sent from Client correspondence. Preview always works. Sending needs `LEAD_MAILBOX_ENABLED`. A send writes an outbound `correspondence` row with Message-ID `<meeting-{leadId}-{meetingType}-…>`, which ties it to its place in the list even if the subject was edited.
 
 ## 12. Edge cases and limits
 - Before migration 185, the cards + agenda show a friendly "not live yet" note and never error.
@@ -145,6 +147,13 @@ Next review date: 2027-02-17
 **TC-06 — Agenda + build-conversation back-compat (feature-specific)**
 1. Open Sales → **Agenda**; confirm the meeting from TC-03/TC-05 appears under the right day.
 2. POST a signed BOOKING_CREATED with NO `meetingType` and a `metadata.leadId` (simulating the legacy build-conversation event) → expect it resolves to `build_conversation`, writes a `lead_meetings` row AND the legacy `discovery_meeting_booked_at`.
+- [ ] Pass  [ ] Fail
+
+**TC-07 — The booking email is in Client correspondence (feature-specific)**
+1. With `LEAD_MAILBOX_ENABLED` not set, open a Tender lead → Proposal presentation card → **Go to the booking email**.
+2. Expected result: the page lands on Client correspondence with "Proposal presentation booking link" chosen. The card has no preview or send window of its own.
+3. Click **Review email**. Expected result: a real preview opens, **Send email** is disabled, and the window says sending is turned off. No developer flag name shows on the page.
+4. Call `POST …/meetings/proposal_presentation/invite-email` without `preview`. Expected result: 503 and no `correspondence` row.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

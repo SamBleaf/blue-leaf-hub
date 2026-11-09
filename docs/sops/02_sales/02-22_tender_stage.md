@@ -71,10 +71,10 @@ Everything is stored on the lead record, so any staff member opening the lead se
 
 7. Check the readiness badge (top-right of the checklist). If it shows an **amber "not ready to present"** warning (under 80%), finish the outstanding items before you book the presentation.
 
-8. When the proposal is ready, scroll to the **Proposal presentation** meeting block. Either click **Copy client booking link** to send the client a self-book link, or **Set a time yourself** to pick an open slot and book it on their behalf.
+8. When the proposal is ready, scroll to the **Proposal presentation** meeting block. Click **Copy client booking link** to send the client a self-book link yourself, **Go to the booking email** to send it from Client correspondence, or **Set a time yourself** to pick an open slot and book it on their behalf.
    *[insert screenshot: Proposal presentation meeting scheduler]*
 
-9. After the presentation, use **Client correspondence** near the bottom of the panel. Choose **Proposal follow-up (24h)** in the list the day after presenting and click **Review email**. A preview opens — read it, edit the wording if needed, then click **Send email**. Sending this email also moves the sub-status to **Client reviewing**.
+9. After the presentation, set the strip to **Proposal presented**. The **Next:** button then reads **Follow up on the proposal** and lands on **Client correspondence** with **Proposal follow-up (24h)** already chosen. The day after presenting, click **Review email**. A preview opens — read it, edit the wording if needed, then click **Send email**. Sending this email also moves the sub-status to **Client reviewing**. If you follow up another way, or sending is turned off, click **Client reviewing** on the strip yourself.
    *[insert screenshot: Client correspondence with the email list open]*
 
 10. While the client is deciding, choose **Client-review follow-up** to gently check in (preview, edit, send).
@@ -261,9 +261,15 @@ Every automated action triggered from this stage:
 
 **TC-06 — Feature-specific: email send gated off (preview still works)**
 1. Ensure `TENDER_EMAIL_ENABLED` is **not** `"true"` (sending off).
-2. Click **Client-review follow-up** to open the preview, confirm it renders, then click **Send email**.
-- Expected UI: the preview opens and shows subject "Any questions on your proposal?"; on Send, an error shows: **"Tender email sending is turned off. Set TENDER_EMAIL_ENABLED to send — preview still works."**
-- Expected DB: no `correspondence` row and no `lead_activities` row created for this send (HTTP 503, no email dispatched).
+2. Click **Client-review follow-up** to open the preview and confirm it renders.
+- Expected UI: the preview opens and shows subject "Any questions on your proposal?". **Send email** is disabled and the window says sending is turned off.
+- Expected API and DB: calling the send route directly returns 503 "Tender email sending is turned off…". No `correspondence` or `lead_activities` row is created.
+- [ ] Pass  [ ] Fail
+
+**TC-06b — Feature-specific: the Next button after a presentation**
+1. Set the strip to **Proposal generated**. Expected: the **Next:** button reads "Present the proposal to the client" and lands on the Proposal presentation card.
+2. Set the strip to **Proposal presented**. Expected: it reads "Follow up on the proposal" and lands on Client correspondence with **Proposal follow-up (24h)** chosen. It must not ask you to present again.
+3. Set the strip to **Client reviewing**. Expected: it moves on to the building contract.
 - [ ] Pass  [ ] Fail
 
 **TC-07 — Feature-specific: readiness threshold flips at 80%**

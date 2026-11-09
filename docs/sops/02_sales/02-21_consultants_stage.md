@@ -96,6 +96,8 @@ Everything you touch saves the instant you change it — there is no separate "S
    - **Engineering complete enough for tender** — once the engineer's work is far enough along.
    - **Certification pathway confirmed** — once you know the approval route (private certifier vs council). Remember: this is the **pathway**, not final approval.
 
+   The **Proposal presentation** card is on this stage too. To email the client the booking link, use **Go to the booking email**; it opens with the other client emails in **Client correspondence**.
+
 7. **Create the job if you haven't.** If no job exists yet, a **Create Job from Lead →** button shows in the advance panel. It needs a site address first (a note appears if the address is missing). Click it to create the job. Once linked, you'll see "Job linked — ready to advance".
 
 8. **Advance to Tender.** When all five conditions are met, the **Move to Tender →** button becomes active. Click it. The lead moves to the **Tender** stage and is handed to the Tender Manager.
