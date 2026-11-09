@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-11-09
 app_version: main
 screenshot_status: placeholders_only
@@ -36,7 +36,7 @@ Use this SOP once a lead has reached the **Tender** stage (it has already passed
 
 The Tender stage turns a single "tender" bucket into a tracked mini-pipeline. In one screen you can:
 
-- **See and set progress** on a 10-step sub-status strip (pack prep → RFQs → pricing → estimate → proposal → presented → reviewing → contract prep/sent/signed).
+- **See and set progress** on a 10-step sub-status strip (pack prep → RFQs → pricing → estimate → proposal → presented → reviewing → contract prep/sent/signed). The last step, **Contract signed**, ticks itself when the signed PDF is uploaded.
 - **Start the estimate** in the RFQ Engine and **generate the Fixed-Price Proposal** — the proposal is treated as a first-class client sales tool, not a file attachment.
 - **Run the Blue Leaf Proposal Checklist**, a client-facing quality gate. It shows a readiness percentage; below 80% it warns the proposal is "not ready to present".
 - **Take five named actions** (each a distinct, deliberate step, never one generic "send"): book the proposal presentation meeting, plus four separately-worded client emails.
@@ -56,7 +56,7 @@ Everything is stored on the lead record, so any staff member opening the lead se
 
 1. Open the lead and confirm the stage badge reads **Tender**. The Tender control panel appears in the "Do this now" focus area.
 
-2. In the **Tender progress** strip, click the sub-status that matches where the work actually is (for example **Tender pack being prepared**). The one you click turns blue; earlier steps show a green tick. Update it whenever the work moves on.
+2. In the **Tender progress** strip, click the sub-status that matches where the work actually is (for example **Tender pack being prepared**). The one you click turns blue; earlier steps show a green tick. Update it whenever the work moves on. You set every step except the last: **Contract signed** can't be clicked and ticks itself once the signed PDF is uploaded.
    *[insert screenshot: Tender progress sub-status strip with one status active]*
 
 3. When you are ready to build the estimate, click **Proceed to RFQ Engine & Estimate →**. This creates the job first if the lead does not have one yet, then opens the RFQ Engine pre-filled from this lead.
@@ -83,10 +83,10 @@ Everything is stored on the lead record, so any staff member opening the lead se
 
 12. If the contract is not signed after a while, click **Unsigned-contract follow-up** to chase it (preview, edit, send).
 
-13. In the **Building contract** block, click **Prepared** or **Sent** to match reality. Clicking **Sent** stamps the sent date. There is no Signed button: signing is recorded in the next step.
+13. In the **Building contract** block, click **Prepared** or **Sent** to match reality. Clicking **Sent** stamps the sent date. There is no Signed button here or on the Tender progress strip: signing is recorded in the next step.
     *[insert screenshot: Building contract status buttons and PDF upload]*
 
-14. When the client returns the signed contract, choose the PDF in the **Building contract** block, optionally set the date signed, and click **✓ Mark contract as signed**. The Hub stores the PDF, marks the contract signed and shows the file as a link.
+14. When the client returns the signed contract, choose the PDF in the **Building contract** block, optionally set the date signed, and click **✓ Mark contract as signed**. The Hub stores the PDF, marks the contract signed and shows the file as a link. If the lead was marked signed earlier with no date on record, the **Date signed** box appears: enter the date if you know it, or leave it empty and the Hub won't guess one.
 
 15. You can now move the lead to **Won** (see 02-02). The move is blocked until the contract is signed **and** the signed PDF is on file.
 
@@ -106,7 +106,7 @@ Everything is stored on the lead record, so any staff member opening the lead se
 | Saying "APB" anywhere the client can see | APB is internal guidance only | Everything client-facing is Blue Leaf branded — use "Fixed-Price Proposal" and "Blue Leaf Proposal Checklist" |
 | Clicking one generic "send" and moving on | Old habit from single-button tools | Use the correct named button — each of the four emails is worded for its exact moment |
 | Looking for a **Signed** button | Older screens had one | Upload the client-signed PDF in the Building contract block. That is what marks it signed |
-| Forgetting to advance the sub-status strip | The strip is manual, not automatic | Nudge the strip each time the work moves so the whole team sees the true position |
+| Forgetting to advance the sub-status strip | The strip is manual, apart from its last step | Nudge the strip each time the work moves so the whole team sees the true position |
 
 ## 8. Troubleshooting
 
@@ -239,6 +239,24 @@ Every automated action triggered from this stage:
 - Expected UI: an amber note says the PDF is not on file, with an upload and **Attach signed PDF**.
 2. Upload a PDF.
 - Expected DB: one new `construction_contract` row; `contract_signed_date` unchanged. Won now passes.
+- [ ] Pass  [ ] Fail
+
+**TC-05c — Contract signed on the progress strip can't be clicked**
+1. On a lead at Tender with the contract not yet signed, try to click **Contract signed** on the Tender progress strip.
+- Expected UI: it isn't a button, and a note says it ticks itself when the signed PDF is uploaded.
+2. Upload the signed PDF.
+- Expected UI: **Contract signed** lights up. The earlier steps show ticks and can no longer be clicked.
+- Expected API: `PATCH /api/sales/leads/:id` with `{ "tender_substatus": "contract_signed" }` returns 400.
+- [ ] Pass  [ ] Fail
+
+**TC-05d — A lead marked signed with no date on record**
+1. Pick a lead at Tender with `contract_status = 'signed'`, no `contract_signed_date` and no signed PDF. Upload a PDF and leave **Date signed** empty.
+- Expected DB: one new `construction_contract` row. `contract_signed_date` stays empty; it is not set to today.
+- [ ] Pass  [ ] Fail
+
+**TC-05e — A browser token can't record a signed contract (needs migration 217)**
+1. With a staff login and the anon key, send straight to PostgREST: `PATCH /rest/v1/leads?id=eq.<id>` with `{ "contract_status": "signed" }`, and `POST /rest/v1/lead_documents` with `{ "lead_id": "<id>", "filename": "x.pdf", "storage_path": "x.pdf", "document_type": "construction_contract" }`.
+- Expected: both are refused with a message ending "through the Hub". The lead is unchanged and no row is added.
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Feature-specific: email send gated off (preview still works)**

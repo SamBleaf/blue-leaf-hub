@@ -1,5 +1,5 @@
 ---
-sop_version: 1.1
+sop_version: 1.2
 last_reviewed: 2026-11-09
 app_version: main
 screenshot_status: placeholders_only
@@ -100,7 +100,8 @@ Note: the **Also track (advisory)** box (deposit invoice raised, council / devel
 | "Can't advance to Won yet — needs the building contract signed…" | The signed PDF has not been uploaded | Upload it in the Building contract block in the Tender stage, then move to Won |
 | "…needs the signed contract PDF on file." | Marked signed before uploads were required, or the file was removed | Attach the PDF in the Building contract block. The signed date is kept |
 | "Someone else has just moved this lead." | Another person moved it first | Reload the page and check where the lead is now |
-| Alert: the hand-off to Operations didn't finish, or the project is missing from Operations | The lead is Won but the job or project step failed | Press **Re-run the hand-off** on the Won panel. It is safe to repeat and never creates a duplicate |
+| Alert: the hand-off to Operations didn't finish, or the project is missing from Operations | The lead is Won but the job or project step failed | Press **Re-run the hand-off** on the Won panel. It restores a missing project, is safe to repeat and never creates a duplicate |
+| The Hub says the linked job is archived or marked lost and no project went to Operations | The job was closed in the Tender Manager, and the Hub won't reopen it on its own | If the project is going ahead, the job has to be restored to Tendering first. There is no button for this yet: a director needs the audited `POST /api/tender/unarchive`. Then press **Re-run the hand-off** |
 | Move to Won button blocked | The lead is not the current focus stage, or a requirement is unmet | Confirm the lead is in **Tender** and the panel shows both contract requirements ticked |
 | "Job & Ops project created" tick stays empty | The lead has no linked job | Add the **site address** and create the job from the lead, then reopen the Won panel |
 | Mark Ops Ready button is greyed out | One or more of the 8 items has not passed | Check the counter (e.g. 7/8) and tick the remaining real item(s) |
@@ -216,8 +217,25 @@ Expected DB record: server returns **422** with code `GATE_BLOCKED`; `leads.stag
 **TC-05a — Re-run the hand-off**
 Steps:
 1. On a Won lead with a linked job, press **Re-run the hand-off** twice.
-Expected UI result: "Done. The job is Won and the project is in Operations."
+Expected UI result: "Done. The project is in Operations."
 Expected DB record: `jobs.status = 'won'`; **exactly one** `projects` row for that `job_id`; one `lead_activities` note per press.
+- [ ] Pass  [ ] Fail
+
+**TC-05b — The hand-off leaves a closed job closed**
+Steps:
+1. On a Won lead whose job has an Operations project, archive the job from the Tender board, then press **Re-run the hand-off**.
+Expected UI result: "Done. The project is in Operations."
+Expected DB record: `jobs.status` stays `archived`; one `projects` row.
+2. Move a lead with a signed PDF to Won when its job is `archived` or `lost` and has no project.
+Expected UI result: the lead is Won and an alert says the job has to be restored first. **Re-run the hand-off** repeats that message.
+Expected DB record: `jobs.status` unchanged; no `projects` row.
+- [ ] Pass  [ ] Fail
+
+**TC-05c — A pre-construction project must really move to Operations**
+Steps:
+1. Take a lead with a pre-construction portal project (`projects.is_preconstruction = true`). Make that update fail, then move the lead to Won.
+Expected UI result: the alert says the hand-off didn't finish, and **Re-run the hand-off** reports the same until the update can succeed.
+Expected DB record: after a successful re-run, the same project row has `is_preconstruction = false`.
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Feature-specific edge: contract value stamped from a single accepted proposal**

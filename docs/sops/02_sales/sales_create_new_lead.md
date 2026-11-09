@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-07-02
+sop_version: 2.1
+last_reviewed: 2026-11-09
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
 owner: Admin
@@ -122,7 +122,8 @@ The lead is now in the pipeline at Enquiry stage. Your next step is to qualify t
 - Website enquiry path: `lead_source` and UTM attribution fields are stamped automatically from the enquiry form submission — manual creation in the drawer is for phone/walk-in/referral leads
 
 ## 12. Edge cases and limits
-- The Architect Tender path creates the lead at Accepted stage directly — it bypasses the qualify, discovery, winning offer, and fee proposal stages. Use it only for genuine architect-tendered leads.
+- The Architect Tender path creates the lead at Tender directly and skips Concept and PTSA / Plans. Use it only for genuine architect-tendered leads.
+- A lead can only be created past Enquiry through the Architect Tender intake or as a test lead. Any other create with a later stage returns 400.
 - `lead_source` is UI-required but not server-enforced (no NOT NULL at DB level) — the server will accept a lead without it if submitted directly via API, but the UI always prevents this.
 - Names are auto-capitalised server-side — do not rely on the UI to do this.
 

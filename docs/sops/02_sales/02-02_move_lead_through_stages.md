@@ -1,5 +1,5 @@
 ---
-sop_version: 2.2
+sop_version: 2.3
 last_reviewed: 2026-11-09
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
@@ -160,12 +160,13 @@ The board view does not enforce advisory gates — gates are only checked in the
 ## 11. Automation notes
 - API: `PATCH /api/sales/leads/:id` with `{ stage: 'new_stage' }` — server detects stage change, sets `stage_entered_at = now()`, inserts `lead_activities` record
 - Stage-change detection: compares `body.stage` against current DB value — only fires the activity insert if the value actually changed
-- No server-side gate enforcement on stage changes — gates are advisory in the UI only
+- Hard gates are enforced by the server on forward moves (422 `GATE_BLOCKED`); requirements marked advisory are logged as a bypass and don't block. The rules live in `src/lib/stageGates.js`
 - Blueprint Insight auto-refreshes after a stage move: `bpFetchedFor.current` is cleared, triggering a new `/api/blueprint/chat` call with the new stage as context
 - `nextStage()` helper in `LeadDetail.jsx` returns the next stage in `STAGE_ORDER` — nurture/lost are not in `STAGE_ORDER` (they are accessed via the header buttons only)
 
 ## 12. Edge cases and limits
-- The board drag-and-drop does not enforce advisory gates — a drag will always succeed even if gate requirements are unmet. Verify gate requirements manually after a drag move.
+- A move from the board checks the same hard gates as any other move and shows why it was refused. Advisory requirements don't block a board move, so check them after moving.
+- An Architect Tender lead skips Concept and PTSA / Plans, but still has to meet the Discovery gate if a move crosses it. One moved back before Discovery shows the qualifying scorecard so it can come forward again.
 - Nurture and Lost stages are not in `STAGE_ORDER` — they cannot be targeted by the advance card button, only by the header action buttons.
 
 ## 13. Owner of the process
@@ -252,6 +253,12 @@ Next review: 2027-01-02
 1. On a real lead at Enquiry, use **Move ▾** and choose Consultants
 2. Expected: refused with "Can't move to Consultants yet — Discovery still needs a qualifying score of at least 5 and a booked build conversation."
 3. Expected DB: stage unchanged, no `stage_change` row in `lead_activities`
+- [ ] Pass  [ ] Fail
+
+**TC-08b1 — Architect Tender keeps the Discovery gate**
+1. Move an Architect Tender lead at Enquiry, with no score or booking, to Consultants
+2. Expected: refused with "Can't move to Consultants yet — Discovery still needs a qualifying score of at least 5 and a booked build conversation."
+3. Expected UI: the lead shows the qualifying scorecard while it sits at Enquiry or Qualify, and not once it is at Tender
 - [ ] Pass  [ ] Fail
 
 **TC-08c — Two people advance the same lead**
