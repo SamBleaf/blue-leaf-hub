@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-11-07
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Project manager
@@ -46,7 +46,7 @@ A client can approve a window choice while the window still needs a technical ch
    2. Set **Scope** in the dropdown.
    3. Check the **Status** column — decision, *Tech:* and *Price:* lines.
    4. Choose the **owner** and type the **next action** (for example "Architect to confirm peninsula clearance").
-   5. Click **Edit** for the full row: product, model, supplier, quantity, finish, technical verification, pricing link and source (drawing sheet / document).
+   5. Click **Edit** for the full row: the same answer card as the meeting, then **Office fields** for product, model, supplier, quantity, finish, technical verification, pricing link and source (drawing sheet / document). A site fact or a risk shows **Not scope** instead of a scope status: it isn't building work, so there's no status to set.
 5. **Technical check:** when a drawing or consultant document confirms an item, set Technical to **Verified** and fill **Record what verified it (drawing / consultant document)**. Without a reference it is flagged.
 6. **Pricing:** choose **Allowance or estimate** or **Quoted and reviewed** and paste the estimate line / RFQ / quote reference into **Pricing (link — never a price)**.
 7. **Add a coordination check** (architect, engineer, windows, energy): at the bottom choose **Choose a coordination check…** and click **Add**. It becomes an owned action, never a client question.

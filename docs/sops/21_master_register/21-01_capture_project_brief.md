@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-11-07
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Sales lead
@@ -40,14 +40,17 @@ It records what the client wants, room by room, in one place. Each answer become
    2. Under **Project setup**, enter the **Current drawing set / revision (P-002)**, choose the **Delivery model (P-007)** (Design & build, Build only, Construction management or Other) and **Occupancy during works (P-008)**.
    3. Turn on **Existing-building prompts** for any renovation or extension.
    4. Under **Rooms & levels — follow the plans**, tap **+ Kitchen**, **+ Bathroom** and so on (or **+ Other**) for each room on the plan, level by level. Rename a room by typing over its name.
-   5. Record the client's priorities (P-005) and the areas of work (P-006).
-4. **Whole house** step — set each standard once for the whole home:
-   1. Type the answer in the box (for example "Render, timber feature").
-   2. Choose the decision in the dropdown beside it — for a **selection**: **Not discussed**, **Preference**, **Proposed** or **Client-approved**; for a **requirement**: **Not discussed**, **Client wants** or **Client-approved**.
-   3. Use the quick buttons when the answer is short: **N/A**, **Excluded**, **By others**, **Undecided** (requirements show only N/A and Undecided).
-   4. Tap a **+ suggestion** chip to add a common answer to the text, or type your own.
-   5. Tap **More** for product, manufacturer, model, finish, supplier, quantity, supplied by, technical check and pricing link.
-5. **Site & existing** step — answer access, services, existing-building condition and unknowns for the whole project (not per room).
+   5. Tap the client's top priorities (P-005, up to three) and add the areas of work (P-006).
+4. **Whole house** step: set each standard once for the whole home. Tap, don't type.
+   1. Tap the choice the client describes, for example **Render**. Only the choices that follow from it appear next, for example **Rendered AAC**. Stop whenever the conversation stops: you don't need an exact product.
+   2. A tick and the line **Recorded:** show what is held. The card then says **Saving…** and **Saved**.
+   3. To change your mind, tap the choice again, or tap a different one. If an earlier answer changes and something chosen under it no longer fits, a yellow box lists it. Tap **Use again** or **Remove**. Nothing disappears by itself.
+   4. No answer yet? Tap **Not decided**. You can add why (**Client unsure**, **Decide later**, **Blue Leaf to advise**, **Designer / consultant to confirm**, **Awaiting drawings / info**) and who has it. Neither is required, and no note is required.
+   5. Tap **N/A** if the question doesn't apply. On product and finish choices you can also tap **By others** or **Excluded**.
+   6. **Other** opens a small box for the client's own words. **+ Note** adds a short staff-only note. **+ More detail** shows the rarer options, **Deferred**, **Existing to remain**, and finish and product boxes.
+   7. Where a question can have more than one answer on its own line (several wall systems, a floor for each zone), tap **+ Add another**.
+   8. Choosing something records a preference only. To record a client approval, or a technical check, open **Office fields** on that item. Those need their evidence, as before.
+5. **Site & existing** step: answer access, occupancy, existing-building condition and unknowns for the whole project (not per room). Answers here are recorded as what they are. A steep driveway is a site fact, not building work.
 6. **Rooms** step:
    1. Pick a room from the room list at the top (or step with ← and →; it shows "Room 4 of 8"). Check its name, level and type, and set its scope: **New**, **Renovated**, **Existing — Remain** or **Not in scope**. Add the drawing sheet if you are working from one.
    2. Answer the prompts that appear for that room type. Floors and walls show the **Whole-house default** — leave it, or tap **Record a room exception** where this room differs.
@@ -72,6 +75,8 @@ It records what the client wants, room by room, in one place. Each answer become
 | Re-typing the address, budget or consultants into a prompt | Habit from paper briefs | Those come from Sales automatically — fix them at source |
 | Ticking **Client-approved** for "they liked it" | Approval means the client has signed off | Use **Preference** or **Proposed**; Client-approved asks for who / when / how |
 | Recording the same floor in every room | Not using the whole-house default | Set W-017 once; only record room exceptions |
+| Typing the answer into **+ Note** | Habit from the old text box | Tap the choices. The note is for staff only and doesn't appear in anything the client reads |
+| Treating a tick as the client's sign-off | The tick looks final | A tick is a preference. Approval is recorded in **Office fields**, with who, when and how |
 | Putting a supplier price in the notes | Old habit | Prices never go in the register — link the estimate line in **Pricing (link — never a price)** |
 | Typing "0" for an unmeasured quantity | Field looks required | Leave it blank — blank means *not measured* |
 
@@ -83,6 +88,10 @@ It records what the client wants, room by room, in one place. Each answer become
 | A banner says someone else changed an item | Two people edited the same item | The card merges both changes; where both changed the same field it keeps the server's copy and tells you which item to re-check |
 | Kitchen prompts appear for a bathroom | Wrong room type picked | Remove the room (✕ **Remove room**) and add it again with the right type |
 | No existing-building questions on a renovation | **Existing-building prompts** is off, or the room is set to **New** | Turn the toggle on (Project step) or set the room to **Renovated** |
+| A yellow box says **Check these** | An earlier answer changed and something chosen under it no longer fits | Tap **Use again** or **Remove**. It counts as outstanding until you do |
+| **Written earlier** under the choices | The item was typed before the cards existed | Your words are kept. Tap the matching choice if you want it structured. The old text stays until you edit it |
+| **Earlier work status** on a site question | An older answer used the old dropdown, which didn't make sense there | Tap **Clear** if it's wrong |
+| A choice is greyed out | That question has a limit, such as three priorities, or the item is locked | Take one off first. A locked item changes through a variation |
 | "This brief was moved onto the project record" banner | The job/project was created | Normal — keep working; the same rows carry on |
 | No **Project brief & register** card; the old Finishes schedule shows instead | The register is switched off for this lead | Ask the director to add the lead to `REGISTER_PILOT_LEADS` (or turn on `REGISTER_ENABLED`) — rows typed in the old list are adopted when it is switched on |
 
@@ -106,6 +115,9 @@ It records what the client wants, room by room, in one place. Each answer become
 - Two people on the same lead: changes to different items merge; the same field edited by both shows a conflict notice.
 - The card can appear in the desktop and mobile layouts at once; only the visible one loads and saves.
 - Question wording comes from the approved Tab 21 library (`tab21-v1.0`); old R02 prompt keys are mapped to the new IDs automatically.
+- The choices come from the answer map (`tab21-answer-map-v1.0`). Choices beyond the Tab 21 wording are proposals for Blue Leaf to confirm. A stored answer keeps the words it was recorded with, even if an option is later reworded.
+- Older typed answers are never parsed into choices. They stay as they were written.
+- Until the document update (R05 P5), a typed answer doesn't appear in the Selections Schedule or most of the Client and Architect Briefs. Priorities do.
 - If the database is missing migration 213, the card still saves to the lead, and document issuing is switched off with a notice.
 - Feature switch (server): `REGISTER_ENABLED=true` (every lead) or `REGISTER_PILOT_LEADS=<lead id>,…` (pilot leads only). Default off: the card is hidden, every `/api/register` route returns 404 `REGISTER_DISABLED`, no automatic promotion runs, and the stage shows the pre-register lists exactly as before.
 
@@ -128,14 +140,14 @@ Next review date: 2027-05-07
 
 **TC-01 — Happy path (standard use)**
 1. Open the lead → **Project brief & register** → **Project**. Enter drawing revision, choose Design & build, add Kitchen and Bathroom.
-2. **Whole house** → W-017 tap "+ Timber", choose **Preference** in the dropdown.
-3. **Rooms** → pick Kitchen in the room list → set its scope to **New** → K-005 benchtop: type "Stone 40 mm", choose **Proposed**.
-4. Expected result: header shows "Saved"; the kitchen item shows "Proposed".
-5. Expected DB record: `leads.selections_schedule.items` has items with `promptKey` W-017 and K-005; `meta.rooms` has 2 rooms.
+2. **Whole house** → W-017: tap **Main floor**, then **Timber**.
+3. **Rooms** → pick Kitchen in the room list → set its scope to **New** → K-005 benchtop: tap **Engineered stone**.
+4. Expected result: header shows "Saved"; each card shows **Recorded:** with the choice and a tick on the button.
+5. Expected DB record: `leads.selections_schedule` has items with `promptKey` W-017 and K-005, each with `answer.selected[].optionId`, `certainty` `preference` and blank `description`; `meta.rooms` has 2 rooms.
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Approval abandoned (required evidence not given)**
-1. On a selection at **Proposed**, tap **Client-approved**.
+1. On a selection at **Proposed**, open **Office fields** and choose **Client-approved** under **Client status**.
 2. In **Record the client approval**, tap **Cancel**.
 3. Expected result: the item stays **Proposed**; no approval line is shown.
 4. Expected DB: the item's `certainty` is still `proposed` and `evidence` is null.
@@ -159,7 +171,7 @@ Next review date: 2027-05-07
 - [ ] Pass  [ ] Fail
 
 **TC-06 — Client-approved records evidence**
-1. Tap **Client-approved** on a selection, choose how it was approved (e.g. meeting), add a reference, **Confirm**.
+1. In **Office fields**, choose **Client-approved** on a selection, choose how it was approved (e.g. meeting), add a reference, **Confirm**.
 2. Expected: the item shows "Client approval: <your name> · <today> · meeting — <reference>"; the evidence is saved with the item.
 - [ ] Pass  [ ] Fail
 
@@ -172,6 +184,42 @@ Next review date: 2027-05-07
 **TC-08 — Room relevance (Scenario C)**
 1. On a bathroom + laundry renovation, open each room.
 2. Expected: no kitchen, living, bedroom, outdoor or new-build prompts; renovation make-good prompts present.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — Site facts are not construction scope**
+1. **Site & existing** → W-001: tap **Steep access** and **Limited parking**. Type nothing.
+2. Expected: no work dropdown on this card. Register step: the row reads **Not scope** and isn't counted as outstanding.
+3. Expected DB: one item, `answer.nature` `fact`, two `selected` entries, `disposition` `undecided`.
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Changing an earlier answer keeps what followed it**
+1. W-007: tap **Yes**, then **Temporary kitchen**. Then tap **No**.
+2. Expected: a yellow **Check these** box lists Temporary kitchen. The item counts as outstanding.
+3. Tap **Use again**. Expected: Yes and Temporary kitchen are selected and the box is gone.
+4. Reject path: tap **Remove** instead. Expected: it is gone from the record, only because you asked.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Not decided needs no note**
+1. W-013: tap **Not decided**, then **Blue Leaf to advise**. Type nothing.
+2. Expected: **Who has it** shows Blue Leaf. Saved without being asked for anything else. The item counts as outstanding.
+3. Reject path: with someone already named in **Who has it**, tap a different reason. Expected: the name doesn't change.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — A choice is never an approval**
+1. K-005: tap a choice. Open **Office fields**.
+2. Expected: **Client status** reads Preference, never Client-approved. The item is still outstanding.
+3. Approve it with evidence, then tap a different choice. Expected: a notice says it's back to Proposed and the evidence is cleared.
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Keyboard and phone**
+1. Press Tab to a choice, Enter to select, Space to take it back. Expected: focus stays on the button and a follow-up row can be reached with Tab.
+2. At 375 px wide with touch: tap through a card. Expected: no sideways scroll, and buttons easy to hit.
+- [ ] Pass  [ ] Fail
+
+**TC-14 — Older typed answers**
+1. Open a lead with a typed answer on W-017.
+2. Expected: the text is under **Written earlier**, no choice is pre-selected, and tapping a choice leaves the text as it was.
+3. Expected: a custom item (**+ Scope / works** in a room) still has its typed row and work status.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

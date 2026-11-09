@@ -84,6 +84,20 @@ The job/project is always resolved server-side from the lead, so a browser can't
 - To change wording: edit the Tab 21 source, re-run the build, bump the version, run `npm run test:register` (the verbatim-wording test will flag drift).
 - Answer map (R05 P3): `question-library/tab21-answer-map-v1.0.json` classifies all 147 questions, with relevance, meeting tier and proposed option ids. `npm run register:answer-map` validates it against the library and writes `TAB21_ANSWER_MAP.md`.
 
+### Guided answers (R05 P4a, added 2026-11-10)
+
+- **Config.** `npm run register:questions` also reads the answer map and writes `ANSWER_CONFIG` (`ANSWER_CONFIG_VERSION`) into `registerQuestions.js`. It throws if a question has no entry, a choice question has nothing to tap, or an answer that sets the disposition has no actions. `--check` fails if the generated file is out of date. `--lock` rewrites `tab21-option-ids-v1.0.lock.json`: only do that to add ids. A test fails if a locked id goes.
+- **Handling**, one per question: `choice` (the card), `record` (typed record with owner, optional options, repeats), `note` (typed note with owner), `context` (Project step: P-006, P-008), `folded` (R-002, on the R-003 card), `prefill` (never asked).
+- **`dispositionUse`**: `none` (the work disposition is not a valid answer; the card can't write it and the office table shows Not scope), `settled_only` (By others, Excluded, Deferred, Existing to remain, N/A), `answer` and `element` (the chosen option or action is the disposition).
+- **Levels**: `select` is `single`, `multi` or `groups` (top level is headings, each with its own choices). `childSelect` and an option's `multi` set the levels below. Option flags: `detail` (behind + More detail), `state` (`client_unsure`, `not_applicable`), `details` plus `constructionTypes` (follow-ups that depend on the element).
+- **Logic** is `src/lib/registerChoice.js`, pure. `src/components/.../register/ProgressiveChoiceCard.jsx` holds no rules. `RepeatRows` in `PromptRow.jsx` draws one row per item; a row's id is fixed before it is saved, so answering it doesn't move focus.
+- **Paths and labels.** A repeatable action is the first step of the path, so Replace and New stay distinct though both set disposition `new`: `["replace", "exposed_aggregate"]`. The stored label is the labels of each step joined by ` · `, except an open option, which is the person's words.
+- **Branch changes.** `switchOn` handles single-answer siblings at every depth. A dependent moves across if the new branch has the same option, otherwise it stays with `stale: true`. A plain replaced answer is dropped, unless it holds typed words or the item has product details, when it is flagged too. A live entry whose path the config no longer has is left alone and listed for review. Stale entries reach no client view (`clientSafeAnswer`) and make the item outstanding.
+- **Item fields.** `itemPatch` is the only writer. Disposition and `supplyBy` move only when the chosen action changes. Certainty moves only between `not_considered` and `preference`. `reasonPatch` offers a reason's usual owner only where nobody was named.
+- **`outstandingReasons`** now reads `state` and `natureOf(item)` (the answer's nature, else the question's, so an older typed site fact is corrected too). N/A is finished unless a follow-up was left. Parked or flagged is `decision`. Facts, requirements, risks and technical checks are not decisions. A recorded `supplyBy` answers who supplies, so it isn't a `decision`, while `contractInclusionOf` still says `undecided` (Tab 27 Q4). A choice stays `decision` until `client_approved`.
+- Documents read answers in P5. The one exception is P-005 priorities in `registerDocuments.mjs`, because the card replaced its only writer.
+- `writeRegister` now keeps the meta row when only `lastStep` is set. Before, a lead with no rooms forgot its step.
+
 ## 6. Documents
 
 `server/lib/registerDocuments.mjs` builds fixtures from register rows and renders through the existing doc engine (`docTemplates.renderDocxTemplate` + `public/templates/blb-*-template.docx`), then LibreOffice (`server/lib/docxToPdf.mjs`). Pre-issue checks: drawing basis, recipient, unevidenced approvals, unverified items, **any `$` figure**, empty schedule, template placeholders. Issue = PDF + DOCX uploaded to a new path (never overwritten), SHA-256, `register_issue_document` (advisory lock; version conflict retried once). Previous revision → `superseded`. Nothing is emailed. Coordination packs (Architect, Routleys, TLI, windows, engineer, energy, joiner) are drafts filtered by supplier / category.
@@ -114,6 +128,8 @@ Never run the repo's `e2e/`, `test-critical-paths`, batch-a or Playwright suites
 | `npm run test:register` | R02 model 15 · R03 model + library 31 · feature switch 7 · promotion/store 22 · mig 212 (disposable PG) 18 · mig 213 (disposable PG) 70 | **163 / 163** |
 | `npm run test:register-e2e` | 69 checks through the **real Hub API** on the loopback sandbox, Scenarios A/B/C, all 25 acceptance scenarios | **69 / 69** |
 | `npm run lint` / `npm run build` | zero-warning lint, production build | pass / pass |
+
+R05 P4a added `npm run test:register-progressive` (`register-progressive-choice`, `register-progressive-render`: no server) and `scripts/tests/sandbox-register-guided.test.mjs` (headless Chromium against the sandbox).
 
 **Sandbox** (`scripts/dev/register-sandbox/`, README there): Postgres 17 + PostgREST + a Node gateway (auth/storage) + the Hub API under `sandbox-exec` (outbound network denied) + Vite. Keys live in `~/.blh-register-sandbox/`; the API runs from `~/.blh-register-sandbox/hub-cwd` so it can never read the repo `.env`. The sandbox env sets `REGISTER_ENABLED=true`. Because macOS blocks app-launched processes from reading Desktop, the servers run from a home-directory copy (`~/blh-register-run`, synced with `rsync --exclude .env`).
 

@@ -379,3 +379,72 @@ Tests after these fixes:
 ### Next dependency
 
 P4a generates the choice trees from `tab21-answer-map-v1.0.json`, writes `item.answer` through `ProgressiveChoiceCard`, and recomputes `outstandingReasons` from `state` and `nature`. P4b adds the baseline config and calls `applyPricingAssumption`. P4d uses `confirmRoomDefaults` and `roomDefaultStatus`. P5 reads answers through `clientSafeAnswer` for every client-facing output.
+
+---
+
+## P4a — Question configuration and guided controls (2026-11-10)
+
+**Outcome.** Staff answer configured questions by tapping, inside the existing rows. Every one of the 147 questions has an explicit handling. Site access, occupation, roof and cladding, flooring, doors, vanity and driveway choices need no typing. Changing an earlier answer never loses a later one. Outstanding is worked out from what the record says. A choice is a preference and cannot become an approval. Nothing here is deployed.
+
+**Commits.** `912ce39` (config), `e3691d6` (logic and outstanding), `3643fb7` (card and screens), `ae6acc4` (phone width and more browser checks), and the docs commit carrying this entry.
+
+### What changed
+
+| Area | Now |
+|---|---|
+| Config | `ANSWER_CONFIG` generated from the answer map. Handling per question: 92 card, 9 typed record with owner, 35 office note, 2 Project step, 1 folded, 8 prefilled. Levels, option states and More detail flags added to the map. Generator throws if a question can't be answered meaningfully. |
+| Option ids | Locked in `tab21-option-ids-v1.0.lock.json`. A test fails if one goes. Labels tested for length and for approval, certificate and price claims. |
+| Card | `ProgressiveChoiceCard` inside `PromptRow`: option buttons with `aria-pressed` and a tick, follow-ups from the choice, Not decided, reason and owner, N/A, By others and Excluded on choices, optional staff note, + More detail, saved state. No new page or wizard. |
+| Upstream changes | A dependent answer moves across if the new branch has the same option, else stays flagged, listed for Use again or Remove, and counts as outstanding. Typed words and answers with product details against them are kept too. Stale entries don't reach a client view. |
+| + option | Gone. `appendOption` removed. P-005 priorities are ids, no longer a comma string. |
+| Legacy | Older typed text stays under Written earlier, never parsed. An older work status the card doesn't show stays readable with a Clear. Custom items keep the typed row. An answer from a newer schema isn't edited. |
+| Repeats | `RepeatRows`: + Add another on any question with a `repeat` config, each its own item with its own element id or zone. |
+| Disposition | Questions with `dispositionUse: none` never write it. Office table shows Not scope on facts, risks, requirements and technical items. Office fields hide scope status, quantity and pricing on them. |
+| Outstanding | See `R03_TECHNICAL_GUIDE.md` §5. |
+| Office fields | Client status (with approval evidence), technical verification, product, pricing and the rest, unchanged in substance. Renamed from More on guided rows, so it isn't confused with + More detail. |
+
+### Decisions within the brief
+
+- **Answers added where the map had none:** W-006, W-023, K-013, M-003, H-003, H-006, R-013 and M-002. All marked `proposed` for Blue Leaf to confirm. M-002 (who engages consultants) is now a fact with no work disposition. M-004's options became actions so Excluded sets the disposition.
+- **Certainty.** A choice moves `not_considered` to `preference` and nothing further. Without this, a selection made in a meeting would read as Not discussed.
+- **Recorded `supplyBy` isn't an open decision.** The question "who supplies?" has been answered. `contractInclusionOf` still says `undecided`, so Tab 27 Q4 isn't pre-decided.
+- **Not decided keeps what was chosen so far** (B02: a conversation may stop at any level). N/A does not: it flags what was chosen.
+- **Group answers are labelled with their heading** ("Door height · 2340"), and tree answers with their path. A leaf alone ("Corrugated", "Laminate") doesn't say enough in a document.
+- **`lastStep` persisted on a lead with no rooms.** It wasn't, so Continue reopened at Project.
+- **Client Brief priorities read the answer.** The card replaced the only writer of that text.
+- The rest of the document builders stay for P5.
+
+### Schema and API impact
+
+No migration. The next free number stays 218. No route changed. `npm run test:register-progressive` is new.
+
+### Tests
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-progressive-choice.test.mjs`: config coverage by family, id lock, labels, every tap rule, every option path chosen and reloaded, outstanding | 166 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-progressive-render.test.mjs`: renders PromptRow for each question that can show, plus legacy, locked and repeat states | 46 passed, 0 failed |
+| BROWSER, DB | `node scripts/tests/sandbox-register-guided.test.mjs`: headless Chromium, real SPA, API, PostgREST, Postgres. 1440 and 375 with touch. Taps, keyboard (Enter, Space, Tab, focus held), branch change, reload, Use again, external works, walls and floors repeating, Not decided, approval and step-back, Other and note typed key by key, priorities into the Client Brief PDF, office table, legacy text, vanity in a room, project-mode record, a real 409 merged. Evidence: `~/blh-register-evidence/r05/p4a/` | 67 passed, 0 failed, 0 page errors |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`: 29 suites | 1661 checks, 0 failing |
+| AUTOMATED | Each of 21 protections removed in turn, files restored and confirmed by checksum. Ad hoc, not committed (`SP/p4a/mutate.txt`). First pass 19 of 21 caught. A test was added for each of the two missed, then all 21 failed a unit test, as intended | 21 of 21 |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint` and `node --check` on `registerDocuments.mjs` pass. The production build was run as `NODE_ENV=production vite build --mode production` with `vite.sandbox.config.mjs`, from the sandbox working directory into the scratchpad, because `npm run build` would load the repo `.env`. It passes. None of these say anything about behaviour.
+
+No existing test assertion changed.
+
+### Caveats
+
+- Blue Leaf hasn't confirmed the option lists. Everything marked `proposed` is a guess at sensible choices. So are the More detail flags. The Tab 27 Gate 0.2 CHECK against real client-meeting conversations is still open.
+- Typed answers don't reach the Selections Schedule or most of the Client and Architect Briefs until P5. An item answered only on the card shows nothing there. Only priorities do.
+- W-018 shows all its groups on one card, which is tall. W-014's gutters are in the config but not on the card. Zones repeat but don't yet feed rooms. W-004, W-006 and W-008 are still separate cards, each with its own config. The R-005 / W-017 inherited default still picks the first. These are P4b, P4c and P4d.
+- `+ Add another` is generic. It doesn't stop two rows having the same zone or element.
+- A hand-inserted scratchpad row with no `updatedAt` loops on 409, because `makeItem` gives it a new timestamp on every read. Found by a test seeding such a row; no screen writes one. Not fixed.
+- At 375, the card is about 275 of the 375 pixels wide. The outer padding belongs to the lead page.
+- The sandbox never exercised a locked item in a browser. The locked state is render-tested, and locks were tested through the API in P3.
+- The browser run signs in with a session placed in browser storage, so the login form isn't exercised.
+- The answer locks are enforced by the Hub API only, as P3 recorded.
+
+### Next dependency
+
+P4b adds the baseline config, gutters as a linked item, zone-driven defaults and performance suggestions, on `toggleOption`, `chooseZone` and `RepeatRows`. P4c merges W-004, W-006 and W-008 presentation and uses `areaIds` and `sourceQuestionIds`, which the card doesn't write yet. P4d uses `confirmRoomDefaults` and the inherited summary. P5 reads answers through `clientSafeAnswer`.
