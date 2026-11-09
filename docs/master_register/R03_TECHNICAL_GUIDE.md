@@ -49,8 +49,8 @@ One namespaced field, `item.answer`, defined in `src/lib/registerAnswer.js` (sch
 |---|---|
 | `state` | `not_discussed`, `recorded`, `client_unsure`, `unresolved`, `not_applicable` |
 | `nature` | `fact`, `choice`, `scope`, `requirement`, `risk`, `action`, `technical`. Only `choice` can sit in `client_selections` |
-| `selected[]` | `{optionId, path[], label, stale?}`. Several allowed, partial paths allowed. `stale` keeps a choice flagged after an upstream change |
-| `element`, `zone`, `areaIds[]` | What a repeatable item is about, and where |
+| `selected[]` | `{optionId, path[], label, stale?}`. Several allowed, partial paths allowed. `stale` keeps a choice flagged after an upstream change. On an open option (`other`, `other_zone`) the label holds the person's own words |
+| `element`, `zone`, `areaIds[]` | What a repeatable item is about, and where. `element.key` is its type, `element.id` is which one |
 | `sourceQuestionIds[]`, `linkedItemIds[]` | Tab 21 aliases for a merged card; related items such as gutters to roof |
 | `unresolved` | `{reason, note}`, reasons from Tab 27 B09. The owner is the existing `responsibility` |
 | `assumption` | **Internal.** Blue Leaf pricing assumption `{origin, tier, baselineVersion, categoryKey, text, at, by}` |
@@ -63,7 +63,9 @@ Room confirmation is `meta.rooms[].defaultConfirmations` = `{[defaultItemId]: {a
 
 Client views use `clientSafeAnswer`, an allow-list: state, chosen labels, element label, zone label. The client portal routes (`/api/portal/app/*`) select named columns that exclude `register_detail`. RLS denies client tokens on these tables.
 
-**Locks.** `register_apply` compares product columns, not `register_detail`, so `saveProject` applies the same rules to a real answer change before calling it: `post_contract_locked`, `reapproval_required` (selections) and `baseline_locked` (scope). Notes, assumptions and delivery stay editable. This is race-safe because `register_apply` still refuses the row if its version moves. Every write must go through `saveProject`: a new direct caller of `register_apply` would skip these checks.
+**Locks.** `register_apply` compares product columns, not `register_detail`, so `saveProject` applies the same rules to a real answer change before calling it: `post_contract_locked` (selections), `reapproval_required` (any client-approved row, in either store) and `baseline_locked` (scope). A real change means a different choice, different words on an Other answer, a different element (`element.id`) or zone, a label with no configured key behind it, or a different `nature`. Rewording a configured label, notes, assumptions and delivery stay editable. `answerMaterialChanged` is the one definition: the 409s, the on-screen step-back (`editOutrunsApproval`) and the room default fingerprint all use it.
+
+The check reads the stored row by `sync.rowId`, which is the row `register_apply` writes. A row id not loaded for this project is refused as `missing`. An item id that doesn't own the row is refused as `item_mismatch`, on saves and deletes. The lock check runs however the version is spelled, because Postgres compares versions as instants. Only a strict ISO stamp for a different millisecond is left to `register_apply`, which refuses it as `stale`. This is race-safe because `register_apply` still refuses the row if its version moves. Every write must go through `saveProject`: a new direct caller of `register_apply` would skip these checks. They are enforced in the Hub API only.
 
 A saved item or room with no `answer` / `defaultConfirmations` key means "not touched", so an older screen can't erase them. An explicit `answer: null` clears.
 

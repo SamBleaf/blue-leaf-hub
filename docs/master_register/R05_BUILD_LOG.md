@@ -231,9 +231,9 @@ P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathwa
 
 ## P3 — Register structured data foundation (2026-11-10)
 
-**Outcome.** A register item can now hold a typed answer, and that answer survives the whole path: lead scratchpad, promotion, project load and save, portal projection, document input. Old free-text records read and edit as before. No screen writes an answer yet, so nothing changes for staff. Nothing here is deployed.
+**Outcome.** A register item can now hold a typed answer, and that answer survives the lead scratchpad, promotion, and project load and save. The client portal never receives it: a client sees only a title built from the chosen labels. Document builders don't read it yet, so documents are unchanged until P5. Old free-text records read and edit as before. No screen writes an answer yet, so nothing changes for staff. Nothing here is deployed.
 
-**Commits.** `6e4dd5c` (model, mappers, tests), `4bacd18` (answer map), and the docs commit carrying this entry.
+**Commits.** `6e4dd5c` (model, mappers, tests), `4bacd18` (answer map), `f9be425` (docs), `3931a78` (independent-review fixes), and the docs commit carrying this update. See "Corrections after the independent review".
 
 ### What changed
 
@@ -243,8 +243,8 @@ P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathwa
 | Answer model (Gate 1.1) | `item.answer`, schema v1, in `src/lib/registerAnswer.js`. Field list in `R03_TECHNICAL_GUIDE.md` §3. |
 | Mappers (Gate 1.3) | Carried by `makeItem`, `readRegister`, `writeRegister`, `selRowToItem`, `rsiRowToItem`, `detailOf` and so both row writers, `ITEM_FIELDS`, promotion, canonical load and save, `applyDefaultToRooms`, the room exception copy, and the staff tender and baseline rows. |
 | Store classification | A part-finished or unresolved selection stays in `client_selections`. Excluded, N/A or a non-choice nature goes to `room_scope_items`, same id, answer intact, and comes back the same. |
-| Locks | A real answer change on a locked row is refused before writing: `post_contract_locked`, `reapproval_required`, `baseline_locked`. Before this, `register_detail` wasn't compared, so an answer could have changed under an approval. |
-| Client boundary | `clientSafeAnswer` is an allow-list. A structured selection's portal name comes from its labels. |
+| Locks | A real answer change on a locked row is refused before writing: `post_contract_locked`, `reapproval_required`, `baseline_locked`. Real means what was chosen, the words of an Other answer, which element and zone it covers, and the record's nature. The check reads the row the save will write. Before this, `register_detail` wasn't compared, so an answer could have changed under an approval. |
+| Client boundary | `clientSafeAnswer` is an allow-list. A structured selection's portal name comes from its labels. That name is all the portal receives. |
 | Zone defaults | `defaultItemsFor`, and `defaultItemFor(reg, id, {zoneKey})`. Existing callers still get one default. |
 | Room confirmation | `room.defaultConfirmations`, with `confirmRoomDefaults` and `roomDefaultStatus`. Library only until P4d. |
 
@@ -286,6 +286,51 @@ No migration. The next free number stays 218. `PUT` and `GET /api/register/leads
 - Tab 27 Q4 (who supplies versus who installs) is still open, so W-023, M-003 and "Owner supplied" on R-009 record only who supplies.
 - Gate 1.4's central baseline config is P4b, per the brief. P3 provides the assumption field and `applyPricingAssumption` only.
 - Project mode needs migration 213. Without it the register stays on the lead, as before.
+- **Tab 27 Gate 0.2's CHECK is not done.** It asks for the mapping to be reviewed against the original client-meeting conversations, with no hidden scope lost. Those conversations aren't available in this workflow. The wording check here is a machine compare against the question library, which can't show that nothing from a real meeting was missed. Blue Leaf needs to do this while confirming the proposed options in P4.
+- The answer locks are enforced in the Hub API only. A staff browser token can still update `client_selections` and `room_scope_items` directly through PostgREST. That predates this phase and the reviewer's probe confirmed it again.
+- Portal issue, withdraw and return still take the item id from the request for the history entry. The SQL guards run on the row either way, so this can only mislabel a history line, and it needs a hand-built staff request.
+- A free-text edit to an approved requirement still keeps the approval, as it always has. Only a typed answer change needs re-approval.
+
+### Corrections after the independent review (2026-11-10)
+
+The first version of this entry overstated several things. What it said, and what is true:
+
+| First claim | Correction |
+|---|---|
+| "A real answer change on a locked row is refused" (same claim in `R03_TECHNICAL_GUIDE.md`) | Not true when written. An ordinary save could change what an Other answer said, which physical element an item covered, or its nature, on approved and baselined rows. Any answer change also got through with a re-spelled version or an item id that didn't own the row. All fixed below. |
+| Locks cover "approved, ordered or baselined" rows | Read as every approved item. Client-approved rows in `room_scope_items` weren't guarded. Fixed for typed answers. |
+| "survives ... portal projection, document input" | Overstated. The portal never receives the answer, only a title derived from labels. No document builder reads it, and the document tests only prove internal text stays out. A structured selection with no typed text still shows TBC. Outcome reworded. |
+| Nothing listed as not done | Gate 0.2's CHECK has no evidence behind it. Added to Caveats. |
+
+Fixed from the review:
+
+| Finding | Fix |
+|---|---|
+| "Real change" was too narrow (blocker) | `materialOf` now also compares the words of an Other answer, `element.id`, a label that has no configured key behind it, and `nature`. Rewording a configured label stays non-material. The 409s, the on-screen step-back and the room default fingerprint all read this one function. |
+| Where Other text lives | In `selected[].label` on an open option (`OPEN_OPTION_IDS`: `other`, `other_zone`). No new field. A test fails if a new catch-all is added to the map without being declared open. |
+| The lock checked a different row from the one written (major) | `saveProject` finds the stored row by `sync.rowId`, the row `register_apply` writes. A row it didn't load is refused as `missing`. An item id that doesn't own the row is refused with the new reason `item_mismatch`, on saves and deletes, so history can't be filed under the wrong item. |
+| The lock depended on how the version was spelled (major) | The check now runs however the version is written. Only a strict ISO stamp for a different millisecond skips it, and `register_apply` refuses that as stale, so an honest stale screen still gets the three-way merge. |
+| Approved requirements kept their approval (minor) | A client-approved row in `room_scope_items` now needs fresh evidence or a step back to Proposed when its answer really changes. The rule is one tested function, `editOutrunsApproval`, used by the screen. |
+
+No migration. `PUT` can now return 409 `CONFLICT` with reason `item_mismatch`, and `missing` can come from the service as well as from `register_apply`.
+
+Tests after the fixes:
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-structured-mapping.test.mjs`, adds open-option coverage | 50 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-model.test.mjs`, adds Other text, element and zone identity, nature, room fingerprint, step-back | 123 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-store.test.mjs`, adds re-spelled and unreadable versions, foreign ids, row id spelling, deletes, approved requirements, real staleness. In-memory stand-in for `register_apply`. | 77 passed, 0 failed |
+| AUTOMATED, DB | `node scripts/tests/sandbox-register-structured.test.mjs`, adds each refusal through the real API, PostgREST and `register_apply`, with typed descriptions so the answer lock is what refuses. No history event filed under a forged id. | 102 passed, 0 failed |
+| DB | The reviewer's probes `p3-review.mjs` and `p3-review2.mjs` run before and after the fix. Before: nine requests accepted with HTTP 200, and a confirmed room stayed confirmed after its default changed. After: all nine refused with 409, stored data unchanged, the room reads `changed`, controls unchanged. Saved in `SP/p3fix/`. | Refused as intended |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`: 26 suites | 1325 checks, 0 failing |
+| AUTOMATED | Each of 18 protections removed in turn, files then restored byte for byte. Ad hoc script, not committed. | 18 of 18 failed a unit test, as intended |
+| BROWSER | Not driven. No screen writes an answer yet. | Not verified |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint` and `node --check` on `registerStore.mjs` pass. The production build was run as `vite build --mode production` with `vite.sandbox.config.mjs`, from the sandbox working directory and into the scratchpad, because `npm run build` would load the repo `.env`, which the brief forbids. It passes. None of these say anything about behaviour.
+
+One existing assertion changed on purpose: the `register-structured-model` check that matched the old step-back condition in `useRegister.js` now confirms the hook calls `editOutrunsApproval`, and that function has its own behaviour tests. Nothing was weakened.
 
 ### Next dependency
 
