@@ -14,11 +14,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
+import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem, mergeBaseline } from "../../../../lib/register.js";
 
 const AUTOSAVE_MS = 1200;
 const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
-const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep", "baseline"];
+const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
 const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet", "defaultConfirmations"];
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -52,9 +52,13 @@ function pickChanged(blank, mine) {
   for (const f of ITEM_FIELDS) if (!same(mine[f], blank[f])) out[f] = mine[f];
   return out;
 }
-function mergeMeta(base, mine, theirs) {
+function mergeMeta(base, mine, theirs, onBaselineConflict) {
   const out = { ...theirs };
   for (const f of META_FIELDS) if (!same(mine[f], base[f]) && (same(theirs[f], base[f]))) out[f] = mine[f];
+  // The guide holds eleven separate values. Merged whole, one person's Roof would silently drop another's Walls.
+  const guide = mergeBaseline(base.baseline, mine.baseline, theirs.baseline);
+  out.baseline = guide.baseline;
+  if (guide.conflicts.length) onBaselineConflict?.(guide.conflicts);
   const baseRooms = new Map((base.rooms || []).map((r) => [r.id, r]));
   const theirRooms = new Map((theirs.rooms || []).map((r) => [r.id, r]));
   const rooms = [];
@@ -312,7 +316,9 @@ export function useRegister(leadId, { enabled = true } = {}) {
         notes.push(`“${it ? itemTitle(it) : "Item"}” was not removed — it ${GUARD_REASONS[c.reason]}.`);
       }
     }
-    const meta = metaSeq.current !== metaSaved.current && baseMeta ? mergeMeta(baseMeta, local.meta, server.meta) : server.meta;
+    const meta = metaSeq.current !== metaSaved.current && baseMeta
+      ? mergeMeta(baseMeta, local.meta, server.meta, (keys) => { versionConflict = true; notes.push(`The pricing guide was also changed elsewhere (${keys.join(", ")}). The latest value is shown.`); })
+      : server.meta;
     const next = { meta, items: out.filter(Boolean) };
     regRef.current = next; setReg(next);
     if (code === "MODE_CHANGED") notes.unshift("This brief has moved onto the project record — your unsaved changes were kept and saved there.");

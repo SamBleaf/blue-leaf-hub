@@ -11,7 +11,7 @@ import { QUESTIONS, ANSWER_CONFIG } from "../../src/lib/registerQuestions.js";
 import {
   makeItem, makeRoom, emptyMeta, readRegister, writeRegister, toggleOption, toggleNotDecided, toggleNotApplicable, chooseZone, choiceView, configForRow, isLinkedRow, itemPatch,
   standardPrompts, roomDefaultFor, defaultItemsFor, exceptionAnswerFrom, clientSafeAnswer, answerSummary, outstandingReasons, isClientSelection, editOutrunsApproval, hasExplicitChoice,
-  normaliseBaseline, setProjectTier, setCategoryTier, applyProjectGuide, baselineView, baselineAssumptions, assumptionFor, performanceSuggestions, resolvePromptId,
+  normaliseBaseline, partAssumptionFor, mergeBaseline, assumptionIsDraft, setProjectTier, setCategoryTier, applyProjectGuide, baselineView, baselineAssumptions, assumptionFor, performanceSuggestions, resolvePromptId,
   BASELINE_CATEGORIES, BASELINE_VERSION, BASELINE_TIERS, PERFORMANCE_SUGGESTIONS, PERFORMANCE_REVIEW_CHECKS, REVIEW_DISCLAIMER, PASSIVE_HOUSE_NOTE, PROJECT_TOPICS, promptsFor,
 } from "../../src/lib/register.js";
 
@@ -225,14 +225,62 @@ section("Pricing guide: what it can never do (B05)");
   ok("by others has no assumption", assumptionFor(reg([], { baseline: b }), whole("W-017", { disposition: "by_others" })) === null);
   ok("a parked row can use it: not decided is exactly what it is for", assumptionFor(reg([], { baseline: b }), whole("W-017", { answer: toggleNotDecided(cfg("W-017"), null) }))?.tier === "upgraded");
   ok("a question in no category has none", assumptionFor(reg([], { baseline: b }), whole("W-016")) === null);
-  ok("the register's outstanding list doesn't change with a tier", outstandingReasons(blank).join() === outstandingReasons(makeItem({ ...blank })).join());
+  const withAssumption = makeItem({ ...blank, answer: { v: 1, state: "not_discussed", assumption: b.categories.floors } });
+  ok("the test really has an assumption on the record", !!withAssumption.answer?.assumption);
+  ok("the register's outstanding list doesn't change with a tier", outstandingReasons(blank).join() === outstandingReasons(withAssumption).join());
+}
+
+section("Pricing guide: one answer is not the whole category");
+{
+  const tiered = (key) => setCategoryTier(null, key, "standard", STAMP);
+  const view = (items, key) => baselineView(reg(items, { baseline: tiered(key) })).find((c) => c.key === key);
+  const inTender = (items, key) => baselineAssumptions(reg(items, { baseline: tiered(key) })).find((a) => a.key === key);
+  const stone = whole("K-005", { answer: pick(cfg("K-005"), ["engineered_stone"]), isDefault: true });
+  ok("a kitchen with only a benchtop is part chosen", view([stone], "kitchen").status === "part");
+  ok("and names what is missing", view([stone], "kitchen").partGaps.join() === "cabinetry,splashback");
+  ok("Tender still carries the assumption for the kitchen", !!inTender([stone], "kitchen") && inTender([stone], "kitchen").gaps.join() === "cabinetry,splashback");
+  const taps = whole("B-008", { answer: pick(cfg("B-008"), ["chrome"]), isDefault: true });
+  ok("a wet area with only tapware is part chosen", view([taps], "wet_areas").status === "part" && view([taps], "wet_areas").partGaps.join() === "toilet,vanity,tiling");
+  const metalOnly = whole("W-014", { answer: pick(cfg("W-014"), ["metal_roofing"]) });
+  ok("metal roofing with no profile or gutters is part chosen", view([metalOnly], "roof").partGaps.join() === "roof profile,gutters");
+  ok("the row says the same as the guide", partAssumptionFor(reg([metalOnly], { baseline: tiered("roof") }), metalOnly)?.coversOnly.join() === "roof profile,gutters");
+  const doorHeight = whole("W-018", { answer: pick(cfg("W-018"), ["door_height", "2340"]) });
+  ok("a door height alone leaves jambs and hardware", view([doorHeight], "doors").partGaps.join() === "jambs,hardware");
+  const glazing = whole("W-015", { answer: pick(cfg("W-015"), ["glazing", "double_glazing"]) });
+  ok("glazing alone leaves the frames", view([glazing], "windows").partGaps.join() === "frames");
+  const hotWater = whole("W-020", { answer: pick(cfg("W-020"), ["hot_water", "heat_pump"]) });
+  ok("hot water alone leaves heating and cooling", view([hotWater], "hvac").partGaps.join() === "heating and cooling");
+  const wordsOnly = whole("W-018", { description: "As per the Smith house" });
+  ok("an older typed answer is taken at its word", view([wordsOnly], "doors").status === "chosen" && partAssumptionFor(reg([wordsOnly], { baseline: tiered("doors") }), wordsOnly) === null);
+  const roofOut = whole("W-014", { disposition: "by_others" });
+  ok("a roof by others needs no profile or gutters", view([roofOut], "roof").status === "settled");
+  ok("a choice is never changed by the guide", JSON.stringify(partAssumptionFor(reg([metalOnly], { baseline: tiered("roof") }), metalOnly)?.text ?? null) !== "null" && metalOnly.certainty === whole("W-014", { answer: pick(cfg("W-014"), ["metal_roofing"]) }).certainty);
+  ok("no tier held, nothing to say", partAssumptionFor(reg([metalOnly]), metalOnly) === null);
+  ok("draft wording is marked until Blue Leaf confirms it", assumptionIsDraft(tiered("roof").categories.roof) && assumptionIsDraft({ tier: "standard", text: "copied earlier" }) && !assumptionIsDraft({ tier: "standard", text: "x", wordingStatus: "confirmed" }));
+}
+
+section("Pricing guide: two people at once");
+{
+  const base = setCategoryTier(null, "windows", "standard", STAMP);
+  const a = setCategoryTier(base, "roof", "standard", STAMP);
+  const b = setCategoryTier(base, "walls", "premium", STAMP);
+  const merged = mergeBaseline(base, b, a);
+  ok("an edit to another category is kept", merged.baseline.categories.roof?.tier === "standard" && merged.baseline.categories.walls?.tier === "premium" && merged.conflicts.length === 0);
+  const both = mergeBaseline(base, setCategoryTier(base, "roof", "premium", STAMP), a);
+  ok("the same category changed twice names a conflict", both.conflicts.join() === "roof");
+  ok("and the saved value stands", both.baseline.categories.roof.tier === "standard");
+  const off = setCategoryTier(base, "windows", "standard", STAMP);
+  ok("a tier taken off stays off", !mergeBaseline(base, off, a).baseline.categories.windows);
+  const tierA = setProjectTier(base, "upgraded"), tierB = setProjectTier(base, "premium");
+  ok("two different project tiers conflict", mergeBaseline(base, tierB, tierA).conflicts.join() === "projectTier");
 }
 
 section("Pricing guide: applying the project guide");
 {
-  const chosenRoof = whole("W-014", { answer: pick(cfg("W-014"), ["metal_roofing"]) });
+  const chosenRoof = whole("W-014", { answer: pick(cfg("W-014"), ["metal_roofing", "pitched", "corrugated"]) });
+  const roofGutters = whole("W-014", { isDefault: false, answer: { v: 1, state: "recorded", selected: [{ optionId: "quad", path: ["quad"], label: "Quad" }], element: { id: "el_g", key: "gutters", label: "Gutters" }, linkedItemIds: [chosenRoof.id] } });
   const byOthers = whole("W-022", { disposition: "by_others" });
-  const r = reg([chosenRoof, byOthers], { baseline: setCategoryTier(setProjectTier(null, "premium"), "walls", "standard", STAMP) });
+  const r = reg([chosenRoof, roofGutters, byOthers], { baseline: setCategoryTier(setProjectTier(null, "premium"), "walls", "standard", STAMP) });
   const next = applyProjectGuide(r, STAMP);
   ok("a category already set keeps its own tier", next.categories.walls.tier === "standard");
   ok("a category the client has fully chosen is left out", !next.categories.roof);

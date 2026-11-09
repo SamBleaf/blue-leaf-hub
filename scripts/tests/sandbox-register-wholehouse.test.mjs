@@ -149,7 +149,7 @@ async function main() {
   check("two gutter records, each linked to its own roof", gutters.length === 2 && gutters.find((g) => live(g)[0].optionId === "quad").answer.linkedItemIds[0] === pitched.id && gutters.find((g) => live(g)[0].optionId === "box_gutter").answer.linkedItemIds[0] === alfresco.id);
   check("gutters aren't defaults and say what they are", gutters.every((g) => !g.isDefault && g.answer.element.key === "gutters" && g.itemKind === "selection"));
   check("the roof's answer doesn't mention them", !JSON.stringify(pitched.answer.selected).includes("gutter"));
-  check("the profile is flagged for checking only by the existing technical status, nothing is claimed", pitched.technicalStatus === "not_required" && !pitched.evidence);
+  check("a roof needs checking against the plans and manufacturer data, and claims nothing", pitched.technicalStatus === "needs_verification" && !pitched.evidence);
 
   await by(p, "prompt-W-014").last().getByTitle("Remove this item").click();
   await saved(p);
@@ -357,7 +357,7 @@ async function main() {
   await by(p, "baseline-guide").getByText("By category").click();
   await by(p, "baseline-laundry-standard").click();
   await saved(p);
-  check("a blank row now reads as a labelled assumption", /Blue Leaf pricing assumption \(Standard\):/.test(await by(p, "assumption-L-003").innerText()) && /Not a client choice, an approval or a price/.test(await by(p, "assumption-L-003").innerText()));
+  check("a blank row now reads as a labelled assumption", /Blue Leaf pricing assumption \(Standard, draft wording\):/.test(await by(p, "assumption-L-003").innerText()) && /Not a client choice, an approval or a price/.test(await by(p, "assumption-L-003").innerText()));
   await by(p, "baseline-floors-premium").click();
   await by(p, "baseline-roof-premium").click();
   await saved(p);
@@ -469,7 +469,7 @@ async function main() {
   const pp = await newPage({ viewport: { width: 1440, height: 1000 } });
   await open(pp, id);
   await by(pp, "baseline-guide").waitFor({ timeout: 15000 });
-  check("on the project record the assumption still shows on an open row", /Upgraded/.test(await by(pp, "baseline-guide").innerText()));
+  check("on the project record the assumption still shows on an open row", /Blue Leaf pricing assumption \(Standard/.test(await by(pp, "assumption-W-020").first().innerText()));
   await by(pp, "baseline-guide").getByText("By category").click();
   await by(pp, "baseline-windows-premium").click();
   await saved(pp);

@@ -29,7 +29,7 @@ import {
   normaliseAnswer, normaliseRoomConfirmations, answerAllowsClientSelection, exceptionAnswerFrom, activeAssumption, applyPricingAssumption, hasExplicitChoice,
   normaliseAssumption, answerMaterialChanged, stableStringify, answerSummary, ANSWER_SCHEMA_VERSION, BASELINE_TIERS,
 } from "./registerAnswer.js";
-import { BASELINE_CATEGORIES, BASELINE_VERSION, PERFORMANCE_SUGGESTIONS } from "./registerGuidance.js";
+import { BASELINE_CATEGORIES, BASELINE_VERSION, BASELINE_WORDING_STATUS, PERFORMANCE_SUGGESTIONS } from "./registerGuidance.js";
 
 export { QUESTION_LIBRARY_VERSION };
 export * from "./registerAnswer.js";
@@ -680,6 +680,14 @@ export function itemTitle(item) {
   return item.description || answerSummary(item) || categoryLabel(item.category);
 }
 
+/** The record this one sits under, in words, read live so it can't go stale ("Main roof" for that roof's gutters). "" for most items. */
+export function linkedParentLabel(register, item) {
+  const parentId = item?.answer?.linkedItemIds?.[0];
+  if (!parentId) return "";
+  const parent = (register?.items || []).find((i) => i.id === parentId);
+  return parent ? parent.answer?.zone?.label || parent.answer?.element?.label || itemTitle(parent) : "";
+}
+
 /** Display name for an item's room — the LIVE room list is canonical (survives a room rename). */
 export function roomLabel(register, item) {
   if (!item.roomId) return item.section === "site" ? "Site / existing" : "Whole house";
@@ -779,12 +787,36 @@ export function setCategoryTier(raw, key, tier, { at = "", by = "" } = {}) {
   if (!cat || !BASELINE_TIERS[tier]) return b;
   const categories = { ...b.categories };
   if (categories[key]?.tier === tier) delete categories[key];
-  else categories[key] = { origin: "blue_leaf_baseline", tier, baselineVersion: BASELINE_VERSION, categoryKey: key, text: cat.tiers[tier], at, by };
+  else categories[key] = { origin: "blue_leaf_baseline", tier, baselineVersion: BASELINE_VERSION, wordingStatus: BASELINE_WORDING_STATUS, categoryKey: key, text: cat.tiers[tier], at, by };
   return normaliseBaseline({ ...b, categories });
 }
 
 const settledOut = (i) => i.answer?.state === "not_applicable" || SETTLED_DISPOSITIONS.has(i.disposition);
 const zoneKeyOf = (i) => i.answer?.zone?.key || "";
+
+/** Was this wording still unconfirmed when it was copied? Anything copied before the status was stamped was. */
+export const assumptionIsDraft = (a) => !!a && (a.wordingStatus || "draft") !== "confirmed";
+
+/** Does this decided whole-house record answer this part of its category? Typed words say what they say, so they count. */
+function partCovered(part, row, linkedKeys) {
+  const elementKey = row.answer?.element?.key || "";
+  if (part.linked) return elementKey === part.linked;
+  if (linkedKeys.includes(elementKey)) return false;
+  if (part.question && resolvePromptId(row.promptKey) !== part.question) return false;
+  if (settledOut(row)) return true;
+  const live = (row.answer?.selected || []).filter((s) => !s.stale);
+  if (!live.length) return true;
+  if (part.option) return live.some((s) => s.path[0] === part.option);
+  if (part.pathHas) return live.some((s) => s.path.some((id) => part.pathHas.includes(id)));
+  return true;
+}
+
+/** The named parts of a category nobody has answered. A part inside a record is only asked about once something is chosen on it. */
+function partGapsOf(category, chosen, decided) {
+  const parts = category.parts || [];
+  const linkedKeys = parts.filter((p) => p.linked).map((p) => p.linked);
+  return parts.filter((p) => (p.question ? decided.length > 0 : chosen.length > 0) && !decided.some((row) => partCovered(p, row, linkedKeys)));
+}
 
 /**
  * Each category as staff and estimators read it. status: open (nothing chosen, the assumption is all there is) · part
@@ -803,14 +835,38 @@ export function baselineView(register) {
     const decided = [...chosen, ...settled];
     const zoneCfg = ANSWER_CONFIG[c.questions[0]]?.zones || [];
     const gaps = decided.some((i) => !zoneKeyOf(i)) ? [] : (c.pricedZones || []).filter((z) => !decided.some((i) => zoneKeyOf(i) === z));
-    const hasGaps = open.length > 0 || gaps.length > 0;
+    const partGaps = partGapsOf(c, chosen, decided).map((p) => p.label);
+    const hasGaps = open.length > 0 || gaps.length > 0 || partGaps.length > 0;
     const status = !decided.length ? "open" : hasGaps ? "part" : chosen.length ? "chosen" : "settled";
     return {
       key: c.key, label: c.label, status, held: b.categories[c.key] || null, tiers: c.tiers,
       chosen: chosen.map((i) => ({ id: i.id, title: itemTitle(i) })), openItemIds: open.map((i) => i.id),
-      zoneGaps: gaps.map((z) => zoneCfg.find((o) => o.id === z)?.label || z),
+      zoneGaps: gaps.map((z) => zoneCfg.find((o) => o.id === z)?.label || z), partGaps,
     };
   });
+}
+
+/**
+ * Two people editing the guide at once. Each category and the project tier are separate values, so an edit to one is kept
+ * when someone else changed another. Where both changed the same one, the saved value stands and it is named in conflicts.
+ */
+export function mergeBaseline(baseRaw, mineRaw, theirsRaw) {
+  const base = normaliseBaseline(baseRaw), mine = normaliseBaseline(mineRaw), theirs = normaliseBaseline(theirsRaw);
+  const tierOf = (b, k) => b.categories[k]?.tier || "";
+  const conflicts = [];
+  const categories = { ...theirs.categories };
+  for (const k of new Set([...Object.keys(base.categories), ...Object.keys(mine.categories)])) {
+    if (tierOf(mine, k) === tierOf(base, k)) continue;
+    if (tierOf(theirs, k) === tierOf(base, k) || tierOf(theirs, k) === tierOf(mine, k)) {
+      if (mine.categories[k]) categories[k] = mine.categories[k]; else delete categories[k];
+    } else conflicts.push(k);
+  }
+  let projectTier = theirs.projectTier;
+  if (mine.projectTier !== base.projectTier) {
+    if (theirs.projectTier === base.projectTier || theirs.projectTier === mine.projectTier) projectTier = mine.projectTier;
+    else conflicts.push("projectTier");
+  }
+  return { baseline: normaliseBaseline({ projectTier, categories }), conflicts };
 }
 
 /** One tap: give the project guide to the categories with no tier yet and something still to price. Never touches one already set. */
@@ -833,11 +889,25 @@ export function assumptionFor(register, item) {
   return held ? activeAssumption(applyPricingAssumption(item, held)) : null;
 }
 
+/**
+ * A record with something chosen, in a category whose guide still prices parts of it (a door height with no hardware). The row
+ * says which parts, the guide and Tender say the same, and the choice itself is never touched. Null where nothing is missing.
+ */
+export function partAssumptionFor(register, item) {
+  if (!item || item.roomId || settledOut(item) || !hasExplicitChoice(item) || item.answer?.linkedItemIds?.length) return null;
+  const id = resolvePromptId(item.promptKey);
+  const cat = BASELINE_CATEGORIES.find((c) => c.questions.includes(id));
+  if (!cat?.parts) return null;
+  const view = baselineView(register).find((c) => c.key === cat.key);
+  const onRow = cat.parts.filter((p) => !p.question && view.partGaps.includes(p.label)).map((p) => p.label);
+  return view.held && onRow.length ? { ...view.held, coversOnly: onRow } : null;
+}
+
 /** The assumptions in force, for the staff Tender view and internal Tender Notes. Staff-only by construction: no client code reads this. */
 export function baselineAssumptions(register) {
   return baselineView(register).filter((c) => c.held && (c.status === "open" || c.status === "part")).map((c) => ({
     key: c.key, label: c.label, tier: c.held.tier, tierLabel: BASELINE_TIERS[c.held.tier], text: c.held.text, baselineVersion: c.held.baselineVersion,
-    status: c.status, zoneGaps: c.zoneGaps, chosen: c.chosen, openItemIds: c.openItemIds,
+    status: c.status, zoneGaps: c.zoneGaps, partGaps: c.partGaps, gaps: [...c.zoneGaps, ...c.partGaps], chosen: c.chosen, openItemIds: c.openItemIds, draft: assumptionIsDraft(c.held),
   }));
 }
 

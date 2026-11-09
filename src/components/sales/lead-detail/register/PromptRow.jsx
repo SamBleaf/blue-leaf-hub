@@ -15,7 +15,7 @@ import { useRef, useState } from "react";
 import {
   makeItem, genId, REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, RESPONSIBILITIES,
   TECHNICAL_STATUSES, PRICING_STATUSES, SUPPLY_BY, ITEM_KINDS, categoryLabel, itemIssues, outstandingReasons,
-  questionById, resolvePromptId, configForRow, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES, BASELINE_TIERS, OPEN_OPTION_IDS,
+  questionById, resolvePromptId, configForRow, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES, BASELINE_TIERS, OPEN_OPTION_IDS, assumptionIsDraft,
 } from "../../../../lib/register.js";
 import { Chip, Mini, Select } from "./ui.jsx";
 import ProgressiveChoiceCard from "./ProgressiveChoiceCard.jsx";
@@ -114,7 +114,7 @@ export default function PromptRow({
           )}
           {assumed && (
             <p className="mt-1.5 rounded border border-dashed border-hairline px-2 py-1 text-[11px] text-muted" data-testid={`assumption-${qid}`}>
-              <span className="font-semibold text-ink">Blue Leaf pricing assumption ({BASELINE_TIERS[assumed.tier]}):</span> {assumed.text} Staff only. Not a client choice, an approval or a price.
+              <span className="font-semibold text-ink">Blue Leaf pricing assumption ({BASELINE_TIERS[assumed.tier]}{assumptionIsDraft(assumed) ? ", draft wording" : ""}){assumed.coversOnly ? `, only for the ${assumed.coversOnly.join(" and ")}` : ""}:</span> {assumed.text} Staff only. Not a client choice, an approval or a price.
             </p>
           )}
           {(!inherited || item) && guided && (kind === "action" || config.handling === "record" || config.repeat?.owner) && (

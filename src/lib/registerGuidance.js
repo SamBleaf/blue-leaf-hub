@@ -22,19 +22,29 @@ export const BASELINE_VERSION = "blue-leaf-baseline-v1.0";
 /** "draft" until Blue Leaf confirms the wording below. The panel says so. Change to "confirmed" when they have. */
 export const BASELINE_WORDING_STATUS = "draft";
 
-/** Each category is independent. `questions` are the Tab 21 ids it covers. `pricedZones` are zones that each need pricing. */
+/**
+ * Each category is independent. `questions` are the Tab 21 ids it covers. `pricedZones` are zones that each need pricing.
+ * `parts` name what a category is made of, so one answer can't read as the whole category (Tab 27 B05, Gate 3 CHECK). A part is
+ * answered by its own question (`question`), by a top-level group on the card (`option`), by any step of a chosen path (`pathHas`),
+ * or by the separate record linked under the row (`linked`).
+ */
 export const BASELINE_CATEGORIES = [
   { key: "walls", label: "External walls", questions: ["W-013"], tiers: {
     standard: "Brick veneer or painted lightweight cladding from a standard range.",
     upgraded: "Rendered or mixed-material walls with one feature cladding zone.",
     premium: "Architectural wall systems with several feature zones, individually detailed.",
   } },
-  { key: "roof", label: "Roof and gutters", questions: ["W-014"], tiers: {
+  { key: "roof", label: "Roof and gutters", questions: ["W-014"], parts: [
+    { key: "profile", label: "roof profile", pathHas: ["standing_seam", "deck_profile", "corrugated", "trapezoidal", "concrete_tile", "terracotta_tile", "other"] },
+    { key: "gutters", label: "gutters", linked: "gutters" },
+  ], tiers: {
     standard: "Corrugated metal roof, standard colour range, standard gutters.",
     upgraded: "Higher-grade metal profile or mid-range tile, with matched gutters.",
     premium: "Standing-seam metal or premium tile, with concealed or feature gutters.",
   } },
-  { key: "windows", label: "Windows and glazing", questions: ["W-015"], tiers: {
+  { key: "windows", label: "Windows and glazing", questions: ["W-015"], parts: [
+    { key: "glazing", label: "glazing", option: "glazing" }, { key: "frame", label: "frames", option: "frame" },
+  ], tiers: {
     standard: "Aluminium frames from a standard range, glazing as the energy assessment requires.",
     upgraded: "Better-performing aluminium frames, double glazing to main living areas.",
     premium: "Thermally broken or timber frames, double glazing throughout.",
@@ -44,7 +54,9 @@ export const BASELINE_CATEGORIES = [
     upgraded: "Engineered timber to living areas, better carpet to bedrooms, porcelain tile to wet areas.",
     premium: "Wide-board engineered or solid timber, wool carpet, natural stone or large-format tile.",
   } },
-  { key: "doors", label: "Doors, jambs and hardware", questions: ["W-018"], tiers: {
+  { key: "doors", label: "Doors, jambs and hardware", questions: ["W-018"], parts: [
+    { key: "height", label: "door height", option: "door_height" }, { key: "jamb", label: "jambs", option: "jamb_or_edge_detail" }, { key: "hardware", label: "hardware", option: "hardware_style" },
+  ], tiers: {
     standard: "2040 flush doors, standard architraves, standard hardware range.",
     upgraded: "2340 doors, simple square-edge trims, mid-range hardware.",
     premium: "Full-height doors, shadowline or flush jambs, designer hardware.",
@@ -54,12 +66,16 @@ export const BASELINE_CATEGORIES = [
     upgraded: "Up to three colours and a feature wall, square-set ceilings to main areas.",
     premium: "Designer colour schedule, square-set throughout, feature ceilings where shown.",
   } },
-  { key: "kitchen", label: "Kitchen and joinery", questions: ["K-004", "K-005", "K-006"], tiers: {
+  { key: "kitchen", label: "Kitchen and joinery", questions: ["K-004", "K-005", "K-006"], parts: [
+    { key: "cabinetry", label: "cabinetry", question: "K-004" }, { key: "benchtop", label: "benchtop", question: "K-005" }, { key: "splashback", label: "splashback", question: "K-006" },
+  ], tiers: {
     standard: "Laminate flat-panel cabinetry, laminate or entry-level engineered stone bench, tile splashback.",
     upgraded: "Painted or veneer cabinetry, engineered stone bench and splashback.",
     premium: "Custom cabinetry, natural stone or porcelain bench and splashback.",
   } },
-  { key: "wet_areas", label: "Wet-area finishes and fixtures", questions: ["B-003", "B-004", "B-008", "B-009"], tiers: {
+  { key: "wet_areas", label: "Wet-area finishes and fixtures", questions: ["B-003", "B-004", "B-008", "B-009"], parts: [
+    { key: "toilet", label: "toilet", question: "B-003" }, { key: "vanity", label: "vanity", question: "B-004" }, { key: "tapware", label: "tapware", question: "B-008" }, { key: "tiles", label: "tiling", question: "B-009" },
+  ], tiers: {
     standard: "Partial-height wall tile, standard vanity, toilet and tapware ranges.",
     upgraded: "Full-height wall tile, wall-hung vanity, mid-range tapware.",
     premium: "Feature and full-height tile, custom vanity, designer tapware.",
@@ -69,7 +85,9 @@ export const BASELINE_CATEGORIES = [
     upgraded: "Built-in cabinetry with bench and undermount trough.",
     premium: "Custom joinery to match the kitchen standard.",
   } },
-  { key: "hvac", label: "Heating, cooling and hot water", questions: ["W-020"], tiers: {
+  { key: "hvac", label: "Heating, cooling and hot water", questions: ["W-020"], parts: [
+    { key: "heating_cooling", label: "heating and cooling", option: "heating_and_cooling" }, { key: "hot_water", label: "hot water", option: "hot_water" },
+  ], tiers: {
     standard: "Split systems to main areas, electric or gas hot water.",
     upgraded: "Ducted heating and cooling, heat pump hot water.",
     premium: "Zoned ducted or hydronic heating, heat pump hot water.",

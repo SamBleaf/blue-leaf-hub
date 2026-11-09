@@ -19,7 +19,7 @@ import { DocumentError } from "./registerDocuments.mjs";
 import { OPS_READY_ITEMS } from "../../src/lib/constants.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, INCLUDED_DISPOSITIONS, dispositionLabel, categoryLabel,
-  QUESTION_LIBRARY_VERSION, answerSummary, contractInclusionOf, baselineAssumptions,
+  QUESTION_LIBRARY_VERSION, answerSummary, contractInclusionOf, baselineAssumptions, linkedParentLabel,
 } from "../../src/lib/register.js";
 
 const BUCKET = "lead-documents";
@@ -32,6 +32,7 @@ const row = (reg, i) => ({
   quantity: i.quantity, unit: i.unit, supplyBy: i.supplyBy, technicalStatus: i.technicalStatus,
   pricingStatus: i.pricingStatus, pricingRef: i.pricingRef, source: i.source, nextAction: i.nextAction,
   answer: i.answer || undefined,                  // staff-only tender view and contract baseline: what was actually agreed
+  linkedTo: linkedParentLabel(reg, i) || undefined, // which roof these gutters belong to, read live and never stored twice
 });
 
 /** Existing cost sources for linking (names only — amounts stay in the estimate / fee proposal). */

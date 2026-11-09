@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import {
   roomLabel, refCode, outstandingReasons, promptsFor, resolvePromptId, isClientSelection, TECH_TOPICS,
   REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, TECHNICAL_STATUSES, PRICING_STATUSES,
-  RESPONSIBILITIES, ITEM_KINDS, REGISTER_CATEGORIES, categoryLabel, answerSummary, answerConfigFor, dispositionApplies, natureOf, assumptionFor, BASELINE_TIERS,
+  RESPONSIBILITIES, ITEM_KINDS, REGISTER_CATEGORIES, categoryLabel, answerSummary, answerConfigFor, dispositionApplies, natureOf, assumptionFor, assumptionIsDraft, BASELINE_TIERS,
 } from "../../../../lib/register.js";
 import { Chip, Select } from "./ui.jsx";
 import PromptRow from "./PromptRow.jsx";
@@ -125,7 +125,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                         <span>{categoryLabel(i.category)}</span>
                         {i.product && <span>· {[i.manufacturer, i.product, i.model].filter(Boolean).join(" ")}</span>}
                         {i.source && <span>· {i.source}</span>}
-                        {assumptionFor(reg, i) && <Chip tone="amber" title={`${assumptionFor(reg, i).text} Staff only. Not a client choice, an approval or a price.`}>Blue Leaf assumption: {BASELINE_TIERS[assumptionFor(reg, i).tier]}</Chip>}
+                        {assumptionFor(reg, i) && <Chip tone="amber" title={`${assumptionFor(reg, i).text} Staff only. Not a client choice, an approval or a price.`}>Blue Leaf assumption: {BASELINE_TIERS[assumptionFor(reg, i).tier]}{assumptionIsDraft(assumptionFor(reg, i)) ? " (draft wording)" : ""}</Chip>}
                       </div></td>
                     <td className="py-1 pr-2">{hasWorkStatus(i) ? <Select value={i.disposition} onChange={(v) => updateItem(i.id, { disposition: v })} options={DISPOSITION_ORDER.map((k) => [k, REGISTER_DISPOSITIONS[k]])} disabled={readOnly || lock} /> : <span className="text-[10px] text-muted">Not scope</span>}</td>
                     <td className="whitespace-nowrap py-1 pr-2 text-[10px] leading-snug">

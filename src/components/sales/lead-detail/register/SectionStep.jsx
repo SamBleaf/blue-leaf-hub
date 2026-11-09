@@ -3,7 +3,7 @@
  * or "Site & existing conditions" (Tab 21 §2). Only the prompts relevant to the project type / stage are
  * shown, grouped by topic; nothing is compulsory.
  */
-import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
+import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, partAssumptionFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
 import { Section } from "./ui.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
 import BaselineGuide, { PerformanceReview } from "./BaselineGuide.jsx";
@@ -21,7 +21,7 @@ export default function SectionStep({ section, reg, context, stage, showDetail, 
   const allFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
   const itemsFor = (qid) => allFor(qid).filter((i) => !isLinkedRow(answerConfigFor(qid), i));
   const itemFor = (qid) => itemsFor(qid)[0] || null;
-  const rowProps = { actor, saveState, assumptionOf: (it) => assumptionFor(reg, it) };
+  const rowProps = { actor, saveState, assumptionOf: (it) => assumptionFor(reg, it) || partAssumptionFor(reg, it) };
   const store = { upsertItem, updateItem, deleteItem };
   const renderPrompt = (q) => {
     const cfg = answerConfigFor(q.id);

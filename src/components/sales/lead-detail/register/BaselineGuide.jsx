@@ -7,7 +7,7 @@
  * is derived from the goals on the card and is not stored at all.
  */
 import {
-  baselineView, setProjectTier, setCategoryTier, applyProjectGuide, normaliseBaseline, performanceSuggestions,
+  baselineView, setProjectTier, setCategoryTier, applyProjectGuide, normaliseBaseline, performanceSuggestions, assumptionIsDraft,
   BASELINE_TIERS, BASELINE_WORDING_STATUS, REVIEW_DISCLAIMER, PASSIVE_HOUSE_NOTE, PERFORMANCE_REVIEW_CHECKS,
 } from "../../../../lib/register.js";
 import { Chip, Section } from "./ui.jsx";
@@ -19,7 +19,8 @@ function statusLine(c) {
   const chosen = c.chosen.map((x) => x.title).join("; ");
   if (c.status === "settled") return "Settled as by others, excluded or N/A. No assumption needed.";
   if (c.status === "chosen") return `Chosen: ${chosen}. The client's choice is what counts, so no assumption is used.`;
-  if (c.status === "part") return `Chosen: ${chosen || "part of this"}. An assumption only covers what isn't chosen${c.zoneGaps.length ? ` (${c.zoneGaps.join(", ")})` : ""}.`;
+  const gaps = [...c.zoneGaps, ...c.partGaps];
+  if (c.status === "part") return `Chosen: ${chosen || "part of this"}. An assumption only covers what isn't chosen${gaps.length ? ` (${gaps.join(", ")})` : ""}.`;
   return "Nothing chosen yet.";
 }
 
@@ -35,7 +36,7 @@ export default function BaselineGuide({ reg, actor, mutateMeta, readOnly }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <p className="text-xs font-semibold text-ink">Blue Leaf pricing guide</p>
         <Chip tone="amber">Staff only</Chip>
-        {BASELINE_WORDING_STATUS === "draft" && <Chip>Draft wording</Chip>}
+        {BASELINE_WORDING_STATUS !== "confirmed" && <Chip>Draft wording</Chip>}
       </div>
       <p className="mt-1 text-[11px] leading-snug text-muted">
         Choose this after the client&apos;s direction above. It gives the estimator a labelled assumption where nothing has been chosen. It isn&apos;t a client choice, an approval or a price, and it never changes what the client has chosen.
@@ -74,7 +75,7 @@ export default function BaselineGuide({ reg, actor, mutateMeta, readOnly }) {
                 ))}
               </div>
               {c.held && (c.status === "open" || c.status === "part") && (
-                <p className="mt-1 text-[11px] text-ink" data-testid={`baseline-text-${c.key}`}><span className="font-semibold">Blue Leaf pricing assumption ({BASELINE_TIERS[c.held.tier]}):</span> {c.held.text}</p>
+                <p className="mt-1 text-[11px] text-ink" data-testid={`baseline-text-${c.key}`}><span className="font-semibold">Blue Leaf pricing assumption ({BASELINE_TIERS[c.held.tier]}{assumptionIsDraft(c.held) ? ", draft wording" : ""}):</span> {c.held.text}</p>
               )}
             </div>
           ))}

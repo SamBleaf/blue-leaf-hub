@@ -78,7 +78,7 @@ try {
     const g = row({ question: q("W-014"), item: gutter });
     ok("a gutter row is titled and tested as gutters, and shows only gutter choices", />Gutters</.test(g) && /card-W-014-gutters/.test(g) && /choice-W-014-gutters-box_gutter/.test(g) && !/Metal roofing/.test(g));
     const asg = row({ question: q("W-017"), item: null, seed: seed("W-017"), assumptionOf: () => ({ tier: "upgraded", text: "Engineered timber." }) });
-    ok("an assumption is labelled as Blue Leaf's, with what it isn't", /Blue Leaf pricing assumption \(Upgraded\)/.test(asg) && /Not a client choice, an approval or a price/.test(asg));
+    ok("an assumption is labelled as Blue Leaf's, with what it isn't", /Blue Leaf pricing assumption \(Upgraded, draft wording\)/.test(asg) && /Not a client choice, an approval or a price/.test(asg));
     ok("and is only there when one applies", !/pricing assumption/.test(row({ question: q("W-017"), item: null, seed: seed("W-017"), assumptionOf: () => null })));
     const w22 = rows({ question: q("W-022"), items: [], seed: seed("W-022") });
     ok("an inclusion line has its owner on the card, and By others", /owner —/.test(w22) && />By others</.test(w22));

@@ -82,9 +82,9 @@ const META = {
   "W-012": { short: "Approvals & consultant responsibilities", section: "site", topic: "consultants", cat: "consultants", owner: "architect", coord: "architect" },
 
   // 3 | WHOLE-HOUSE GENERAL INCLUSIONS AND MATERIAL STANDARDS
-  "W-013": { short: "Architectural material direction", section: "project", topic: "envelope", cat: "cladding", isDefault: true, coord: "architect",
+  "W-013": { short: "Architectural material direction", section: "project", topic: "envelope", cat: "cladding", isDefault: true, tech: "needs_verification", coord: "architect",
     opts: ["Masonry", "Render", "Lightweight cladding", "Timber feature", "Metal roof"] },
-  "W-014": { short: "Roof & gutter colour / material", section: "project", topic: "envelope", cat: "roof", isDefault: true, coord: "architect" },
+  "W-014": { short: "Roof & gutter colour / material", section: "project", topic: "envelope", cat: "roof", isDefault: true, tech: "needs_verification", coord: "architect" },
   "W-015": { short: "Windows & glazing priorities", section: "project", topic: "envelope", cat: "windows", tech: "needs_verification", owner: "architect", coord: "windows" },
   "W-016": { short: "Envelope quality (comfort, energy, moisture)", section: "project", topic: "envelope", cat: "insulation", tech: "needs_verification", owner: "consultant", coord: "energy" },
   "W-017": { short: "Floor palette by zone", section: "project", topic: "internal", cat: "flooring", isDefault: true,

@@ -17,7 +17,7 @@ function Rows({ rows, empty, extra }) {
         <tr key={r.id} className="border-t border-hairline/60 align-top">
           <td className="w-20 py-0.5 pr-2 font-mono text-[10px] text-muted">{r.ref}</td>
           <td className="w-28 py-0.5 pr-2 text-ink">{r.area}</td>
-          <td className="py-0.5 pr-2">{r.description || answerSummary(r) || r.category}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
+          <td className="py-0.5 pr-2">{r.description || answerSummary(r) || r.category}{r.linkedTo ? <span className="text-muted"> ({r.linkedTo})</span> : null}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
           <td className="py-0.5 pr-2 text-muted">{r.disposition}</td>
           {extra && <td className="py-0.5">{extra(r)}</td>}
         </tr>
@@ -72,7 +72,8 @@ export default function TenderPanel({ lead, reg, updateItem, flush }) {
             {assumptions.map((a) => (
               <li key={a.key}>
                 <span className="font-semibold text-ink">{a.label}: {a.tierLabel}.</span> <span className="text-ink">{a.text}</span>
-                {a.status === "part" && <span className="text-muted"> Covers only what isn&apos;t chosen{a.zoneGaps.length ? ` (${a.zoneGaps.join(", ")})` : ""}.</span>}
+                {a.draft && <span className="ml-1"><Chip>Draft wording</Chip></span>}
+                {a.status === "part" && <span className="text-muted"> Covers only what isn&apos;t chosen{a.gaps?.length ? ` (${a.gaps.join(", ")})` : ""}.</span>}
               </li>
             ))}
           </ul>
