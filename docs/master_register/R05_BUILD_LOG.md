@@ -233,7 +233,7 @@ P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathwa
 
 **Outcome.** A register item can now hold a typed answer, and that answer survives the lead scratchpad, promotion, and project load and save. The client portal never receives it: a client sees only a title built from the chosen labels. Document builders don't read it yet, so documents are unchanged until P5. Old free-text records read and edit as before. No screen writes an answer yet, so nothing changes for staff. Nothing here is deployed.
 
-**Commits.** `6e4dd5c` (model, mappers, tests), `4bacd18` (answer map), `f9be425` (docs), `3931a78` (independent-review fixes), and the docs commit carrying this update. See "Corrections after the independent review".
+**Commits.** `6e4dd5c` (model, mappers, tests), `4bacd18` (answer map), `f9be425` (docs), `3931a78` and `2015603` (first review fixes and docs), then the second-review commits listed under "Corrections after the second independent review".
 
 ### What changed
 
@@ -243,7 +243,7 @@ P6 extends `computeLeadNextAction` and `nextStage` for the plans-supplied pathwa
 | Answer model (Gate 1.1) | `item.answer`, schema v1, in `src/lib/registerAnswer.js`. Field list in `R03_TECHNICAL_GUIDE.md` §3. |
 | Mappers (Gate 1.3) | Carried by `makeItem`, `readRegister`, `writeRegister`, `selRowToItem`, `rsiRowToItem`, `detailOf` and so both row writers, `ITEM_FIELDS`, promotion, canonical load and save, `applyDefaultToRooms`, the room exception copy, and the staff tender and baseline rows. |
 | Store classification | A part-finished or unresolved selection stays in `client_selections`. Excluded, N/A or a non-choice nature goes to `room_scope_items`, same id, answer intact, and comes back the same. |
-| Locks | A real answer change on a locked row is refused before writing: `post_contract_locked`, `reapproval_required`, `baseline_locked`. Real means what was chosen, the words of an Other answer, which element and zone it covers, and the record's nature. The check reads the row the save will write. Before this, `register_detail` wasn't compared, so an answer could have changed under an approval. |
+| Locks | A real answer change on a locked row is refused before writing: `post_contract_locked`, `reapproval_required`, `baseline_locked`. Real means what was chosen and the words shown for it, which element and zone it covers and the words shown for those, the state, the areas and the record's nature. The check reads the row the save will write, and a change that names no row can't replace a stored item. Before this, `register_detail` wasn't compared, so an answer could have changed under an approval. |
 | Client boundary | `clientSafeAnswer` is an allow-list. A structured selection's portal name comes from its labels. That name is all the portal receives. |
 | Zone defaults | `defaultItemsFor`, and `defaultItemFor(reg, id, {zoneKey})`. Existing callers still get one default. |
 | Room confirmation | `room.defaultConfirmations`, with `confirmRoomDefaults` and `roomDefaultStatus`. Library only until P4d. |
@@ -283,7 +283,8 @@ No migration. The next free number stays 218. `PUT` and `GET /api/register/leads
 - `outstandingReasons` is unchanged, so a recorded fact on a scope item still counts as an open decision and would be listed in the Client Brief's questions. No screen can create one before P4a, which recomputes it.
 - Document builders are unchanged. A structured selection with no typed text shows TBC in the schedule. P5 must read answers through `clientSafeAnswer`.
 - The map is a proposal. Child options beyond the source wording are marked `proposed` or sit under a Tab 27 source, for Blue Leaf to confirm in P4.
-- Tab 27 Q4 (who supplies versus who installs) is still open, so W-023, M-003 and "Owner supplied" on R-009 record only who supplies.
+- Tab 27 Q4 (who supplies versus who installs) is still open, so W-023, M-003, "Owner supplied" on R-009 and "By client" on W-022, R-014, V-005 and O-001 record only who supplies. An item answered "By client" stays undecided on contract inclusion until Q4 is settled.
+- P4a must copy an option's label once, when it is chosen, and never refresh a stored label from the config. Repeatable elements need a stable `element.id`. Other text goes in `selected[].label` on an open option.
 - Gate 1.4's central baseline config is P4b, per the brief. P3 provides the assumption field and `applyPricingAssumption` only.
 - Project mode needs migration 213. Without it the register stays on the lead, as before.
 - **Tab 27 Gate 0.2's CHECK is not done.** It asks for the mapping to be reviewed against the original client-meeting conversations, with no hidden scope lost. Those conversations aren't available in this workflow. The wording check here is a machine compare against the question library, which can't show that nothing from a real meeting was missed. Blue Leaf needs to do this while confirming the proposed options in P4.
@@ -306,7 +307,7 @@ Fixed from the review:
 
 | Finding | Fix |
 |---|---|
-| "Real change" was too narrow (blocker) | `materialOf` now also compares the words of an Other answer, `element.id`, a label that has no configured key behind it, and `nature`. Rewording a configured label stays non-material. The 409s, the on-screen step-back and the room default fingerprint all read this one function. |
+| "Real change" was too narrow (blocker) | `materialOf` now also compares the words of an Other answer, `element.id`, a label that has no configured key behind it, and `nature`. Rewording a configured label stays non-material (superseded by the second review below: every word shown now counts). The 409s, the on-screen step-back and the room default fingerprint all read this one function. |
 | Where Other text lives | In `selected[].label` on an open option (`OPEN_OPTION_IDS`: `other`, `other_zone`). No new field. A test fails if a new catch-all is added to the map without being declared open. |
 | The lock checked a different row from the one written (major) | `saveProject` finds the stored row by `sync.rowId`, the row `register_apply` writes. A row it didn't load is refused as `missing`. An item id that doesn't own the row is refused with the new reason `item_mismatch`, on saves and deletes, so history can't be filed under the wrong item. |
 | The lock depended on how the version was spelled (major) | The check now runs however the version is written. Only a strict ISO stamp for a different millisecond skips it, and `register_apply` refuses that as stale, so an honest stale screen still gets the three-way merge. |
@@ -331,6 +332,49 @@ Tests after the fixes:
 `npm run lint` and `node --check` on `registerStore.mjs` pass. The production build was run as `vite build --mode production` with `vite.sandbox.config.mjs`, from the sandbox working directory and into the scratchpad, because `npm run build` would load the repo `.env`, which the brief forbids. It passes. None of these say anything about behaviour.
 
 One existing assertion changed on purpose: the `register-structured-model` check that matched the old step-back condition in `useRegister.js` now confirms the hook calls `editOutrunsApproval`, and that function has its own behaviour tests. Nothing was weakened.
+
+### Corrections after the second independent review (2026-11-10)
+
+The second review ran new probes through the real sandbox API. Each claim below was checked before anything changed (output in `SP/p3fix2/pre-p1.txt` and `pre-p3.txt`). Commits: `a7a644e` (model, store, tests), `f4d655f` (answer map), and the docs commit carrying this update.
+
+| Claim in this entry, the guide or the first fix report | What was true |
+|---|---|
+| "Rewording a configured label still doesn't count" | Wrong twice over. The rule protected nothing, because stored labels are only written when someone chooses an option, so a config rewording never reaches them. It also wasn't even: on an ordered selection with no typed text a reword was already refused, because `item_name` is built from the label. |
+| "A real answer change on a locked row is refused", and "real means ... which element and zone it covers" | Not true for the words. Ordered and baselined rows accepted changed option words, a swapped `optionId`, changed zone words and a renamed element with HTTP 200, and the stored client view changed. "Front driveway" could become "Rear driveway" on a baselined row with an ordinary rename. |
+| "Client-approved requirements now need fresh evidence or a step back" | Not in every case. A delete plus a re-insert with no `sync` in one request changed an approved requirement or selection and kept the approval. |
+| "The lock now checks the row that actually gets written" | Only for changes carrying `sync.rowId`. A change with no `sync` skipped the guard and still wrote a replacement row. |
+| The answer is lossless through the mappers | `makeItem` dropped a second Other answer on the same path, before any mapper ran, and could keep a flagged copy over the live entry. |
+| W-023, M-003 and R-009 are the items affected by Tab 27 Q4 | W-022, R-014, V-005 and O-001 mapped "By client" straight to `by_others`, which `contractInclusionOf` reads as outside the contract. That pre-decided the open question. |
+
+Fixed:
+
+| Finding | Fix |
+|---|---|
+| The lock compared different fields from the ones people read (major) | `materialOf` now compares the option path plus the words shown for it (the same rule `clientSafeAnswer` uses), and the id, key and label of the element and zone. `normSelected` makes `optionId` the last step of the path, so a separate id can't change what is shown. |
+| A second Other answer was lost (major) | On an open option the words are part of the de-duplication key. A bare "Other" and a blank label still count as one. For the same choice, a live entry replaces a flagged copy and keeps its place. |
+| A save naming no row could replace a stored item (minor) | `saveProject` refuses a change with no `sync.rowId` whose id is already on the project, reason `exists`. `register_apply` already says `exists` in every case but the cross-store delete and re-insert. New items and real moves between stores are unaffected. |
+| The room default fingerprint missed who supplies (minor) | `supplyBy` and `responsibility` are now part of it. No confirmation has been stored by a screen yet, so nothing needs re-confirming. |
+| The map pre-decided Tab 27 Q4 (minor) | "By client" on those four now records who supplies only, as R-009 does, with a note on each. The map validator refuses a client-supply option that also sets a disposition. Added to `decisions_needed`. |
+
+No migration. `PUT` can now return 409 `CONFLICT` with reason `exists` from the service as well as from `register_apply`.
+
+Existing assertions changed on purpose, all made stricter or moved to the new rule: in `register-structured-model`, "a label wording change isn't", "a configured option that merely starts with 'other' keeps its label out of it", "renaming an element under its stable id isn't", "a keyed zone can be reworded" and "renaming the element under its id leaves the room confirmed"; in `register-structured-store` and `sandbox-register-structured`, "renaming the element under its id is still allowed". Each now asserts the opposite, because each described the gap the review found. The fixture gains two items with two Other answers each, one per store.
+
+Tests after these fixes:
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED | `node scripts/tests/register-structured-mapping.test.mjs`, adds Tab 27 Q4 checks and one more damaged map refused | 56 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-model.test.mjs`, adds path-decides-id, two Others, live over flagged, words shown as a change, fingerprint who-supplies | 142 passed, 0 failed |
+| AUTOMATED | `node scripts/tests/register-structured-store.test.mjs`, adds words on ordered, baselined and approved rows, no-row saves in both directions, two Others through promotion. In-memory stand-in for `register_apply`. | 94 passed, 0 failed |
+| AUTOMATED, DB | `node scripts/tests/sandbox-register-structured.test.mjs` after `restart-api`, adds each of those through the real API, PostgREST and `register_apply`, and reads the stored rows back | 117 passed, 0 failed |
+| DB | The reviewer's probes `probes/r2/p1.mjs` and `p3.mjs` before and after. Before: the option, zone and element word changes on ordered and baselined rows, a swapped `optionId`, the approved reword and both cross-store swaps returned 200 and changed the stored data. After: each returns 409 with the stored data unchanged, except the swapped `optionId`, which still returns 200 but stores what the path names, so the client view doesn't move. Saved in `SP/p3fix2/`. | As intended |
+| AUTOMATED | `bash SP/run-tests.sh all` after `restart-api`: 26 suites | 1382 checks, 0 failing |
+| AUTOMATED | Each of 12 new protections removed in turn, files restored and confirmed by checksum. Ad hoc script, not committed (`SP/p3fix2/mutate.txt`). | 12 of 12 failed a unit test, as intended |
+| BROWSER | Not driven. No screen writes an answer yet. | Not verified |
+| PRODUCTION | Not available in this workflow | Not verified |
+
+`npm run lint`, `node --check` on `registerStore.mjs` and `build-answer-map-doc.mjs --check` pass. The production build was run as `NODE_ENV=production vite build --mode production` with `vite.sandbox.config.mjs` from the sandbox working directory into the scratchpad, for the same reason as above. These say nothing about behaviour.
 
 ### Next dependency
 
