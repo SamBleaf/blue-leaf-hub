@@ -10,6 +10,7 @@
 //      Technical register (mock-up 04); both built from the same selections data.
 //   5. Real approved Blue Leaf logo embedded in every header (not typed branding).
 import fs from "fs";
+import { fixDocxFooterFields } from "./fix-footer-page-fields.mjs";
 import {
   Document, Packer, Paragraph, TextRun, ImageRun, PageBreak, PageOrientation,
   Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType, Footer, PageNumber,
@@ -211,7 +212,7 @@ function cardTable() {
   const right = cell([
     P(run("{NAME}", { size: SZ.body, bold: true, color: NAVY }), { after: 12, line: 224 }),
     P(run("{DESC}", { size: SZ.small, color: INK }), { after: 14, line: 230 }),
-    P([ run("{STATUS}", { size: SZ.small, bold: true, color: BLUE, caps: true, spacing: 12 }), run("   /   ", { size: SZ.small, color: GREY }), run("{SOURCE}", { size: SZ.small, color: GREY }), run("{/ITEMS}", { size: 2 }) ], { after: 0, line: 216 }),
+    P([ run("{STATUS}", { size: SZ.small, bold: true, color: BLUE, caps: true, spacing: 12 }), run("{SEP}", { size: SZ.small, color: GREY }), run("{SOURCE}", { size: SZ.small, color: GREY }), run("{/ITEMS}", { size: 2 }) ], { after: 0, line: 216 }),
   ], rightW, { va: VerticalAlign.TOP, pad: 80, borders: { top: line(HAIR, 2), bottom: line(HAIR, 2), left: nb(), right: line(HAIR, 2) } });
   return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [leftW, rightW],
     borders: { top: line(HAIR, 2), bottom: line(HAIR, 2), left: line(HAIR, 2), right: nb(), insideHorizontal: nb(), insideVertical: nb() },
@@ -249,4 +250,5 @@ const jobs = [
   ["blb-client-presentation-template.docx", clientPresentation],
   ["blb-selections-schedule-template.docx", technicalSchedule],
 ];
-for (const [name, doc] of jobs) { const buf = await Packer.toBuffer(doc); fs.writeFileSync(`${OUT}/${name}`, buf); console.log("wrote template", name, buf.length, "bytes"); }
+// Footer page numbers are split into four runs so LibreOffice keeps their style (fix-footer-page-fields.mjs).
+for (const [name, doc] of jobs) { const { buffer: buf } = fixDocxFooterFields(await Packer.toBuffer(doc)); fs.writeFileSync(`${OUT}/${name}`, buf); console.log("wrote template", name, buf.length, "bytes"); }

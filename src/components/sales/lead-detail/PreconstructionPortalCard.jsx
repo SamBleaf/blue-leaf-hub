@@ -1,9 +1,10 @@
 /**
- * PreconstructionPortalCard — CV-3b. Inducts the client into the portal EARLY (from PTSA-signed /
- * during Consultants) so the client↔consultant comms (CV-3a) have a home before the build starts.
+ * PreconstructionPortalCard — CV-3b. Sets the portal up EARLY (from PTSA-signed / during
+ * Consultants) so the client↔consultant comms (CV-3a) have a home before the build starts.
  * It provisions a project row flagged is_preconstruction (hidden from Operations until Won, when
- * finalizeWonJob flips the flag and the same row becomes the live Ops project). Client invite + magic
- * link are done from the existing Portal admin — this card links straight there.
+ * finalizeWonJob flips the flag and the same row becomes the live Ops project). Setting up never
+ * invites the client: an admin invites them deliberately from the v2 Portal Admin console, either
+ * early (owner-approved for the pilot, 10 Nov 2026) or once the building contract is signed.
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -24,7 +25,7 @@ export default function PreconstructionPortalCard({ lead }) {
     setBusy(false);
     if (!ok) { setMsg({ type: "error", text: error || "Could not set up the portal." }); return; }
     setState((s) => ({ ...(s || {}), project: data.project, noJob: false }));
-    setMsg({ type: "success", text: data.created ? "Pre-construction portal created." : "Portal already set up." });
+    setMsg({ type: "success", text: data.created ? "Portal set up. The client hasn't been invited." : "Portal already set up. The client hasn't been invited." });
   }
 
   const project = state?.project;
@@ -34,14 +35,14 @@ export default function PreconstructionPortalCard({ lead }) {
     <div className="rounded-card border border-hairline bg-surface p-4">
       <h3 className="section-label mb-1">Client pre-construction portal</h3>
       <p className="text-[11px] text-muted mb-2">
-        Bring the client into the portal now — their home for the design team, selections and every
-        message with the consultants. It stays hidden from Operations until the job is won.
+        Set the portal up now so the design team, selections and messages with the consultants have a
+        home. Setting it up doesn’t invite the client, and Operations can’t see it until the job is won.
       </p>
 
       {state == null ? (
         <p className="text-xs text-muted">Loading…</p>
       ) : state.noJob ? (
-        <p className="text-xs text-muted">The portal is keyed to the job — sign the PTSA / Plans stage first to create it.</p>
+        <p className="text-xs text-muted">The portal is set up against the job, so the job needs to exist first (it’s created when the PTSA / Plans stage is signed).</p>
       ) : !project ? (
         <button type="button" onClick={provision} disabled={busy}
           className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
@@ -61,9 +62,9 @@ export default function PreconstructionPortalCard({ lead }) {
                   : <span className="text-muted"> · not invited yet</span>}
               </p>
             : <p className="text-[11px] text-amber-700">No client linked yet.</p>}
-          <p className="text-[10px] text-muted">Client invitations are a deliberate step from Portal Admin after staff approval (normally once the construction contract is signed) — never sent automatically.</p>
-          <Link to={`/portal-admin/${project.id}`} className="inline-block text-xs font-semibold text-primary hover:underline">
-            Open Portal admin (invite client, manage access) ↗
+          <p className="text-[10px] text-muted">Inviting the client is a deliberate admin step in Portal Admin. It can happen early, during design, or once the building contract is signed. Invitations are never sent automatically.</p>
+          <Link to={`/portal-admin/${project.id}/v2`} className="inline-block text-xs font-semibold text-primary hover:underline">
+            Open Portal admin (access and invitations) ↗
           </Link>
         </div>
       )}

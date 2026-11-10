@@ -8,6 +8,7 @@ import { QUESTIONS, ANSWER_CONFIG } from "../../src/lib/registerQuestions.js";
 import {
   makeItem, makeRoom, emptyMeta, toggleOption, chooseElement, chooseZone, toggleArea, itemPatch, choiceView, roomDefaultFor, roomDefaultsFor, roomInheritedLines, roomLinesToConfirm,
   confirmRoomDefaults, exceptionFieldsFrom, outstandingByPlace, roomLabel, roomDefaultStatus, contractInclusionOf, outstandingReasons,
+  promptWording,
 } from "../../src/lib/register.js";
 
 let pass = 0, fail = 0;
@@ -81,6 +82,16 @@ section("Audit fixes: what a room shows");
   ok("floor and paint go when the room's own questions cover them (R05-06)", shown({ coveredQuestions: new Set(["R-005", "R-006"]) }) === "feature_wall,trim,doors_and_hardware");
   const older = toggleOption(c, null, ["floor_finish"]);
   ok("an answer already on the record still shows", choiceView(c, older, { coveredQuestions: new Set(["R-005", "R-006"]) }).levels[0].options.some((o) => o.id === "floor_finish"));
+  const covered = new Set(["R-005", "R-006"]);
+  const roomWords = promptWording(q("D-003"), c, null, covered);
+  ok("the heading follows the buttons that are left (Tab 26 retest)", roomWords.short === "Feature wall, trim & doors", roomWords.short);
+  ok("so does the help, and it says where floor and paint went", /^Feature wall, trim, doors and hardware\./.test(roomWords.text) && /Floor finish and general paint are recorded/.test(roomWords.text), roomWords.text);
+  ok("with nothing covering them, the library wording stands", promptWording(q("D-003"), c, null, new Set()).short === q("D-003").short && promptWording(q("D-003"), c, null, null).text === q("D-003").text);
+  ok("with floor already on the record (so its button shows), the library wording stands", promptWording(q("D-003"), c, older, covered).short === q("D-003").short);
+  ok("only one of the two covered, the library wording stands", promptWording(q("D-003"), c, null, new Set(["R-005"])).short === q("D-003").short);
+  ok("a prompt with no covered options is untouched", promptWording(q("R-005"), cfg("R-005"), null, covered).short === q("R-005").short);
+  const coverable = Object.entries(ANSWER_CONFIG).filter(([, v]) => (v.options || []).some((o) => o.coveredBy));
+  ok("every prompt with covered options has room-screen wording that doesn't name them", coverable.length > 0 && coverable.every(([, v]) => v.whenCovered?.short && v.whenCovered?.text && !(v.options || []).filter((o) => o.coveredBy).some((o) => v.whenCovered.short.toLowerCase().includes(o.label.toLowerCase()))));
   const qs = [q("R-006")];
   const confirmed = confirmRoomDefaults(bed, [walls], STAMP);
   ok("confirming keeps what the default said", confirmed.defaultConfirmations[walls.id].words.includes("Warm"));

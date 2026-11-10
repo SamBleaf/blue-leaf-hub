@@ -165,3 +165,43 @@ export async function clearEditorDraft(actorKey, workspaceId, materialId) {
   try { await tx("readwrite", (s) => s.delete(editorKey(actorKey, workspaceId, materialId))); return { ok: true }; }
   catch { return { ok: false }; }
 }
+
+// ── Master Register drafts (Tab 26 R05 retest) ───────────────────────────────────────────────────
+// Unsaved register edits for one (actor, lead), written as they are made, so a reload, a closed tab or an
+// iPad killing the page doesn't lose them. Same store, actor scoping, 7-day expiry and logout purge as
+// takeoff. Recovery only: offered back with Restore / Discard, never applied or sent by itself.
+const registerKey = (actorKey, leadId) => `register|${actorKey}|${leadId}`;
+
+/** Save the draft, or clear it when there is nothing unsaved. */
+export async function saveRegisterDraft({ actorKey, leadId, draft }) {
+  if (!actorKey || !leadId) return { ok: false, reason: "no-identity" };
+  try {
+    const key = registerKey(actorKey, leadId);
+    const isEmpty = (d) => !d || (!d.meta && !(d.items || []).length && isEmpty(d.earlier));
+    const empty = isEmpty(draft);
+    if (empty) { await tx("readwrite", (s) => s.delete(key)); return { ok: true }; }
+    const record = { key, kind: "register", actorKey, leadId, draft: JSON.parse(JSON.stringify(draft)), savedAt: Date.now() };
+    await tx("readwrite", (s) => s.put(record));
+    return { ok: true };
+  } catch (e) {
+    const quota = e?.name === "QuotaExceededError" || /quota/i.test(String(e?.message || ""));
+    return { ok: false, reason: quota ? "quota" : "unavailable" };
+  }
+}
+
+export async function loadRegisterDraft(actorKey, leadId) {
+  if (!actorKey || !leadId) return { ok: true, record: null };
+  try {
+    const key = registerKey(actorKey, leadId);
+    const rec = await tx("readonly", (s) => reqP(s.get(key)));
+    if (!rec) return { ok: true, record: null };
+    if (Date.now() - rec.savedAt > RECOVERY_TTL_MS) { await tx("readwrite", (s) => s.delete(key)); return { ok: true, record: null }; }
+    return { ok: true, record: rec };
+  } catch { return { ok: false, record: null }; }
+}
+
+export async function clearRegisterDraft(actorKey, leadId) {
+  if (!actorKey || !leadId) return { ok: true };
+  try { await tx("readwrite", (s) => s.delete(registerKey(actorKey, leadId))); return { ok: true }; }
+  catch { return { ok: false }; }
+}

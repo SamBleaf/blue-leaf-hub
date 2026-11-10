@@ -114,8 +114,9 @@ export async function apiPost(url, body) {
 /**
  * PUT with JSON body.
  */
-export async function apiPut(url, body) {
+export async function apiPut(url, body, options = {}) {
   return apiFetch(url, {
+    ...options,
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

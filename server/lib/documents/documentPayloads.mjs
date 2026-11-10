@@ -127,6 +127,9 @@ const PRESENT_AREAS = [
 ];
 const AREA_TAGLINE = "Agreed in principle for review — supplier schedules and drawings remain the technical reference.";
 const NEEDS_DECISION = new Set(["TBC", "Hold", "Design", "Undecided", "Preliminary"]);
+/** The client presentation says this once per row instead of repeating "TBC" (Tab 26 R05 retest). The technical register keeps TBC. */
+export const PRESENTATION_PENDING_LABEL = "Still to be decided";
+const known = (v) => (v && v !== "TBC" ? v : "");
 
 export function buildClientPresentationPayload(fx) {
   const p = fx.project, cp = fx.clientPresentation || {};
@@ -142,14 +145,20 @@ export function buildClientPresentationPayload(fx) {
     n += 1;
     return {
       AREA_NUM: String(n).padStart(2, "0"), AREA_NAME: a.name, AREA_TAGLINE,
-      ITEMS: rows.map((r) => ({
-        REF_ID: r.itemId || "", CAT: r.category || "", NAME: r.product || "",
-        DESC: r.finish || "", STATUS: r.status || "TBC", SOURCE: r.responsibility || "",
-      })),
+      ITEMS: rows.map((r) => {
+        // No product yet: the item is the heading and the room the label, so nothing reads "TBC".
+        const product = known(r.product), source = known(r.responsibility);
+        const split = !product && r.item;
+        return {
+          REF_ID: r.itemId || "", CAT: (split ? r.where : r.category) || "", NAME: product || r.item || "",
+          DESC: known(r.finish), STATUS: known(r.status) || PRESENTATION_PENDING_LABEL,
+          SOURCE: source, SEP: source ? "   /   " : "",
+        };
+      }),
     };
   }).filter(Boolean);
   const DECISIONS = (fx.selections || []).filter((r) => NEEDS_DECISION.has(r.status)).map((r) => ({
-    REF_ID: r.itemId || "", ITEM: [r.category, r.product].filter(Boolean).join(" — "), OWNER: r.responsibility || "—", STATUS: r.status || "TBC",
+    REF_ID: r.itemId || "", ITEM: [r.category, known(r.product)].filter(Boolean).join(" — "), OWNER: known(r.responsibility) || "—", STATUS: known(r.status) || PRESENTATION_PENDING_LABEL,
   }));
   const palette = (cp.palette || []).slice(0, 4);
   const tiles = {};
@@ -162,7 +171,7 @@ export function buildClientPresentationPayload(fx) {
     HAS_PALETTE: palette.length ? [{}] : [],
     ...tiles,
     READ_LABEL: "Reading this schedule",
-    READ_BODY: "Preferred means the look is agreed in principle, not the exact product. Proposed means a specific option is being reviewed. Client-approved requires documented acceptance. Nothing in this document authorises procurement.",
+    READ_BODY: "Preferred means the look is agreed in principle, not the exact product. Proposed means a specific option is being reviewed. Client-approved requires documented acceptance. Still to be decided means no choice has been made yet. Nothing in this document authorises procurement.",
     AREAS,
     HAS_DECISIONS: DECISIONS.length ? [{}] : [],
     DECISIONS,
@@ -216,7 +225,7 @@ export const DOC_DEFS = {
 };
 
 // ── Pre-issue validation (Tab 17 blockers) ───────────────────────────────────
-const PLACEHOLDER_RX = /(\{\{|\}\}|\bTODO\b|\bTBD\b|REPLACE[_ ]?ME|\bXXX+\b|lorem ipsum|placeholder)/i;
+export const PLACEHOLDER_RX = /(\{\{|\}\}|\bTODO\b|\bTBD\b|REPLACE[_ ]?ME|\bXXX+\b|lorem ipsum|placeholder)/i;
 const FAKE_MONEY_RX = /\$\s?0(?:[.,]0{1,2})?(?!\d)/;
 function walkStrings(node, visit, path = "") {
   if (node == null) return;

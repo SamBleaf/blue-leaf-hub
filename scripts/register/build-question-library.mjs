@@ -356,6 +356,13 @@ function buildAnswerConfig(e, q) {
   if (e.roomReadsAll) cfg.roomReadsAll = true;                                    // a room reads every surface listed, not the first it finds
   if (e.standard) cfg.standard = clean(e.standard);                              // also set once on Whole House, by zone
   if (e.usualGroup) cfg.usualGroup = e.usualGroup;
+  // Room-screen wording for when the covered options are hidden (their topic has its own prompt on that screen).
+  const covered = (cfg.options || []).filter((o) => o.coveredBy);
+  if (covered.length && !(e.whenCovered?.short && e.whenCovered?.text)) throw new Error(`${q.id}: options covered by another prompt need whenCovered wording (short + text) for the screen that hides them.`);
+  if (e.whenCovered) {
+    if (covered.some((o) => e.whenCovered.short.toLowerCase().includes(o.label.toLowerCase()))) throw new Error(`${q.id}: whenCovered.short still names a covered option.`);
+    cfg.whenCovered = { short: clean(e.whenCovered.short), text: clean(e.whenCovered.text) };
+  }
   if (e.reviewSuggestions) cfg.reviewSuggestions = true;
   if (handling === "record" || (handling === "choice" && e.actions && !e.elements)) cfg.asksWhat = true;   // the thing acted on is project-specific, so it is typed
   return cfg;

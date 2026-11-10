@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useClientPortal } from "./clientPortalContext.js";
 import { portalGet, portalPost } from "../../lib/clientPortalApi.js";
 import { Loading, ErrorBox, Empty, Card, PageTitle, fmtAud, fmtDate, daysUntil } from "./clientPortalUi.jsx";
@@ -13,6 +14,9 @@ const STATUS_LABEL = {
   installed: "Installed",
   overdue: "Overdue",
 };
+
+// Before a client commits: choosing is a preference, and any cost or timing change is confirmed with them first.
+const PREFERENCE_NOTE = "Choosing tells us your preference. Blue Leaf confirms any cost or timing change with you before it’s final.";
 
 export default function ClientSelections() {
   const ctx = useClientPortal();
@@ -79,9 +83,11 @@ function SelectionCard({ projectId, selection, onChange }) {
   const [err, setErr] = useState(null);
   const [changeMode, setChangeMode] = useState(false);
   const [note, setNote] = useState("");
+  const [rechoose, setRechoose] = useState(false);   // in review: show the options again so the client can change their mind
   const finalised = ["approved", "ordered", "installed"].includes(selection.status);
   const inReview = selection.status === "in_review";
   const changeReq = selection.status === "changes_requested";
+  const rechoosing = rechoose && inReview;   // if staff approve meanwhile, the card goes back to its approved state
   const decided = finalised || inReview || changeReq;   // chip styling + hides the order-by nudge; no client action
   const overdue = selection.status === "overdue";
   const orderBy = selection.orderByDate;
@@ -93,6 +99,7 @@ function SelectionCard({ projectId, selection, onChange }) {
     const { ok, error } = await portalPost(projectId, `selections/${selection.id}/select`, { optionId });
     setBusy(null);
     if (!ok) { setErr(error); return; }
+    setRechoose(false);
     onChange();
   }
 
@@ -109,10 +116,11 @@ function SelectionCard({ projectId, selection, onChange }) {
       <div className="flex items-start justify-between gap-3 px-5 py-4">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink">{selection.itemName}</p>
-          <p className="mt-0.5 text-xs text-muted">
-            {selection.roomArea ? `${selection.roomArea} · ` : ""}
-            {selection.allowanceAmount != null ? `Allowance ${fmtAud(selection.allowanceAmount)}` : "No allowance set"}
-          </p>
+          {selection.roomArea || selection.allowanceAmount != null ? (
+            <p className="mt-0.5 text-xs text-muted">
+              {[selection.roomArea, selection.allowanceAmount != null ? `Allowance ${fmtAud(selection.allowanceAmount)}` : null].filter(Boolean).join(" · ")}
+            </p>
+          ) : null}
         </div>
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${overdue ? "bg-red-50 text-red-700" : decided ? "bg-accent/10 text-accent" : "bg-amber-50 text-amber-700"}`}>
           {STATUS_LABEL[selection.status] || selection.status}
@@ -125,16 +133,25 @@ function SelectionCard({ projectId, selection, onChange }) {
         </p>
       ) : null}
 
-      {finalised || inReview ? (
-        <div className="border-t border-hairline px-5 py-4 text-sm">
-          <span className="text-muted">Chosen: </span>
-          <span className="font-semibold text-ink">{selection.selectedProduct || "—"}</span>
+      {(finalised || inReview) && !rechoosing ? (
+        <div className="border-t border-hairline px-5 py-4 text-sm" data-testid={`client-selection-chosen-${selection.id}`}>
+          {selection.selectedProduct ? (
+            <><span className="text-muted">Chosen: </span><span className="font-semibold text-ink">{selection.selectedProduct}</span></>
+          ) : (
+            <span className="font-semibold text-ink">{finalised ? "Confirmed by Blue Leaf" : "Choice received"}</span>
+          )}
           {selection.costImpact != null && selection.costImpact !== 0 ? (
             <span className={`ml-2 text-xs ${selection.costImpact > 0 ? "text-amber-700" : "text-accent"}`}>
               {selection.costImpact > 0 ? "+" : ""}{fmtAud(selection.costImpact)} vs allowance
             </span>
           ) : null}
           {inReview ? <p className="mt-1 text-xs text-muted">Choice received — Blue Leaf is reviewing it.</p> : null}
+          {inReview && options.length > 0 ? (
+            <button type="button" onClick={() => setRechoose(true)} data-testid={`client-change-choice-${selection.id}`}
+              className="mt-2 min-h-[40px] rounded-xl border border-hairline px-4 py-2 text-xs font-semibold text-ink hover:bg-page">Change my choice</button>
+          ) : inReview ? (
+            <p className="mt-2 text-xs text-muted">Need a change? <Link to="/client-portal/messages" className="font-semibold text-primary hover:underline">Message us</Link>.</p>
+          ) : null}
         </div>
       ) : changeReq ? (
         <div className="border-t border-hairline px-5 py-4 text-sm">
@@ -143,6 +160,7 @@ function SelectionCard({ projectId, selection, onChange }) {
         </div>
       ) : options.length === 0 && selection.selectedProduct ? (
         <div className="border-t border-hairline px-5 py-4 space-y-3">
+          <p className="text-xs text-muted">{PREFERENCE_NOTE}</p>
           <div>
             <p className="text-xs text-muted">Blue Leaf proposes:</p>
             <p className="text-sm font-semibold text-ink">{selection.selectedProduct}</p>
@@ -168,6 +186,7 @@ function SelectionCard({ projectId, selection, onChange }) {
         </div>
       ) : (
         <div className="border-t border-hairline px-5 py-4 space-y-2.5">
+          {options.length > 0 ? <p className="text-xs text-muted">{rechoosing ? "Choose again and we’ll review your new choice instead." : PREFERENCE_NOTE}</p> : null}
           {options.length === 0 ? (
             <p className="text-sm text-muted">Options are being prepared for this item.</p>
           ) : (
@@ -184,7 +203,7 @@ function SelectionCard({ projectId, selection, onChange }) {
                       {opt.isRecommended ? <span className="ml-2 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">Recommended</span> : null}
                     </p>
                     <p className="mt-0.5 text-xs text-muted">
-                      {opt.priceIncGst != null ? fmtAud(opt.priceIncGst) : "Price on request"}
+                      {opt.priceIncGst != null ? fmtAud(opt.priceIncGst) : "Price to be confirmed"}
                       {over != null && over > 0 ? ` · +${fmtAud(over)} over allowance` : ""}
                       {opt.leadTimeWeeks ? ` · ${opt.leadTimeWeeks} wk lead` : ""}
                     </p>
@@ -193,6 +212,7 @@ function SelectionCard({ projectId, selection, onChange }) {
                     type="button"
                     disabled={busy === opt.id}
                     onClick={() => choose(opt.id)}
+                    data-testid={`client-choose-${opt.id}`}
                     className="min-h-[40px] shrink-0 rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     {busy === opt.id ? "Saving…" : "Choose"}
@@ -201,6 +221,9 @@ function SelectionCard({ projectId, selection, onChange }) {
               );
             })
           )}
+          {rechoosing ? (
+            <button type="button" onClick={() => setRechoose(false)} className="min-h-[40px] rounded-xl border border-hairline px-4 py-2 text-xs font-semibold text-muted hover:bg-page">Keep my current choice</button>
+          ) : null}
           {err ? <p className="text-xs text-red-700">{err}</p> : null}
         </div>
       )}

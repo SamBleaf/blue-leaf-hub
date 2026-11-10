@@ -53,7 +53,8 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     ro?.observe(document.body);
     return () => ro?.disconnect();
   }, []);
-  const store = useRegister(lead.id, { enabled: visible });
+  // Unsaved edits are kept on this device per signed-in staff member (same key format as Takeoff's recovery).
+  const store = useRegister(lead.id, { enabled: visible, actorKey: profile?.id ? `staff:${profile.id}` : null });
   const { reg, info, save } = store;
   const loaded = !!reg;
   const [context, setContext] = useState(null);
@@ -168,6 +169,20 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
             : <button type="button" onClick={() => { setExpanded(false); toggleOpen(false); }} className="text-[11px] text-muted hover:text-ink">Collapse</button>}
         </div>
       </div>
+
+      {store.recovery && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900" data-testid="register-recovery">
+          <span>
+            Unsaved changes from {new Date(store.recovery.savedAt).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} are kept on this device
+            {store.recovery.count ? ` (${store.recovery.count} ${store.recovery.count === 1 ? "change" : "changes"})` : ""}.
+            {store.recovery.conflicts ? ` ${store.recovery.conflicts} ${store.recovery.conflicts === 1 ? "was" : "were"} also changed elsewhere; the latest value will be kept.` : ""}
+          </span>
+          <span className="flex gap-2">
+            <button type="button" onClick={store.restoreDraft} className="rounded border border-amber-300 bg-surface px-2.5 py-1 font-semibold text-amber-900 hover:bg-amber-100" data-testid="register-recovery-restore">Restore</button>
+            <button type="button" onClick={store.discardDraft} className="rounded px-2.5 py-1 text-amber-800 hover:underline" data-testid="register-recovery-discard">Discard</button>
+          </span>
+        </div>
+      )}
 
       {open && (
         <>

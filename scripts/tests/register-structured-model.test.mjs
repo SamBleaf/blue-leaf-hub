@@ -220,8 +220,10 @@ ok("a junk confirmation is dropped", Object.keys(makeRoom({ defaultConfirmations
 
 console.log("\nThe screens' save store carries it");
 const hook = readFileSync(new URL("../../src/components/sales/lead-detail/register/useRegister.js", import.meta.url), "utf8");
-ok("autosave's field list comes from makeItem, so it includes answer", /Object\.keys\(makeItem\(\{\}\)\)/.test(hook) && "answer" in makeItem({}));
-ok("the conflict merge keeps room confirmations", /ROOM_FIELDS = \[[^\]]*"defaultConfirmations"/.test(hook));
+// The merge moved to registerMerge.js (Tab 26 retest: shared with the recovery of unsaved edits); the hook imports it.
+const merge = readFileSync(new URL("../../src/lib/registerMerge.js", import.meta.url), "utf8");
+ok("autosave's field list comes from makeItem, so it includes answer", /Object\.keys\(makeItem\(\{\}\)\)/.test(merge) && "answer" in makeItem({}) && /from "\.\.\/\.\.\/\.\.\/\.\.\/lib\/registerMerge\.js"/.test(hook));
+ok("the conflict merge keeps room confirmations", /ROOM_FIELDS = \[[^\]]*"defaultConfirmations"/.test(merge));
 ok("an approved item steps back through the tested rule above", /if \(editOutrunsApproval\(item, partial\)\)/.test(hook));
 
 console.log(`\nregister-structured-model: ${pass} passed, ${fail} failed`);

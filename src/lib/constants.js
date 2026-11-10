@@ -139,6 +139,8 @@ export const DELIVERABLE_STATUS_COLORS = {
   included:  "bg-teal-100 text-teal-700",
   issued:    "bg-green-100 text-green-700",
 };
+/** A deliverable flagged for re-issue shows this pill instead of its status (the status is kept). */
+export const DELIVERABLE_REISSUE_PILL = { label: "Re-issue", color: "bg-red-100 text-red-700" };
 export const DELIVERABLE_FEEDS_LABELS = { consent: "→ Consent", proposal: "→ Proposal", both: "→ Consent + Proposal", none: "" };
 /** Advisory dependency graph between deliverables (by key). A deliverable is "waiting" while any
  *  upstream deliverable that is ALSO on the roster hasn't arrived yet — never a hard block.
@@ -1041,3 +1043,15 @@ export const PROCUREMENT_ITEM_SOURCE = {
 // Default order-by buffers (mirror migration 085 column defaults)
 export const PROCUREMENT_APPROVAL_BUFFER_DAYS = 5;
 export const PROCUREMENT_REVIEW_BUFFER_DAYS = 3;
+
+/** Staff-facing labels for client_selections.status (Portal Admin v2 list). The client portal keeps its own wording. */
+export const SELECTION_STAFF_STATUS_LABELS = {
+  not_started: "Not released",
+  awaiting_client: "With client",
+  in_review: "Client responded: review in the register",
+  changes_requested: "Client asked for a change",
+  approved: "Approved",
+  ordered: "Ordered",
+  installed: "Installed",
+  overdue: "Overdue with client",
+};

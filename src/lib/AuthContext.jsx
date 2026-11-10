@@ -25,7 +25,7 @@ export function AuthProvider({ children }) {
   const signOut = useCallback(async () => {
     const sb = getSupabase();
     if (sb) await sb.auth.signOut().catch(() => {});
-    await clearRememberedActorRecovery().catch(() => {}); // explicit logout drops unsaved takeoff drafts on this device
+    await clearRememberedActorRecovery().catch(() => {}); // explicit logout drops unsaved takeoff and register drafts on this device
     await clearPlanCache().catch(() => {});               // … and the plan copies kept on it (HUB 021)
     setProfile(null);
     navigate("/login", { replace: true });

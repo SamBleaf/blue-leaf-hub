@@ -13,14 +13,14 @@ import { apiFetch } from "../../../lib/apiFetch.js";
 import {
   CONSULTANT_ROLES, CONSULTANT_ROLE_ORDER, CONSULTANT_CLIENT_FACING,
   CONSULTANT_DELIVERABLES, DELIVERABLE_STATUS, DELIVERABLE_STATUS_ORDER,
-  DELIVERABLE_STATUS_COLORS, DELIVERABLE_FEEDS_LABELS, DELIVERABLE_DEPENDENCIES,
+  DELIVERABLE_STATUS_COLORS, DELIVERABLE_FEEDS_LABELS, DELIVERABLE_DEPENDENCIES, DELIVERABLE_REISSUE_PILL,
 } from "../../../lib/constants.js";
 import ConsentSpine from "./ConsentSpine.jsx";
 import ConsultantComms from "./ConsultantComms.jsx";
 import PreconstructionPortalCard from "./PreconstructionPortalCard.jsx";
 import MeetingScheduler from "./MeetingScheduler.jsx";
 import RegisterWorkshop from "./register/RegisterWorkshop.jsx";
-import { deliverableIsReady, consultantDocsReady } from "../../../lib/stageGates.js";
+import { deliverableIsReady, consultantDocsReady, flagReissue, DELIVERABLE_ARRIVED_STATUSES } from "../../../lib/stageGates.js";
 
 const seedDeliverables = (role) => (CONSULTANT_DELIVERABLES[role] || []).map((d) => ({ key: d.key, status: "pending" }));
 const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).find((d) => d.key === key) || { label: key, feeds: "none" };
@@ -28,7 +28,7 @@ const deliverableMeta = (role, key) => (CONSULTANT_DELIVERABLES[role] || []).fin
 // resetting to pending on an extra click.
 const nextStatus = (s) => { const i = DELIVERABLE_STATUS_ORDER.indexOf(s); return DELIVERABLE_STATUS_ORDER[Math.min(i + 1, DELIVERABLE_STATUS_ORDER.length - 1)]; };
 // Has it arrived? Enough for downstream work to start. Being ready to rely on is a separate test: deliverableIsReady.
-const hasArrived = (s) => ["received", "reviewed", "included", "issued"].includes(s);
+const hasArrived = (s) => DELIVERABLE_ARRIVED_STATUSES.includes(s);
 // Past "received", the status has to rest on something: a revision or a document reference (CNS-05).
 const STATUSES_NEEDING_A_REFERENCE = ["reviewed", "included", "issued"];
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -53,16 +53,6 @@ export default function ConsultantsStage({ lead, patch, reload }) {
   roster.forEach((r) => delsOf(r).forEach((d) => { rosterDeliverables[d.key] = { status: d.status || "pending", reissue: !!d.reissue }; }));
   const rosterKeys = new Set(Object.keys(rosterDeliverables));
   const waitingOn = (key) => (DELIVERABLE_DEPENDENCIES[key] || []).filter((up) => rosterKeys.has(up) && !hasArrived(rosterDeliverables[up]?.status));
-  function transitiveDownstream(changedKey) {
-    const out = new Set(); const queue = [changedKey];
-    while (queue.length) {
-      const cur = queue.shift();
-      for (const k of rosterKeys) {
-        if ((DELIVERABLE_DEPENDENCIES[k] || []).includes(cur) && !out.has(k)) { out.add(k); queue.push(k); }
-      }
-    }
-    return out;
-  }
   const allDelStates = Object.values(rosterDeliverables);
   const doneCount = allDelStates.filter(deliverableIsReady).length;
   const blockedCount = Object.keys(rosterDeliverables).filter((k) => waitingOn(k).length).length;
@@ -86,18 +76,20 @@ export default function ConsultantsStage({ lead, patch, reload }) {
     const to = nextStatus(d.status || "pending");
     if (STATUSES_NEEDING_A_REFERENCE.includes(to) && !(d.revision?.trim() || d.source?.trim())) { setNeedsRef(`${i}:${key}`); setOpenDetail(`${i}:${key}`); return; }
     setNeedsRef(null);
-    editDeliverable(i, key, { status: to, reissue: false });
+    editDeliverable(i, key, { status: to, reissue: false, reissueFrom: null });
   };
-  // Mark an upstream doc changed → flag every downstream done doc for re-issue.
-  const markChanged = (changedKey) => {
-    const downstream = transitiveDownstream(changedKey);
-    saveRoster(roster.map((r) => ({ ...r, deliverables: delsOf(r).map((d) => (downstream.has(d.key) && hasArrived(d.status || "pending") ? { ...d, reissue: true } : d)) })));
-  };
+  // Mark an upstream doc changed → flag every downstream doc that has arrived for re-issue, recording the trigger.
+  const markChanged = (changedKey) => saveRoster(flagReissue(roster.map((r) => ({ ...r, deliverables: delsOf(r) })), changedKey, DELIVERABLE_DEPENDENCIES));
+  // "Structural drawings changed (now Rev C)" for each recorded trigger, naming the changed document's revision as it
+  // stands now (staff often type the new revision just after pressing changed?). Older flags carry no trigger.
+  const revisionNow = (key) => roster.flatMap(delsOf).find((x) => x.key === key)?.revision?.trim() || "";
+  const reissueReason = (d) => (Array.isArray(d.reissueFrom) ? d.reissueFrom : [])
+    .map((t) => { const rev = revisionNow(t.key) || t.revision; return `${DELIVERABLE_LABELS[t.key] || t.key} changed${rev ? ` (now Rev ${rev})` : ""}`; }).join("; ");
   const contactLabel = (c) => `${[c.firstName, c.lastName].filter(Boolean).join(" ")}${c.company ? ` — ${c.company}` : ""}`;
 
   return (
     <div className="space-y-4">
-      {/* CV-3b — induct the client into the portal early (their home for the design team + comms) */}
+      {/* CV-3b — set the portal up early (home for the design team + comms); inviting the client is a separate admin step */}
       <PreconstructionPortalCard lead={lead} />
 
       {/* Consultant roster + deliverables */}
@@ -145,9 +137,10 @@ export default function ConsultantsStage({ lead, patch, reload }) {
                         const waiting = waitingOn(d.key);
                         return (
                           <div key={d.key} className="flex items-center gap-2 flex-wrap">
-                            <button type="button" onClick={() => cycleDeliverable(i, d.key)}
-                              className={`shrink-0 w-[74px] text-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${DELIVERABLE_STATUS_COLORS[st]}`}>
-                              {DELIVERABLE_STATUS[st]}
+                            <button type="button" onClick={() => cycleDeliverable(i, d.key)} data-testid={`deliverable-status-${d.key}`}
+                              title={d.reissue ? `${DELIVERABLE_STATUS[st]}, flagged for re-issue. Click once the re-issued document is in.` : undefined}
+                              className={`shrink-0 w-[74px] text-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${d.reissue ? DELIVERABLE_REISSUE_PILL.color : DELIVERABLE_STATUS_COLORS[st]}`}>
+                              {d.reissue ? DELIVERABLE_REISSUE_PILL.label : DELIVERABLE_STATUS[st]}
                             </button>
                             <span className="text-[11px] text-ink">{meta.label}</span>
                             {meta.feeds && meta.feeds !== "none" && (
@@ -158,7 +151,7 @@ export default function ConsultantsStage({ lead, patch, reload }) {
                             {waiting.length > 0 && !hasArrived(st) && (
                               <span className="text-[10px] text-amber-700">⏳ waiting: {waiting.map((k) => DELIVERABLE_LABELS[k] || k).join(", ")}</span>
                             )}
-                            {d.reissue && <span className="text-[10px] font-semibold text-red-600">⟳ re-issue required</span>}
+                            {d.reissue && <span className="text-[10px] font-semibold text-red-600" data-testid={`deliverable-reissue-${d.key}`}>⟳ re-issue required{reissueReason(d) ? `: ${reissueReason(d)}` : ""}</span>}
                             <button type="button" onClick={() => setOpenDetail(openDetail === `${i}:${d.key}` ? null : `${i}:${d.key}`)} aria-expanded={openDetail === `${i}:${d.key}`} data-testid={`deliverable-detail-${d.key}`}
                               className="inline-flex min-h-[32px] items-center text-[10px] text-primary hover:underline sm:min-h-0">Details</button>
                             {hasArrived(st) && (

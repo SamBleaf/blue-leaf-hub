@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-09-04
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Supervisor
@@ -36,7 +36,7 @@ It runs the whole time the design is being coordinated, before the build starts.
 Three connected pieces:
 
 1. **Consultant comms (the Hub thread).** Every message about a consultant is logged in one thread per consultant — a note you type (a phone reply, an internal remark, something the client relayed) or an email you send the consultant directly. Each message records **who** it’s from (Client / Blue Leaf / Consultant), **how** it travelled (note / email / phone / portal), and whether it is **shared with the client**. This is the single source of truth — nothing about the design lives only in someone’s inbox.
-2. **The client’s pre-construction portal.** Normally the client’s portal only exists once the job is Won. This lets you open it **early**, during design, so the client has a home for the design team and the messages you choose to share. Operations never sees this project until the job is Won (it stays hidden until then).
+2. **The client’s pre-construction portal.** Normally the client’s portal only exists once the job is Won. This lets you set it up **early**, during design, so the design team, selections and the messages you choose to share have a home. Setting it up **doesn’t invite the client**. Inviting is a separate, deliberate admin step in Portal Admin: early, during design (approved by Sam for the pilot, 10 Nov 2026), or once the building contract is signed. Operations never sees this project until the job is Won (it stays hidden until then).
 3. **The client’s Design Team page.** In the portal the client sees the design disciplines on their job, reads the messages you shared, and can send you a message (optionally about a specific discipline). Their reply lands straight back in the same Hub thread and emails the office. The client never emails the consultants directly — you broker every exchange.
 
 **Sending real emails to consultants is OFF by default.** Logging a note always works. Actually emailing a consultant only sends when `CONSULTANT_EMAIL_ENABLED` is set — otherwise you get a clear message and can log the note instead.
@@ -47,7 +47,7 @@ Three connected pieces:
 - To **email** a consultant: that consultant has a **CRM contact selected** on the roster row, and that contact has a valid email address (add it in the CRM). Real sending also needs `CONSULTANT_EMAIL_ENABLED=true` in the environment — otherwise logging still works.
 - To set up the **pre-construction portal**: the lead has a **linked job** (created when the PTSA / Plans stage is signed).
 - Migrations **198** (`consultant_messages`) and **199** (`projects.is_preconstruction`) are applied. Before 198, logging a note returns “Consultant comms need migration 198”. Before 199, setting up the portal returns “Apply migration 199 first”.
-- To invite the client into the portal you (or an admin) use the existing **Portal admin** screen — this SOP links straight to it.
+- To invite the client into the portal an **admin** uses the v2 **Portal admin** console — this SOP links straight to it. Decide first whether this client is getting early access; invitations are never sent automatically.
 
 ## 5. Step-by-step process
 
@@ -68,9 +68,9 @@ Three connected pieces:
 
 7. At the top of the Consultants stage, find **Client pre-construction portal**.
 8. If it says the job isn’t created yet, finish the **PTSA / Plans** stage first (that creates the job).
-9. Click **Set up the client’s portal →**. The card confirms the portal is active and shows the address.
+9. Click **Set up the client’s portal →**. The card says **Portal set up. The client hasn’t been invited.** and shows the address.
    [insert screenshot: “Client pre-construction portal” card after set-up, showing the address + Open Portal admin link]
-10. Click **Open Portal admin (invite client, manage access) ↗** to go to the Portal admin, where you invite the client and manage their login (admin only).
+10. Only when the client should have access: click **Open Portal admin (access and invitations) ↗**. It opens the v2 console, where an admin invites the client and manages their login. Early access during design is allowed for the pilot; otherwise invite once the building contract is signed.
 
 ### C. What the client does (Design Team page)
 
@@ -194,4 +194,11 @@ Three connected pieces:
 **TC-08 — Win graduates the pre-con project**
 1. Win the test lead (signed contract + value).
 - Expected DB: the same `projects` row now has `is_preconstruction=false`; it appears on the Operations board; the client’s login + shared comms are unchanged.
+- [ ] Pass  [ ] Fail
+
+**TC-09 — The card never tells staff to invite the client now (Tab 26 R05 retest)**
+1. Open a test lead at Consultants that has a job. Read the **Client pre-construction portal** card before and after **Set up the client’s portal →**.
+- Expected UI: no “Bring the client into the portal now”. The card says setting it up doesn’t invite the client, and that inviting is a deliberate admin step, early or once the building contract is signed. After set-up the message reads **Portal set up. The client hasn’t been invited.**
+- Expected UI: **Open Portal admin (access and invitations) ↗** opens `/portal-admin/<project id>/v2`, the console with the invite control.
+- Expected DB: no `invitations` row and no `project_client_users` row were created by setting up.
 - [ ] Pass  [ ] Fail

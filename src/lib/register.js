@@ -784,7 +784,10 @@ export function refCode(item) {
   let h = 2166136261;
   const s = String(item.id || "");
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  const tail = h.toString(36).toUpperCase().slice(-3).padStart(3, "0");
+  let tail = h.toString(36).toUpperCase().slice(-3).padStart(3, "0");
+  // "XXX" and "TBD" read as placeholder text to the issue check, which would block every document holding the item.
+  // Rare (about 1 id in 23,000); step the hash for those ids only, so every other reference stays as it was.
+  while (/^(XXX|TBD)$/.test(tail)) { h = Math.imul(h ^ 0x9e3779b9, 16777619) >>> 0; tail = h.toString(36).toUpperCase().slice(-3).padStart(3, "0"); }
   const q = resolvePromptId(item.promptKey);
   return `${q ? q.replace("-", "") : "X"}-${tail}`;
 }

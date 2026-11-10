@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-11-07
+sop_version: 1.2
+last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Project manager
@@ -41,7 +41,10 @@ It makes each document from the same register rows — nothing is retyped. Befor
 4. Fix anything the checks list (in the register), then **Preview draft** again.
 5. Fill **Issue to (name)** (and the email if you want it on the record — **nothing is sent**).
 6. Click **Issue revision P01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
-7. The history row shows **Current**, the date, the recipient and the **Checksum**. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
+7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: P01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
+   - **Selections & Finishes Schedule, Client presentation:** an item with nothing chosen yet says **Still to be decided** once, with the item as its heading, instead of repeating "TBC". The **Technical register** layout keeps TBC for the trade.
+   - **Architect Design Brief:** a client-approved requirement that still needs a technical check is listed under Confirmed project requirements with **(technical check pending)** after it.
+   - Every document's footer reads **PAGE 1 / 2** in the same small grey type as the label.
 8. **Coordination packs:** under **Coordination requests (draft packs from the same register)** click a pack — Architect, Routleys (plumbing fixtures), TLI (lighting & electrical), Window supplier, Engineer, Energy assessor, Joiner — to get a draft list of only the items tagged for them.
 9. **Received documents:** click **Add received document**:
    1. Choose **Record type** (Consultant document or Supplier schedule / quote), **Discipline**, **Issuer**, **Document no.**, **Revision**, **Received** date, and attach the **File (PDF)**.
@@ -177,6 +180,13 @@ Next review date: 2027-05-07
 1. Preview. Expected: marked internal, no dollar sign, no quantity, pricing assumptions labelled, and draft wording says so.
 2. Issue. Expected: P01, audience internal. Change an item and issue again. Expected: P02 current, P01 superseded and still opens, and its hash is unchanged.
 3. Reject paths. No recipient: blocked. A dollar figure in a description: blocked. Changing the register after the preview: refused as stale. A client login: no document list and no row.
+- [ ] Pass  [ ] Fail
+
+**TC-10 — Tab 26 R05 retest follow-ups**
+1. Issue any document. Expected: the card reads **Recorded: P0n (current) · date · for [name] · not emailed**, not "Issued … to".
+2. Preview the Selections & Finishes Schedule as **Client presentation** with one item that has nothing chosen. Expected: that item says **Still to be decided** once, with no "TBC" anywhere and no stray "/" where there's no supplier; the reading key explains the label. Switch to **Technical register**: TBC is still used.
+3. Mark a requirement client-approved (with evidence) while its technical status is **Needs verification**, then preview the Architect Design Brief. Expected: it reads "… (technical check pending)" under Confirmed project requirements.
+4. Look at any two-page preview's footer. Expected: **PAGE 1 / 2** with the numbers the same size and grey as the word PAGE.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

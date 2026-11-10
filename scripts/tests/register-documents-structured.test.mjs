@@ -101,6 +101,26 @@ ok("no amounts", !/\$\s?\d/.test(flat(notes.tenderNotes)));
 section("Audit fixes");
 const kitchenLine = assumptions.rows.find((r) => /Kitchen/.test(r.area));
 ok("the assumption doesn't describe the benchtop that was chosen (R05-05)", !/bench/i.test(kitchenLine.text) && /cabinetry/i.test(kitchenLine.text), kitchenLine.text);
+const checkReq = mk("W-022", { itemKind: "requirement", certainty: "client_approved", evidence: { at: "2026-11-10", by: "Staff" }, description: "Steel beam over the new opening", technicalStatus: "needs_verification" });
+const plainReq = mk("W-022", { itemKind: "requirement", certainty: "client_approved", evidence: { at: "2026-11-10", by: "Staff" }, description: "Keep the existing fireplace" });
+const archCheck = buildRegisterFixture("architect_brief", { ...input(), register: { ...register, items: [...items, checkReq, plainReq] } }).architectBrief.confirmedReqs;
+ok("a client-approved requirement still needing a technical check says so (Tab 26 DOC-02)", archCheck.some((l) => /Steel beam over the new opening \(technical check pending\)$/.test(l)), flat(archCheck));
+ok("one with no open check reads as before", archCheck.some((l) => /Keep the existing fireplace$/.test(l)), flat(archCheck));
+ok("schedule rows carry the room and the item separately, for the client presentation", sel.selections.every((r) => typeof r.where === "string" && r.item && r.category.startsWith(r.where.replace(/ \((project default|room exception)\)$/, ""))), flat(sel.selections.slice(0, 2)));
+// An item reference must never read as placeholder text: "W014-XXX" blocked issuing (found by sandbox-register-structured).
+{
+  const { refCode } = await import("../../src/lib/register.js");
+  const { PLACEHOLDER_RX } = await import("../../server/lib/documents/documentPayloads.mjs");
+  let hits = 0, seen = 0, changedOthers = 0;
+  const fnv = (id) => { let h = 2166136261; for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36).toUpperCase().slice(-3).padStart(3, "0"); };
+  for (let n = 0; n < 200000; n++) {
+    const id = `ri_${n.toString(36)}`;
+    const raw = fnv(id), ref = refCode({ id, promptKey: "W-014" });
+    if (/^(XXX|TBD)$/.test(raw)) { seen += 1; if (PLACEHOLDER_RX.test(ref)) hits += 1; }
+    else if (ref !== `W014-${raw}`) changedOthers += 1;
+  }
+  ok("no item reference reads as a placeholder, and every other reference is unchanged", seen > 0 && hits === 0 && changedOthers === 0, JSON.stringify({ seen, hits, changedOthers }));
+}
 const viteConfig = fs.readFileSync(join(REPO, "vite.config.js"), "utf8");
 ok("the service worker leaves stored-file links alone (R05-01)", /navigateFallbackDenylist:[^\n]*\\\/sb/.test(viteConfig));
 

@@ -160,7 +160,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>} {d.internal && <Chip tone="amber">Internal only</Chip>}</p>
-                <p className="text-[11px] text-muted">{d.hint} {current ? `Issued: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · to ${current.recipient_name || "—"}` : "Draft — not issued yet."}</p>
+                <p className="text-[11px] text-muted">{d.hint} {current ? `Recorded: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · for ${current.recipient_name || "—"} · not emailed` : "Draft — not issued yet."}</p>
               </div>
               <div className="flex items-center gap-2">
                 {d.key === "selections_schedule" && <Select value={layout} onChange={setLayout} options={[["technical", "Technical register"], ["client", "Client presentation"]]} className="w-40" />}

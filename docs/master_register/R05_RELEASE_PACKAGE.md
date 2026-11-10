@@ -51,6 +51,8 @@ What a future read-only adapter can rely on: `lead_id`, `job_id` and `project_id
 | 7 | Should supervisors get Sales access? | Admin only at the route prefix, as today |
 | 8 | Legal contract generation and e-signing (DEC-CT), PTSA wording (PTS-02) | Not built, needs legal review |
 
+**Decided 10 Nov 2026 (Tab 26 R05 retest follow-ups).** Sam: an admin may give a client **early portal access** during the pilot (the pilot client is a friend and is piloting the whole Hub). Nothing in the server blocks an early invite, by design; the Consultants card now says setting up doesn't invite and inviting is a deliberate admin step. Sam also approved the room-screen D-003 wording (**Feature wall, trim & doors**; recorded as `whenCovered` in the Tab 21 answer map, the approved library text unchanged), the client-portal wording below, the **Still to be decided** label in the client presentation, and **(technical check pending)** in the architect brief. To log in Tab 21 as a source-config amendment.
+
 ## 5. Behaviour changes staff will notice
 
 - A contract can only be marked signed by uploading the signed PDF. A lead showing signed with no PDF needs one attached before Won.
@@ -59,6 +61,12 @@ What a future read-only adapter can rely on: `lead_id`, `job_id` and `project_id
 - Rooms list what they inherit, with one confirm, instead of asking again.
 - Client Brief scope lines now carry a small item reference.
 - A site fact recorded with an older Included status no longer prints as work.
+- The Consultants portal card no longer says to bring the client in now. Setting up never invites; an admin invites from the v2 console, early or after the contract.
+- A consultant document flagged for re-issue shows a red **Re-issue** pill and names what changed.
+- The documents list says **Recorded … for … not emailed**. The client presentation says **Still to be decided** instead of repeating TBC. Footer page numbers match the footer.
+- Unsaved register edits are kept on the device and offered back after a reload (**Restore** / **Discard**). Save & Next stays on the room if a save fails.
+- Clients can change a choice while Blue Leaf reviews it. Approved items with no product read **Confirmed by Blue Leaf**; unpriced options read **Price to be confirmed**.
+- Portal Admin shows plain statuses with a link to the lead, and the Clients list shows the real portal status.
 
 ## 6. Outstanding defects and risks
 
@@ -72,7 +80,9 @@ What a future read-only adapter can rely on: `lead_id`, `job_id` and `project_id
 | Partial audit items not built | SOURCE | PTS-01 numbering, CON-01 step sequencing, TEN-03 and TEN-05 contract pack states, DIS-03, QUA-02 and QUA-05, release metrics |
 | General joinery standard isn't read by a room prompt | SOURCE | Recorded on Whole House only |
 | Selections Schedule loses its column headings on page 2 | BROWSER | LibreOffice doesn't repeat them from this template. Needs the table split per page |
-| A reported sign-out hang through the public staging link | Not reproduced | Tried on a local production build with a second tab open |
+| A reported sign-out hang through the public staging link | Not reproduced | Tried on a local production build with a second tab open. ChatGPT's retest (Tab 26, 10 Nov) also didn't reproduce it: log out returned to sign-in in about 0.6 s. Not proven fixed |
+| Early client portal access has no server check | SOURCE | Owner-approved for the pilot. An admin can invite before the contract is signed. A server gate with a named override would be the later option |
+| Client login and visibility on the public link, client-side logout, baseline edits under protection, the exact 390 px viewport | Not tested by ChatGPT | Its managed browser had no fresh profile or mobile emulation. Covered locally by sandbox suites, not independently |
 
 ## 7. Test evidence
 
@@ -85,13 +95,13 @@ bash <scratchpad>/run-tests.sh all
 PLAYWRIGHT_BROWSERS_PATH=0 npx playwright test --config scripts/dev/register-sandbox/playwright.sandbox.config.mjs
 ```
 
-Screenshots: `~/blh-register-evidence/r05/` (p4b, p4cd, p5, p6, p7). Per-phase detail: `R05_BUILD_LOG.md`.
+Screenshots: `~/blh-register-evidence/r05/` (p4b, p4cd, p5, p6, p7, tab26). Per-phase detail: `R05_BUILD_LOG.md`. Playwright needs `PLAYWRIGHT_BROWSERS_PATH=0` for the browsers bundled in the repo's `playwright-core`.
 
 *The older notes in `R04_RELEASE_PACKAGE.md` and `RELEASE_BLOCKER_REVIEW.md` are kept as history.*
 
 ## 8. Exact files changed from `759b8e7`
 
-A = added, M = modified, D = deleted. This list stops at the commit before this section was added, so it predates the audit fixes in commit `3508676`.
+A = added, M = modified, D = deleted. This list stops at the commit before this section was added, so it predates the audit fixes in commit `3508676` and the Tab 26 retest follow-ups after it. For the full current list run `git diff --name-status 759b8e7..HEAD`.
 
 ```
 M	docs/agent_knowledge/MASTER_DATA_DICTIONARY.md

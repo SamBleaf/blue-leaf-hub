@@ -1,5 +1,5 @@
 ---
-sop_version: 1.5
+sop_version: 1.6
 last_reviewed: 2026-11-10
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
@@ -63,10 +63,13 @@ It records what the client wants, room by room, in one place. Each answer become
    2. At the top of the room, **From Whole House** lists what this room takes from the whole-house standards, one line each: its floor, walls, ceiling, kitchen, wet-area and laundry standards. Tap **Confirm room defaults** to say they apply here. That records applicability only. It is not client approval, a technical check or a price. If one line is different in this room, tap **Different here** on that line and choose. Other rooms don't change. If someone changes a whole-house standard after you confirmed a room, the line says **Changed since confirmed** and nothing moves until you look at it.
    3. Answer the questions listed below that list. Those are the ones this room still has to answer.
    4. On a renovation, **Existing works here** shows the work recorded for this room on Site & Existing. It is the same record, so a change here shows there. **+ Existing work here** adds one.
-   3. Tap **Save & next room →** to move on. The last room shows **Save — last room**.
+   3. Tap **Save & next room →** to move on. The last room shows **Save — last room**. If the save fails, you stay on the same room with your edit still showing and the reason beside **Save**; tap it again once the connection is back.
+   - In a bedroom, walk-in robe or study, the **Feature wall, trim & doors** question doesn't offer floor or paint, because the room's own floor and wall finish lines above cover them. (In the office Register table it keeps its full name, *Floor, paint, trim & doors*.)
 7. Tick **Show detailed prompts** only when you want the detailed (later-stage) questions now.
 
 > 💡 **Tip:** The card saves by itself about a second after you stop typing. Watch the word beside **Save**: *Unsaved… → Saving… → Saved*. You can close the lead and come back — it reopens where you stopped.
+
+> 💡 **Lost connection or reloaded too soon?** What you type is also kept on the device as you go. If the page closes before it saved (a reload, a closed tab, an iPad dropping the page), the register shows **Unsaved changes from [time] are kept on this device** when you come back. Tap **Restore** to put them back and save them, or **Discard** to drop them. Anything someone else changed since keeps their newer value, and you're told which. Signing out clears these copies from the device; they also expire after 7 days.
 
 [insert screenshot: Project step with On file in Sales and Project setup]
 [insert screenshot: Whole house prompt with decision chips and quick buttons]
@@ -97,6 +100,7 @@ It records what the client wants, room by room, in one place. Each answer become
 |----------------------|-------------------|-----|
 | "Save failed" beside Save | Lost connection or the server refused the change | Check the message under the header, then tap **Save**. Your typing is kept on screen. |
 | A banner says someone else changed an item | Two people edited the same item | The card merges both changes; where both changed the same field it keeps the server's copy and tells you which item to re-check |
+| **Unsaved changes … are kept on this device** appears | The page closed before your last edit saved | Tap **Restore** to save them now, or **Discard** if you meant to drop them |
 | Kitchen prompts appear for a bathroom | Wrong room type picked | Remove the room (✕ **Remove room**) and add it again with the right type |
 | No existing-building questions on a renovation | **Existing-building prompts** is off, or the room is set to **New** | Turn the toggle on (Project step) or set the room to **Renovated** |
 | A yellow box says **Check these** | An earlier answer changed and something chosen under it no longer fits | Tap **Use again** or **Remove**. It counts as outstanding until you do |
@@ -351,6 +355,12 @@ Next review date: 2027-05-07
 **TC-32 — No quantities in the meeting, and a way back to what's open**
 1. In a room open **Office fields**. Expected: no quantity or pricing field. In the Register step the same record has both, and quantity stays blank until measured.
 2. Tap **N outstanding** under the steps, then a place. Expected: straight to that step or room.
+- [ ] Pass  [ ] Fail
+
+**TC-33 — Save & Next on a failed save, and unsaved edits after a reload (Tab 26 R05 retest)**
+1. In a room, make a choice, then take the API offline (or block the save) and tap **Save & next room →**. Expected: you stay on the same room, your choice still shows, the badge gives the reason and doesn't say Saved; nothing is written. Bring the API back and tap again: it moves on and the choice is saved.
+2. With saving still blocked, make another choice and reload. Expected: the register shows **Unsaved changes from [time] are kept on this device** with **Restore** and **Discard**; nothing has been written yet. Tap **Restore** once saving works: the choice is saved and the banner goes.
+3. In a bedroom, look at D-003. Expected: headed **Feature wall, trim & doors**, its help says floor and paint are recorded in the room's finish lines, and there's no Floor finish or General paint button.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

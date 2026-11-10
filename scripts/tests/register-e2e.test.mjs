@@ -255,7 +255,17 @@ async function main() {
   check("#13", "the client's choice waits for Blue Leaf review — not approved", benchQ.sync.status === "in_review" && benchQ.certainty !== "client_approved" && benchQ.sync.clientChoice?.product === "Smartstone Arcadia");
   const staleStaff = await putReg(staff, leadA.id, { changes: [{ ...bench, nextAction: "stale screen edit" }] });
   check("#19", "a staff screen loaded before the client's choice cannot overwrite it (409 stale)", staleStaff.status === 409);
-  const approve = await putReg(staff, leadA.id, { changes: [{ ...benchQ, certainty: "client_approved", evidence: { at: new Date().toISOString(), by: "Sandbox Staff", method: "portal_choice", ref: "Client chose Option B in the portal" } }] });
+  // Tab 26 retest: the client can change their mind while Blue Leaf reviews; a staff approval from before the change is refused.
+  const optIdOf = (label) => optB.find((o) => o.label === label).id;
+  const rechoose = await api(clientTok, "POST", `/api/portal/app/${projectId}/selections/${bench.sync.rowId}/select`, { optionId: optIdOf("Option A") });
+  check("#22", "the client changed their choice while it was in review (still waiting for Blue Leaf)", rechoose.ok && rechoose.body.status === "in_review", JSON.stringify(rechoose.body));
+  const staleApprove = await putReg(staff, leadA.id, { changes: [{ ...benchQ, certainty: "client_approved", evidence: { at: new Date().toISOString(), by: "Sandbox Staff", method: "portal_choice", ref: "Approving what the screen showed before the change" } }] });
+  check("#13", "an approval from a screen loaded before the client's change is refused (409 stale)", staleApprove.status === 409, JSON.stringify(staleApprove.body).slice(0, 200));
+  const back = await api(clientTok, "POST", `/api/portal/app/${projectId}/selections/${bench.sync.rowId}/select`, { optionId: optIdOf("Option B") });
+  check("#22", "…and the client can change back", back.ok && back.body.status === "in_review");
+  const benchQ2 = find(await getReg(staff, leadA.id), (i) => i.id === bench.id);
+  check("#13", "the register shows the client's latest choice", benchQ2.sync.clientChoice?.product === "Smartstone Arcadia");
+  const approve = await putReg(staff, leadA.id, { changes: [{ ...benchQ2, certainty: "client_approved", evidence: { at: new Date().toISOString(), by: "Sandbox Staff", method: "portal_choice", ref: "Client chose Option B in the portal" } }] });
   const { data: benchA } = await svc.from("client_selections").select("status, approved_at, approval_evidence").eq("id", bench.sync.rowId).single();
   const { data: benchAct } = await svc.from("client_actions").select("status").eq("related_entity_id", bench.sync.rowId).single();
   check("#13", "staff approval with evidence → approved, task closed", approve.ok && benchA.status === "approved" && benchA.approval_evidence?.method === "portal_choice" && benchAct.status === "completed");

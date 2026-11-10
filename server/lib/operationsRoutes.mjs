@@ -21,7 +21,8 @@ export function registerOperationsRoutes(app) {
       // CV-3b: hide pre-construction-portal projects (is_preconstruction=true) — they exist to give
       // the client a portal during design, before the job is a live Ops project. Soft-degrades on a
       // pre-migration-199 DB (42703 → the column is absent → run the original unfiltered query).
-      const PROJ_COLS = "id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, jobs(id, won_at)";
+      // portal_enabled (mig 027) is read here so the Clients/Portal Admin list shows the real status.
+      const PROJ_COLS = "id, job_id, address, status, tentative_start_date, accepted_trades, buildexact_job_id, buildexact_link_source, created_at, schedule_baseline_locked_at, portal_enabled, jobs(id, won_at)";
       let { data: projects, error: pe } = await sb
         .from("projects")
         .select(`${PROJ_COLS}, is_preconstruction`)
@@ -40,6 +41,12 @@ export function registerOperationsRoutes(app) {
       if (pe) throw pe;
 
       const projectIds = (projects || []).map((p) => p.id);
+      // Portal v2 flag: a separate, tolerant read so a DB without the column still lists projects.
+      let v2ById = new Map();
+      if (projectIds.length) {
+        const { data: v2, error: v2e } = await sb.from("projects").select("id, portal_v2_enabled").in("id", projectIds);
+        if (!v2e) v2ById = new Map((v2 || []).map((r) => [r.id, r.portal_v2_enabled === true]));
+      }
       let tasks = [];
       if (projectIds.length) {
         const { data: td } = await sb
@@ -75,7 +82,7 @@ export function registerOperationsRoutes(app) {
 
         const health = overdue >= 4 ? "red" : overdue >= 1 ? "amber" : "green";
 
-        return { ...p, schedule: { total, done, overdue, overall, nextMilestone, activeTrades, health } };
+        return { ...p, portal_v2_enabled: v2ById.get(p.id) === true, schedule: { total, done, overdue, overall, nextMilestone, activeTrades, health } };
       });
 
       return res.json({ ok: true, projects: enriched });

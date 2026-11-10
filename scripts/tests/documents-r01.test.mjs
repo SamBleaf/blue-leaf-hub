@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { renderDocxTemplate } from "../../server/lib/docTemplates.mjs";
 import {
   buildClientBriefPayload, buildArchitectBriefPayload, buildSelectionsSchedulePayload, buildClientPresentationPayload,
-  validateFixture, SELECTION_STATUSES, ARCHITECT_ITEM_STATUSES, DOC_DEFS,
+  validateFixture, SELECTION_STATUSES, ARCHITECT_ITEM_STATUSES, DOC_DEFS, PRESENTATION_PENDING_LABEL,
 } from "../../server/lib/documents/documentPayloads.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,7 +84,7 @@ const cpItems = cp.AREAS.flatMap((a) => a.ITEMS);
 const cpShort = buildClientPresentationPayload(short); // no clientPresentation block in fixture
 ok("T11 client presentation: same selections regrouped into client areas; decisions filtered; palette optional",
   cp.AREAS.length >= 3 && cpItems.length === long.selections.length && cp.AREAS.every((a, i) => a.AREA_NUM === String(i + 1).padStart(2, "0")) &&
-  cp.HAS_PALETTE.length === 1 && cp.TILE1_AREA === "Exterior" && cp.DECISIONS.every((d) => d.REF_ID && d.ITEM && ["TBC", "Hold", "Design", "Undecided", "Preliminary"].includes(d.STATUS)) &&
+  cp.HAS_PALETTE.length === 1 && cp.TILE1_AREA === "Exterior" && cp.DECISIONS.every((d) => d.REF_ID && d.ITEM && [PRESENTATION_PENDING_LABEL, "Hold", "Design", "Undecided", "Preliminary"].includes(d.STATUS)) &&
   cpShort.HAS_PALETTE.length === 0 && cpShort.AREAS.length >= 1);
 
 // 12. Deliberate pagination flags (no fabricated geometry — just content-size signals the template reads).
@@ -104,6 +104,58 @@ for (const def of Object.values(DOC_DEFS)) {
   if (out && out.length > 5000) rendered++;
 }
 ok("T13 all five documents render through the existing renderDocxTemplate", rendered === 5 && Object.keys(DOC_DEFS).length === 5);
+
+// 14. Footer page numbers keep the footer style under LibreOffice (Tab 26 R05 retest): each PAGE/NUMPAGES
+//     field is four runs (begin · instruction · separate · end), every one 7.5pt grey like the "PAGE" label.
+{
+  const PizZip = (await import("pizzip")).default;
+  const { splitFooterFields } = await import("../documents/fix-footer-page-fields.mjs");
+  let good = 0;
+  for (const def of Object.values(DOC_DEFS)) {
+    const zip = new PizZip(fs.readFileSync(path.join(REPO, "public/templates", def.templateFile)));
+    const xml = Object.keys(zip.files).filter((n) => /^word\/footer\d*\.xml$/.test(n)).map((n) => zip.file(n).asText()).join("");
+    const runs = xml.match(/<w:r>(?:(?!<\/w:r>).)*<\/w:r>/g) || [];
+    const fieldRuns = runs.filter((r) => /<w:fldChar|<w:instrText/.test(r));
+    const oneRunField = runs.some((r) => /fldCharType="begin"/.test(r) && /fldCharType="end"/.test(r));
+    const styled = fieldRuns.length === 8 && fieldRuns.every((r) => r.includes('<w:sz w:val="15"/>') && r.includes('<w:color w:val="62737D"/>'));
+    const once = (xml.match(/> PAGE </g) || []).length === 1 && (xml.match(/> NUMPAGES </g) || []).length === 1;
+    if (!oneRunField && styled && once && splitFooterFields(xml).count === 0) good += 1;
+    else console.log(`    ${def.templateFile}: oneRunField=${oneRunField} styled=${styled} once=${once}`);
+  }
+  const sample = '<w:r><w:rPr><w:sz w:val="15"/></w:rPr><w:fldChar w:fldCharType="begin"/><w:instrText xml:space="preserve">PAGE</w:instrText><w:fldChar w:fldCharType="separate"/><w:fldChar w:fldCharType="end"/></w:r>';
+  const fixed = splitFooterFields(sample);
+  ok("T14 footer page numbers are split, styled fields in all five templates (and the fixer is idempotent)",
+    good === 5 && fixed.count === 1 && (fixed.xml.match(/<w:r>/g) || []).length === 4 && splitFooterFields(fixed.xml).count === 0);
+}
+
+// 15. The client presentation never prints "TBC": an undecided row says "Still to be decided" once, its item is the
+//     heading, and an unknown supplier leaves no dangling separator. The technical register keeps TBC (Tab 27 line 21).
+{
+  const tbcRow = { group: "Internal Finishes", itemId: "R005-1", category: "Bed 1 — Floor finish", where: "Bed 1", item: "Floor finish", product: "TBC", finish: "TBC", qty: "—", status: "TBC", responsibility: "TBC" };
+  const prefRow = { ...tbcRow, itemId: "R006-1", item: "Wall paint", category: "Bed 1 — Wall paint", finish: "Warm white", status: "Preferred" };
+  const namedRow = { ...tbcRow, itemId: "K005-1", group: "Joinery", item: "Benchtop", category: "Kitchen — Benchtop", where: "Kitchen", product: "Engineered stone", finish: "20 mm", status: "Proposed", responsibility: "Client · Routleys" };
+  const pfx = { ...reno, selections: [tbcRow, prefRow, namedRow] };
+  const pp = buildClientPresentationPayload(pfx);
+  const its = pp.AREAS.flatMap((a) => a.ITEMS);
+  const row = (id) => its.find((x) => x.REF_ID === id);
+  const words = JSON.stringify({ AREAS: pp.AREAS, DECISIONS: pp.DECISIONS });
+  const tbc = row("R005-1"), pref = row("R006-1"), named = row("K005-1");
+  const tech = buildSelectionsSchedulePayload(pfx);
+  ok("T15 client presentation: one 'Still to be decided' per undecided row, no TBC, no dangling separator; technical register keeps TBC",
+    !/"TBC"/.test(words) &&
+    tbc.STATUS === PRESENTATION_PENDING_LABEL && tbc.NAME === "Floor finish" && tbc.CAT === "Bed 1" && tbc.DESC === "" && tbc.SOURCE === "" && tbc.SEP === "" &&
+    (JSON.stringify(tbc).match(new RegExp(PRESENTATION_PENDING_LABEL, "g")) || []).length === 1 &&
+    pref.STATUS === "Preferred" && pref.NAME === "Wall paint" && pref.DESC === "Warm white" &&
+    named.NAME === "Engineered stone" && named.CAT === "Kitchen — Benchtop" && named.SEP === "   /   " && named.SOURCE === "Client · Routleys" &&
+    pp.DECISIONS.find((d) => d.REF_ID === "R005-1")?.OWNER === "—" && pp.DECISIONS.find((d) => d.REF_ID === "R005-1")?.STATUS === PRESENTATION_PENDING_LABEL &&
+    /TBC/.test(JSON.stringify(tech)) &&
+    /Still to be decided means/.test(pp.READ_BODY));
+  const tpl = fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_presentation.templateFile));
+  const PizZip = (await import("pizzip")).default;
+  const out = new PizZip(renderDocxTemplate(tpl, pp)).file("word/document.xml").asText().replace(/<[^>]+>/g, "");
+  ok("T15b it renders: no TBC, no leftover tag, the separator only where there's a supplier",
+    !/\bTBC\b/.test(out) && !/\{[#/]?[A-Z_]{2,}\}/.test(out) && (out.match(/ {3}\/ {3}/g) || []).length === 1 + (pp.SUBLINE.match(/ {3}\/ {3}/g) || []).length && out.includes("Still to be decided"));
+}
 
 console.log(`\nR01–R04 document tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

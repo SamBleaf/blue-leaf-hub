@@ -91,9 +91,14 @@ export default function ClientHome() {
       ) : null}
 
       {preConstruction ? (
-        <Card title="Your build starts soon">
+        <Card title="Before we start on site">
+          {home.nextMilestone ? (
+            <p className="mb-1.5 text-sm font-semibold text-ink" data-testid="client-next-milestone">
+              Next: {home.nextMilestone}{home.nextMilestoneEta ? ` · ${fmtDate(home.nextMilestoneEta)}` : ""}
+            </p>
+          ) : null}
           <p className="text-sm leading-relaxed text-muted">
-            We’re finalising approvals and pre-construction details. Updates and site photos will appear here as soon as work begins on site.
+            We’re working through the design, approvals and pre-construction details. Updates and site photos will appear here once work begins on site.
           </p>
           {home.comingUp?.length ? (
             <p className="mt-2 text-xs text-muted">You have {home.comingUp.length} selection{home.comingUp.length === 1 ? "" : "s"} to make before site start.</p>

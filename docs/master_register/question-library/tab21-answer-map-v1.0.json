@@ -5823,6 +5823,11 @@
    "family": "D",
    "short": "Floor, paint, trim & doors",
    "text": "Floor finish, general paint, feature wall, trim, doors and hardware.",
+   "whenCovered": {
+    "short": "Feature wall, trim & doors",
+    "text": "Feature wall, trim, doors and hardware. Floor finish and general paint are recorded in this room's Floor finish and Wall, ceiling & feature finish prompts.",
+    "approved": "Sam, 10 Nov 2026 (Tab 26 R05 retest follow-up): room-screen wording only; the library text, office table and documents are unchanged"
+   },
    "group": "ROOM-SPECIFIC: BEDROOM / WIR / STUDY / NURSERY",
    "section": "room",
    "libraryKind": "SELECTION",

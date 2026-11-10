@@ -246,13 +246,14 @@ export function registerPortalV2Routes(app) {
       // Milestone counts for progress.
       const { data: milestones } = await sb
         .from("portal_milestones")
-        .select("achieved_at, sort_order, label")
+        .select("achieved_at, sort_order, label, eta")
         .eq("project_id", projectId)
         .order("sort_order", { ascending: true });
       const msList = milestones || [];
       const achieved = msList.filter((m) => m.achieved_at).length;
       const progressPct = msList.length ? Math.round((achieved / msList.length) * 100) : 0;
       const nextMilestone = msList.find((m) => !m.achieved_at)?.label || null;
+      const nextMilestoneEta = msList.find((m) => !m.achieved_at)?.eta || null;   // its own date, not the current stage's
 
       // Pending action count.
       const { count: actionCount } = await sb
@@ -334,6 +335,7 @@ export function registerPortalV2Routes(app) {
             : null,
           progressPct,
           nextMilestone,
+          nextMilestoneEta,
           actionCount: actionCount || 0,
           nextAction: nextAction ? rowToCamel(nextAction) : null,
           latestUpdate: latestUpdate ? rowToCamel(latestUpdate) : null,

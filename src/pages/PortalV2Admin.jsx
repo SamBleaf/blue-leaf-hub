@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiFetch, apiPost, apiPatch } from "../lib/apiFetch.js";
+import { SELECTION_STAFF_STATUS_LABELS } from "../lib/constants.js";
 
 const BUILD_PHASES = [
   { v: "pre_construction", label: "Pre-Construction" },
@@ -72,7 +73,7 @@ export default function PortalV2Admin() {
       <UpdateSection projectId={projectId} onDone={flash} />
       <UpdatesListSection projectId={projectId} onDone={flash} />
       <MilestonesSection projectId={projectId} milestones={data?.milestones || []} onDone={(m) => { flash(m); load(); }} />
-      <SelectionsSection projectId={projectId} selections={data?.selections || []} onDone={(m) => { flash(m); load(); }} />
+      <SelectionsSection projectId={projectId} leadId={data?.project?.leadId || null} selections={data?.selections || []} onDone={(m) => { flash(m); load(); }} />
       <MeetingsSection projectId={projectId} meetings={data?.meetings || []} onDone={(m) => { flash(m); load(); }} />
       <DocumentsSection projectId={projectId} onDone={flash} />
       <RegisterContractSection projectId={projectId} onDone={flash} />
@@ -500,7 +501,7 @@ function MilestonesSection({ projectId, milestones, onDone }) {
   );
 }
 
-function SelectionsSection({ projectId, selections, onDone }) {
+function SelectionsSection({ projectId, leadId, selections, onDone }) {
   const [f, setF] = useState({ category: "", itemName: "", allowanceAmount: "", dueDate: "", optA: "", priceA: "", optB: "", priceB: "" });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const [busy, setBusy] = useState(false);
@@ -524,7 +525,14 @@ function SelectionsSection({ projectId, selections, onDone }) {
   return (
     <Section title="Selections">
       <ul className="mb-3 space-y-1 text-xs text-muted">
-        {selections.map((s) => <li key={s.id}>● {s.itemName} — {s.status}{s.dueDate ? ` · due ${s.dueDate}` : ""}</li>)}
+        {selections.map((s) => (
+          <li key={s.id} data-testid={`v2-selection-${s.id}`}>
+            ● {s.itemName} — {SELECTION_STAFF_STATUS_LABELS[s.status] || s.status}{s.dueDate ? ` · due ${s.dueDate}` : ""}
+            {leadId && (s.status === "in_review" || s.status === "changes_requested") && (
+              <Link to={`/sales/${leadId}`} className="ml-2 font-semibold text-primary hover:underline">Open the lead’s register →</Link>
+            )}
+          </li>
+        ))}
       </ul>
       <div className="grid gap-2 sm:grid-cols-2">
         <input value={f.category} onChange={set("category")} placeholder="Category (Kitchen)" className={inputCls} />

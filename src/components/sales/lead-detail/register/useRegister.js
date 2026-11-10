@@ -14,13 +14,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem, mergeBaseline } from "../../../../lib/register.js";
+import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
+// The three-way merge lives in registerMerge.js (shared with the recovery of unsaved edits, and unit-tested there).
+import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore } from "../../../../lib/registerMerge.js";
+import { saveRegisterDraft, loadRegisterDraft, clearRegisterDraft, rememberActor } from "../../../../lib/takeoffRecovery.js";
 
 const AUTOSAVE_MS = 1200;
-const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
-const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
-const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet", "defaultConfirmations"];
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const GUARD_REASONS = {
   issued_locked: "is on the client portal — withdraw it before deleting or re-classifying",
@@ -34,55 +33,15 @@ const GUARD_REASONS = {
   item_mismatch: "doesn't match the record it was opened from — reload and try again",
 };
 
-/** Three-way merge of one item. Returns { item, conflicts: [field] }. */
-function mergeItem(base, mine, theirs) {
-  if (!theirs) return { item: null, conflicts: [] };
-  if (!base) return { item: makeItem({ ...theirs, ...pickChanged(makeItem({}), mine), sync: theirs.sync }), conflicts: [] };
-  const out = { ...theirs };
-  const conflicts = [];
-  for (const f of ITEM_FIELDS) {
-    if (same(mine[f], base[f])) continue;                 // I didn't touch it → keep theirs
-    if (same(theirs[f], base[f]) || same(theirs[f], mine[f])) out[f] = mine[f];
-    else conflicts.push(f);                               // both changed → theirs wins, tell the user
-  }
-  return { item: makeItem({ ...out, sync: theirs.sync }), conflicts };
-}
-function pickChanged(blank, mine) {
-  const out = {};
-  for (const f of ITEM_FIELDS) if (!same(mine[f], blank[f])) out[f] = mine[f];
-  return out;
-}
-function mergeMeta(base, mine, theirs, onBaselineConflict) {
-  const out = { ...theirs };
-  for (const f of META_FIELDS) if (!same(mine[f], base[f]) && (same(theirs[f], base[f]))) out[f] = mine[f];
-  // The guide holds eleven separate values. Merged whole, one person's Roof would silently drop another's Walls.
-  const guide = mergeBaseline(base.baseline, mine.baseline, theirs.baseline);
-  out.baseline = guide.baseline;
-  if (guide.conflicts.length) onBaselineConflict?.(guide.conflicts);
-  const baseRooms = new Map((base.rooms || []).map((r) => [r.id, r]));
-  const theirRooms = new Map((theirs.rooms || []).map((r) => [r.id, r]));
-  const rooms = [];
-  for (const r of mine.rooms || []) {
-    const b = baseRooms.get(r.id), t = theirRooms.get(r.id);
-    if (!b) { rooms.push(r); continue; }                  // added by me
-    if (!t) continue;                                     // deleted elsewhere
-    const m = { ...t };
-    for (const f of ROOM_FIELDS) if (!same(r[f], b[f]) && same(t[f], b[f])) m[f] = r[f];
-    rooms.push(m);
-  }
-  for (const t of theirs.rooms || []) {                   // added elsewhere, or I never had it
-    if (!rooms.some((r) => r.id === t.id) && !(baseRooms.has(t.id) && !(mine.rooms || []).some((r) => r.id === t.id))) rooms.push(t);
-  }
-  out.rooms = rooms.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  return emptyMeta({ ...out, rev: theirs.rev });
-}
-
-export function useRegister(leadId, { enabled = true } = {}) {
+export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const [status, setStatus] = useState({ loading: true, error: null });
   const [info, setInfo] = useState({ mode: null, projectId: null, isPreconstruction: true, promotion: null, pendingPromotion: false, schemaReady: true });
   const [reg, setReg] = useState(null);
   const [save, setSave] = useState({ state: "idle", at: null, message: null });
   const [notices, setNotices] = useState([]);
+  // Unsaved edits from an earlier visit on this device, offered back (never applied by themselves).
+  const [recovery, setRecovery] = useState(null);
+  const recoveryRef = useRef(null);
 
   const regRef = useRef(null);
   const baseRef = useRef({ meta: null, items: new Map() });
@@ -108,6 +67,18 @@ export function useRegister(leadId, { enabled = true } = {}) {
     return { meta, items };
   }, []);
 
+  // Keep what's unsaved on this device as it's typed (Tab 26 R05 retest): a reload, a closed tab or an iPad
+  // dropping the page can't lose it. An offer not yet answered is kept alongside until Restore or Discard.
+  const persistDraft = useCallback(() => {
+    if (!actorKey) return;
+    const now = registerDraftOf({ reg: regRef.current, baseMeta: baseRef.current.meta, baseItems: baseRef.current.items,
+      dirtyIds: dirty.current.keys(), metaDirty: metaSeq.current !== metaSaved.current });
+    const offered = recoveryRef.current?.draft;
+    // Restore replays the earlier draft first, then this visit's edits on top (planRegisterRestore).
+    const draft = offered ? (draftIsEmpty(now) ? offered : { ...now, earlier: offered }) : now;
+    saveRegisterDraft({ actorKey, leadId, draft });
+  }, [actorKey, leadId]);
+
   const load = useCallback(async () => {
     setStatus((s) => ({ ...s, loading: true }));
     const r = await apiFetch(`/api/register/leads/${leadId}`);
@@ -122,8 +93,20 @@ export function useRegister(leadId, { enabled = true } = {}) {
     regRef.current = next; setReg(next);
     setStatus({ loading: false, error: null });
     setSave({ state: "idle", at: null, message: null });
+    if (actorKey) {
+      rememberActor(actorKey);   // so signing out clears this device's drafts
+      const { record } = await loadRegisterDraft(actorKey, leadId);
+      if (mounted.current && record && !draftIsEmpty(record.draft)) {
+        const plan = planRegisterRestore(record.draft, next, itemTitle);
+        if (plan.nothingToRestore && !plan.removed.length) { clearRegisterDraft(actorKey, leadId); recoveryRef.current = null; setRecovery(null); }
+        else {
+          recoveryRef.current = record;
+          setRecovery({ savedAt: record.savedAt, count: plan.touchedIds.length + (plan.metaTouched ? 1 : 0), conflicts: plan.conflicts.length, removed: plan.removed.length });
+        }
+      }
+    }
     return r.data;
-  }, [leadId, adopt]);
+  }, [leadId, adopt, actorKey]);
 
   // Load only when the register is actually on screen (the lead page renders its panels in both the desktop
   // and the CSS-hidden mobile layout — the hidden copy must not hold a second, stale register).
@@ -141,8 +124,9 @@ export function useRegister(leadId, { enabled = true } = {}) {
     regRef.current = next; setReg(next);
     for (const id of touchedIds) { dirty.current.set(id, ++seq.current); refused.current.delete(id); }
     if (metaTouched) metaSeq.current += 1;
+    persistDraft();
     schedule();
-  }, [schedule]);
+  }, [schedule, persistDraft]);
 
   const updateItem = useCallback((id, partial) => {
     const cur = regRef.current; if (!cur) return;
@@ -194,7 +178,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
   // over the rejection/conflict — flush() restores this latched badge instead. Cleared on the next user edit.
   const outcome = useRef(null);
   const flushRef = useRef(async () => {});
-  const flush = useCallback(async () => {
+  const flush = useCallback(async ({ keepalive = false } = {}) => {
     clearTimeout(timer.current);
     const cur = regRef.current;
     if (!cur) return true;
@@ -211,7 +195,8 @@ export function useRegister(leadId, { enabled = true } = {}) {
     const body = { changes, deletes };
     if (metaDirty) body.meta = { ...cur.meta, rev: baseRef.current.meta?.rev ?? cur.meta.rev };
 
-    const r = await apiPut(`/api/register/leads/${leadId}`, body);
+    // keepalive lets the browser finish the save as the page goes, but refuses bodies over 64 KB — so only small ones.
+    const r = await apiPut(`/api/register/leads/${leadId}`, body, keepalive && JSON.stringify(body).length < 60000 ? { keepalive: true } : undefined);
     saving.current = false;
     if (!mounted.current) return false;
 
@@ -234,6 +219,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
       const meta = metaChangedInFlight ? emptyMeta({ ...local.meta, rev: server.meta.rev }) : server.meta;
       const next = { meta, items };
       regRef.current = next; setReg(next);
+      persistDraft();   // clears the device copy once everything is saved; otherwise keeps what's left
       const stillDirty = dirty.current.size || deleted.current.size || metaChangedInFlight;
       if (stillDirty) {
         setSave({ state: "dirty", at: null, message: null });
@@ -259,7 +245,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
     timer.current = setTimeout(() => { flushRef.current(); }, 5000);   // offline / network: retry
     return false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, adopt, schedule]);
+  }, [leadId, adopt, schedule, persistDraft]);
   flushRef.current = flush;
 
   // Fully persist before a document action (preview / issue / pack). Awaits any in-flight autosave, then
@@ -321,6 +307,7 @@ export function useRegister(leadId, { enabled = true } = {}) {
       : server.meta;
     const next = { meta, items: out.filter(Boolean) };
     regRef.current = next; setReg(next);
+    persistDraft();   // a refused change is never kept for later
     if (code === "MODE_CHANGED") notes.unshift("This brief has moved onto the project record — your unsaved changes were kept and saved there.");
     if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
     const anything = dirty.current.size || deleted.current.size || metaSeq.current !== metaSaved.current;
@@ -346,14 +333,34 @@ export function useRegister(leadId, { enabled = true } = {}) {
     }
   }
 
-  // Warn before leaving with unsaved work; flush when the tab is hidden.
+  // Warn before leaving with unsaved work; flush when the tab is hidden or the page goes. The page-exit save asks the
+  // browser to finish it (keepalive) — best effort; the device draft above is what makes it safe.
   useEffect(() => {
     const onBefore = (e) => { if (dirty.current.size || deleted.current.size || saving.current || metaSeq.current !== metaSaved.current) { e.preventDefault(); e.returnValue = ""; } };
     const onHide = () => { if (document.visibilityState === "hidden") flushRef.current(); };
+    const onPageHide = () => flushRef.current({ keepalive: true });
     window.addEventListener("beforeunload", onBefore);
     document.addEventListener("visibilitychange", onHide);
-    return () => { window.removeEventListener("beforeunload", onBefore); document.removeEventListener("visibilitychange", onHide); };
+    window.addEventListener("pagehide", onPageHide);
+    return () => { window.removeEventListener("beforeunload", onBefore); document.removeEventListener("visibilitychange", onHide); window.removeEventListener("pagehide", onPageHide); };
   }, []);
+
+  // Restore / Discard the offered draft. Restore merges it onto what's on screen now and saves it the normal way,
+  // so the server's version checks and guards still decide; anything changed elsewhere keeps the latest value.
+  const restoreDraft = useCallback(() => {
+    const record = recoveryRef.current;
+    recoveryRef.current = null; setRecovery(null);
+    if (!record || !regRef.current) return;
+    const plan = planRegisterRestore(record.draft, regRef.current, itemTitle);
+    const notes = [...plan.conflicts, ...plan.removed.map((t) => `“${t}” was removed elsewhere, so it wasn't restored.`)];
+    if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
+    if (plan.nothingToRestore) { persistDraft(); return; }
+    commit(plan.reg, plan.touchedIds, plan.metaTouched);
+  }, [commit, persistDraft]);
+  const discardDraft = useCallback(() => {
+    recoveryRef.current = null; setRecovery(null);
+    persistDraft();
+  }, [persistDraft]);
 
   // Portal actions (issue / withdraw / return) — explicit, never autosaved.
   const portal = useCallback(async (action, items, note) => {
@@ -366,14 +373,16 @@ export function useRegister(leadId, { enabled = true } = {}) {
     const next = adopt(r.data);
     dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
+    persistDraft();
     return { ok: true, held: r.data?.held || [] };
-  }, [leadId, adopt]);
+  }, [leadId, adopt, persistDraft]);
 
   /** How one item's own save went. A refusal on another item says nothing about this one. */
   const saveStateOf = (id) => refused.current.get(id) || (dirty.current.has(id) ? (save.state === "error" ? "error" : "dirty") : "saved");
 
   return {
     loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices, saveStateOf,
+    recovery, restoreDraft, discardDraft,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
     reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
   };

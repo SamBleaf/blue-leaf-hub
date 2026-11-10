@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-08-30
+sop_version: 1.2
+last_reviewed: 2026-11-10
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Supervisor
@@ -91,8 +91,8 @@ You need:
 
 ### C. Handle a changed document (re-issue)
 
-11. If an already Received/Issued document changes (for example the footing class or glazing is revised), click the **changed?** link on that document. Every downstream document that was already done is flagged **⟳ re-issue required**, so nobody presents stale information.
-12. When a flagged document has been re-done, click its status pill to advance it — that clears its own **re-issue** flag.
+11. If an already Received/Issued document changes (for example the footing class or glazing is revised), type its new revision under **Details** first, then click the **changed?** link on that document. Every downstream document that has arrived is flagged for re-issue, so nobody presents stale information. Its status pill turns red and reads **Re-issue**, and the warning beside it says what caused it and that document's revision as it stands now, for example **⟳ re-issue required: Structural drawings changed (now Rev C)**. If two upstream documents changed, both are named.
+12. When a flagged document has been re-done, click its red **Re-issue** pill to advance it. That clears the flag and its cause. (Hover over the pill to see the status underneath, for example "In the set, flagged for re-issue".)
 
 ### D. Lodge Planning Consent (PlanSA)
 
@@ -160,7 +160,8 @@ A document that has only been received isn't ready. Move it on by tapping its st
 | A document shows **⏳ waiting** forever | The upstream document is on the roster but never advanced to Received/Issued | Advance the upstream document's status pill; the waiting note clears once it reads Received or Issued. |
 | Advanced to Tender but a warning listed missing items | The advisory Tender gate flagged a missing exit signal | This is expected and logged as a gate bypass; go back, complete the missing signal (docs / proposal / F&F / site address / job), and it clears. |
 | "Ready for tender" never fully ticks | One roster row still has a Pending/Requested document, or no Fixed-Price proposal exists | Advance every document to Received/Issued and generate the proposal. |
-| **⟳ re-issue required** won't clear | The flagged document hasn't been re-advanced | Click the flagged document's status pill to advance it — that clears its own re-issue flag. |
+| **⟳ re-issue required** won't clear | The flagged document hasn't been re-advanced | Click the flagged document's red **Re-issue** pill to advance it — that clears its own re-issue flag and its cause. |
+| The warning says only "re-issue required", with no cause | The flag was set before 10 Nov 2026, when causes weren't recorded | Check which upstream document changed, then clear it as usual. New flags always name their cause. |
 
 ---
 
@@ -363,5 +364,24 @@ Expected UI / response:
 
 Expected DB record:
 - Table `lead_activities` has a new row for the lead: `activity_type = "stage_change"`, `summary = "Moved from consultants to tender"`, and `detail` begins with `"Gate bypass — missing: "` followed by the missing signal labels.
+
+- [ ] Pass  [ ] Fail
+
+---
+
+**TC-08 — Feature-specific: a re-issue says what caused it (Tab 26 R05 retest)**
+
+Steps:
+1. On a test lead at Consultants, add a **Structural engineer**. Set **Structural drawings** to In the set with revision **B**, and **Engineer's certificate** to In the set with revision **A**.
+2. Click **changed?** on Structural drawings.
+
+Expected UI:
+- The Engineer's certificate pill turns red and reads **Re-issue** (not "In the set"). Structural drawings still reads **In the set**.
+- The warning reads **⟳ re-issue required: Structural drawings changed (now Rev B)**. Change Structural drawings' revision to C under Details: it reads **(now Rev C)**.
+- The summary drops from 2 ready to 1 ready, with 1 re-issue.
+- Clicking the red pill advances the certificate to Issued and removes the warning; the summary is back to 2 ready.
+
+Expected DB record:
+- In `leads.consultant_roster`, the certificate deliverable has `reissue: true` and `reissueFrom: [{ key: "structural_drawings", revision: "B", at: <timestamp> }]` after step 2, and `reissue: false`, `reissueFrom: null`, `status: "issued"` after the click.
 
 - [ ] Pass  [ ] Fail

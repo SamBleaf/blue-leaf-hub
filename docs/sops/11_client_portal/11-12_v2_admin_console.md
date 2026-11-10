@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-21
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -52,6 +52,8 @@ Lets the builder configure and feed the client's portal without touching the dat
 11. Open **Selections** → **Add selection**
 12. Enter the selection title/category and its options (the basic form supports two options A/B, each with cost and lead-time impact)
 13. Save — this creates the selection and a client action
+    - The list above the form shows each selection's status in plain words: **With client**, **Client responded: review in the register**, **Client asked for a change**, **Approved**. When the client has responded, **Open the lead's register →** takes you to the lead, where you approve or return it.
+    - The **Client portal** list (`/portal-admin`) shows **Portal v2 enabled**, **Portal enabled (legacy)** or **Portal not set up** for each live project, and opens the v2 console for v2 projects. Pre-construction portals aren't in that list; open them from the lead's Consultants card.
 
 ### Meetings
 14. Open **Meetings** → **Add meeting**
@@ -190,6 +192,12 @@ Next review date: 2026-12-21
 1. Publish a weekly update from the console
 2. Check: the update appears on the client's Home/Journey
 3. Expected result: **no** client notification email or in-app notification fires (`notification_sent_at` remains unset, `portal_notifications` has no new row) — document this confirmed gap
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Plain statuses and the way back to the register (Tab 26 R05 retest)**
+1. On a v2 project whose lead has a client response waiting, open the console's **Selections** list.
+2. Expected UI: no raw codes like `in_review`; the response reads **Client responded: review in the register** with **Open the lead's register →** linking to `/sales/<lead id>`. Approved items have no link.
+3. Open **Client portal** (`/portal-admin`). Expected UI: a live v2 project reads **Portal v2 enabled** (not "Portal not set up") and clicking it opens `/portal-admin/<id>/v2`. Expected API: `GET /api/operations/projects` rows carry `portal_enabled` and `portal_v2_enabled`.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

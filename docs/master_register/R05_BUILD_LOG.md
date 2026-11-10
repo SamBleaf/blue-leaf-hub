@@ -805,3 +805,33 @@ ChatGPT tested the build through the ngrok staging link. Each finding was reprod
 | BROWSER | Production-build check, SP/staging/verify-prod.mjs | Pass |
 | BROWSER | Playwright walkthrough at 1440 and 375 | 28 of 28 |
 | PRODUCTION | Not available | Not verified |
+
+## Tab 26 retest follow-ups (2026-11-10)
+
+ChatGPT retested commit `3508676` (Master Register doc, Tab 26, "R05 independent staging retest"). Every R05 audit fix it could reach was confirmed. No P0. Its follow-ups were checked against the code by a read-only review, and Sam approved the brief the same day, with one change: **an admin may give a client early portal access during the pilot**.
+
+| Tab 26 item | Cause found | Change | Evidence |
+|---|---|---|---|
+| P1 portal card says "Bring the client into the portal now" | Card copy contradicted its own footnote. Nothing on the server stops an early invite (`/api/auth/invite` checks admin only) | Copy: setting up doesn't invite; inviting is a deliberate admin step, early (approved for the pilot) or after the contract. The link went to the legacy page, which has no invite control; it now opens the v2 console. SOP 02-27 | AUTOMATED (render), BROWSER (sandbox-sales-pathway unchanged) |
+| P2 D-003 title and help still say floor and paint | The R05 fix filtered buttons only | `whenCovered` wording in the answer map (approved room-screen wording; library text, office table and documents unchanged), passed through by the generator with a guard, chosen by `promptWording` with the same rule as the buttons | AUTOMATED, BROWSER |
+| P2 green "In the set" beside red re-issue | Pill ignored the flag; the cause was never recorded | Red **Re-issue** pill; the flag stores `reissueFrom` (changed document, revision, time) inside the roster JSON, no migration; the warning names the document and its revision now. `flagReissue` moved to `stageGates.js` and unit-tested | AUTOMATED, BROWSER, DB |
+| P2 footer "PAGE /" | The docx library writes each page field as one run; LibreOffice drops that run's style, so the numbers print at 10.5pt ink beside a 7.5pt grey label. Same in all five templates | `fix-footer-page-fields.mjs` splits each field into four styled runs; `author-templates.mjs` runs it too. Verified under LibreOffice: "PAGE 1 / 2" in one style | AUTOMATED (T14), real PDF |
+| P2 repeated TBC in the client presentation | Rows pass "TBC" through four fields | One **Still to be decided** per undecided row, the item as heading, no stray separator (`{SEP}`), a line in the reading key. Technical register keeps TBC | AUTOMATED (T15, T15b) |
+| Usability: unsaved edit lost on reload | The leave warning existed and was armed (the test browser likely suppressed it), but the exit save can't survive unload and nothing was kept on the device | Unsaved register edits kept in the device recovery store (same store, actor scoping, 7-day expiry and logout purge as Takeoff), offered back with **Restore** / **Discard**, merged onto the current server copy through the normal save. Pagehide save with keepalive when small. The register's three-way merge moved unchanged to `registerMerge.js` | AUTOMATED, BROWSER (reload test), DB |
+
+**Older Tab 26 items still open, now done.** Documents list said "Issued … to" (now **Recorded … for … not emailed**). The Clients portal list always said "Portal not set up": `/api/operations/projects` never selected the portal columns. Portal Admin showed raw `in_review` (plain labels, link to the lead). Client portal: **Confirmed by Blue Leaf** instead of "Chosen: —", **Change my choice** while in review (the server already allowed it), **Price to be confirmed**, a preference line, no "No allowance set", Home names the next milestone with its own date. Architect brief marks client-approved requirements still awaiting a technical check. A browser test now injects a failed save into Save & Next.
+
+**Not done.** R05-08b schedule headings on page 2 (owner's call, unchanged). An options editor for an existing register selection (deferred). The welcome email's next milestone is editable copy in Settings, not code. Client login on the public link, client logout, baseline edits and 390 px were not tested by ChatGPT.
+
+**Independent review.** A four-area read-only review with a skeptic per area found six real low-severity issues, all fixed before commit: the hidden-tab save used keepalive (refused over 64 KB; now pagehide only, small bodies only); an unanswered offer was dropped when the same item was edited again (both are now kept and replayed in order); **Change my choice** could stay open after staff approval; Home could pair the next milestone with another milestone's date (server now returns `nextMilestoneEta`); the re-issue warning named the revision at click time; the new portal test couldn't delete its project (now uses `admin_delete_projects`). Four other findings were refuted.
+
+**Found by the suite.** One full run failed in `sandbox-register-structured`: a client brief refused to issue with "Unresolved placeholder … W014-XXX". An item's short reference is a 3-character hash of its id, and about 1 id in 23,000 hashes to `XXX` or `TBD`, which the issue check reads as placeholder text, so a document holding that item could never be issued. This predates R05 (R03 `1a88109`). `refCode` now steps the hash for those ids only; every other reference is unchanged (checked over 200,000 ids in `register-documents-structured`).
+
+**Environment note.** The Playwright browser cache in `~/Library/Caches/ms-playwright` was empty; the bundled browsers are in the repo's `playwright-core`, so suites need `PLAYWRIGHT_BROWSERS_PATH=0` (the scratch runner now sets it).
+
+| Level | What | Result |
+|---|---|---|
+| AUTOMATED, BROWSER, DB | `bash SP/run-tests.sh all` (adds `register-draft-recovery`, `sandbox-client-portal`) | 39 suites, 2,604 checks, 0 failing |
+| BROWSER | Playwright walkthrough at 1440 and 375 | 28 of 28 (run before the `refCode` fix) |
+| BROWSER, real PDF | Footer before and after under LibreOffice 26.8 | Numbers now match the 7.5pt grey label |
+| PRODUCTION | Not available | Not verified |

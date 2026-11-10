@@ -245,8 +245,33 @@ async function main() {
   await rp.getByText(/re-issue required/).first().waitFor({ timeout: 8000 });
   check("the dependent document is flagged and stops counting", (await rp.getByText(/1 ready/).count()) > 0);
   await rp.waitForTimeout(800);
-  check("the flag is saved (DB)", (await lead(ri)).consultant_roster[0].deliverables.find((d) => d.key === "engineer_certificate").reissue === true);
+  const cert = (await lead(ri)).consultant_roster[0].deliverables.find((d) => d.key === "engineer_certificate");
+  check("the flag is saved (DB)", cert.reissue === true);
+  check("the flag records what caused it (DB)", cert.reissueFrom?.[0]?.key === "structural_drawings" && cert.reissueFrom[0].revision === "B" && !!cert.reissueFrom[0].at, JSON.stringify(cert));
+  const certPill = await by(rp, "deliverable-status-engineer_certificate").innerText();
+  check("the flagged document's pill says Re-issue, not In the set (Tab 26 retest)", certPill.trim() === "Re-issue", certPill);
+  check("the changed document keeps its own status", (await by(rp, "deliverable-status-structural_drawings").innerText()).trim() === "In the set");
+  const why = await by(rp, "deliverable-reissue-engineer_certificate").innerText();
+  check("the warning names the change that caused it", /re-issue required: Structural drawings changed \(now Rev B\)/.test(why), why);
+  await by(rp, "deliverable-detail-structural_drawings").click();
+  await by(rp, "deliverable-revision-structural_drawings").fill("C");
+  await rp.waitForTimeout(400);
+  check("typing the new revision after pressing changed? updates the warning (review fix)", /Structural drawings changed \(now Rev C\)/.test(await by(rp, "deliverable-reissue-engineer_certificate").innerText()));
+  await by(rp, "deliverable-status-engineer_certificate").click();
+  await rp.getByText(/2 ready/).first().waitFor({ timeout: 8000 });
+  await rp.waitForTimeout(800);
+  const cleared = (await lead(ri)).consultant_roster[0].deliverables.find((d) => d.key === "engineer_certificate");
+  check("clicking it once re-done clears the flag and its cause (DB)", cleared.reissue === false && cleared.reissueFrom == null && cleared.status === "issued", JSON.stringify(cleared));
   await rp.context().close();
+
+  section("An older re-issue flag with no recorded cause still reads correctly");
+  const ro = await mkLead("consultants", { ...QUALIFIED, concept_agreement_status: "accepted", consultant_roster: [{ role: "engineer", contactId: "", deliverables: [{ key: "structural_drawings", status: "included", revision: "B" }, { key: "engineer_certificate", status: "included", revision: "A", reissue: true }] }] });
+  const op = await newPage({ viewport: { width: 1440, height: 1000 } });
+  await open(op, ro);
+  await by(op, "deliverable-reissue-engineer_certificate").waitFor({ timeout: 45000 });
+  check("the pill says Re-issue", (await by(op, "deliverable-status-engineer_certificate").innerText()).trim() === "Re-issue");
+  check("the warning falls back to the plain wording", (await by(op, "deliverable-reissue-engineer_certificate").innerText()).trim() === "⟳ re-issue required");
+  await op.context().close();
 
   section("Job warning says what is actually wrong (audit R05-04)");
   const jm = await mkLead("consultants", { ...QUALIFIED, concept_agreement_status: "accepted", ptsa_status: "signed" });

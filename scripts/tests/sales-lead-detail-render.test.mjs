@@ -32,6 +32,7 @@ import QualifyActions from ${C("QualifyActions")};
 import DiscoveryActions from ${C("DiscoveryActions")};
 import LeadDetailHeader from ${C("LeadDetailHeader")};
 import LeadStageSection from ${C("LeadStageSection")};
+import PreconstructionPortalCard from ${C("PreconstructionPortalCard")};
 const noop = () => {};
 export const advance = (p) => r(<LeadStageAdvance onAdvance={noop} {...p} />);
 export const enquiry = (lead) => r(<EnquiryCallScript lead={lead} patch={noop} scorecard={null} />);
@@ -44,6 +45,7 @@ export const qualify = (lead) => r(<QualifyActions lead={lead} patch={noop} relo
 export const discovery = (lead) => r(<DiscoveryActions lead={lead} reload={noop} />);
 export const header = (primaryAction) => r(<LeadDetailHeader breadcrumb={null} stepper={null} keyFacts={null} secondaryActions={null} primaryAction={primaryAction} />);
 export const section = () => r(<LeadStageSection title="Notes"><p>inside</p></LeadStageSection>);
+export const portalCard = () => r(<PreconstructionPortalCard lead={{ id: "l1" }} />);
 `);
 
 await build({
@@ -204,6 +206,14 @@ try {
   });
   t("the rail is narrower", () => assert.match(read(`${dirPath}/LeadCommandCentreLayout.jsx`), /_300px\]/));
   t("Blueprint no longer calls the AI on every page load", () => assert.match(page, /if \(lead && bpWanted\) fetchBlueprintInsight\(lead\)/));
+
+  console.log("\n▸ The client portal card (Tab 26 R05 retest P1)");
+  const portalCardHtml = v.portalCard();
+  const cardSrc = read(`${dirPath}/PreconstructionPortalCard.jsx`);
+  t("it no longer tells staff to bring the client in now", () => { assert.doesNotMatch(portalCardHtml, /into the portal now/i); assert.doesNotMatch(cardSrc, /Bring the client into the portal/); });
+  t("it says setting up doesn't invite the client", () => assert.match(portalCardHtml, /doesn.t invite the client/));
+  t("inviting is a deliberate admin step, early or after the contract", () => assert.match(cardSrc, /deliberate admin step in Portal Admin\. It can happen early, during design, or once the building contract is signed\. Invitations are never sent automatically\./));
+  t("its link opens the v2 console, where the invite control is", () => { assert.match(cardSrc, /to=\{`\/portal-admin\/\$\{project\.id\}\/v2`\}/); assert.doesNotMatch(cardSrc, /to=\{`\/portal-admin\/\$\{project\.id\}`\}/); });
 } finally {
   rmSync(dir, { recursive: true, force: true });
   rmSync(out, { force: true });

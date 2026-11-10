@@ -143,6 +143,8 @@ async function main() {
   check("the ceiling reads as different here", /Different here/.test(ceilingLine));
   check("it shows what the room actually has, with the default underneath (audit R05-07)", /Cornice/.test(ceilingLine.split("Whole house:")[0]) && /Whole house:[^]*Square set/.test(ceilingLine), ceilingLine);
   check("floor and paint aren't offered again on the bedroom's finishes (audit R05-06)", (await by(p, "choice-D-003-floor_finish").count()) === 0 && (await by(p, "choice-D-003-general_paint").count()) === 0 && (await by(p, "choice-D-003-trim").count()) === 1);
+  const d003 = await by(p, "prompt-D-003").innerText();
+  check("its heading and help match the buttons that are left (Tab 26 retest)", /Feature wall, trim & doors/.test(d003) && !/Floor, paint, trim & doors/.test(d003) && !/^Floor finish, general paint/m.test(d003), d003.slice(0, 300));
   await pickRoom(p, rooms.bed2);
   await by(p, "room-default-R-006-ceiling").waitFor();
   check("the next bedroom still reads the whole-house ceiling", /Square set/.test(await by(p, "room-default-R-006-ceiling").innerText()) && /To confirm/.test(await by(p, "room-default-R-006-ceiling").innerText()));
@@ -282,6 +284,47 @@ async function main() {
   await m.screenshot({ path: join(EVIDENCE, "site-existing-375.png"), fullPage: false });
   await m.context().close();
 
+  section("Save & Next when the save fails (Tab 26 review action)");
+  await by(p, "step-rooms").click();
+  await pickRoom(p, rooms.bed2);
+  await by(p, "choice-D-003-trim").waitFor({ timeout: 15000 });
+  await settle(p).catch(() => {});
+  const failSave = (status, body) => (route) => (route.request().method() === "PUT" ? route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }) : route.continue());
+  await p.route("**/api/register/leads/*", failSave(500, { ok: false, error: "Injected save failure" }));
+  await by(p, "choice-D-003-trim").click();
+  await by(p, "save-next-room").click();
+  await by(p, "register-save-state").filter({ hasText: /Injected save failure/ }).waitFor({ timeout: 10000 }).catch(() => {});
+  const badgeAfterFail = await by(p, "register-save-state").innerText().catch(() => "");
+  check("a failed save keeps you on the same room", (await by(p, "room-picker").inputValue()) === rooms.bed2.id);
+  check("the badge says it failed, not Saved", /Injected save failure/.test(badgeAfterFail) && !/^Saved/.test(badgeAfterFail), badgeAfterFail);
+  check("the edit is still on screen", await pressed(by(p, "choice-D-003-trim")));
+  check("nothing was written (DB)", !(await getReg(id)).items.some((i) => i.roomId === rooms.bed2.id && i.promptKey === "D-003" && live(i).some((x) => x.optionId === "trim")));
+  await p.unroute("**/api/register/leads/*");
+  await by(p, "save-next-room").click();
+  await p.waitForFunction((want) => document.querySelector('[data-testid="room-picker"]')?.value === want, rooms.laundry.id, { timeout: 15000 }).catch(() => {});
+  check("once saving works, Save & Next moves on", (await by(p, "room-picker").inputValue()) === rooms.laundry.id);
+  check("and the edit was saved (DB)", (await getReg(id)).items.some((i) => i.roomId === rooms.bed2.id && i.promptKey === "D-003" && live(i).some((x) => x.optionId === "trim")));
+
+  section("Unsaved edits come back after a reload (Tab 26 retest)");
+  await pickRoom(p, rooms.bed2);
+  await by(p, "choice-D-003-doors_and_hardware").waitFor({ timeout: 15000 });
+  await settle(p).catch(() => {});
+  await p.route("**/api/register/leads/*", failSave(500, { ok: false, error: "Injected save failure" }));
+  await by(p, "choice-D-003-doors_and_hardware").click();
+  await p.waitForTimeout(600);   // the device copy is written as the edit is made (saves are still failing)
+  p.on("dialog", (d) => d.accept().catch(() => {}));   // the leave warning, if the browser shows it
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await by(p, "register-workshop").first().waitFor({ timeout: 45000 });
+  const offerShown = await by(p, "register-recovery").waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
+  check("the reloaded page offers the unsaved change back", offerShown);
+  check("nothing was applied by itself (DB)", !(await getReg(id)).items.some((i) => i.roomId === rooms.bed2.id && i.promptKey === "D-003" && live(i).some((x) => x.optionId === "doors_and_hardware")));
+  await p.unroute("**/api/register/leads/*");
+  if (offerShown) {
+    await by(p, "register-recovery-restore").click();
+    await p.waitForTimeout(2500);
+    check("Restore saves it the normal way (DB)", (await getReg(id)).items.some((i) => i.roomId === rooms.bed2.id && i.promptKey === "D-003" && live(i).some((x) => x.optionId === "doors_and_hardware")));
+    check("the offer goes once it's restored", (await by(p, "register-recovery").count()) === 0);
+  }
   await p.context().close();
   check("no page errors", pageErrors.length === 0, pageErrors.join(" | "));
 }

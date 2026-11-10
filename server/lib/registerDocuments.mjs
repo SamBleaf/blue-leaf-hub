@@ -100,6 +100,7 @@ export function selectionRows(register, { coord } = {}) {
       itemId: refCode(i),
       group: SCHEDULE_GROUPS.has(group) ? group : "Internal Finishes",
       category: `${roomLabel(register, i)} — ${itemShort(i)}${sourceTag(i)}`,
+      where: `${roomLabel(register, i)}${sourceTag(i)}`, item: itemShort(i),   // split, for the client presentation
       product: productWords(register, i) || "TBC",
       finish: clean(i.colour) || "TBC",
       qty: i.quantity != null ? clean(`${i.quantity} ${i.unit || ""}`) : "—",            // never a fake zero
@@ -212,7 +213,9 @@ function architectBriefFixture(input) {
   fx.architectBrief = {
     actionsIntro: "The following are the decisions most likely to delay the next coordinated drawing issue. Reference IDs match the design register below and the project register.",
     actions,
-    confirmedReqs: items.filter((i) => i.itemKind === "requirement" && i.certainty === "client_approved" && approvalIsEvidenced(i) && said(i)).map((i) => `${area(i)}: ${said(i)}`),
+    // Client-approved isn't technically verified (Tab 26 DOC-02): say so while the technical check is open.
+    confirmedReqs: items.filter((i) => i.itemKind === "requirement" && i.certainty === "client_approved" && approvalIsEvidenced(i) && said(i))
+      .map((i) => `${area(i)}: ${said(i)}${i.technicalStatus === "needs_verification" ? " (technical check pending)" : ""}`),
     clientPrefs: items.filter((i) => isClientSelection(i) && ["preference", "proposed"].includes(i.certainty) && (said(i) || i.product)).slice(0, 10).map((i) => `${area(i)} ${itemShort(i).toLowerCase()}: ${clean(i.description || i.product) || said(i)}`),
     scheduleItems: register_,
     references: [register.meta.planRev ? `Current drawing basis: ${register.meta.planRev}` : null,

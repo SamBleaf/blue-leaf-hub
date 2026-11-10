@@ -417,6 +417,20 @@ function openRows(live, path) {
 }
 
 /** The rows to draw for this answer. No decisions are left to the component. */
+/**
+ * The heading and help a prompt shows. When every option another prompt on this screen covers is hidden (same rule as
+ * choiceView's notCovered), the library's whenCovered wording replaces the original, so the words match the buttons
+ * (Tab 26 R05 retest, D-003). Everywhere else — the office table, documents — the approved library wording stands.
+ */
+export function promptWording(question, cfg, answer, coveredQuestions = null) {
+  const original = { short: question?.short || "", text: question?.text || "" };
+  const coverable = (cfg?.options || []).filter((o) => o.coveredBy);
+  if (!cfg?.whenCovered || !coverable.length || !coveredQuestions) return original;
+  const live = (normaliseAnswer(answer)?.selected || []).filter((e) => !e.stale);
+  const allHidden = coverable.every((o) => coveredQuestions.has(o.coveredBy) && !isOn(live, [o.id]));
+  return allHidden ? { short: cfg.whenCovered.short, text: cfg.whenCovered.text } : original;
+}
+
 export function choiceView(cfg, answer, { showDetail = false, usedZones = null, coveredQuestions = null } = {}) {
   const a = normaliseAnswer(answer);
   const selected = a?.selected || [];

@@ -16,6 +16,7 @@ import {
   makeItem, genId, REGISTER_DISPOSITIONS, DISPOSITION_ORDER, REGISTER_CERTAINTY, CERTAINTY_ORDER, RESPONSIBILITIES,
   TECHNICAL_STATUSES, PRICING_STATUSES, SUPPLY_BY, ITEM_KINDS, categoryLabel, itemIssues, outstandingReasons,
   questionById, resolvePromptId, configForRow, isGuidedConfig, answerIsEditable, dispositionApplies, answerSummary, ANSWER_NATURES, BASELINE_TIERS, OPEN_OPTION_IDS, assumptionIsDraft,
+  promptWording,
 } from "../../../../lib/register.js";
 import { Chip, Mini, Select } from "./ui.jsx";
 import ProgressiveChoiceCard from "./ProgressiveChoiceCard.jsx";
@@ -76,7 +77,9 @@ export default function PromptRow({
     setAsk(null);
   }
 
-  const title = rowTitle || config?.linkedLabel || question?.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
+  // On a room screen whose other prompts cover some options, the wording follows the buttons that are left.
+  const wording = guided ? promptWording(question, config, it.answer, coveredQuestions) : { short: question?.short, text: question?.text };
+  const title = rowTitle || config?.linkedLabel || wording.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
   const locked = !!it.sync?.locked;
   const disabled = !!readOnlyReason;
 
@@ -96,9 +99,9 @@ export default function PromptRow({
             {it.technicalStatus === "verified" && <Chip tone="green">Verified</Chip>}
             {it.pricingStatus && it.pricingStatus !== "not_reviewed" && <Chip tone="slate">{PRICING_STATUSES[it.pricingStatus]}</Chip>}
           </div>
-          {question?.text && !rowTitle && !config?.linkedKey && (
+          {wording.text && !rowTitle && !config?.linkedKey && (
             <button type="button" onClick={() => setShowText((s) => !s)} className={`mt-0.5 block w-full text-left text-[11px] leading-snug text-muted ${showText ? "" : "line-clamp-1"}`}>
-              {question.text}
+              {wording.text}
             </button>
           )}
 

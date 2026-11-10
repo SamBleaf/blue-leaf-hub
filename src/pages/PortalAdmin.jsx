@@ -110,12 +110,12 @@ export default function PortalAdmin() {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => navigate(`/portal-admin/${p.id}`)}
+                onClick={() => navigate(p.portal_v2_enabled ? `/portal-admin/${p.id}/v2` : `/portal-admin/${p.id}`)}
                 className="text-left rounded-card border border-hairline bg-surface p-4 hover:border-primary"
               >
                 <p className="font-semibold text-ink">{p.address}</p>
                 <p className="text-xs text-muted mt-1">
-                  {p.portal_enabled ? "Portal enabled" : "Portal not set up"}
+                  {p.portal_v2_enabled ? "Portal v2 enabled" : p.portal_enabled ? "Portal enabled (legacy)" : "Portal not set up"}
                 </p>
               </button>
             ))}

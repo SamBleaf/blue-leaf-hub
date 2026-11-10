@@ -54,6 +54,35 @@ export function consultantDocsReady(roster) {
 export const DELIVERABLE_READY_STATUSES = ["included", "issued"];
 export function deliverableIsReady(d) { return DELIVERABLE_READY_STATUSES.includes(d?.status) && !d?.reissue; }
 
+/** Has this consultant document arrived? Enough for downstream work to start; not the same as ready to rely on. */
+export const DELIVERABLE_ARRIVED_STATUSES = ["received", "reviewed", "included", "issued"];
+
+/**
+ * Mark a consultant document changed. Every document downstream of it (transitively, through `deps`, among the
+ * documents on this roster) that has already arrived is flagged for re-issue, and the flag records what caused it:
+ * the changed document and its revision at that moment (`reissueFrom`, newest first, one entry per upstream
+ * document, at most 3). Pure: returns a new roster; each entry must carry its `deliverables` array.
+ */
+export function flagReissue(roster, changedKey, deps = {}, at = new Date().toISOString()) {
+  const list = Array.isArray(roster) ? roster : [];
+  const delsOf = (r) => (Array.isArray(r?.deliverables) ? r.deliverables : []);
+  const all = list.flatMap(delsOf);
+  const keys = new Set(all.map((d) => d.key));
+  const downstream = new Set();
+  const queue = [changedKey];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const k of keys) if ((deps[k] || []).includes(cur) && !downstream.has(k)) { downstream.add(k); queue.push(k); }
+  }
+  const trigger = { key: changedKey, revision: String(all.find((d) => d.key === changedKey)?.revision || "").trim(), at };
+  return list.map((r) => ({
+    ...r,
+    deliverables: delsOf(r).map((d) => (downstream.has(d.key) && DELIVERABLE_ARRIVED_STATUSES.includes(d.status || "pending")
+      ? { ...d, reissue: true, reissueFrom: [trigger, ...(Array.isArray(d.reissueFrom) ? d.reissueFrom : []).filter((t) => t?.key !== changedKey)].slice(0, 3) }
+      : d)),
+  }));
+}
+
 export const STAGE_GATES = {
   qualify: [],
   discovery: [

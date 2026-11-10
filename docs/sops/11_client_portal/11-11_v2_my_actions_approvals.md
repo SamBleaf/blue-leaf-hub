@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-06-21
+sop_version: 1.1
+last_reviewed: 2026-11-10
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -54,8 +54,10 @@ Gives the client one place to see and clear every outstanding decision. Each act
 
 ### Make a selection
 4. A selection action on My Actions links you to the **Selections** tab
-5. Choose your option there (cost and lead-time impact shown) — see SOP 11-13 / Selections
-6. The selection action clears once a choice is recorded
+5. Choose your option there (cost and lead-time impact shown) — see SOP 11-13 / Selections. Each undecided item says: *Choosing tells us your preference. Blue Leaf confirms any cost or timing change with you before it's final.* An option with no price yet says **Price to be confirmed**.
+6. The selection action clears once a choice is recorded. The item then shows **Chosen: [product]** and **With Blue Leaf** while Blue Leaf reviews it.
+7. Changed your mind while it's with Blue Leaf? Tap **Change my choice**, pick again (or **Keep my current choice**). Blue Leaf reviews the new choice instead. For a single proposal there's no list to pick from, so it says **Need a change? Message us**.
+8. Once Blue Leaf approves, the item says **Approved**, with **Chosen: [product]**, or **Confirmed by Blue Leaf** when no product name was recorded. To change an approved item, message Blue Leaf.
 
 > 💡 **Tip:** A declined variation cannot be re-opened from your side — if you change your mind, message the builder and they will re-issue it. Approve carefully.
 
@@ -178,6 +180,13 @@ Next review date: 2026-12-21
 2. As the client, open the selection action
 3. Expected result: there is **no inline approve** — the action links to the **Selections** tab; making the choice there clears the action from My Actions
 4. Expected DB: after choosing on Selections, the `client_selections` status reflects the choice and the `client_actions` selection row is completed
+- [ ] Pass  [ ] Fail
+
+**TC-08 — Change a choice under review; plain wording (Tab 26 R05 retest)**
+1. As a test client, open **Selections** on a project with: an approved item with no product, an item In review with two options, an undecided item with an unpriced option, and an In review single proposal.
+2. Expected UI: **Confirmed by Blue Leaf** on the approved item (never "Chosen: —"); no "No allowance set"; **Price to be confirmed** (never "Price on request"); the preference line above undecided options; **Change my choice** on the item in review; **Need a change? Message us** on the single proposal.
+3. Tap **Change my choice**, choose the other option. Expected UI: the new choice shows, still **With Blue Leaf**. Expected DB: `client_selections.status = 'in_review'`, `selected_product` = the new option's product.
+4. Open Home. Expected UI: **Before we start on site** with **Next: [milestone] · [date]** when a milestone is set.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

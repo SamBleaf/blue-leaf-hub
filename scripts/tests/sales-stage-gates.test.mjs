@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   STAGE_GATES, STAGE_ORDER, evaluateGate, stagesCrossed, forwardMoveBlock, forwardBlockReason, hardBlockReason,
   resolveEngagementPathway, showsQualifyingScorecard, canPerformControlledSalesWrite, canUnsignContract, SALES_CONTROLLED_ROLES,
-  nextStageFor, stageApplies, requirementsFor, gateRows, consultantDocsReady, deliverableIsReady,
+  nextStageFor, stageApplies, requirementsFor, gateRows, consultantDocsReady, deliverableIsReady, flagReissue,
 } from "../../src/lib/stageGates.js";
 import { decodePdfUpload } from "../../server/lib/leadContractEvidence.mjs";
 
@@ -125,6 +125,42 @@ t("in the set is ready", () => assert.equal(consultantDocsReady(roster("included
 t("issued is still ready, so older records keep their state", () => assert.equal(consultantDocsReady(roster("issued")), true));
 t("flagged for re-issue isn't ready", () => assert.equal(deliverableIsReady({ status: "included", reissue: true }), false));
 t("an empty roster isn't ready", () => assert.equal(consultantDocsReady([]), false));
+
+// Tab 26 retest: a re-issue says what caused it.
+const DEPS = { structural_drawings: ["soil_report"], engineer_certificate: ["structural_drawings"] };
+const chain = () => [{ role: "engineer", deliverables: [
+  { key: "soil_report", status: "included", revision: "C" },
+  { key: "structural_drawings", status: "included", revision: "B" },
+  { key: "engineer_certificate", status: "included", revision: "A" },
+] }];
+const del = (r, k) => r[0].deliverables.find((d) => d.key === k);
+t("changing a document flags what depends on it, with the cause", () => {
+  const r = flagReissue(chain(), "structural_drawings", DEPS, "t1");
+  assert.equal(del(r, "engineer_certificate").reissue, true);
+  assert.deepEqual(del(r, "engineer_certificate").reissueFrom, [{ key: "structural_drawings", revision: "B", at: "t1" }]);
+  assert.equal(del(r, "structural_drawings").reissue, undefined, "the changed document itself isn't flagged");
+});
+t("the flag travels down the chain and names the root change", () => {
+  const r = flagReissue(chain(), "soil_report", DEPS, "t1");
+  assert.equal(del(r, "structural_drawings").reissueFrom[0].key, "soil_report");
+  assert.equal(del(r, "engineer_certificate").reissueFrom[0].key, "soil_report");
+});
+t("a second change adds a second cause, newest first", () => {
+  const r = flagReissue(flagReissue(chain(), "soil_report", DEPS, "t1"), "structural_drawings", DEPS, "t2");
+  assert.deepEqual(del(r, "engineer_certificate").reissueFrom.map((x) => x.key), ["structural_drawings", "soil_report"]);
+});
+t("the same document changing twice keeps one entry, the newest", () => {
+  let r = flagReissue(chain(), "structural_drawings", DEPS, "t1");
+  r[0].deliverables[1].revision = "C";
+  r = flagReissue(r, "structural_drawings", DEPS, "t2");
+  assert.deepEqual(del(r, "engineer_certificate").reissueFrom, [{ key: "structural_drawings", revision: "C", at: "t2" }]);
+});
+t("documents that haven't arrived aren't flagged", () => {
+  const c = chain(); c[0].deliverables[2].status = "requested";
+  assert.equal(del(flagReissue(c, "structural_drawings", DEPS, "t1"), "engineer_certificate").reissue, undefined);
+});
+t("a flagged document with a recorded cause still isn't ready", () => assert.equal(deliverableIsReady(del(flagReissue(chain(), "structural_drawings", DEPS, "t1"), "engineer_certificate")), false));
+t("the input roster isn't changed", () => { const c = chain(); flagReissue(c, "structural_drawings", DEPS, "t1"); assert.equal(c[0].deliverables[2].reissue, undefined); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

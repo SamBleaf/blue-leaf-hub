@@ -770,7 +770,7 @@ export function registerPortalV2AdminRoutes(app) {
       if (!sb) return err(res, 503, "DB not configured");
       const { projectId } = req.params;
       const [proj, milestones, selections, meetings, clients, actions] = [
-        await sb.from("projects").select("id, address, portal_enabled, portal_v2_enabled, build_phase, team_members, portal_client_email, portal_client_name").eq("id", projectId).maybeSingle(),
+        await sb.from("projects").select("id, job_id, address, portal_enabled, portal_v2_enabled, build_phase, team_members, portal_client_email, portal_client_name").eq("id", projectId).maybeSingle(),
         await sb.from("portal_milestones").select("id, key, label, sort_order, is_current, confidence, confidence_note, stage_preview, achieved_at, eta").eq("project_id", projectId).order("sort_order", { ascending: true }),
         await sb.from("client_selections").select("id, category, item_name, status, due_date, order_by_date, allowance_amount, selected_product").eq("project_id", projectId).order("sort_order", { ascending: true }),
         await sb.from("portal_meetings").select("id, title, status, scheduled_at, client_visible").eq("project_id", projectId).order("scheduled_at", { ascending: false }),
@@ -782,6 +782,11 @@ export function registerPortalV2AdminRoutes(app) {
         // Tolerant: column lands in migration 105; a miss just leaves it undefined.
         const { data: pi } = await sb.from("projects").select("payment_instructions").eq("id", projectId).maybeSingle();
         if (pi) projectRow.paymentInstructions = pi.payment_instructions || null;
+        // The lead this project came from, so staff can jump from a client response to its register row.
+        if (projectRow.jobId) {
+          const { data: ld } = await sb.from("leads").select("id").eq("job_id", projectRow.jobId).limit(1);
+          projectRow.leadId = ld?.[0]?.id || null;
+        }
       }
       return ok(res, {
         project: projectRow,
