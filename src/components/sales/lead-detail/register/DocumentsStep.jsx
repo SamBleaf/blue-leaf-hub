@@ -171,12 +171,12 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
             {active === d.key && preview && (
               <div className="mt-2 space-y-2">
                 <div className="rounded border border-primary/30 bg-primary/[0.04] p-2 text-[11px]" data-testid={`pre-issue-${d.key}`}>
-                  <p className="font-semibold text-primary">Preview of the draft — not a controlled record until you issue it as P{String(preview.revision).padStart(2, "0")}.</p>
+                  <p className="font-semibold text-primary">Preview of the draft — not a controlled record until you issue it as R{String(preview.revision).padStart(2, "0")}.</p>
                   <dl className="mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
                     <div><span className="text-muted">Project: </span><span className="text-ink">{[context?.identity?.clientName, context?.identity?.siteAddress].filter(Boolean).join(" — ") || "—"}</span></div>
                     <div><span className="text-muted">Recipient: </span><span className="text-ink">{recipient.name || "— enter below"}</span></div>
                     <div><span className="text-muted">Drawing basis: </span><span className="text-ink">{reg.meta.planRev || "— not set"}</span></div>
-                    <div><span className="text-muted">Document: </span><span className="text-ink">{d.label} · P{String(preview.revision).padStart(2, "0")}</span></div>
+                    <div><span className="text-muted">Document: </span><span className="text-ink">{d.label} · R{String(preview.revision).padStart(2, "0")}</span></div>
                     <div className="sm:col-span-2"><span className="text-muted">Includes: </span><span className="text-ink">{scopeSummary(d.key)}</span></div>
                   </dl>
                 </div>
@@ -191,7 +191,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                   <Mini label="Issue to (name)"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} className="inp w-48 text-[11px]" /></Mini>
                   <Mini label="Email (record only — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} className="inp w-56 text-[11px]" /></Mini>
                   <button type="button" disabled={busy || preview.checks.errors.length > 0 || !recipient.name.trim() || (preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim())} onClick={issue}
-                    className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision P{String(preview.revision).padStart(2, "0")}</button>
+                    className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision R{String(preview.revision).padStart(2, "0")}</button>
                   <button type="button" onClick={() => { setActive(null); setPreview(null); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
                 </div>
                 {preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim() && (

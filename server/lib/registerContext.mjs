@@ -11,6 +11,7 @@
  */
 import { setFact } from "./factsService.mjs";
 import { DELIVERY_MODELS } from "../../src/lib/register.js";
+import { resolveEngagementPathway } from "../../src/lib/stageGates.js";
 
 const pickStr = (...vals) => { for (const v of vals) { const s = v == null ? "" : String(v).trim(); if (s) return s; } return ""; };
 const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -80,6 +81,7 @@ export async function loadRegisterContext(sb, leadId) {
     deliveryModel,
     deliveryModelSource: job?.delivery_model ? "job" : lead.delivery_model ? "lead" : null,
     stage: lead.stage, stageEnteredAt: lead.stage_entered_at || null,
+    engagementPathway: resolveEngagementPathway(lead),   // design_build | plans_supplied | architect_tender (stageGates)
     budget: {
       min: num(lead.construction_budget_min), max: num(lead.construction_budget_max),
       estimatedValue: num(job?.estimated_value ?? lead.estimated_value),

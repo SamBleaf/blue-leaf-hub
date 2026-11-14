@@ -55,19 +55,19 @@ ok("gutters say which roof", sel.selections.some((r) => /Quad/.test(r.product) &
 ok("a project default is labelled", sel.selections.some((r) => /project default/.test(r.category)));
 ok("a room exception is labelled", sel.selections.some((r) => r.category.startsWith("Bed 1") && /room exception/.test(r.category)));
 ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.itemId)));
-ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferenceGroups)));
-ok("scope lines carry the item id", brief.clientBrief.scopeIn.some((l) => /Walls/.test(l) && /\[W004-/.test(l)), flat(brief.clientBrief.scopeIn));
+ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferences)));
+ok("scope lines carry the item id, beside the words rather than inside them", brief.clientBrief.scopeIn.some((l) => /Walls/.test(l.text) && /^W004-/.test(l.ref) && !/\[/.test(l.text)), flat(brief.clientBrief.scopeIn));
 ok("the architect brief lists card scope", arch.architectBrief.scheduleItems.some((r) => /Demolish|Remove/i.test(r.requirement) && /Walls/.test(r.requirement)), flat(arch.architectBrief.scheduleItems).slice(0, 400));
-ok("an area reads as the room's name", brief.clientBrief.scopeIn.some((l) => l.startsWith("Kitchen:")));
+ok("an area reads as the room's name", brief.clientBrief.scopeIn.some((l) => l.text.startsWith("Kitchen:")));
 
 section("Facts never become priced scope (MR-UX-02.8)");
-ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /Narrow|Steep/.test(l)));
-ok("an older Included status on a fact doesn't print as work", !brief.clientBrief.scopeIn.some((l) => /Yes/.test(l)), flat(brief.clientBrief.scopeIn));
+ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /Narrow|Steep/.test(l.text)));
+ok("an older Included status on a fact doesn't print as work", !brief.clientBrief.scopeIn.some((l) => /Yes/.test(l.text)), flat(brief.clientBrief.scopeIn));
 ok("the architect's register doesn't list it as work", !arch.architectBrief.scheduleItems.some((r) => /Narrow|Steep/.test(r.requirement)));
-ok("it's noted as a fact", brief.clientBrief.assumptions.some((l) => /Narrow/.test(l) && /fact/.test(l)), flat(brief.clientBrief.assumptions));
+ok("it's noted as a fact", brief.clientBrief.noted.some((g) => /site and household/.test(g.label) && g.items.some((t) => /Narrow/.test(t))), flat(brief.clientBrief.noted));
 
 section("Performance goals stay intent (B04, DEC-MRUX-03)");
-ok("the goal is labelled for review", /Airtightness[^"]*subject to consultant review/.test(flat(brief.clientBrief.preferenceGroups)) || /Airtightness[^"]*subject to consultant review/.test(flat(arch.architectBrief.scheduleItems)), flat(arch.architectBrief.scheduleItems).slice(0, 800));
+ok("the goal is labelled for review", brief.clientBrief.preferences.flatMap((g) => g.items).some((x) => /Airtightness/.test(x.text) && x.status === "For consultant review") && /Airtightness[^"]*subject to consultant review/.test(flat(arch.architectBrief.scheduleItems)), flat(brief.clientBrief.preferences).slice(0, 800));
 const suggestions = Object.values(PERFORMANCE_SUGGESTIONS).flat().map((s) => s.text);
 for (const [name, doc] of [["client brief", brief], ["architect brief", arch], ["schedule", sel]]) ok(`no review suggestion in the ${name}`, !suggestions.some((t) => flat(doc).includes(t)));
 
@@ -138,7 +138,7 @@ ok("no recipient blocks it", registerDocChecks("tender_scope_notes", notes, { re
 section("Old records and rendering");
 const legacy = { meta: emptyMeta({ planRev: "A", rooms: [kitchen] }), items: [makeItem({ itemKind: "selection", promptKey: "K-005", category: "benchtop", roomId: kitchen.id, description: "Marble bench", certainty: "preference" }), makeItem({ itemKind: "scope", promptKey: "R-003", category: "scope", roomId: kitchen.id, description: "New kitchen", disposition: "new" })] };
 const lf = buildRegisterFixture("client_brief", { ...input(), register: legacy });
-ok("older typed records print unchanged", /Marble bench/.test(flat(lf.clientBrief.preferenceGroups)) && lf.clientBrief.scopeIn.some((l) => /New kitchen/.test(l)));
+ok("older typed records print unchanged", /Marble bench/.test(flat(lf.clientBrief.preferences)) && lf.clientBrief.scopeIn.some((l) => /New kitchen/.test(l.text)));
 const out = await renderRegisterDocument("tender_scope_notes", buildRegisterFixture("tender_scope_notes", input("Draft")), {});
 ok("it renders to DOCX and PDF", out.docx.length > 5000 && out.pdf.length > 5000 && out.pdf.slice(0, 4).toString() === "%PDF");
 ok("no unfilled tag or empty value", out.leaks.length === 0, out.leaks.join());

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.2
-last_reviewed: 2026-11-10
+sop_version: 1.3
+last_reviewed: 2026-11-15
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Project manager
@@ -26,7 +26,7 @@ Director, project manager, office staff preparing documents for the client, the 
 - When an architect, engineer or supplier sends a document (drawings, schedules, quotes): record it under **Received consultant & supplier documents**.
 
 ## 3. What this does
-It makes each document from the same register rows — nothing is retyped. Before a document is issued the Hub checks it (drawing basis named, recipient named, approvals evidenced, verified items referenced, **no dollar figures**). Each issue is a permanent, numbered revision (P01, P02 …) with a PDF, a controlled Word copy and a checksum. A new issue supersedes the old one; old revisions are never deleted. Nothing is emailed — you send the PDF yourself.
+It makes each document from the same register rows — nothing is retyped. Before a document is issued the Hub checks it (drawing basis named, recipient named, approvals evidenced, verified items referenced, **no dollar figures**). Each issue is a permanent, numbered revision (R01, R02 …) with a PDF, a controlled Word copy and a checksum. Every page carries the document number, for example **BLB-CPB-0417-R01** (Blue Leaf · document type · project reference · revision). A draft preview shows **Draft — not issued** and no revision number. Documents issued before 15 November 2026 keep their original labels (P01, P02). A new issue supersedes the old one; old revisions are never deleted. Nothing is emailed — you send the PDF yourself.
 
 ## 4. Before you start
 - The register has the content you want to issue (see 21-01 and 21-02).
@@ -40,8 +40,8 @@ It makes each document from the same register rows — nothing is retyped. Befor
 3. Click **Preview draft**. Read the PDF in the preview. Any warnings are listed above it.
 4. Fix anything the checks list (in the register), then **Preview draft** again.
 5. Fill **Issue to (name)** (and the email if you want it on the record — **nothing is sent**).
-6. Click **Issue revision P01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
-7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: P01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
+6. Click **Issue revision R01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
+7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: R01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
    - **Selections & Finishes Schedule, Client presentation:** an item with nothing chosen yet says **Still to be decided** once, with the item as its heading, instead of repeating "TBC". The **Technical register** layout keeps TBC for the trade.
    - **Architect Design Brief:** a client-approved requirement that still needs a technical check is listed under Confirmed project requirements with **(technical check pending)** after it.
    - Every document's footer reads **PAGE 1 / 2** in the same small grey type as the label.
@@ -55,15 +55,21 @@ It makes each document from the same register rows — nothing is retyped. Befor
 > 💡 **Tip:** Received documents never change the register by themselves. You decide what each one changes — that is the reconciliation.
 
 [insert screenshot: Documents step with three documents and Preview draft]
-[insert screenshot: issue history showing P01 Superseded and P02 Current]
+[insert screenshot: issue history showing R01 Superseded and R02 Current]
 [insert screenshot: received document under review with Set as source]
+
+### What the Client Project Brief contains (design cpb-2.0, from 15 Nov 2026)
+
+The brief reads in this order and leaves out any section with nothing in it: **The project** (your Sales description, the client's top three priorities and their own note, the client vision as the design direction) → **Scope of works** (what we propose to build, then what stays, what's outside the scope, by others, items the client supplies, still to be decided, and what still needs checking, with who confirms) → **Design direction** (preferences with their status in words) → **Assumptions** → **Decisions to make** (only real actions, 3–7, client's first; an unassigned one reads "To be agreed") → **What happens next** (follows the pathway: the PTSA is only explained before it is signed, never on a plans-supplied or architect-tender lead).
+
+> 💡 **Tip:** If a decision you expected is missing, give it a next action in the register. A preference on its own is direction, not a decision.
 
 ### Tender Scope & Pricing Notes (internal)
 
 1. Open **Documents**. The card is marked **Internal only**.
 2. Tap **Preview**. The recipient is already set to Blue Leaf estimating.
 3. Read it against the drawings. It lists included work, existing works, excluded work, work by others, systems and materials, finishes, site facts, risks, undecided items, technical questions, Blue Leaf pricing assumptions and drawing references. Each register line carries its item ID.
-4. Tap **Issue**. It is stored as P01 and is never overwritten. Issue it again and it becomes P02, and P01 stays on file.
+4. Tap **Issue**. It is stored as R01 and is never overwritten. Issue it again and it becomes R02, and R01 stays on file.
 5. Use it to price in Buildxact. Don't send it to the client, a consultant or a trade. It has no amounts and no quantities, because Buildxact holds the numbers.
 
 ## 6. What happens next
@@ -133,9 +139,9 @@ Next review date: 2027-05-07
 ### Test cases
 
 **TC-01 — Happy path (standard use)**
-1. Documents → Preliminary Client Project Brief → **Preview draft** → fill **Issue to (name)** → **Issue revision P01**.
-2. Expected result: history shows P01 **Current** with checksum, PDF and DOCX links; the PDF opens.
-3. Expected DB record: `lead_documents` row `document_type = 'client_brief'`, `version = 1`, `revision_label = 'P01'`, `status = 'current'`, `issued_at` and `content_sha256` set.
+1. Documents → Preliminary Client Project Brief → **Preview draft** → fill **Issue to (name)** → **Issue revision R01**.
+2. Expected result: history shows R01 **Current** with checksum, PDF and DOCX links; the PDF opens.
+3. Expected DB record: `lead_documents` row `document_type = 'client_brief'`, `version = 1`, `revision_label = 'R01'`, `status = 'current'`, `issued_at` and `content_sha256` set.
 - [ ] Pass  [ ] Fail
 
 **TC-02 — Empty required field**
@@ -146,7 +152,7 @@ Next review date: 2027-05-07
 
 **TC-03 — Duplicate submission**
 1. Issue the Selections schedule, then issue it again.
-2. Expected result: P01 becomes **Superseded**, P02 is **Current**; two rows, one current.
+2. Expected result: R01 becomes **Superseded**, R02 is **Current**; two rows, one current.
 - [ ] Pass  [ ] Fail
 
 **TC-04 — Wrong role**
@@ -178,15 +184,22 @@ Next review date: 2027-05-07
 
 **TC-09 — Tender Scope & Pricing Notes**
 1. Preview. Expected: marked internal, no dollar sign, no quantity, pricing assumptions labelled, and draft wording says so.
-2. Issue. Expected: P01, audience internal. Change an item and issue again. Expected: P02 current, P01 superseded and still opens, and its hash is unchanged.
+2. Issue. Expected: R01, audience internal. Change an item and issue again. Expected: R02 current, R01 superseded and still opens, and its hash is unchanged.
 3. Reject paths. No recipient: blocked. A dollar figure in a description: blocked. Changing the register after the preview: refused as stale. A client login: no document list and no row.
 - [ ] Pass  [ ] Fail
 
 **TC-10 — Tab 26 R05 retest follow-ups**
-1. Issue any document. Expected: the card reads **Recorded: P0n (current) · date · for [name] · not emailed**, not "Issued … to".
+1. Issue any document. Expected: the card reads **Recorded: R0n (current) · date · for [name] · not emailed**, not "Issued … to".
 2. Preview the Selections & Finishes Schedule as **Client presentation** with one item that has nothing chosen. Expected: that item says **Still to be decided** once, with no "TBC" anywhere and no stray "/" where there's no supplier; the reading key explains the label. Switch to **Technical register**: TBC is still used.
 3. Mark a requirement client-approved (with evidence) while its technical status is **Needs verification**, then preview the Architect Design Brief. Expected: it reads "… (technical check pending)" under Confirmed project requirements.
 4. Look at any two-page preview's footer. Expected: **PAGE 1 / 2** with the numbers the same size and grey as the word PAGE.
+- [ ] Pass  [ ] Fail
+
+**TC-11 — Client Project Brief design and identity (doc suite R01)**
+1. Preview the Client Project Brief on a lead with scope, preferences and decisions. Expected: every page has the logo, "Client Project Brief" and the address at the top, and "BLB-CPB-[ref] · Draft — not issued" and "Page X of Y" at the bottom; no revision number on a draft.
+2. Issue it. Expected: the PDF reads **BLB-CPB-[ref]-R0n · Issued [date]** on every page; `lead_documents.revision_label` is `R0n`.
+3. Expected content: no "[W004-…]" codes inside sentences (a small grey reference follows the line instead); no recorded preference listed as a decision; no decision owner invented; a long preferences table repeats its header on each page; an empty section (e.g. no decisions) is left out and the numbers close up.
+4. On a plans-supplied lead: no PTSA paragraph and no Concept or agreement step.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

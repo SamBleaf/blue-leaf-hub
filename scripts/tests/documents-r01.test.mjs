@@ -19,11 +19,20 @@ const issuedReno = { ...reno, meta: { ...reno.meta, status: "Issued", issuedDate
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); } };
 
-// 1. Client-brief payload maps lists 1:1 (no loss) + intention band + questions table.
+// 1. Client Project Brief (cpb-2.0): lists map 1:1 (no loss), priorities choose the right card band, sections number
+//    themselves in reading order, and the page identity is BLB-CPB-[ref]-[rev] (doc suite R01).
 const cb = buildClientBriefPayload(reno);
-ok("T1 client brief: scope/summary/preferences + 3 intentions + questions table",
-  cb.SCOPE_IN.length === 3 && cb.SCOPE_OUT.length === 2 && cb.SUMMARY_PARAS.length === 2 && cb.PREFERENCE_GROUPS.length === 3 &&
-  cb.INT1_LABEL === "Connect" && cb.INT3_LABEL === "Perform" && cb.QUESTIONS.length === 3 && cb.QUESTIONS.every((q) => q.REF_ID && q.STATUS));
+const cbDraft = buildClientBriefPayload({ ...reno, meta: { ...reno.meta, status: "Draft" } });
+const cbIssued = buildClientBriefPayload(issuedReno);
+ok("T1 client brief: scope, boundaries, preferences, decisions and priorities map 1:1; sections number in order",
+  cb.SCOPE_IN.length === reno.clientBrief.scopeIn.length && cb.BOUNDARIES[0].B_ITEMS.length === reno.clientBrief.boundaries[0].items.length &&
+  cb.OVERVIEW.length === reno.clientBrief.overview.length && cb.PREFS.length === reno.clientBrief.preferences.reduce((n, g) => n + g.items.length, 0) &&
+  cb.PRI_BAND_3 === true && cb.PRI_BAND_2 === false && cb.PL1 === reno.clientBrief.priorities[0] &&
+  cb.DECISIONS.length === reno.clientBrief.decisions.length && cb.DECISIONS.every((q) => q.REF && q.ACTION && q.OWNER) &&
+  [cb.S1_NUM, cb.S2_NUM, cb.S3_NUM, cb.S4_NUM, cb.S5_NUM, cb.S6_NUM].join() === "01,02,03,04,05,06");
+ok("T1b identity: a draft has no revision and says so; an issued copy prints BLB-CPB-ref-R0n and its date",
+  /^BLB-CPB-0417\s+·\s+Draft — not issued$/.test(cbDraft.FTR_IDENTITY) && !/R0\d/.test(cbDraft.FTR_IDENTITY) && /^Draft/.test(cbDraft.DOC_KICKER) &&
+  /^BLB-CPB-0417-R0\d\s+·\s+Issued 6 November 2026$/.test(cbIssued.FTR_IDENTITY) && cbIssued.META_ROWS.some((r) => r.VA === `BLB-CPB-0417-R0${reno.meta.revision}` || r.VB === `BLB-CPB-0417-R0${reno.meta.revision}`));
 
 // 2. Architect-brief: actions (ID/owner/status), REQ reference list, and a grouped design register with the coordination vocabulary.
 const ab = buildArchitectBriefPayload(reno);
@@ -54,8 +63,8 @@ const noClient = JSON.parse(JSON.stringify(issuedReno)); noClient.project.client
 ok("T6 validation: missing client name blocks issue", validateFixture(noClient, { mode: "issue" }).ok === false);
 
 // 7. Placeholder / TODO text blocks issue (and warns in draft); a fabricated $0 blocks issue.
-const placeholder = JSON.parse(JSON.stringify(issuedReno)); placeholder.clientBrief.summaryParas[0] = "TODO: real summary {{CLIENT}}";
-const zeroMoney = JSON.parse(JSON.stringify(issuedReno)); zeroMoney.clientBrief.summaryParas.push("Fixed price is $0.00 for the whole build");
+const placeholder = JSON.parse(JSON.stringify(issuedReno)); placeholder.clientBrief.overview[0] = "TODO: real summary {{CLIENT}}";
+const zeroMoney = JSON.parse(JSON.stringify(issuedReno)); zeroMoney.clientBrief.overview.push("Fixed price is $0.00 for the whole build");
 ok("T7 validation: placeholder text & $0 money both block issue",
   validateFixture(placeholder, { mode: "issue" }).ok === false && validateFixture(placeholder, { mode: "draft" }).ok === true &&
   validateFixture(zeroMoney, { mode: "issue" }).ok === false);
@@ -90,11 +99,13 @@ ok("T11 client presentation: same selections regrouped into client areas; decisi
 // 12. Deliberate pagination flags (no fabricated geometry — just content-size signals the template reads).
 const abReno = buildArchitectBriefPayload(reno), abLong = buildArchitectBriefPayload(long), abShort = buildArchitectBriefPayload(short);
 const cbReno = buildClientBriefPayload(reno), cbShort = buildClientBriefPayload(short);
-ok("T12 pagination: short/medium architect stay one page; long breaks + shows references; client brief breaks only when it carries the process path",
+const cpbXml = new (await import("pizzip")).default(fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_brief.templateFile))).file("word/document.xml").asText();
+ok("T12 pagination: short/medium architect stay one page; long breaks + shows references; the client brief flows (no forced breaks) and hides empty sections",
   abShort.ARCH_BREAK === false && abReno.ARCH_BREAK === false && abLong.ARCH_BREAK === true &&
   abLong.HAS_REFS.length === 1 && abReno.HAS_REFS.length === 0 &&
-  cbReno.CB_BREAK === true && cbReno.HAS_PROCESS.length === 1 && cbReno.PROC1_LABEL === "Concept" &&
-  cbShort.CB_BREAK === false && cbShort.HAS_PROCESS.length === 0 && cbShort.ASSUMPTIONS.length === short.clientBrief.assumptions.length);
+  !/w:type="page"|pageBreakBefore/.test(cpbXml) && cbReno.HAS_STEPS === true && cbShort.HAS_STEPS === false &&
+  cbShort.NOTED.at(-1).N_LABEL === "This brief assumes" && cbShort.HAS_S5 === (short.clientBrief.decisions.length > 0) &&
+  buildClientBriefPayload({ ...short, clientBrief: { ...short.clientBrief, decisions: [], preferences: [] } }).HAS_S5 === false);
 
 // 13. All FIVE templates (four client and consultant, one internal: R05 P5) render from one fixture via the canonical engine (no second engine, no image module).
 let rendered = 0;
@@ -117,8 +128,10 @@ ok("T13 all five documents render through the existing renderDocxTemplate", rend
     const runs = xml.match(/<w:r>(?:(?!<\/w:r>).)*<\/w:r>/g) || [];
     const fieldRuns = runs.filter((r) => /<w:fldChar|<w:instrText/.test(r));
     const oneRunField = runs.some((r) => /fldCharType="begin"/.test(r) && /fldCharType="end"/.test(r));
-    const styled = fieldRuns.length === 8 && fieldRuns.every((r) => r.includes('<w:sz w:val="15"/>') && r.includes('<w:color w:val="62737D"/>'));
-    const once = (xml.match(/> PAGE </g) || []).length === 1 && (xml.match(/> NUMPAGES </g) || []).length === 1;
+    // Every field run carries an explicit size and colour, the same across all eight (the footer's own style).
+    const sz = (r) => r.match(/<w:sz w:val="(\d+)"\/>/)?.[1], col = (r) => r.match(/<w:color w:val="([0-9A-F]{6})"\/>/)?.[1];
+    const styled = fieldRuns.length === 8 && fieldRuns.every((r) => sz(r) && col(r) && sz(r) === sz(fieldRuns[0]) && col(r) === col(fieldRuns[0]));
+    const once = (xml.match(/<w:instrText[^>]*>\s*PAGE\s*</g) || []).length === 1 && (xml.match(/<w:instrText[^>]*>\s*NUMPAGES\s*</g) || []).length === 1;
     if (!oneRunField && styled && once && splitFooterFields(xml).count === 0) good += 1;
     else console.log(`    ${def.templateFile}: oneRunField=${oneRunField} styled=${styled} once=${once}`);
   }

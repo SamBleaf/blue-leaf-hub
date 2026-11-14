@@ -135,7 +135,7 @@ async function main() {
   const stale = await api("POST", `/api/register/leads/${id}/documents/tender_scope_notes/issue`, { recipientName: "Blue Leaf estimating", expectedVersions: { made_up_item: 1 } });
   check("a stale preview can't be issued", stale.status === 409 && stale.body?.code === "ISSUE_STALE", JSON.stringify(stale.body).slice(0, 200));
   const first = await api("POST", `/api/register/leads/${id}/documents/tender_scope_notes/issue`, { recipientName: "Blue Leaf estimating", expectedVersions: pv.body.itemVersions });
-  check("P01 issues", first.ok && first.body.document.revision_label === "P01", JSON.stringify(first.body).slice(0, 300));
+  check("R01 issues", first.ok && first.body.document.revision_label === "R01", JSON.stringify(first.body).slice(0, 300));
   const p1 = first.body.document;
   check("the audience is internal (DB)", p1.audience === "internal" && p1.document_type === "tender_scope_notes");
   await new Promise((r) => setTimeout(r, 1200));
@@ -143,7 +143,7 @@ async function main() {
   const changed = await api("PUT", `/api/register/leads/${id}`, { changes: [{ ...fresh.items.find((i) => i.promptKey === "K-005"), colour: "Polar white" }], deletes: [] });
   check("the register moves on", changed.ok, JSON.stringify(changed.body).slice(0, 200));
   const second = await api("POST", `/api/register/leads/${id}/documents/tender_scope_notes/issue`, { recipientName: "Blue Leaf estimating" });
-  check("P02 issues", second.ok && second.body.document.revision_label === "P02", JSON.stringify(second.body).slice(0, 300));
+  check("R02 issues", second.ok && second.body.document.revision_label === "R02", JSON.stringify(second.body).slice(0, 300));
   check("P02 says what it replaced", second.body.supersededId === p1.id);
   const { data: rowsAfter } = await svc.from("lead_documents").select("id, status, content_sha256, storage_path, revision_label").eq("lead_id", id).eq("document_type", "tender_scope_notes").order("version");
   check("P01 is superseded, its hash and file unchanged (DB)", rowsAfter[0].status === "superseded" && rowsAfter[0].content_sha256 === p1.content_sha256 && rowsAfter[0].storage_path === p1.storage_path);
@@ -173,10 +173,10 @@ async function main() {
   const p = await newPage({ viewport: { width: 1440, height: 1000 } });
   await open(p, id, "documents");
   await by(p, "doc-card-tender_scope_notes").waitFor({ timeout: 15000 });
-  await by(p, "doc-card-tender_scope_notes").filter({ hasText: /P02/ }).waitFor({ timeout: 15000 });
+  await by(p, "doc-card-tender_scope_notes").filter({ hasText: /R02/ }).waitFor({ timeout: 15000 });
   const card = await by(p, "doc-card-tender_scope_notes").innerText();
   check("the card says internal only", /Internal only/.test(card) && /Never goes to the client/.test(card), card);
-  check("the current revision shows", /P02/.test(card), card);
+  check("the current revision shows", /R02/.test(card), card);
   await by(p, "doc-card-tender_scope_notes").getByRole("button", { name: /Preview/ }).first().click();
   await by(p, "doc-card-tender_scope_notes").locator("iframe").waitFor({ timeout: 45000 });
   check("the draft opens", true);

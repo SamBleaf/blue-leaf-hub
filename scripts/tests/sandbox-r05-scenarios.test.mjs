@@ -169,11 +169,11 @@ async function main() {
   scene(8, "controlled document revision and issue");
   {
     const p1 = await api(admin, "POST", `/api/register/leads/${reno}/documents/architect_brief/issue`, { recipientName: "Studio Example" });
-    check("P01", p1.ok && p1.body.document.revision_label === "P01", JSON.stringify(p1.body).slice(0, 300));
+    check("R01", p1.ok && p1.body.document.revision_label === "R01", JSON.stringify(p1.body).slice(0, 300));
     const held = (await getReg(reno)).register.items.find((i) => i.id === access.id);
     await putReg(reno, { changes: [{ ...held, nextAction: "Check crane access" }] });
     const p2 = await api(admin, "POST", `/api/register/leads/${reno}/documents/architect_brief/issue`, { recipientName: "Studio Example" });
-    check("P02", p2.ok && p2.body.document.revision_label === "P02");
+    check("R02", p2.ok && p2.body.document.revision_label === "R02");
     const { data: rows } = await svc.from("lead_documents").select("status, content_sha256").eq("id", p1.body.document.id).single().then((r) => ({ data: [r.data] }));
     check("P01 is superseded and its hash unchanged (DB)", rows[0].status === "superseded" && rows[0].content_sha256 === p1.body.document.content_sha256);
     const notes2 = await api(admin, "POST", `/api/register/leads/${reno}/documents/tender_scope_notes/issue`, { recipientName: "Blue Leaf estimating" });

@@ -26,6 +26,8 @@ import { convertDocxToPdfBuffer } from "./docxToPdf.mjs";
 import { DOC_DEFS, validateFixture } from "./documents/documentPayloads.mjs";
 import { loadRegister } from "./registerStore.mjs";
 import { loadRegisterContext } from "./registerContext.mjs";
+import { issueRevisionLabel } from "./documents/documentIdentity.mjs";
+import { STAGE_ORDER } from "../../src/lib/stageGates.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
@@ -110,13 +112,24 @@ export function selectionRows(register, { coord } = {}) {
   });
 }
 
-function baseFixture({ lead, context, register, revision, status, issuedDate, issuer }) {
+/**
+ * The project reference printed in BLB-[TYPE]-[REF]-[REV]. The Hub has no allocated project number yet (an owner
+ * decision: format and when it is minted), so live documents use the lead-derived reference they always have.
+ * `projectRef` is the hook for that number, and is how fixtures print a real-looking one.
+ */
+export const legacyProjectRef = (leadId) => `BL${String(leadId).replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
+function baseFixture({ lead, context, register, revision, status, issuedDate, issuer, recipientName, projectRef }) {
   const typeLabel = PROJECT_TYPE_LABELS[context.projectType] || "Residential project";
   const architect = (context.consultants || []).find((c) => ["architect", "designer", "interior_designer"].includes(c.role));
+  const street = clean(String(context.identity.siteAddress || "").split(",")[0]);
   return {
-    meta: { ref: `BL${String(lead.id).replace(/-/g, "").slice(0, 6).toUpperCase()}`, revision, status, issuedDate: status === "Issued" ? issuedDate : undefined, preparedDate: issuedDate },
+    meta: { ref: projectRef || legacyProjectRef(lead.id), revision, status, issuedDate: status === "Issued" ? issuedDate : undefined, preparedDate: issuedDate, recipient: clean(recipientName) || undefined },
     project: {
       clientName: context.identity.clientName,
+      siteShort: [street, context.identity.suburb].filter(Boolean).filter((v, i, a) => i === 0 || !new RegExp(`,?\\s${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i").test(a[0])).join(", "),
+      projectLabel: [typeLabel, DELIVERY_MODELS[context.deliveryModel]].filter(Boolean).join("  ·  "),
+      stageLabel: STAGE_LABEL[lead.stage] || "",
       siteAddress: [context.identity.siteAddress, context.identity.suburb].filter(Boolean).filter((v, i, a) => i === 0 || !a[0].includes(v)).join(", "),
       drawingBasis: register.meta.planRev || "",
       projectDescription: clean(`${typeLabel}${context.identity.suburb ? ` · ${context.identity.suburb}` : ""}`),
@@ -127,69 +140,148 @@ function baseFixture({ lead, context, register, revision, status, issuedDate, is
   };
 }
 
+// ── Client Project Brief (BLB-CPB): what the homeowner reads ──────────────────────────────────────
+const CPB_GROUP = { External: "Exterior", "Internal Finishes": "Interior finishes", General: "Interior finishes", Joinery: "Joinery and kitchen",
+  "Wet Areas": "Bathrooms and laundry", "Services & Fixtures": "Services and fixtures", "External Works": "Outdoor areas" };
+const CPB_GROUP_ORDER = ["Exterior", "Windows and doors", "Interior finishes", "Joinery and kitchen", "Bathrooms and laundry", "Services and fixtures", "Outdoor areas"];
+const KITCHEN_ROOMS = new Set(["kitchen", "scullery", "pantry"]), WET_ROOMS = new Set(["bathroom", "ensuite", "wc", "laundry", "mudroom"]);
+/** A room item is grouped by its room (a kitchen sink is a kitchen item); a whole-house default by what it is. */
+function cpbGroup(register, i) {
+  const type = (register.meta.rooms || []).find((r) => r.id === i.roomId)?.roomType;
+  if (["windows", "doors"].includes(i.category)) return "Windows and doors";
+  if (KITCHEN_ROOMS.has(type)) return "Joinery and kitchen";
+  if (WET_ROOMS.has(type)) return "Bathrooms and laundry";
+  return CPB_GROUP[docGroupFor(i.category)] || "Interior finishes";
+}
+const plainShort = (item) => clean(itemShort(item).replace(/\s*\([^)]*\)/g, ""));
+const DESIGN_DIRECTION = new Set(["preference", "proposed", "client_approved"]);
+
+/** The client's next steps, by engagement pathway and where the lead is (Tab 22 D4; stageGates pathway rules). */
+function cpbNextSteps(lead, context) {
+  const pathway = context.engagementPathway || "design_build";
+  const at = STAGE_ORDER.indexOf(lead.stage);
+  const before = (st) => at <= STAGE_ORDER.indexOf(st);
+  const mark = (steps, i) => steps.map((x, k) => ({ ...x, current: k === i }));
+  if (lead.stage === "won") return { paras: ["The building contract is in place. Your project now moves to construction planning, and this brief stays on file as the record of the agreed direction."], steps: [], ptsa: null };
+  if (pathway === "plans_supplied") {
+    return {
+      paras: ["Your plans are already prepared, so there is no separate concept or pre-construction design stage. Next, the consultant documents are confirmed and the work is priced."],
+      steps: mark([
+        { label: "Consultant documents", text: "Engineering, energy and other consultant documents are confirmed against your plans." },
+        { label: "Pricing", text: "The confirmed scope and selections are priced." },
+        { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
+      ], lead.stage === "tender" ? 1 : 0),
+      ptsa: null,
+    };
+  }
+  if (pathway === "architect_tender") {
+    return {
+      paras: ["Your architect leads the design. Blue Leaf's role is to review the documents and price the work."],
+      steps: mark([
+        { label: "Document review", text: "We review the architect's documents and raise anything that affects scope or price." },
+        { label: "Pricing", text: "The documented scope is priced." },
+        { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
+      ], lead.stage === "tender" ? 1 : 0),
+      ptsa: null,
+    };
+  }
+  const preAgreement = context.commercial?.ptsaStatus !== "signed" && before("fee_proposal");
+  if (preAgreement) {
+    return {
+      paras: ["The next step is to agree how the design and pricing will be developed. This brief sets the direction; the stages below turn it into coordinated drawings, confirmed selections and a defined scope for pricing."],
+      steps: mark([
+        { label: "Concept", text: "We record the agreed direction in this brief." },
+        { label: "Pre-construction agreement", text: "A separate agreement sets out the design and pricing services, responsibilities and fees." },
+        { label: "Design, selections and pricing", text: "Consultants coordinate the design, your selections are confirmed and the scope is priced." },
+        { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
+      ], lead.stage === "fee_proposal" ? 1 : 0),
+      ptsa: { title: "A separate pre-construction agreement", text: "Before detailed design and pricing services begin, Blue Leaf will provide a separate pre-construction services agreement (PTSA) setting out the services, responsibilities, fees and deliverables. This brief does not replace that agreement and is not an acceptance of construction works." },
+    };
+  }
+  return {
+    paras: ["Your pre-construction agreement is in place. The design is being coordinated with the consultants, and your selections and the scope are being developed for pricing."],
+    steps: mark([
+      { label: "Design coordination", text: "Consultants coordinate the structure, services and energy requirements with the design." },
+      { label: "Selections", text: "Your finishes and fixtures are confirmed in the selections schedule." },
+      { label: "Pricing", text: "The confirmed scope and selections are priced." },
+      { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
+    ], lead.stage === "tender" ? 2 : 0),
+    ptsa: null,
+  };
+}
+
 function clientBriefFixture(input) {
-  const { context, register } = input;
+  const { lead, context, register } = input;
   const fx = baseFixture(input);
   const items = orderItems(register, register.items);
   const area = (i) => roomLabel(register, i);
-  const pItem = items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-005");
-  // Chosen priorities come from the typed answer. Older records hold them as text, read without changing them.
-  const chosenPriorities = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
-  const priorities = (chosenPriorities.length ? chosenPriorities : (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean)).slice(0, 3);
-  const priorityNote = clientSafeAnswer(pItem)?.clientNote || (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; ");
-  const reqs = items.filter((i) => i.itemKind === "requirement" && !i.roomId && said(i) && resolvePromptId(i.promptKey) !== "P-005");
-  const intentions = priorities.length
-    ? priorities.map((p, idx) => ({ label: p, text: idx === 0 ? priorityNote : "" }))
-    : reqs.slice(0, 3).map((r) => ({ label: itemShort(r), text: said(r) }));
+  // A row names its room (or the rooms an area answer covers); project-wide rows read without a place prefix.
+  const where = (i) => { const a = area(i); return a === "Whole house" || a === "Site / existing" ? "" : `${a}: `; };
+  const entry = (i, text) => ({ text: clean(text), ref: refCode(i) });
+
+  // 1 · The project. Sales words verbatim; nothing generated in their place.
   const occupancy = { occupied: "The home is expected to stay occupied during the works.", partly: "Part of the home is expected to stay occupied during the works.", vacant: "The home is expected to be vacant during the works." }[register.meta.occupancy] || "";
-  const summary = [
-    sentence(context.goals.description || context.goals.vision || `${fx.project.projectDescription} for ${fx.project.clientName}`),
-    clean([context.deliveryModel ? `Delivery model: ${DELIVERY_MODELS[context.deliveryModel]}.` : "", occupancy].join(" ")),
-  ].filter(Boolean);
-  // DOC1b (R04): "Included" is scope of WORKS only. Retained fabric ("existing to remain") is a scope
-  // BOUNDARY, so it belongs under "Not in the current scope", not conflated with demolition under Included.
-  const scopeIn = items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided"))
-    .map((i) => `${area(i)}: ${said(i) || dispositionLabel(i.disposition)}${i.disposition === "remove" ? " (remove)" : i.disposition === "make_good" ? " (make good)" : ""} [${refCode(i)}]`);
-  const scopeOut = items.filter((i) => ["excluded", "by_others", "deferred", "retain"].includes(i.disposition) && !NOT_WORK.has(natureOf(i)))
-    .map((i) => `${area(i)}: ${said(i) || itemShort(i)} — ${i.disposition === "retain" ? "existing to remain" : dispositionLabel(i.disposition)} [${refCode(i)}]`);
-  const groups = new Map();
-  for (const i of items.filter((x) => isClientSelection(x) && ["preference", "proposed", "client_approved"].includes(x.certainty) && (said(x) || x.product))) {
-    const g = docGroupFor(i.category) === "General" ? "Internal Finishes" : docGroupFor(i.category);
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(`${area(i)} — ${itemShort(i)}${sourceTag(i)}: ${clean(i.description || i.product) || said(i)} (${selectionStatus(i).toLowerCase()})`);
-  }
-  const perf = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005").map((i) => `${area(i)}: ${said(i)}${reviewOnly(i)}`);
-  if (perf.length) groups.set("Performance & comfort", perf.slice(0, 8));
-  const open = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
+  const description = sentence(context.goals.description);
+  const vision = sentence(context.goals.vision);
+  const pItem = items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-005");
+  const chosen = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
+  const priorities = (chosen.length ? chosen : (pItem?.description || "").split(/\s*;\s*/)[0].split(/\s*,\s*/).filter(Boolean)).slice(0, 3);
+  const priorityNote = clean(clientSafeAnswer(pItem)?.clientNote || (pItem?.description || "").split(/\s*;\s*/).slice(1).join("; "));
+  const typeLabel = PROJECT_TYPE_LABELS[context.projectType] || "Residential project";
+
+  // 2 · Scope. Work only (a fact, risk, check or requirement is never work — Tab 27 MR-UX-02.8).
+  const workWords = (i) => { const w = said(i) || dispositionLabel(i.disposition); return i.disposition === "remove" && !/demol|remov/i.test(w) ? `${w} (removal)` : i.disposition === "make_good" && !/make good|match/i.test(w) ? `${w} (make good)` : w; };
+  const scopeIn = items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided")).map((i) => entry(i, `${where(i)}${workWords(i)}`));
+  const isRisk = (i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site");
+  const block = (label, note, list) => ({ label, note, items: list });
+  const physical = (i) => !NOT_WORK.has(natureOf(i));
+
+  // 7 · Decisions: a real action (an action record, or an open next action), never a recorded preference.
+  const decisions = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
     .filter((i) => !["architect", "consultant", "trade"].includes(i.responsibility))
-    // DOC1a (R04): a selection already captured as a design DIRECTION (preference / proposed / approved)
-    // is NOT a required client action — it belongs in §02 "Design direction", not §03 "Key questions" —
-    // UNLESS it carries an explicit, unresolved next action (e.g. the genuine "confirm the appliance" ask).
-    .filter((i) => {
-      const hasDirection = isClientSelection(i) && ["preference", "proposed", "client_approved"].includes(i.certainty) && (said(i) || i.product);
-      const openAction = !!(i.nextAction && i.nextAction.trim()) && !i.resolved;
-      return !hasDirection || openAction;
-    })
-    .sort((a, b) => (a.responsibility === "client" ? -1 : 0) - (b.responsibility === "client" ? -1 : 0)).slice(0, 7);
-  const risks = items.filter((i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site"))
-    .map((i) => `${area(i)}: ${said(i) || itemShort(i)} — to be confirmed by ${responsibilityLabel(i.responsibility || "consultant").toLowerCase()}`).slice(0, 8);
-  // A site fact is noted here as a fact. It never appears as work (Tab 27 MR-UX-02.8).
-  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${itemShort(i)}: ${clean(answerSummary(i))} (recorded as a site or household fact)`);
+    .map((i) => ({ i, action: clean(i.nextAction) && !i.resolved ? clean(i.nextAction) : natureOf(i) === "action" ? said(i) : "" }))
+    .filter(({ i, action }) => action && !(isClientSelection(i) && DESIGN_DIRECTION.has(i.certainty) && !clean(i.nextAction)))
+    .sort((a, b) => (a.i.responsibility === "client" ? -1 : 0) - (b.i.responsibility === "client" ? -1 : 0)).slice(0, 7);
+  const inDecisions = new Set(decisions.map((d) => d.i.id));
+
+  const boundaries = [
+    block("Existing to remain or protect", "", items.filter((i) => i.disposition === "retain" && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
+    block("Not in the current scope", "These are not part of the work currently proposed. Some may be added later as a separate decision.",
+      items.filter((i) => ["excluded", "deferred"].includes(i.disposition) && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}${i.disposition === "deferred" ? " (possible later stage)" : ""}`))),
+    block("By others", "Arranged separately, outside Blue Leaf's work.", items.filter((i) => i.disposition === "by_others" && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
+    block("Items you plan to supply", "You have told us you will supply these. How they are installed and coordinated is confirmed as the design develops.",
+      items.filter((i) => i.supplyBy === "client" && !["excluded", "by_others", "na"].includes(i.disposition)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
+    block("Still to be decided", "Parts of the project that are open for now. We will confirm them with you as the design develops.",
+      items.filter((i) => isWork(i) && i.disposition === "undecided" && said(i) && !inDecisions.has(i.id) && i.supplyBy !== "client").map((i) => entry(i, `${where(i)}${said(i)}`))),
+    block("To be checked during design", "These need investigation or a consultant's input before they can be relied on.",
+      items.filter(isRisk).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}. ${responsibilityLabel(i.responsibility || "consultant")} to confirm.`))),
+  ];
+
+  // 5 · Design direction: recorded preferences, grouped for a reader, status in words. Requirements as goals.
+  const groups = new Map();
+  for (const i of items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product))) {
+    const g = cpbGroup(register, i);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push({ text: `${where(i)}${clean(i.description || i.product) || said(i)}`, status: selectionStatus(i), ref: refCode(i) });
+  }
+  const goals = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005")
+    .map((i) => ({ text: `${where(i)}${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
+  const preferences = [...CPB_GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g) })), ...(goals.length ? [{ group: "Requirements and goals", items: goals.slice(0, 8) }] : [])];
+
+  // 6 · Noted facts stay facts.
+  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${plainShort(i)}: ${clean(answerSummary(i))}`);
+
   fx.clientBrief = {
-    summaryParas: summary,
-    intentions,
-    scopeIn, scopeOut,
-    preferenceGroups: [...groups.entries()].map(([name, list]) => ({ name, items: list })),
-    questions: open.map((i) => ({ id: refCode(i), action: clean(i.nextAction) || said(i) || itemShort(i), owner: responsibilityLabel(i.responsibility || "blue_leaf"), status: "OPEN" })),
-    nextStepsParas: ["The next step is the Pre-construction Services Agreement (PTSA). Design development, consultant coordination and detailed selections follow, and each decision above is recorded against the same project brief."],
-    processSteps: [
-      { num: "01", label: "Concept", note: "Brief & concept design" },
-      { num: "02", label: "PTSA & plans", note: "Pre-construction services" },
-      { num: "03", label: "Coordination", note: "Consultants & selections" },
-      { num: "04", label: "Tender", note: "Scope & pricing confirmed" },
-      { num: "05", label: "Contract", note: "Build & handover" },
-    ],
-    assumptions: [...facts, ...risks],
+    subtitle: `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
+    overview: [description, occupancy].filter(Boolean),
+    priorities, priorityNote,
+    direction: vision && vision !== description ? vision : "",
+    scopeIn,
+    boundaries,
+    preferences,
+    noted: facts.length ? [{ label: "What we have noted about the site and household", items: facts }] : [],
+    decisions: decisions.map(({ i, action }) => ({ ref: refCode(i), action: sentence(action), owner: i.responsibility ? responsibilityLabel(i.responsibility) : "" })),
+    nextSteps: cpbNextSteps(lead, context),
   };
   return fx;
 }
@@ -290,7 +382,7 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   if (MONEY_RX.test(strings)) errors.push("The document would contain a dollar figure — register documents never show prices or allowances.");
   if (docType === "selections_schedule" && !fx.selections.length) errors.push("There are no client selections to schedule yet.");
   if (docType === "tender_scope_notes" && !fx.tenderNotes.sections.some((sec) => sec.title !== "Drawing references")) errors.push("There is nothing in the register for the estimator yet.");
-  if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferenceGroups.length) warnings.push("The brief has no recorded scope or preferences yet.");
+  if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferences.length) warnings.push("The brief has no recorded scope or preferences yet.");
   const v = validateFixture(fx, { mode: mode === "issue" ? "issue" : "draft" });
   if (mode === "issue") errors.push(...v.errors); else warnings.push(...v.warnings);
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
@@ -303,7 +395,7 @@ function renderedTextIssues(docxBuffer) {
     const xml = Object.keys(zip.files).filter((n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n)).map((n) => zip.files[n].asText()).join(" ");
     const text = xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
     const bad = [];
-    if (/\{[#/]?[A-Z_]{2,}\}/.test(text)) bad.push("unfilled template tag");
+    if (/\{\s*[#/^]?\s*[A-Z][A-Z0-9_]+\s*\}/.test(text)) bad.push("unfilled template tag");   // tags with digits too (INT1_NUM)
     if (/\bundefined\b|\bNaN\b|\[object Object\]|\[Client\]/.test(text)) bad.push("empty or invalid value");
     return bad;
   } catch { return ["the document could not be read back"]; }
@@ -372,7 +464,7 @@ export async function previewDocument(sb, leadId, docType, { layout, recipientNa
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
   let revision = 1;
   try { revision = await nextVersion(sb, leadId, docType); } catch { /* preview works pre-213 */ }
-  const input = { lead, context, register, revision, issuedDate: isoDate(), issuer: actor?.name };
+  const input = { lead, context, register, revision, issuedDate: isoDate(), issuer: actor?.name, recipientName };
   const fx = buildRegisterFixture(docType, { ...input, status: "Draft" });
   // Show exactly what WOULD block an issue (checked on the issued form of the same document).
   const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }), { register, recipientName, mode: "issue" });
@@ -397,14 +489,16 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     }
     const revision = await nextVersion(sb, leadId, docType);
     const issuedDate = isoDate();
-    const fx = buildRegisterFixture(docType, { lead, context, register, revision, status: "Issued", issuedDate, issuer: actor?.name });
+    const fx = buildRegisterFixture(docType, { lead, context, register, revision, status: "Issued", issuedDate, issuer: actor?.name, recipientName });
+    // New issues are R01, R02 … (one convention, documentIdentity.mjs). Rows already issued keep their stored P labels.
+    const revLabel = issueRevisionLabel(revision);
     const checks = registerDocChecks(docType, fx, { register, recipientName, mode: "issue" });
     if (checks.errors.length) throw new DocumentError(422, "This document can't be issued yet.", "PREFLIGHT", { checks });
     const out = await renderRegisterDocument(docType, fx, { layout });
     if (out.leaks.length) throw new DocumentError(422, "This document can't be issued yet.", "PREFLIGHT", { checks: { errors: [`Rendering problem: ${out.leaks.join(", ")}.`], warnings: [] } });
 
     const sha = createHash("sha256").update(out.pdf).digest("hex");
-    const stamp = `${issuedDate}-${docType.replace(/_/g, "-")}-P${String(revision).padStart(2, "0")}-${randomBytes(3).toString("hex")}`;
+    const stamp = `${issuedDate}-${docType.replace(/_/g, "-")}-${revLabel}-${randomBytes(3).toString("hex")}`;
     const pdfPath = `leads/${leadId}/register/${docType}/${stamp}.pdf`;
     const docxPath = `leads/${leadId}/register/${docType}/${stamp}.docx`;
     // A thrown rejection (network/timeout under undici) is normalised to the same {error} shape the
@@ -425,14 +519,14 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     }
 
     const label = REGISTER_DOC_TYPES[docType].label;
-    const filename = `${label} — ${fx.project.clientName} — P${String(revision).padStart(2, "0")}.pdf`.replace(/[\\/]/g, "-");
+    const filename = `${label} — ${fx.project.clientName} — ${revLabel}.pdf`.replace(/[\\/]/g, "-");
     const versions = registerItemVersions(register);
     let data, error;
     try { ({ data, error } = await sb.rpc("register_issue_document", {
       p_lead_id: leadId, p_document_type: docType, p_expected_version: revision,
       p_row: {
         filename, file_size: out.pdf.length, mime_type: PDF_MIME, storage_path: pdfPath, uploaded_by: actor?.email || actor?.name || "register",
-        content_sha256: sha, revision_label: `P${String(revision).padStart(2, "0")}`, template_key: out.template.key,
+        content_sha256: sha, revision_label: revLabel, template_key: out.template.key,
         template_version: `${out.template.file}@${out.template.hash}`,
         source_snapshot: { fixture: fx, registerMode: loaded.mode, registerMetaRev: register.meta.rev ?? null, itemVersions: versions,
           libraryVersion: QUESTION_LIBRARY_VERSION, exportDocxPath: docxPath, layout: layout || "technical" },

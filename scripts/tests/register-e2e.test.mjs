@@ -164,7 +164,7 @@ async function main() {
     pv.ok && /Morgan & Alex Hart/.test(pvText) && /west brick wall retained/i.test(pvText) && /Landscaping/i.test(pvText), pv.body?.error || pvText.slice(0, 200));
   check("#15", "brief contains no dollar figures and no unfilled placeholders", pv.ok && !/\$\s?\d/.test(pvText) && !/\{[#/]?[A-Z_]{2,}\}/.test(pvText));
   const iss1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "Morgan & Alex Hart", recipientEmail: "hart.family@example.invalid" });
-  check("#18", "client brief issued as P01 with recipient + checksum (no signature required)", iss1.ok && iss1.body.document.revision_label === "P01" && !!iss1.body.document.content_sha256, JSON.stringify(iss1.body).slice(0, 300));
+  check("#18", "client brief issued as R01 with recipient + checksum (no signature required)", iss1.ok && iss1.body.document.revision_label === "R01" && !!iss1.body.document.content_sha256, JSON.stringify(iss1.body).slice(0, 300));
   const docxUrl = iss1.ok ? await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${iss1.body.document.id}/url?export=docx`) : null;
   check("#5fix", "an issued document stores BOTH the PDF and the controlled DOCX export (no half-stored issue — Tab 25 issue 5)", !!docxUrl?.ok && !!docxUrl.body.url, JSON.stringify(docxUrl?.body || {}).slice(0, 160));
   const noRecip = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "" });
@@ -226,7 +226,7 @@ async function main() {
   const ss2 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/selections_schedule/issue`, { recipientName: "Morgan & Alex Hart" });
   const list = await api(staff, "GET", `/api/register/leads/${leadA.id}/documents`);
   const schedRevs = (list.body?.documents?.issued || []).filter((d) => d.document_type === "selections_schedule");
-  const p01 = schedRevs.find((d) => d.revision_label === "P01"), p02 = schedRevs.find((d) => d.revision_label === "P02");
+  const p01 = schedRevs.find((d) => d.revision_label === "R01"), p02 = schedRevs.find((d) => d.revision_label === "R02");
   const p01Again = p01 ? await fetchDoc(p01.id, "A-selections-P01-retrieved.pdf") : "";
   const p02Text = p02 ? await fetchDoc(p02.id, "A-selections-P02.pdf") : "";
   check("#18", "re-issue: P02 current, P01 superseded and still retrievable with its ORIGINAL content",

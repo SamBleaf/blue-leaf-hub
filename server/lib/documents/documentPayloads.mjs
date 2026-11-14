@@ -6,6 +6,8 @@
 // columns, no migrations — a typed fixture only. Doc-type constants (breadcrumb, section label, title,
 // tagline, callout, footer) are generated here; only project CONTENT comes from the fixture.
 
+import { documentIdentity, fmtAuDate as fmtIdDate } from "./documentIdentity.mjs";
+
 export const SELECTION_STATUSES = [
   "Client-approved", "Confirmed", "Proposed", "Preferred", "Preliminary", "TBC",
   "N/A", "Excluded", "By Others", "Existing to Remain", "Undecided", "Hold", "Design", "Retain", "Deferred",
@@ -14,8 +16,6 @@ export const SELECTION_STATUSES = [
 export const ARCHITECT_ITEM_STATUSES = ["Client-approved", "Proposed", "To verify"];
 
 const GROUP_ORDER = ["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"];
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const fmtAuDate = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || "")); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : String(iso || ""); };
 const paras = (arr) => (arr || []).map((t) => ({ PARA_TEXT: String(t || "") }));
 const items = (arr) => (arr || []).map((t) => ({ ITEM_TEXT: String(t || "") }));
 
@@ -29,54 +29,114 @@ function metaRows(pairs) {
   return rows;
 }
 
-function chrome(fx, { prefix, breadcrumb, sectionLabel, title, tagline }) {
-  const meta = fx.meta, issued = meta.status === "Issued";
-  const docNumber = `${prefix}-${meta.ref}`;
-  const issueCode = `P${String(meta.revision).padStart(2, "0")}`;
-  const statusValue = issued ? `ISSUED  /  ${fmtAuDate(meta.issuedDate)}` : `PRELIMINARY  /  ${issueCode}`;
+// Every document prints one identity: BLB-[TYPE]-[PROJECT REF]-[REVISION] (documentIdentity.mjs). A draft carries
+// no revision — it isn't one yet — and says "Draft — not issued"; an issued copy prints its revision and date.
+function chrome(fx, { type, breadcrumb, sectionLabel, title, tagline }) {
+  const meta = fx.meta;
+  const id = documentIdentity({ type, projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
   return {
     BREADCRUMB: breadcrumb, SECTION_LABEL: sectionLabel, DOC_TITLE: title, TAGLINE: tagline,
-    FOOTER_MID: `${docNumber}  ·  ${issued ? "ISSUED" : "DRAFT"}`,
-    _docNumber: docNumber, _statusValue: statusValue,
+    FOOTER_MID: `${id.number}  ·  ${id.issued ? id.statusText.toUpperCase() : "DRAFT — NOT ISSUED"}`,
+    _docNumber: id.number, _statusValue: id.issued ? `${id.revision}  /  ${id.statusText}` : "DRAFT  /  NOT ISSUED", _id: id,
   };
 }
 
-/** 01 — Client Project Brief (editorial). */
+/** 01 — Client Project Brief (BLB-CPB, template cpb-2.0). Reader: the homeowner, after the concept presentation. */
+const two = (n) => String(n).padStart(2, "0");
+// A quiet reference after a line: non-breaking spaces bind it to the last word and a non-breaking hyphen keeps
+// "W011-UHI" in one piece, so a reference never sits alone or splits across lines.
+const refTail = (ref) => (ref ? `\u00A0\u00A0\u00A0${String(ref).replace(/-/g, "\u2011")}` : "");
 export function buildClientBriefPayload(fx) {
-  const b = fx.clientBrief || {}, p = fx.project;
-  const c = chrome(fx, { prefix: "PBR", breadcrumb: "Client Project Brief  /  Design Study",
-    sectionLabel: p.sectionLabel || "Concept presentation  ·  Renovation + extension", title: "Project brief",
-    tagline: "A clear foundation for the next phase of your home." });
-  const intn = (i, k) => (b.intentions && b.intentions[i] ? b.intentions[i][k] : "");
-  return {
-    ...c,
-    META_ROWS: metaRows([["Prepared for", p.clientName], ["Site", p.siteAddress], ["Design basis", p.drawingBasis], ["Document status", c._statusValue]]),
-    SUMMARY_PARAS: paras(b.summaryParas),
-    INT1_NUM: "01", INT1_LABEL: intn(0, "label"), INT1_TEXT: intn(0, "text"),
-    INT2_NUM: "02", INT2_LABEL: intn(1, "label"), INT2_TEXT: intn(1, "text"),
-    INT3_NUM: "03", INT3_LABEL: intn(2, "label"), INT3_TEXT: intn(2, "text"),
-    SCOPE_IN: items(b.scopeIn),
-    SCOPE_OUT: items(b.scopeOut),
-    PREFERENCE_GROUPS: (b.preferenceGroups || []).map((g) => ({ GROUP_NAME: g.name, ITEMS: items(g.items) })),
-    QUESTIONS: (b.questions || []).map((q) => ({ REF_ID: q.id || "", ACTION: q.action || "", OWNER: q.owner || "—", STATUS: q.status || "OPEN" })),
-    NEXT_STEPS_PARAS: paras(b.nextStepsParas),
-    // Composed closing page (Tab 17 #2): Blue Leaf process path + working assumptions + a status anchor.
-    // A full brief (one that carries the process path) breaks before the questions so page 1 ends on the
-    // design narrative and page 2 reads as one composed block; a short brief stays a single page.
-    CB_BREAK: !!(b.processSteps && b.processSteps.length),
-    HAS_PROCESS: (b.processSteps && b.processSteps.length) ? [{}] : [],
-    ...procFields(b.processSteps),
-    ASSUMPTIONS: items(b.assumptions),
-    CLOSE_LABEL: "Document status · preliminary",
-    CLOSE_BODY: "Prepared for discussion at concept stage. This is a design brief, not a fixed-price quotation: products, quantities and allowances are indicative and are developed and confirmed during pre-construction. No client signature is required.",
-  };
-}
+  const b = fx.clientBrief || {}, p = fx.project || {}, meta = fx.meta || {};
+  const id = documentIdentity({ type: "client_brief", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
+  const overview = (b.overview || []).filter(Boolean);
+  const priorities = (b.priorities || []).filter(Boolean).slice(0, 3);
+  const scopeIn = (b.scopeIn || []).filter((x) => x && x.text);
+  const boundaries = (b.boundaries || []).map((g) => ({ ...g, items: (g.items || []).filter((x) => x && x.text) })).filter((g) => g.items.length);
+  const prefRows = [];
+  // Every row names its category (bold where a group starts, quiet after), so a row continued onto a new page still says what it is.
+  for (const g of b.preferences || []) (g.items || []).filter((x) => x && x.text).forEach((x, i) => prefRows.push({ AREA: i === 0 ? g.group : "", AREA_SUB: i === 0 ? "" : g.group, TEXT: x.text, STATUS: x.status || "" }));
+  const drawing = String(p.drawingBasis || "").trim();
+  const assumes = [
+    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be developed.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
+    "Structural, energy, drainage and approval requirements are confirmed by the relevant consultants as the design develops.",
+    "Final selections, quantities, timeframe and the construction price are not set by this document.",
+  ];
+  const noted = [...(b.noted || []).filter((g) => (g.items || []).length), { label: "This brief assumes", items: assumes }];
+  const decisions = (b.decisions || []).filter((d) => d && d.action);
+  const steps = (b.nextSteps?.steps || []).filter((x) => x && x.label);
+  const ptsa = b.nextSteps?.ptsa || null;
 
-/** Pad the Blue Leaf process path to five fixed stage slots for the client-brief band. */
-function procFields(steps) {
-  const out = {};
-  for (let i = 0; i < 5; i++) { const s = (steps || [])[i] || {}; out[`PROC${i + 1}_NUM`] = s.num || ""; out[`PROC${i + 1}_LABEL`] = s.label || ""; out[`PROC${i + 1}_NOTE`] = s.note || ""; }
-  return out;
+  // Sections are numbered in reading order, counting only the ones that print.
+  const present = {
+    s1: !!(overview.length || priorities.length || b.direction),
+    s2: !!(scopeIn.length || boundaries.length),
+    s3: prefRows.length > 0,
+    s4: true,
+    s5: decisions.length > 0,
+    s6: true,
+  };
+  const nums = {}; let n = 0;
+  for (const k of ["s1", "s2", "s3", "s4", "s5", "s6"]) if (present[k]) nums[k] = two(++n);
+
+  const metaPairs = [
+    ["Prepared for", p.clientName], ["Site", p.siteAddress],
+    ["Project", p.projectLabel || p.projectDescription], ["Drawing basis", drawing || "Not yet recorded"],
+    ["Document", id.number], ["Status", id.issued ? `${id.revision} · ${id.statusText}` : id.statusText],
+    ["Prepared by", p.preparedBy || "Blue Leaf Building"],
+    id.issued ? ["Issued to", meta.recipient || p.clientName] : ["Prepared", fmtIdDate(meta.preparedDate)],
+  ];
+  const kicker = ["Preliminary", p.stageLabel].filter(Boolean).join("  /  ");
+  return {
+    HDR_DOC_TYPE: "Client Project Brief",
+    HDR_PROJECT: p.siteShort || p.siteAddress || "",
+    FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
+    DOC_KICKER: id.issued ? kicker : `Draft  /  ${kicker}`,
+    DOC_TITLE: "Project brief",
+    HAS_SUBTITLE: !!b.subtitle, DOC_SUBTITLE: b.subtitle || "",
+    META_ROWS: metaRows(metaPairs),
+    STATUS_LABEL: id.issued ? "Preliminary record" : "Draft for review — not issued",
+    STATUS_BODY: "This brief records our current understanding of your project so we can confirm it together. It is not a construction specification, a fixed-price quotation or a contract, and nothing in it is ordered or approved.",
+
+    HAS_S1: present.s1, S1_NUM: nums.s1 || "",
+    OVERVIEW: overview.map((t) => ({ PARA: t })),
+    HAS_PRIORITIES: priorities.length > 0,
+    PRI_BAND_3: priorities.length === 3, PRI_BAND_2: priorities.length === 2, PRI_BAND_1: priorities.length === 1,
+    PN1: "01", PN2: "02", PN3: "03", PL1: priorities[0] || "", PL2: priorities[1] || "", PL3: priorities[2] || "",
+    HAS_PRIORITY_NOTE: !!b.priorityNote, PRIORITY_NOTE: b.priorityNote || "",
+    HAS_DIRECTION: !!b.direction, DIRECTION: b.direction || "",
+
+    HAS_S2: present.s2, S2_NUM: nums.s2 || "",
+    SCOPE_INTRO: drawing
+      ? `This is the building work we currently propose, based on ${drawing}. It will be refined as the design develops.`
+      : "This is the building work we currently propose, based on our conversations so far. It will be refined as the design develops.",
+    HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text, REF: refTail(x.ref) })),
+    HAS_BOUNDARIES: boundaries.length > 0,
+    BOUNDARIES: boundaries.map((g) => ({ B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: g.items.map((x) => ({ TEXT: x.text, REF: refTail(x.ref) })) })),
+
+    HAS_S3: present.s3, S3_NUM: nums.s3 || "",
+    PREF_INTRO: "These are the preferences you have shared so far. They describe a direction, not a final specification: products, sizes and technical details are confirmed as the design develops.",
+    PREFS: prefRows,
+    PREF_KEY: "Preferred: the look you like, not yet a specific product.  Proposed: a specific option we are reviewing with you.  Client-approved: you have confirmed it with us.  Goals marked for review are checked by consultants before they are relied on.",
+
+    HAS_S4: present.s4, S4_NUM: nums.s4,
+    NOTED: noted.map((g) => ({ N_LABEL: g.label, N_ITEMS: g.items.map((t) => ({ TEXT: t })) })),
+
+    HAS_S5: present.s5, S5_NUM: nums.s5 || "",
+    DECISIONS_INTRO: "These are the decisions and next steps that need input before the design can move on. We will work through them with you.",
+    DECISIONS: decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: d.owner || "To be agreed" })),
+
+    S6_NUM: nums.s6,
+    NEXT_PARAS: (b.nextSteps?.paras || []).map((t) => ({ PARA: t })),
+    HAS_STEPS: steps.length > 0,
+    STEPS: steps.map((x) => ({ SLABEL: x.label, SNOW: x.current ? "\nWhere we are now" : "", STEXT: x.text || "" })),
+    HAS_PTSA: !!ptsa, PTSA_TITLE: ptsa?.title || "", PTSA_TEXT: ptsa?.text || "",
+
+    ABOUT_LABEL: "About this document",
+    ABOUT_BODY: id.issued
+      ? `${p.preparedBy || "Blue Leaf Building"} prepared this brief from our meetings and the project register. It is a record for you to keep and does not need a signature. If anything here does not match what you told us, let us know and we will issue a revised brief.`
+      : "This is a draft for review. It has not been issued, and it will carry a revision number and issue date once it is.",
+  };
 }
 
 // Design-register grouping: an explicit row group (live register data) wins; fixtures fall back to ID prefixes.
@@ -85,7 +145,7 @@ const archGroup = (id, group) => group || (/^(EX|WN|ST|RF|PL)/.test(id) ? "Envel
 /** 02 — Architect Design Brief (coordination-first). */
 export function buildArchitectBriefPayload(fx) {
   const a = fx.architectBrief || {}, p = fx.project;
-  const c = chrome(fx, { prefix: "ADB", breadcrumb: "Architect / Consultant  /  Design Study",
+  const c = chrome(fx, { type: "architect_brief", breadcrumb: "Architect / Consultant  /  Design Study",
     sectionLabel: "Design coordination  /  Architect", title: "Architect design brief",
     tagline: "Requirements, decisions and actions to progress the next drawing issue." });
   // design register, grouped by element
@@ -133,7 +193,7 @@ const known = (v) => (v && v !== "TBC" ? v : "");
 
 export function buildClientPresentationPayload(fx) {
   const p = fx.project, cp = fx.clientPresentation || {};
-  const c = chrome(fx, { prefix: "SFS", breadcrumb: "Client Selections  /  Design Study",
+  const c = chrome(fx, { type: "client_presentation", breadcrumb: "Client Selections  /  Design Study",
     sectionLabel: "Client selections  /  Design development", title: "Materials & finishes",
     tagline: "A considered palette, with every decision traceable." });
   const byGroup = new Map();
@@ -181,7 +241,7 @@ export function buildClientPresentationPayload(fx) {
 /** 04 — Technical Selection Register (reference-first, dense, grouped). */
 export function buildSelectionsSchedulePayload(fx) {
   const p = fx.project;
-  const c = chrome(fx, { prefix: "TSR", breadcrumb: "Technical Selections  /  Design Study",
+  const c = chrome(fx, { type: "selections_schedule", breadcrumb: "Technical Selections  /  Design Study",
     sectionLabel: "Procurement  /  Technical reference", title: "Selection register",
     tagline: "Room and element schedule · source references · decision status" });
   const byGroup = new Map();
@@ -201,7 +261,7 @@ export function buildSelectionsSchedulePayload(fx) {
 // One master copy for the Buildxact estimator. Never a client or supplier document, and it carries no amounts or quantities.
 export function buildTenderNotesPayload(fx) {
   const t = fx.tenderNotes || {}, p = fx.project;
-  const c = chrome(fx, { prefix: "TSN", breadcrumb: "Internal  /  Tender",
+  const c = chrome(fx, { type: "tender_scope_notes", breadcrumb: "Internal  /  Tender",
     sectionLabel: "Internal  /  Estimating", title: "Tender scope & pricing notes",
     tagline: "What to price, what is out, and what is still open. Buildxact holds the numbers." });
   return {
