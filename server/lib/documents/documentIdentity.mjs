@@ -12,7 +12,7 @@
 //
 // Prospective only: rows already issued keep their stored revision_label (P01 …), filename and storage path.
 
-/** Document type codes. TSN stays until the Estimator Handover (EHO) name is confirmed by the owner. */
+/** Document type codes. TSN keeps its name (owner, 15 Nov 2026: the estimator is in-house). The tender handover gets a code when it is specified. */
 export const DOC_CODES = {
   client_brief: "CPB",
   architect_brief: "ADB",
