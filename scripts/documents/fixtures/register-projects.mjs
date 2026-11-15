@@ -3,7 +3,7 @@
 // Each project is built from real register records (makeItem / makeRoom / the Tab 21 answer configs) and goes
 // through the real fixture builder (buildRegisterFixture) and renderer. Nothing here is hand-written document
 // prose, so the specimens show what the Hub would actually produce. All names, addresses and references are
-// fictional. No prices, no quantities.
+// fictional. No prices, no quantities, and no engineered stone (prohibited in Australia from 1 July 2024).
 //
 //   kestrel  — 14 Kestrel Court, Stirling (ref 0417): renovation and two-storey rear extension (the specimen project)
 //   powder   — 3 Aldgate Lane, Aldgate (ref 0608): a single powder-room renovation, minimal content
@@ -12,14 +12,20 @@ import { makeItem, makeRoom, emptyMeta, toggleOption } from "../../../src/lib/re
 import { QUESTIONS, ANSWER_CONFIG } from "../../../src/lib/registerQuestions.js";
 
 const q = (id) => QUESTIONS.find((x) => x.id === id);
+// Stable item ids (CPB-05): every record gets an id from its project prefix and its position, so the same project
+// rendered as a draft, R01 and R02 prints the same register references. makeItem would otherwise mint a random id.
+let PREFIX = "x", SEQ = 0;
+const startProject = (prefix) => { PREFIX = prefix; SEQ = 0; };
+const nextId = () => `ri_${PREFIX}_${String(++SEQ).padStart(3, "0")}`;
 const pick = (id, ...paths) => paths.reduce((a, p) => toggleOption(ANSWER_CONFIG[id], a, p), null);
 /** A record for a question, with the question's own kind, category and section unless overridden. */
-const rec = (id, more = {}) => makeItem({ itemKind: q(id).itemKind, category: q(id).category, promptKey: id, section: q(id).section === "site" ? "site" : "project", technicalStatus: q(id).technical, ...more });
+const rec = (id, more = {}) => makeItem({ id: nextId(), itemKind: q(id).itemKind, category: q(id).category, promptKey: id, section: q(id).section === "site" ? "site" : "project", technicalStatus: q(id).technical, ...more });
 const inRoom = (room, id, more = {}) => rec(id, { roomId: room.id, room: room.name, section: "room", ...more });
 const EVIDENCE = { at: "2026-11-04", by: "Sam (Blue Leaf)", method: "meeting", ref: "Concept presentation, 4 Nov 2026" };
 
 // ── 0417 · Kestrel Court ─────────────────────────────────────────────────────────────────────────────
 function kestrel() {
+  startProject("kc");
   const R = {
     kitchen: makeRoom({ id: "k_kitchen", name: "Kitchen and living", roomType: "kitchen", level: "Ground", order: 0, sheet: "A101" }),
     entry: makeRoom({ id: "k_entry", name: "Entry", roomType: "hall", level: "Ground", order: 1 }),
@@ -66,7 +72,7 @@ function kestrel() {
     inRoom(R.main, "R-005", { certainty: "preference", overridesDefaultId: floorDefault.id, description: "Wool carpet" }),
     rec("W-019", { isDefault: true, certainty: "preference", description: "Calm neutral walls with matte finishes" }),
     inRoom(R.kitchen, "K-004", { certainty: "preference", description: "Large central island and a walk-in butler's pantry, with cabinetry finishes still to be developed" }),
-    inRoom(R.kitchen, "K-005", { certainty: "client_approved", evidence: EVIDENCE, description: "Engineered stone benchtop with a waterfall end to the island" }),
+    inRoom(R.kitchen, "K-005", { certainty: "client_approved", evidence: EVIDENCE, description: "Porcelain benchtop with a waterfall end to the island" }),
     inRoom(R.ensuite, "B-007", { certainty: "preference", description: "Freestanding bath" }),
     inRoom(R.ensuite, "B-006", { certainty: "preference", description: "Walk-in shower with a frameless screen" }),
     inRoom(R.ensuite, "B-005", { certainty: "preference", description: "Above-counter basin", nextAction: "Confirm the basin style once the vanity is drawn", responsibility: "client" }),
@@ -102,6 +108,7 @@ function kestrel() {
 
 // ── 0608 · Aldgate powder room (short) ───────────────────────────────────────────────────────────────
 function powder() {
+  startProject("al");
   const pr = makeRoom({ id: "p_powder", name: "Powder room", roomType: "wc", level: "Ground", order: 0 });
   return {
     projectRef: "0608",
@@ -124,6 +131,7 @@ function powder() {
 
 // ── 0631 · Ridgeline Drive new home (long) ───────────────────────────────────────────────────────────
 function ridgeline() {
+  startProject("rd");
   const names = [["Kitchen", "kitchen"], ["Scullery", "scullery"], ["Living", "living"], ["Dining", "dining"], ["Family", "family"], ["Study", "study"], ["Main bedroom", "bedroom"],
     ["Ensuite", "ensuite"], ["Walk-in robe", "wir"], ["Bedroom 2", "bedroom"], ["Bedroom 3", "bedroom"], ["Bedroom 4", "bedroom"], ["Bathroom", "bathroom"], ["Laundry", "laundry"], ["Garage", "garage"]];
   const rooms = names.map(([name, roomType], i) => makeRoom({ id: `r_${i}`, name, roomType, level: i < 6 || i > 12 ? "Ground" : "Upper", order: i }));
@@ -144,13 +152,13 @@ function ridgeline() {
     rec("W-017", { isDefault: true, certainty: "preference", description: "Engineered oak flooring to the living areas, carpet to the bedrooms" }),
     rec("W-019", { isDefault: true, certainty: "preference", description: "Warm white walls with a soft feature colour in the study" }),
     inRoom(by.Kitchen, "K-004", { certainty: "preference", description: "Two-tone cabinetry with timber-look uppers and painted lowers" }),
-    inRoom(by.Kitchen, "K-005", { certainty: "client_approved", evidence: EVIDENCE, description: "Engineered stone benchtops with a 40 mm edge" }),
+    inRoom(by.Kitchen, "K-005", { certainty: "client_approved", evidence: EVIDENCE, description: "Granite benchtops with a 40 mm edge" }),
     inRoom(by.Kitchen, "K-006", { certainty: "preference", description: "Handmade-look tile splashback" }),
     inRoom(by.Kitchen, "K-007", { certainty: "proposed", description: "Undermount sink with a matte black mixer" }),
     inRoom(by.Scullery, "K-004", { certainty: "preference", description: "Open shelving and a second sink in the scullery" }),
     ...["Ensuite", "Bathroom"].flatMap((rn) => [
       inRoom(by[rn], "B-003", { certainty: "preference", description: "Wall-hung toilet" }),
-      inRoom(by[rn], "B-004", { certainty: "preference", description: "Floating timber-look vanity with a stone top" }),
+      inRoom(by[rn], "B-004", { certainty: "preference", description: "Floating timber-look vanity with a porcelain top" }),
       inRoom(by[rn], "B-006", { certainty: "preference", description: "Walk-in shower with a linear floor waste" }),
       inRoom(by[rn], "B-008", { certainty: "preference", description: "Brushed nickel tapware" }),
       inRoom(by[rn], "B-009", { certainty: "preference", description: "Matte porcelain floor tiles with a feature wall behind the vanity" }),

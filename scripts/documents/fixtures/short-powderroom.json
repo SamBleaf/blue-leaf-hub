@@ -55,10 +55,12 @@
         "group": "Finishes",
         "items": [
           {
+            "where": "Powder room",
             "text": "Warm neutral tiles with a matte black tapware accent.",
             "status": "Preferred"
           },
           {
+            "where": "Vanity",
             "text": "Timber-look laminate cabinetry to match the kitchen.",
             "status": "Preferred"
           }

@@ -62,10 +62,12 @@
         "group": "External",
         "items": [
           {
+            "where": "Extension",
             "text": "Fibre-cement cladding (horizontal profile) to the extension, with timber-look battens as a feature to the entry — warm but low-maintenance.",
             "status": "Preferred"
           },
           {
+            "where": "Windows and doors",
             "text": "Dark, slimline-framed windows and doors; generous glazing to the north living zone.",
             "status": "Preferred"
           }
@@ -75,10 +77,12 @@
         "group": "Internal",
         "items": [
           {
+            "where": "Living areas",
             "text": "Engineered oak / blackbutt-tone flooring through living areas; 2.7 m ceilings to the new ground floor.",
             "status": "Preferred"
           },
           {
+            "where": "Throughout",
             "text": "Calm, neutral palette; honest materials (timber, stone-look benchtops, matte finishes).",
             "status": "Preferred"
           }
@@ -88,10 +92,12 @@
         "group": "Kitchen & wet areas",
         "items": [
           {
+            "where": "Kitchen",
             "text": "Walk-in butler's pantry; island bench as the social centre.",
             "status": "Preferred"
           },
           {
+            "where": "Ensuite",
             "text": "Ensuite with freestanding bath and a large walk-in shower; underfloor heating preferred (to be costed).",
             "status": "Preferred"
           }

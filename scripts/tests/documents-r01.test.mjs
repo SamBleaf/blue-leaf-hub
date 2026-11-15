@@ -26,9 +26,9 @@ const cbDraft = buildClientBriefPayload({ ...reno, meta: { ...reno.meta, status:
 const cbIssued = buildClientBriefPayload(issuedReno);
 ok("T1 client brief: scope, boundaries, preferences, decisions and priorities map 1:1; sections number in order",
   cb.SCOPE_IN.length === reno.clientBrief.scopeIn.length && cb.BOUNDARIES[0].B_ITEMS.length === reno.clientBrief.boundaries[0].items.length &&
-  cb.OVERVIEW.length === reno.clientBrief.overview.length && cb.PREFS.length === reno.clientBrief.preferences.reduce((n, g) => n + g.items.length, 0) &&
+  cb.OVERVIEW.length === reno.clientBrief.overview.length && cb.PREF_GROUPS.reduce((n, g) => n + g.ROWS_KEEP.length + g.ROWS.length + g.ROWS_PEN.length + g.ROWS_LAST.length, 0) === reno.clientBrief.preferences.reduce((n, g) => n + g.items.length, 0) &&
   cb.PRI_BAND_3 === true && cb.PRI_BAND_2 === false && cb.PL1 === reno.clientBrief.priorities[0] &&
-  cb.DECISIONS.length === reno.clientBrief.decisions.length && cb.DECISIONS.every((q) => q.REF && q.ACTION && q.OWNER) &&
+  [...cb.DECISIONS_KEEP, ...cb.DECISIONS, ...cb.DECISIONS_PEN, ...cb.DECISIONS_LAST].length === reno.clientBrief.decisions.length && [...cb.DECISIONS_KEEP, ...cb.DECISIONS, ...cb.DECISIONS_PEN, ...cb.DECISIONS_LAST].every((q) => q.REF && q.ACTION && q.OWNER) &&
   [cb.S1_NUM, cb.S2_NUM, cb.S3_NUM, cb.S4_NUM, cb.S5_NUM, cb.S6_NUM].join() === "01,02,03,04,05,06");
 ok("T1b identity: a draft has no revision and says so; an issued copy prints BLB-CPB-ref-R0n and its date",
   /^BLB-CPB-0417\s+·\s+Draft — not issued$/.test(cbDraft.FTR_IDENTITY) && !/R0\d/.test(cbDraft.FTR_IDENTITY) && /^Draft/.test(cbDraft.DOC_KICKER) &&

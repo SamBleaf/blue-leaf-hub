@@ -103,6 +103,23 @@ export function pageFooter() {
   })] });
 }
 
+/**
+ * Full-width rows that close a table (a note, the closing callout). LibreOffice keeps table rows together but not a
+ * table with the paragraph after it, so a closing block that must never sit alone on a page is the table's last rows.
+ * cond: an optional condition key wrapping the row. keep: glue it to the next row.
+ */
+export function tailNoteRow(field, { cond = null, keep = false } = {}) {
+  return new TableRow({ cantSplit: true, children: [cell(
+    para([run(cond ? `{#${cond}}` : "", { size: 2 }), run(`{${field}}`, { size: S.small, color: C.grey }), run(cond ? `{/${cond}}` : "", { size: 2 })], { after: 0, line: 252, keepNext: keep }),
+    CW, { span: 2, pt: 140, pb: 60, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
+}
+export function tailCalloutRow(labelTag, bodyTag, span) {
+  return new TableRow({ cantSplit: true, children: [cell([
+    para(run(`{${labelTag}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 40, keepNext: true }),
+    para(run(`{${bodyTag}}`, { size: S.small + 1 }), { after: 0, line: 252 }),
+  ], CW, { span, fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: rule(C.white, 40), bottom: none(), right: none() } })] });
+}
+
 export const sectionProps = () => ({ page: { size: { width: PAGE.w, height: PAGE.h }, margin: PAGE.margin } });
 
 // ── Styles and lists ───────────────────────────────────────────────────────────────────────────────
@@ -155,7 +172,7 @@ export function callout(labelTag, bodyTag) {
 export function sectionHead(numTag, kicker, title) {
   return [
     para([run(`{${numTag}}`, { size: S.kicker, bold: true, color: C.blue }), run(`  /  ${kicker}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 })],
-      { before: 300, after: 100, keepNext: true, border: { bottom: rule(C.blue, 6) } }),
+      { before: 280, after: 100, keepNext: true, border: { bottom: rule(C.blue, 6) } }),
     para(run(title, { size: S.h1, bold: true }), { heading: HeadingLevel.HEADING_1, before: 40, after: 100, keepNext: true, line: 240 }),
   ];
 }
@@ -169,44 +186,78 @@ export const bodyGrey = (t, o = {}) => para(run(t, { size: o.size || S.small + 1
 /** Loop of paragraphs: {#KEY}{FIELD}{/KEY}. */
 export const paraLoop = (key, field, o = {}) => when(key, [para(run(`{${field}}`, { size: o.size || S.body }), { after: o.after ?? 100 })]);
 /** Loop of bullets with a quiet reference after the text: {#KEY} • {TEXT}  {REF} {/KEY}. */
-export function bulletLoop(key, { textField = "TEXT", refField = null } = {}) {
+export function bulletLoop(key, { textField = "TEXT", refField = null, keep = false } = {}) {
   const kids = [run(`{${textField}}`)];
   if (refField) kids.push(run(`{${refField}}`, { size: S.meta, color: C.grey }));
-  return when(key, [para(kids, { numbering: { reference: "blb-bullet", level: 0 }, after: 60, line: 252 })]);
+  return when(key, [para(kids, { numbering: { reference: "blb-bullet", level: 0 }, after: 60, line: 252, keepNext: keep })]);
 }
 
 /**
- * A data table: one header row that repeats on every page, then one looped row (never split).
- * cols: [{ head, field, width, bold?, color?, size? }]. Rows loop over KEY.
+ * A bounded bullet list (the payload's boundedRows split): a short list stays whole with its label, a long one keeps
+ * its first two and last two bullets together, so a label never ends a page with one bullet under it.
  */
-export function dataTable(key, cols, o = {}) {
-  // o.keepTogether: a short table (decisions, steps) moves to the next page whole rather than leaving one row behind.
-  const keep = !!o.keepTogether;
-  const total = cols.reduce((a, c) => a + c.width, 0);
-  if (total !== CW) throw new Error(`dataTable ${key}: column widths ${total} must equal ${CW}`);
-  const hr = new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
-    para(run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
-    c.width, { fill: C.surface, pt: 80, pb: 80, pl: i === 0 ? 140 : 0, pr: 140, va: VerticalAlign.CENTER, borders: { top: none(), left: none(), right: none(), bottom: rule(C.blue, 6) } })) });
-  const dr = new TableRow({ cantSplit: true, children: cols.map((c, i) => {
+export const boundedBullets = (key) => [...bulletLoop(`${key}_KEEP`, { keep: true }), ...bulletLoop(key), ...bulletLoop(`${key}_PEN`, { keep: true }), ...bulletLoop(`${key}_LAST`)];
+
+const headerRow = (cols) => new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
+  para(run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
+  c.width, { fill: C.surface, pt: 80, pb: 80, pl: i === 0 ? 140 : 0, pr: 140, va: VerticalAlign.CENTER, borders: { top: none(), left: none(), right: none(), bottom: rule(C.blue, 6) } })) });
+
+/** One looped data row: {#key} in the first cell, {/key} (plus any closers) in the last. keep glues it to the next row. */
+function loopRow(key, cols, { keep = false, closeExtra = "" } = {}) {
+  return new TableRow({ cantSplit: true, children: cols.map((c, i) => {
     const kids = [];
     if (i === 0) kids.push(run(`{#${key}}`, { size: 2 }));
     kids.push(run(`{${c.field}}`, { size: c.size || S.table, bold: !!c.bold, color: c.color || C.ink }));
     if (c.sub) kids.push(run(`{${c.sub}}`, { size: S.meta, color: C.grey }));
-    if (i === cols.length - 1) kids.push(run(`{/${key}}`, { size: 2 }));
-    return cell(para(kids, { after: 0, line: 252, keepNext: keep }), c.width, { pt: 90, pb: 90, pl: i === 0 ? 140 : 0, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } });
+    if (i === cols.length - 1) kids.push(run(`{/${key}}${closeExtra}`, { size: 2 }));
+    return cell(para(kids, { after: 0, line: 252, keepNext: keep }), c.width, { pt: 60, pb: 60, pl: i === 0 ? 140 : 0, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } });
   }) });
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows: [hr, dr] });
 }
 
 /**
- * A band of numbered cards, always on a three-column grid so a card is the same size whether there are one, two
- * or three (no loop: one band per count, chosen by a condition). Fields {PREFIX1..n}; the rest of the grid is blank.
+ * A data table: a header row that repeats on every page, then looped rows that never split.
+ * cols: [{ head, field, width, bold?, color?, size?, sub? }]. Rows loop over KEY.
+ * o.bounded: the payload splits the rows into KEY_KEEP (glued to the next row), KEY (free), KEY_PEN (glued to the
+ * last) and KEY_LAST, so a short table stays whole and a long one never leaves a single row on a page: the header
+ * keeps its first two rows and the last two rows stay together (independent review CPB-04/08).
+ * o.lastKeepNext: the last row also stays with what follows (the closing block after the final table).
  */
+export function dataTable(key, cols, o = {}) {
+  const total = cols.reduce((a, c) => a + c.width, 0);
+  if (total !== CW) throw new Error(`dataTable ${key}: column widths ${total} must equal ${CW}`);
+  const rows = [headerRow(cols)];
+  if (o.bounded) {
+    rows.push(loopRow(`${key}_KEEP`, cols, { keep: true }), loopRow(key, cols), loopRow(`${key}_PEN`, cols, { keep: true }), loopRow(`${key}_LAST`, cols, { keep: !!o.lastKeepNext || !!(o.tail && o.tail.length) }));
+    rows.push(...(o.tail || []));
+    return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+  }
+  rows.push(loopRow(key, cols));
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+}
+
+/**
+ * A grouped table: repeating header row, then for each group a band row (the group's name, kept with its first row)
+ * followed by its rows. groupKey loops over [{ [bandField], [rowsKey]: [...] }].
+ */
+export function groupedTable(groupKey, bandField, rowsKey, cols) {
+  const total = cols.reduce((a, c) => a + c.width, 0);
+  if (total !== CW) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${CW}`);
+  const band = new TableRow({ cantSplit: true, children: [cell(
+    para([run(`{#${groupKey}}`, { size: 2 }), run(`{${bandField}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 })], { after: 0, line: 220, keepNext: true }),
+    CW, { span: cols.length, pt: 130, pb: 40, pl: 140, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } })] });
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(),
+    // Each group's rows are bounded like dataTable (the payload's boundedRows split): the band keeps its first two rows,
+    // the last two rows stay together, so neither end of a group is ever a single row on a page.
+    rows: [headerRow(cols), band, loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }),
+      loopRow(`${rowsKey}_LAST`, cols, { closeExtra: `{/${groupKey}}` })] });
+}
+
+/** A band of n numbered cards across the full width (no loop: one band per count, chosen by a condition). Fields {PREFIX1..n}. */
 export function cardBand(n, numPrefix, labelPrefix) {
-  const w = Math.floor(CW / 3), widths = [w, w, CW - 2 * w];
-  const cells = widths.map((wd, i) => (i >= n ? cell(para(run("", { size: 2 }), { after: 0 }), wd, { pt: 0, pb: 0 }) : cell([
+  const w = Math.floor(CW / n), widths = Array.from({ length: n }, (_, i) => (i === n - 1 ? CW - w * (n - 1) : w));
+  const cells = widths.map((wd, i) => cell([
     para(run(`{${numPrefix}${i + 1}}`, { size: S.kicker, bold: true, color: C.blue }), { after: 40 }),
     para(run(`{${labelPrefix}${i + 1}}`, { size: S.h2, bold: true }), { after: 0, line: 252 }),
-  ], wd, { fill: C.surface, pt: 120, pb: 130, pl: 170, pr: 170, borders: { top: rule(C.blue, 12), left: none(), bottom: none(), right: i < 2 ? rule(C.white, 24) : none() } })));
+  ], wd, { fill: C.surface, pt: 120, pb: 130, pl: 170, pr: 170, borders: { top: rule(C.blue, 12), left: none(), bottom: none(), right: i < n - 1 ? rule(C.white, 24) : none() } }));
   return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED, borders: noBorders(), rows: [new TableRow({ cantSplit: true, children: cells })] });
 }

@@ -68,10 +68,12 @@
         "group": "External",
         "items": [
           {
+            "where": "Exterior",
             "text": "Combination of through-coloured render and vertical spotted-gum cladding, low-sheen dark metal roof.",
             "status": "Preferred"
           },
           {
+            "where": "Windows and doors",
             "text": "Bushfire-compliant (BAL-rated) windows and doors; the final BAL rating is to be confirmed with the energy/bushfire assessor.",
             "status": "Preferred"
           }
@@ -81,10 +83,12 @@
         "group": "Internal",
         "items": [
           {
+            "where": "Floors",
             "text": "Large-format porcelain to entry and wet areas; engineered timber to living and bedrooms.",
             "status": "Preferred"
           },
           {
+            "where": "Kitchen",
             "text": "Honed stone benchtops; integrated joinery with minimal hardware.",
             "status": "Preferred"
           }

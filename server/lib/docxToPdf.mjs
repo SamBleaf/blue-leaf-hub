@@ -49,3 +49,14 @@ export async function convertDocxToPdfBuffer(docxBuffer) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * The fonts a PDF embeds, by name, without the subset prefix ("BAAAAA+Lato-Regular" → "Lato-Regular"). Read from the
+ * PDF's font dictionaries, so it needs no extra tools on the server. Used to refuse a controlled document whose fonts
+ * were silently substituted (e.g. a server without Lato installed).
+ */
+export function pdfFontNames(pdfBuffer) {
+  const text = Buffer.from(pdfBuffer).toString("latin1");
+  return [...new Set([...text.matchAll(/\/BaseFont\s*\/(?:[A-Z]{6}\+)?([A-Za-z0-9_.-]+)/g)].map((m) => m[1]))];
+}
+

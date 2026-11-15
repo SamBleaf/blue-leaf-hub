@@ -22,12 +22,14 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import PizZip from "pizzip";
 import { renderDocxTemplate } from "./docTemplates.mjs";
-import { convertDocxToPdfBuffer } from "./docxToPdf.mjs";
+import { convertDocxToPdfBuffer, pdfFontNames } from "./docxToPdf.mjs";
 import { DOC_DEFS, validateFixture } from "./documents/documentPayloads.mjs";
 import { loadRegister } from "./registerStore.mjs";
 import { loadRegisterContext } from "./registerContext.mjs";
 import { issueRevisionLabel } from "./documents/documentIdentity.mjs";
 import { STAGE_ORDER } from "../../src/lib/stageGates.js";
+import { LEAD_STAGES } from "../../src/lib/constants.js";
+import { restrictedFindings, restrictedInText } from "../../src/lib/restrictedProducts.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
@@ -155,14 +157,52 @@ function cpbGroup(register, i) {
 }
 const plainShort = (item) => clean(itemShort(item).replace(/\s*\([^)]*\)/g, ""));
 const DESIGN_DIRECTION = new Set(["preference", "proposed", "client_approved"]);
+/** "Steep access, Narrow or restricted access" → "Steep access and narrow or restricted access." (CPB-11) */
+function readableList(item) {
+  const safe = clientSafeAnswer(item) || {};
+  const labels = (safe.selected || []).map((x) => clean(x.label)).filter(Boolean);
+  // A branch answer stores "Yes · Work zones"; when every part shares the branch, say it once: "Yes — work zones, …".
+  const branch = labels.length > 1 && labels.every((l) => l.includes(" · ")) ? labels[0].split(" · ")[0] : "";
+  const shared = branch && labels.every((l) => l.split(" · ")[0] === branch);
+  const parts = labels.length ? (shared ? labels.map((l) => l.split(" · ").slice(1).join(" · ")) : labels) : [clean(answerSummary(item))];
+  const ordinary = (w) => /^[A-Z][a-z]/.test(w) && !/[A-Z]/.test(w.slice(1));   // "Narrow…" yes, "AAC" or "NBN" no
+  const words = parts.map((w, k) => ((k > 0 || shared) && ordinary(w) ? w.charAt(0).toLowerCase() + w.slice(1) : w));
+  const list = words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0];
+  const joined = shared ? `${branch} — ${list}` : list;
+  const element = clean(safe.element?.label || safe.element || ""), zone = clean(safe.zone?.label || safe.zone || "");
+  return sentence(labels.length ? [element, joined, zone].filter(Boolean).join(" — ") : joined);
+}
 
-/** The client's next steps, by engagement pathway and where the lead is (Tab 22 D4; stageGates pathway rules). */
+/**
+ * The brief's own pathway: the engagement pathway (stageGates), with a build-only delivery model on the design and
+ * build pathway read as build only, so a build-only client is never told about concept design or a PTSA (CPB-01).
+ * Which pipeline stages apply to build only is still an owner decision (R05 release package §4, #1).
+ */
+export function cpbPathway(context) {
+  const p = context.engagementPathway || "design_build";
+  return p === "design_build" && context.deliveryModel === "build_only" ? "build_only" : p;
+}
+const PATHWAY_STAGE_LABEL = { build_only: "Scope and pricing", plans_supplied: "Plans and pricing", architect_tender: "Tender" };
+
+/** The client's next steps, by the brief's pathway and where the lead is (Tab 22 D4; stageGates pathway rules). */
 function cpbNextSteps(lead, context) {
-  const pathway = context.engagementPathway || "design_build";
+  const pathway = cpbPathway(context);
   const at = STAGE_ORDER.indexOf(lead.stage);
   const before = (st) => at <= STAGE_ORDER.indexOf(st);
   const mark = (steps, i) => steps.map((x, k) => ({ ...x, current: k === i }));
-  if (lead.stage === "won") return { paras: ["The building contract is in place. Your project now moves to construction planning, and this brief stays on file as the record of the agreed direction."], steps: [], ptsa: null };
+  if (lead.stage === LEAD_STAGES.WON) return { paras: ["The building contract is in place. Your project now moves to construction planning, and this brief stays on file as the record of the agreed direction."], steps: [], ptsa: null };
+  if (pathway === "build_only") {
+    return {
+      paras: ["This project doesn't need a separate design stage. Next, we confirm the scope and measurements, then price the work."],
+      steps: mark([
+        { label: "Confirm the scope", text: "We confirm the scope, measurements and any drawings needed." },
+        { label: "Pricing", text: "We price the confirmed scope and your selections." },
+        { label: "Building contract", text: "The contract confirms the scope, price and programme before work starts." },
+        { label: "Construction", text: "The work is scheduled and carried out." },
+      ], lead.stage === "tender" ? 1 : 0),
+      ptsa: null,
+    };
+  }
   if (pathway === "plans_supplied") {
     return {
       paras: ["Your plans are already prepared, so there is no separate concept or pre-construction design stage. Next, the consultant documents are confirmed and the work is priced."],
@@ -195,7 +235,7 @@ function cpbNextSteps(lead, context) {
         { label: "Design, selections and pricing", text: "Consultants coordinate the design, your selections are confirmed and the scope is priced." },
         { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
       ], lead.stage === "fee_proposal" ? 1 : 0),
-      ptsa: { title: "A separate pre-construction agreement", text: "Before detailed design and pricing services begin, Blue Leaf will provide a separate pre-construction services agreement (PTSA) setting out the services, responsibilities, fees and deliverables. This brief does not replace that agreement and is not an acceptance of construction works." },
+      ptsa: { text: "The pre-construction agreement (PTSA) is separate from this brief and from any building contract. It sets out the design and pricing services, responsibilities and fees before that work begins." },
     };
   }
   return {
@@ -246,14 +286,14 @@ function clientBriefFixture(input) {
 
   const boundaries = [
     block("Existing to remain or protect", "", items.filter((i) => i.disposition === "retain" && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
-    block("Not in the current scope", "These are not part of the work currently proposed. Some may be added later as a separate decision.",
+    block("Not in the current scope", "Not part of the work proposed now.",
       items.filter((i) => ["excluded", "deferred"].includes(i.disposition) && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}${i.disposition === "deferred" ? " (possible later stage)" : ""}`))),
     block("By others", "Arranged separately, outside Blue Leaf's work.", items.filter((i) => i.disposition === "by_others" && physical(i)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
-    block("Items you plan to supply", "You have told us you will supply these. How they are installed and coordinated is confirmed as the design develops.",
+    block("Items you plan to supply", "We'll confirm with you how these are installed.",
       items.filter((i) => i.supplyBy === "client" && !["excluded", "by_others", "na"].includes(i.disposition)).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}`))),
-    block("Still to be decided", "Parts of the project that are open for now. We will confirm them with you as the design develops.",
+    block("Still to be decided", "",
       items.filter((i) => isWork(i) && i.disposition === "undecided" && said(i) && !inDecisions.has(i.id) && i.supplyBy !== "client").map((i) => entry(i, `${where(i)}${said(i)}`))),
-    block("To be checked during design", "These need investigation or a consultant's input before they can be relied on.",
+    block("Still to be checked", "",
       items.filter(isRisk).map((i) => entry(i, `${where(i)}${said(i) || plainShort(i)}. ${responsibilityLabel(i.responsibility || "consultant")} to confirm.`))),
   ];
 
@@ -262,16 +302,18 @@ function clientBriefFixture(input) {
   for (const i of items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product))) {
     const g = cpbGroup(register, i);
     if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push({ text: `${where(i)}${clean(i.description || i.product) || said(i)}`, status: selectionStatus(i), ref: refCode(i) });
+    groups.get(g).push({ where: area(i), text: clean(i.description || i.product) || said(i), status: selectionStatus(i), ref: refCode(i) });
   }
   const goals = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005")
-    .map((i) => ({ text: `${where(i)}${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
+    .map((i) => ({ where: area(i), text: `${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
   const preferences = [...CPB_GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g) })), ...(goals.length ? [{ group: "Requirements and goals", items: goals.slice(0, 8) }] : [])];
 
   // 6 · Noted facts stay facts.
-  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${plainShort(i)}: ${clean(answerSummary(i))}`);
+  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${plainShort(i)}: ${readableList(i)}`);
 
+  if (lead.stage !== LEAD_STAGES.WON) fx.project.stageLabel = PATHWAY_STAGE_LABEL[cpbPathway(context)] || fx.project.stageLabel;
   fx.clientBrief = {
+    pathway: cpbPathway(context),
     subtitle: `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
     overview: [description, occupancy].filter(Boolean),
     priorities, priorityNote,
@@ -380,6 +422,23 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   if (unverified.length) (mode === "issue" ? errors : warnings).push(`${unverified.length} item(s) are marked verified without a technical reference.`);
   const strings = JSON.stringify(fx);
   if (MONEY_RX.test(strings)) errors.push("The document would contain a dollar figure — register documents never show prices or allowances.");
+  // Prohibited products (CPB-02; src/lib/restrictedProducts.js). A selection that will be supplied and names one stops a
+  // client-facing document, whatever the wording around it; anything else that names one (a "no engineered stone"
+  // requirement, the client's note, existing or removed stone, a brand, the estimator's notes) warns. The room is
+  // named, so two records with the same name can be told apart.
+  const clientFacing = REGISTER_DOC_TYPES[docType]?.audience !== "internal";
+  const found = restrictedFindings(register.items);
+  for (const { item, product, blocking } of found) {
+    const room = roomLabel(register, item);
+    const what = `"${clean(item.description || item.product) || itemShort(item)}"${room ? ` (${room})` : ""}`;
+    if (blocking) (mode === "issue" && clientFacing ? errors : warnings).push(`${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`);
+    else warnings.push(`${what} mentions ${product.label.toLowerCase()}. Check it isn't being supplied or installed. ${product.rule}`);
+  }
+  if (!found.some((f) => f.product.level === "error")) for (const product of restrictedInText(strings)) warnings.push(`This document mentions ${product.label.toLowerCase()} (for example in a pricing assumption). ${product.rule}`);
+  // Characters Lato can't print come out blank. Ranges checked against Lato's own character set: other scripts
+  // (Hebrew to Tibetan, Hangul, CJK), technical symbols, dingbats, misc symbols and arrows, emoji.
+  const unprintable = [...new Set((strings.match(/[\u0590-\u0FFF\u1100-\u11FF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]|[\uD800-\uDBFF][\uDC00-\uDFFF]/g) || []))];
+  if (unprintable.length) warnings.push(`Some characters may not print in the Blue Leaf font: ${unprintable.slice(0, 8).join(" ")}. Check names and descriptions.`);
   if (docType === "selections_schedule" && !fx.selections.length) errors.push("There are no client selections to schedule yet.");
   if (docType === "tender_scope_notes" && !fx.tenderNotes.sections.some((sec) => sec.title !== "Drawing references")) errors.push("There is nothing in the register for the estimator yet.");
   if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferences.length) warnings.push("The brief has no recorded scope or preferences yet.");
@@ -410,6 +469,21 @@ function templateFor(defKey) {
   return { def, bytes, file: def.templateFile, hash: createHash("sha256").update(bytes).digest("hex").slice(0, 16) };
 }
 
+/**
+ * The font fail-safe (independent review CPB-13), read from the fonts embedded in the rendered PDF.
+ * No Lato at all: the server is missing the font and the whole document came out in a substitute, so it is refused,
+ * unless DOCUMENT_FONT_CHECK=warn is set while Lato is being installed. Lato plus another font: some characters (an
+ * arrow, a tick, another script) fell back, so staff are warned and can check the text.
+ */
+export function fontVerdict(fonts, env = process.env) {
+  const foreign = (fonts || []).filter((f) => !/^Lato-/.test(f));
+  if (!(fonts || []).some((f) => /^Lato-/.test(f))) {
+    const msg = `font substitution (${foreign.join(", ") || "no fonts embedded"}): the server needs the Lato font installed`;
+    return String(env?.DOCUMENT_FONT_CHECK || "").toLowerCase() === "warn" ? { error: null, warnings: [msg] } : { error: msg, warnings: [] };
+  }
+  return { error: null, warnings: foreign.length ? [`Some characters printed in a fallback font (${foreign.join(", ")}). Check the text for symbols or characters from other scripts.`] : [] };
+}
+
 export async function renderRegisterDocument(docType, fx, { layout } = {}) {
   const spec = REGISTER_DOC_TYPES[docType];
   const defKey = layout === "client" && spec.altLayout ? spec.altLayout : spec.def;
@@ -418,7 +492,12 @@ export async function renderRegisterDocument(docType, fx, { layout } = {}) {
   const docx = renderDocxTemplate(t.bytes, payload);
   const leaks = renderedTextIssues(docx);
   const pdf = await convertDocxToPdfBuffer(docx);
-  return { docx, pdf, template: { key: defKey, file: t.file, hash: t.hash }, leaks };
+  // Fail safe (independent review CPB-13): every register template is Lato only. Any other font means the server
+  // substituted (e.g. Lato isn't installed), so the document is refused rather than issued looking wrong.
+  const fonts = pdfFontNames(pdf);
+  const verdict = fontVerdict(fonts);
+  if (verdict.error) leaks.push(verdict.error);
+  return { docx, pdf, template: { key: defKey, file: t.file, hash: t.hash }, leaks, fonts, fontWarnings: verdict.warnings };
 }
 
 // ── load inputs ──────────────────────────────────────────────────────────────────────────────────
@@ -470,6 +549,7 @@ export async function previewDocument(sb, leadId, docType, { layout, recipientNa
   const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }), { register, recipientName, mode: "issue" });
   const out = await renderRegisterDocument(docType, fx, { layout });
   if (out.leaks.length) checks.errors.push(`Rendering problem: ${out.leaks.join(", ")}.`);
+  checks.warnings.push(...(out.fontWarnings || []));
   return { pdf: out.pdf, checks, revision, itemVersions: registerItemVersions(register) };
 }
 

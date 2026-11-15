@@ -26,7 +26,7 @@ Director, project manager, office staff preparing documents for the client, the 
 - When an architect, engineer or supplier sends a document (drawings, schedules, quotes): record it under **Received consultant & supplier documents**.
 
 ## 3. What this does
-It makes each document from the same register rows — nothing is retyped. Before a document is issued the Hub checks it (drawing basis named, recipient named, approvals evidenced, verified items referenced, **no dollar figures**). Each issue is a permanent, numbered revision (R01, R02 …) with a PDF, a controlled Word copy and a checksum. Every page carries the document number, for example **BLB-CPB-0417-R01** (Blue Leaf · document type · project reference · revision). A draft preview shows **Draft — not issued** and no revision number. Documents issued before 15 November 2026 keep their original labels (P01, P02). A new issue supersedes the old one; old revisions are never deleted. Nothing is emailed — you send the PDF yourself.
+It makes each document from the same register rows — nothing is retyped. Before a document is issued the Hub checks it (drawing basis named, recipient named, approvals evidenced, verified items referenced, **no dollar figures**, **no prohibited product such as engineered stone**, and the PDF printed in the Blue Leaf font). Each issue is a permanent, numbered revision (R01, R02 …) with a PDF, a controlled Word copy and a checksum. Every page carries the document number, for example **BLB-CPB-0417-R01** (Blue Leaf · document type · project reference · revision). A draft preview shows **Draft — not issued** and no revision number. Documents issued before 15 November 2026 keep their original labels (P01, P02). A new issue supersedes the old one; old revisions are never deleted. Nothing is emailed — you send the PDF yourself.
 
 ## 4. Before you start
 - The register has the content you want to issue (see 21-01 and 21-02).
@@ -63,6 +63,23 @@ It makes each document from the same register rows — nothing is retyped. Befor
 The brief reads in this order and leaves out any section with nothing in it: **The project** (your Sales description, the client's top three priorities and their own note, the client vision as the design direction) → **Scope of works** (what we propose to build, then what stays, what's outside the scope, by others, items the client supplies, still to be decided, and what still needs checking, with who confirms) → **Design direction** (preferences with their status in words) → **Assumptions** → **Decisions to make** (only real actions, 3–7, client's first; an unassigned one reads "To be agreed") → **What happens next** (follows the pathway: the PTSA is only explained before it is signed, never on a plans-supplied or architect-tender lead).
 
 > 💡 **Tip:** If a decision you expected is missing, give it a next action in the register. A preference on its own is direction, not a decision.
+
+> ⚠️ **Engineered stone:** Engineered stone is prohibited in Australia from 1 July 2024.
+>
+> **What stops an issue.** A selection names engineered stone in its description, product, colour, supplier, source or chosen option, or the "Engineered stone" card is chosen. Then the brief, the architect brief and the schedule won't issue. Shorthand counts too ("eng. stone", "E-stone", "quartz benchtop", or just "Quartz" on a benchtop, splashback, vanity or laundry bench). The check doesn't read around the words: "Porcelain instead of engineered stone" on a selection still stops the issue.
+>
+> **What to do.** Agree a compliant alternative with the client if needed (porcelain, sintered stone, natural stone). Then reword the selection to name only what will be supplied, for example "Porcelain benchtop, 20 mm". The register keeps the original wording in its history.
+>
+> **What only warns.** These are recorded but don't stop the issue:
+> - existing stone, on a record marked Retain or Remove
+> - a requirement such as "no engineered stone"
+> - the client's own note
+> - a brand name such as Caesarstone (check it's a compliant range)
+> - the internal Tender Notes
+>
+> Each message names the record and its room.
+>
+> ⚠️ **Font warnings:** "Some characters printed in a fallback font" or "may not print in the Blue Leaf font" means a symbol or a character from another language is in a name or description. Check the preview and retype it in plain text. If the issue is refused with "the server needs the Lato font installed", tell the office: the server is missing the Blue Leaf font.
 
 ### Tender Scope & Pricing Notes (internal)
 
@@ -198,8 +215,10 @@ Next review date: 2027-05-07
 **TC-11 — Client Project Brief design and identity (doc suite R01)**
 1. Preview the Client Project Brief on a lead with scope, preferences and decisions. Expected: every page has the logo, "Client Project Brief" and the address at the top, and "BLB-CPB-[ref] · Draft — not issued" and "Page X of Y" at the bottom; no revision number on a draft.
 2. Issue it. Expected: the PDF reads **BLB-CPB-[ref]-R0n · Issued [date]** on every page; `lead_documents.revision_label` is `R0n`.
-3. Expected content: no "[W004-…]" codes inside sentences (a small grey reference follows the line instead); no recorded preference listed as a decision; no decision owner invented; a long preferences table repeats its header on each page; an empty section (e.g. no decisions) is left out and the numbers close up.
-4. On a plans-supplied lead: no PTSA paragraph and no Concept or agreement step.
+3. Expected content: no register codes in the scope or boundary lists (they stay in the decisions table only); no recorded preference listed as a decision; no decision owner invented ("To be agreed"); preferences grouped under category bands with the room named once; a long table repeats its header and never leaves a single row on a page; the closing note never sits on a page by itself; an empty section (e.g. no decisions) is left out and the numbers close up.
+4. On a plans-supplied lead, and on a build-only lead with no plans: no PTSA and no Concept or agreement step.
+5. Add a selection "Engineered stone benchtop" and try to issue. Expected: refused, with the reason; the Tender Notes still issue with a warning.
+6. Change it to "Porcelain instead of engineered stone". Expected: still refused (a selection names only what is supplied). Change it to "Porcelain benchtop, 20 mm". Expected: issues. Add "Existing engineered stone vanity top" with disposition **Retain**, and a requirement "No engineered stone in the kitchen". Expected: each issues, with a warning only.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

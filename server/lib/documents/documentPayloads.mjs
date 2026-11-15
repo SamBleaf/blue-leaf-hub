@@ -43,9 +43,17 @@ function chrome(fx, { type, breadcrumb, sectionLabel, title, tagline }) {
 
 /** 01 — Client Project Brief (BLB-CPB, template cpb-2.0). Reader: the homeowner, after the concept presentation. */
 const two = (n) => String(n).padStart(2, "0");
-// A quiet reference after a line: non-breaking spaces bind it to the last word and a non-breaking hyphen keeps
-// "W011-UHI" in one piece, so a reference never sits alone or splits across lines.
-const refTail = (ref) => (ref ? `\u00A0\u00A0\u00A0${String(ref).replace(/-/g, "\u2011")}` : "");
+/**
+ * Bounded table rows (independent review CPB-04/08), for a template dataTable({ bounded: true }):
+ *   up to three rows → the whole table stays together;
+ *   four or more     → the header keeps its first two rows, the last two rows stay together, and the table may break
+ *                      between any other rows (its header repeats on the next page). Never a single row alone.
+ */
+export function boundedRows(key, rows) {
+  const n = rows.length;
+  if (n <= 3) return { [`${key}_KEEP`]: rows.slice(0, Math.max(0, n - 1)), [key]: [], [`${key}_PEN`]: [], [`${key}_LAST`]: rows.slice(Math.max(0, n - 1)) };
+  return { [`${key}_KEEP`]: rows.slice(0, 1), [key]: rows.slice(1, n - 2), [`${key}_PEN`]: rows.slice(n - 2, n - 1), [`${key}_LAST`]: rows.slice(n - 1) };
+}
 export function buildClientBriefPayload(fx) {
   const b = fx.clientBrief || {}, p = fx.project || {}, meta = fx.meta || {};
   const id = documentIdentity({ type: "client_brief", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
@@ -53,13 +61,17 @@ export function buildClientBriefPayload(fx) {
   const priorities = (b.priorities || []).filter(Boolean).slice(0, 3);
   const scopeIn = (b.scopeIn || []).filter((x) => x && x.text);
   const boundaries = (b.boundaries || []).map((g) => ({ ...g, items: (g.items || []).filter((x) => x && x.text) })).filter((g) => g.items.length);
-  const prefRows = [];
-  // Every row names its category (bold where a group starts, quiet after), so a row continued onto a new page still says what it is.
-  for (const g of b.preferences || []) (g.items || []).filter((x) => x && x.text).forEach((x, i) => prefRows.push({ AREA: i === 0 ? g.group : "", AREA_SUB: i === 0 ? "" : g.group, TEXT: x.text, STATUS: x.status || "" }));
+  // Preferences grouped under a category band; within a group the room is named once per run (CPB-07).
+  const prefGroups = (b.preferences || []).map((g) => {
+    const items = (g.items || []).filter((x) => x && x.text);
+    const rows = items.map((x, i) => ({ WHERE: i === 0 || items[i - 1].where !== x.where ? (x.where || "") : "", TEXT: x.text, STATUS: x.status || "" }));
+    // Bounded per group: the band stays with its first two rows and the last two rows stay together.
+    return { GROUP: g.group, ...boundedRows("ROWS", rows) };
+  }).filter((g) => g.ROWS_LAST.length);
   const drawing = String(p.drawingBasis || "").trim();
   const assumes = [
-    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be developed.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
-    "Structural, energy, drainage and approval requirements are confirmed by the relevant consultants as the design develops.",
+    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be ${b.pathway === "build_only" ? "confirmed" : "developed"}.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
+    "The relevant consultants will need to confirm any structural, energy, drainage and approval requirements.",
     "Final selections, quantities, timeframe and the construction price are not set by this document.",
   ];
   const noted = [...(b.noted || []).filter((g) => (g.items || []).length), { label: "This brief assumes", items: assumes }];
@@ -71,7 +83,7 @@ export function buildClientBriefPayload(fx) {
   const present = {
     s1: !!(overview.length || priorities.length || b.direction),
     s2: !!(scopeIn.length || boundaries.length),
-    s3: prefRows.length > 0,
+    s3: prefGroups.length > 0,
     s4: true,
     s5: decisions.length > 0,
     s6: true,
@@ -96,45 +108,46 @@ export function buildClientBriefPayload(fx) {
     HAS_SUBTITLE: !!b.subtitle, DOC_SUBTITLE: b.subtitle || "",
     META_ROWS: metaRows(metaPairs),
     STATUS_LABEL: id.issued ? "Preliminary record" : "Draft for review — not issued",
-    STATUS_BODY: "This brief records our current understanding of your project so we can confirm it together. It is not a construction specification, a fixed-price quotation or a contract, and nothing in it is ordered or approved.",
+    // CPB-03: no blanket "nothing is approved" — selections carry their own evidenced status.
+    STATUS_BODY: "This brief records the preferences and decisions discussed so far, so we can confirm them together. It is not a construction specification, a fixed-price quotation or a contract. It doesn't itself authorise purchasing, construction or changes to a contract, and each selection carries the status shown.",
 
     HAS_S1: present.s1, S1_NUM: nums.s1 || "",
     OVERVIEW: overview.map((t) => ({ PARA: t })),
     HAS_PRIORITIES: priorities.length > 0,
-    PRI_BAND_3: priorities.length === 3, PRI_BAND_2: priorities.length === 2, PRI_BAND_1: priorities.length === 1,
+    PRI_BAND_3: priorities.length === 3, PRI_BAND_2: priorities.length === 2, PRI_INLINE: priorities.length === 1,   // CPB-10
     PN1: "01", PN2: "02", PN3: "03", PL1: priorities[0] || "", PL2: priorities[1] || "", PL3: priorities[2] || "",
     HAS_PRIORITY_NOTE: !!b.priorityNote, PRIORITY_NOTE: b.priorityNote || "",
     HAS_DIRECTION: !!b.direction, DIRECTION: b.direction || "",
 
     HAS_S2: present.s2, S2_NUM: nums.s2 || "",
-    SCOPE_INTRO: drawing
-      ? `This is the building work we currently propose, based on ${drawing}. It will be refined as the design develops.`
-      : "This is the building work we currently propose, based on our conversations so far. It will be refined as the design develops.",
-    HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text, REF: refTail(x.ref) })),
+    SCOPE_INTRO: `This is the building work we currently propose, based on ${drawing || "our conversations so far"}. ${b.pathway === "build_only" ? "We'll confirm it with you before pricing." : "It will be refined as the design develops."}`,
+    // CPB-06: register references stay in the record, not in the client's sentences.
+    HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text })),
     HAS_BOUNDARIES: boundaries.length > 0,
-    BOUNDARIES: boundaries.map((g) => ({ B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: g.items.map((x) => ({ TEXT: x.text, REF: refTail(x.ref) })) })),
+    BOUNDARIES: boundaries.map((g) => ({ B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: g.items.map((x) => ({ TEXT: x.text })) })),
 
     HAS_S3: present.s3, S3_NUM: nums.s3 || "",
-    PREF_INTRO: "These are the preferences you have shared so far. They describe a direction, not a final specification: products, sizes and technical details are confirmed as the design develops.",
-    PREFS: prefRows,
-    PREF_KEY: "Preferred: the look you like, not yet a specific product.  Proposed: a specific option we are reviewing with you.  Client-approved: you have confirmed it with us.  Goals marked for review are checked by consultants before they are relied on.",
+    PREF_INTRO: "Your preferences so far describe a direction, not a final specification: products, sizes and details are confirmed as the project develops.",
+    PREF_GROUPS: prefGroups,
+    PREF_KEY: "Preferred: the look you like.  Proposed: a specific option we're reviewing with you.  Client-approved: you've confirmed it with us.  For consultant review: checked before it's relied on.",
 
     HAS_S4: present.s4, S4_NUM: nums.s4,
-    NOTED: noted.map((g) => ({ N_LABEL: g.label, N_ITEMS: g.items.map((t) => ({ TEXT: t })) })),
+    // N_ITEMS is the whole list (for checks); the template prints the bounded split N_BUL_* so a list stays with its label.
+    NOTED: noted.map((g) => { const items = g.items.map((t) => ({ TEXT: t })); return { N_LABEL: g.label, N_ITEMS: items, ...boundedRows("N_BUL", items) }; }),
 
     HAS_S5: present.s5, S5_NUM: nums.s5 || "",
-    DECISIONS_INTRO: "These are the decisions and next steps that need input before the design can move on. We will work through them with you.",
-    DECISIONS: decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: d.owner || "To be agreed" })),
+    DECISIONS_INTRO: "These need someone's input before the project can move on. We'll work through them with you.",
+    ...boundedRows("DECISIONS", decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: d.owner || "To be agreed" }))),
 
     S6_NUM: nums.s6,
     NEXT_PARAS: (b.nextSteps?.paras || []).map((t) => ({ PARA: t })),
-    HAS_STEPS: steps.length > 0,
-    STEPS: steps.map((x) => ({ SLABEL: x.label, SNOW: x.current ? "\nWhere we are now" : "", STEXT: x.text || "" })),
-    HAS_PTSA: !!ptsa, PTSA_TITLE: ptsa?.title || "", PTSA_TEXT: ptsa?.text || "",
+    HAS_STEPS: steps.length > 0, NO_STEPS: steps.length === 0,
+    ...boundedRows("STEPS", steps.map((x) => ({ SLABEL: x.label, SNOW: x.current ? "\nWhere we are now" : "", STEXT: x.text || "" }))),
+    HAS_PTSA: !!ptsa, PTSA_NOTE: ptsa?.text || "",
 
     ABOUT_LABEL: "About this document",
     ABOUT_BODY: id.issued
-      ? `${p.preparedBy || "Blue Leaf Building"} prepared this brief from our meetings and the project register. It is a record for you to keep and does not need a signature. If anything here does not match what you told us, let us know and we will issue a revised brief.`
+      ? `${p.preparedBy || "Blue Leaf Building"} prepared this brief from our discussions and the information recorded for your project. It's a record for you to keep and doesn't need a signature. If anything here doesn't match what you told us, let us know and we'll issue a revised brief.`
       : "This is a draft for review. It has not been issued, and it will carry a revision number and issue date once it is.",
   };
 }
