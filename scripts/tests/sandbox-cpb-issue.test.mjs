@@ -1,8 +1,9 @@
 /**
- * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.1) issued for real on the isolated sandbox (independent
- * review CPB-15): preview → issue R01 through the API → download the stored PDF and match its checksum → change the
- * brief and issue R02 → R01 still opens unchanged → a client login can't see either. Evidence (the issued PDFs and the
- * registry rows) is written to ~/blh-register-evidence/docsuite/cpb2/. Refuses any non-loopback URL; credentials are
+ * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.2) issued for real on the isolated sandbox (independent
+ * reviews CPB-15, CPB2-04): preview → issue R01 through the API → download the stored PDF and match its checksum →
+ * change a selection and the drawing basis, issue R02 → R02 prints the new drawing set, R01 still opens unchanged with
+ * the set it was issued against → a client login can't see either. Evidence (the issued PDFs and the registry rows) is
+ * written to ~/blh-register-evidence/docsuite/cpb3/. Refuses any non-loopback URL; credentials are
  * never printed. Nothing is emailed: an issue is a record. Run: node scripts/tests/sandbox-cpb-issue.test.mjs
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,7 +13,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { buildTestJobAddress } from "../lib/testArtifactPrefixes.mjs";
-import { REGISTER_PROJECTS } from "../documents/fixtures/register-projects.mjs";
+import { REGISTER_PROJECTS, KESTREL_SUPPLIED_PLANS } from "../documents/fixtures/register-projects.mjs";
 import { pdfFontNames } from "../../server/lib/docxToPdf.mjs";
 
 const API = "http://localhost:8797", GW = "http://localhost:54321";
@@ -20,7 +21,7 @@ for (const u of [API, GW]) if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.tes
 const SB_DIR = join(homedir(), ".blh-register-sandbox");
 const secrets = JSON.parse(readFileSync(join(SB_DIR, "secrets.json"), "utf8"));
 const creds = JSON.parse(readFileSync(join(SB_DIR, "credentials.local.json"), "utf8"));
-const EVIDENCE = join(homedir(), "blh-register-evidence", "docsuite", "cpb2");
+const EVIDENCE = join(homedir(), "blh-register-evidence", "docsuite", "cpb3");
 mkdirSync(EVIDENCE, { recursive: true });
 const svc = createClient(GW, secrets.service_key, { auth: { persistSession: false } });
 const anon = () => createClient(GW, secrets.anon_key, { auth: { persistSession: false } });
@@ -67,23 +68,31 @@ async function main() {
   const t1 = pdfText(f1, "CPB-issued-R01.pdf");
   check("every page of the issued PDF carries BLB-CPB-[ref]-R01 and 'Issued'", /BLB-CPB-BL[0-9A-F]{6}-R01\s+·\s+Issued/.test(t1) && (t1.match(/BLB-CPB-BL[0-9A-F]{6}-R01/g) || []).length >= 3);
   check("the issued PDF is Lato only (font fail-safe)", pdfFontNames(f1).length > 0 && pdfFontNames(f1).every((f) => /^Lato-/.test(f)), pdfFontNames(f1).join());
-  check("the issued brief is the redesigned one (cpb-2.1 template)", /blb-client-brief-template\.docx@/.test(d1.template_version) && /Your preferences so far/.test(t1));
+  // The issue was rendered by the code and template in this checkout (review CPB3-H10): the recorded template hash is the
+  // file's own, and the cpb-2.2 wording is in the PDF (site access as a sentence; the status key under the last group).
+  const templateHash = sha(readFileSync(new URL("../../public/templates/blb-client-brief-template.docx", import.meta.url))).slice(0, 16);
+  check("the issued brief used this checkout's cpb-2.2 template and wording", d1.template_version === `blb-client-brief-template.docx@${templateHash}`
+    && /Site access is steep, with narrow or restricted areas\./.test(t1.replace(/\s+/g, " ")) && /What we propose to build/.test(t1), `${d1.template_version} vs @${templateHash}`);
+  check("R01 prints the drawing set it was issued against", t1.includes(k.register.meta.planRev) && !t1.includes(KESTREL_SUPPLIED_PLANS));
 
-  section("Change the brief, issue R02; R01 stays");
+  section("Change the brief and its drawing basis, issue R02; R01 stays");
   const reg = (await api("GET", `/api/register/leads/${id}`)).body.register;
   const basin = reg.items.find((i) => i.promptKey === "B-005");
-  const changed = await api("PUT", `/api/register/leads/${id}`, { changes: [{ ...basin, description: "Undermount basin" }], deletes: [] });
-  check("a selection changes", changed.ok);
+  // CPB2-04: the clients' supplied plans are recorded as the new drawing basis (the record, not the stage, says which set).
+  const changed = await api("PUT", `/api/register/leads/${id}`, { meta: { ...reg.meta, planRev: KESTREL_SUPPLIED_PLANS }, changes: [{ ...basin, description: "Undermount basin" }], deletes: [] });
+  check("a selection and the drawing basis change", changed.ok, JSON.stringify(changed.body).slice(0, 300));
   const pv2 = await api("POST", `/api/register/leads/${id}/documents/client_brief/preview`, { recipientName: "Jordan & Mia Whitcombe" });
   const r2 = await api("POST", `/api/register/leads/${id}/documents/client_brief/issue`, { recipientName: "Jordan & Mia Whitcombe", expectedVersions: pv2.body.itemVersions });
   const d2 = r2.body?.document;
   check("issued as R02", r2.ok && d2.revision_label === "R02" && r2.body.supersededId === d1.id, JSON.stringify(r2.body).slice(0, 300));
   const f2 = await fetchIssued(id, d2.id);
-  pdfText(f2, "CPB-issued-R02.pdf");
+  const t2 = pdfText(f2, "CPB-issued-R02.pdf");
+  check("R02 prints the new drawing set and the changed selection, not the old set", t2.includes(KESTREL_SUPPLIED_PLANS) && !t2.includes(k.register.meta.planRev) && /Undermount basin/.test(t2));
   const { data: rows } = await svc.from("lead_documents").select("id, revision_label, status, content_sha256, storage_path, filename, recipient_name, audience, template_version, issued_at").eq("lead_id", id).eq("document_type", "client_brief").order("version");
   check("R01 is superseded, R02 current, in the registry", rows.length === 2 && rows[0].status === "superseded" && rows[1].status === "current");
   const again = await fetchIssued(id, d1.id);
-  check("R01 still opens, byte for byte as issued", !!again && sha(again) === d1.content_sha256 && rows[0].content_sha256 === d1.content_sha256);
+  check("R01 still opens, byte for byte as issued, with its original drawing set", !!again && sha(again) === d1.content_sha256 && rows[0].content_sha256 === d1.content_sha256
+    && pdfText(again, "CPB-R01-reopened.pdf").includes(k.register.meta.planRev));
   const { error: tamper } = await svc.from("lead_documents").update({ revision_label: "R09" }).eq("id", d1.id);
   check("an issued row can't be rewritten (DB trigger)", !!tamper);
   writeFileSync(join(EVIDENCE, "CPB-registry-rows.json"), JSON.stringify(rows, null, 2));

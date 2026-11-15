@@ -197,3 +197,23 @@ function ridgeline() {
 }
 
 export const REGISTER_PROJECTS = { kestrel, powder, ridgeline };
+
+/**
+ * Kestrel Court's R02 (independent review CPB2-04): the clients have since had their own plans prepared, so the
+ * pathway becomes plans supplied and the brief is reissued against the supplied set. The drawing basis is the recorded
+ * set, printed as recorded; it is never inferred from the stage. R01 keeps the concept set it was issued against.
+ */
+export const KESTREL_SUPPLIED_PLANS = "Supplied plans A-100 Rev D, 10 November 2026";
+export function plansSuppliedRevision(p) {
+  p.context.engagementPathway = "plans_supplied";
+  p.lead.stage = "consultants";
+  p.register.meta.planRev = KESTREL_SUPPLIED_PLANS;
+  p.context.drawings = [{ filename: "Supplied plans A-100 Rev D.pdf", revision: "Rev D", issuer: "Studio Example" }];
+  // The decisions recorded at concept are brought up to date against the supplied plans (review CPB3-H01): the same
+  // records (same ids and references), with next actions that no longer point at concept drawings or design development.
+  const next = { "Extension footprint": "Confirm how the new floor levels meet the existing house, using the supplied plans",
+    "Ensuite heating": "Decide whether underfloor heating in the ensuite is included in the scope for pricing",
+    "Envelope review": "Check the cladding and glazing on the supplied plans against the energy assessment before pricing" };
+  for (const i of p.register.items) if (next[i.description]) i.nextAction = next[i.description];
+  return p;
+}

@@ -9,7 +9,7 @@ import fs from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { buildRegisterFixture, renderRegisterDocument, registerDocChecks } from "../../server/lib/registerDocuments.mjs";
-import { REGISTER_PROJECTS } from "./fixtures/register-projects.mjs";
+import { REGISTER_PROJECTS, plansSuppliedRevision } from "./fixtures/register-projects.mjs";
 
 const [outDir, docType = "client_brief"] = process.argv.slice(2);
 if (!outDir) { console.error("usage: render-register-specimens.mjs <outDir> [docType]"); process.exit(2); }
@@ -20,7 +20,7 @@ const variants = [
   { name: "kestrel-issued", project: "kestrel", ...ISSUED, recipientName: "Jordan & Mia Whitcombe" },
   { name: "kestrel-draft", project: "kestrel", status: "Draft", issuedDate: "2026-11-15", revision: 1, issuer: ISSUED.issuer },
   { name: "kestrel-plans-supplied", project: "kestrel", ...ISSUED, revision: 2, recipientName: "Jordan & Mia Whitcombe",
-    tweak: (p) => { p.context.engagementPathway = "plans_supplied"; p.lead.stage = "consultants"; } },
+    tweak: plansSuppliedRevision },
   { name: "powder-issued", project: "powder", ...ISSUED, recipientName: "Priya Raman" },
   { name: "ridgeline-issued", project: "ridgeline", ...ISSUED, recipientName: "Alexander and Catherine Montgomery-Hargreaves" },
 ];

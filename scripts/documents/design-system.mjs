@@ -17,7 +17,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import {
   Paragraph, TextRun, ImageRun, Table, TableRow, TableCell, Header, Footer, WidthType, BorderStyle, ShadingType,
-  AlignmentType, VerticalAlign, TabStopType, PageNumber, LevelFormat, TableLayoutType, HeadingLevel,
+  AlignmentType, VerticalAlign, TabStopType, PageNumber, LevelFormat, TableLayoutType, HeadingLevel, LineRuleType,
 } from "docx";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -198,8 +198,13 @@ export function bulletLoop(key, { textField = "TEXT", refField = null, keep = fa
  */
 export const boundedBullets = (key) => [...bulletLoop(`${key}_KEEP`, { keep: true }), ...bulletLoop(key), ...bulletLoop(`${key}_PEN`, { keep: true }), ...bulletLoop(`${key}_LAST`)];
 
-const headerRow = (cols) => new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
-  para(run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
+/** The column header row. cond: a condition key wrapping the row, so it prints only when the condition holds. */
+const headerRow = (cols, { cond = null } = {}) => new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
+  para([
+    ...(cond && i === 0 ? [run(`{#${cond}}`, { size: 2 })] : []),
+    run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }),
+    ...(cond && i === cols.length - 1 ? [run(`{/${cond}}`, { size: 2 })] : []),
+  ], { after: 0, line: 220, keepNext: true }),
   c.width, { fill: C.surface, pt: 80, pb: 80, pl: i === 0 ? 140 : 0, pr: 140, va: VerticalAlign.CENTER, borders: { top: none(), left: none(), right: none(), bottom: rule(C.blue, 6) } })) });
 
 /** One looped data row: {#key} in the first cell, {/key} (plus any closers) in the last. keep glues it to the next row. */
@@ -236,21 +241,64 @@ export function dataTable(key, cols, o = {}) {
 }
 
 /**
- * A grouped table: repeating header row, then for each group a band row (the group's name, kept with its first row)
- * followed by its rows. groupKey loops over [{ [bandField], [rowsKey]: [...] }].
+ * A grouped table (independent reviews CPB-07, CPB2-06). Each group is its own table, so its band is a header row and
+ * repeats at the top of the next page when the group runs on: a continued group is never shown without its category.
+ * The column header prints once, above the first group (the payload marks it with firstKey), and repeats with that
+ * group. The groups are separated by a hairline paragraph, so LibreOffice never merges two of them.
+ * groupKey loops over [{ [firstKey], [lastKey], [bandField], ...boundedRows(rowsKey) }]: within a group the band keeps
+ * its first two rows and the last two rows stay together, so neither end of a group is ever a single row on a page.
+ * o.tail: a note field printed as the last row of the LAST group only (lastKey), so it always travels with that
+ * group's last two rows (the status key under the preferences). Returns blocks (paragraphs and tables).
  */
-export function groupedTable(groupKey, bandField, rowsKey, cols) {
+export function groupedTable(groupKey, bandField, rowsKey, cols, { firstKey = "G_FIRST", lastKey = "G_LAST", tail = null } = {}) {
   const total = cols.reduce((a, c) => a + c.width, 0);
   if (total !== CW) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${CW}`);
-  const band = new TableRow({ cantSplit: true, children: [cell(
-    para([run(`{#${groupKey}}`, { size: 2 }), run(`{${bandField}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 })], { after: 0, line: 220, keepNext: true }),
+  const band = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(
+    para(run(`{${bandField}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 0, line: 220, keepNext: true }),
     CW, { span: cols.length, pt: 130, pb: 40, pl: 140, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } })] });
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(),
-    // Each group's rows are bounded like dataTable (the payload's boundedRows split): the band keeps its first two rows,
-    // the last two rows stay together, so neither end of a group is ever a single row on a page.
-    rows: [headerRow(cols), band, loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }),
-      loopRow(`${rowsKey}_LAST`, cols, { closeExtra: `{/${groupKey}}` })] });
+  const rows = [headerRow(cols, { cond: firstKey }), band, loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }),
+    loopRow(`${rowsKey}_LAST`, cols, { keep: !!tail })];
+  // {-w:tr …} makes the condition remove the whole row in every group but the last.
+  if (tail) rows.push(new TableRow({ cantSplit: true, children: [cell(
+    para([run(`{-w:tr ${lastKey}}`, { size: 2 }), run(`{${tail}}`, { size: S.small, color: C.grey }), run(`{/${lastKey}}`, { size: 2 })], { after: 0, line: 252 }),
+    CW, { span: cols.length, pt: 120, pb: 40, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] }));
+  const table = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+  return when(groupKey, [table, tableGap()]);
 }
+
+/**
+ * A titled bullet list that may run onto the next page (independent review CPB2-01; review CPB3-L1/L5). The title is
+ * the table's header row, so a list that continues on the next page opens with its title again: continued items are
+ * never shown without it. Each item is a single-cell row holding a Word list paragraph (the same bullets as anywhere
+ * else, so the DOCX edits like a list); {-w:tr …} makes the loop repeat the table row. Rows loop over the payload's
+ * boundedRows split of key, so the title keeps its first two items and the last two stay together.
+ * head: the header cell's paragraphs. Use listTable (a Heading 2 title) or labelledList (a small label and a note).
+ */
+// Spacing matches the paragraph lists it replaced: a list paragraph's "after" doesn't add to the next heading's "before"
+// (the larger wins), but a table cell's padding does, so the last item has no bottom padding and the title rows carry
+// only the difference (verification V-04).
+function bulletRow(key, keep, bottom = 60) {
+  return new TableRow({ cantSplit: true, children: [cell(
+    para([run(`{-w:tr ${key}}`, { size: 2 }), run("{TEXT}"), run(`{/${key}}`, { size: 2 })], { numbering: { reference: "blb-bullet", level: 0 }, after: 0, line: 252, keepNext: keep }),
+    CW, { pt: 0, pb: bottom, pl: 0, pr: 0 })] });
+}
+export function titledList(key, head, { headTop = 120, headBottom = 70 } = {}) {
+  const top = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(head, CW, { pt: headTop, pb: headBottom, pl: 0, pr: 0 })] });
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [CW], layout: TableLayoutType.FIXED, borders: noBorders(),
+    rows: [top, bulletRow(`${key}_KEEP`, true), bulletRow(key, false), bulletRow(`${key}_PEN`, true), bulletRow(`${key}_LAST`, false, 0)] });
+}
+/** A list under a Heading 2 title (Scope: "What we propose to build"). */
+export const listTable = (key, title) => titledList(key, [para(run(title, { size: S.h2, bold: true }), { heading: HeadingLevel.HEADING_2, after: 0, line: 240, keepNext: true })]);
+/**
+ * A list under a small blue label, with an optional grey note (the scope boundaries, the assumptions). Each list is
+ * its own table, so put a hairline paragraph after it inside its loop: two of them never touch.
+ */
+export const labelledList = (key, labelTag, { noteCond = null, noteTag = null } = {}) => titledList(key, [
+  para(run(`{${labelTag}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 0, keepNext: true }),
+  ...(noteCond ? when(noteCond, [para(run(`{${noteTag}}`, { size: S.small + 1, color: C.grey }), { before: 60, after: 0, keepNext: true })]) : []),
+], { headTop: 150, headBottom: 60 });   // with the 1 pt gap, the same spacing as the old label (about 8.5 pt above, 3 pt below)
+/** The paragraph that keeps two looped tables apart: exactly 1 pt tall (an "auto" line takes the 10 pt default font's height). */
+export function tableGap() { return new Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT }, children: [run("", { size: 2 })] }); }
 
 /** A band of n numbered cards across the full width (no loop: one band per count, chosen by a condition). Fields {PREFIX1..n}. */
 export function cardBand(n, numPrefix, labelPrefix) {

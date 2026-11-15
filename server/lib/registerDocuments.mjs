@@ -174,6 +174,167 @@ function readableList(item) {
 }
 
 /**
+ * Site access in plain sentences (CPB2-05). Each recorded option keeps its own qualifier, so an "or" is never upgraded
+ * to an "and"; a constraint that needs planning is said as one, never as a feature of the site ("crane or plant access
+ * will need to be planned for", not "with crane or plant access"). An element, a zone or an option not listed here
+ * falls back to the full recorded words (readableList).
+ */
+const ACCESS_IS = { steep_access: "steep" };
+const ACCESS_WITH = { narrow_or_restricted_access: "narrow or restricted areas", limited_parking: "limited parking" };
+const ACCESS_PLAN = { crane_or_plant_access: "crane or plant access", delivery_constraints: "delivery constraints", shared_or_neighbour_access: "shared or neighbour access" };
+const ACCESS_KNOWN = new Set(["standard_driveway", ...Object.keys(ACCESS_IS), ...Object.keys(ACCESS_WITH), ...Object.keys(ACCESS_PLAN)]);
+const andList = (l) => (l.length > 1 ? `${l.slice(0, -1).join(", ")} and ${l.at(-1)}` : l[0] || "");
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+export function siteAccessSentence(item) {
+  if (resolvePromptId(item?.promptKey) !== "W-001") return "";
+  const safe = clientSafeAnswer(item);
+  if (!safe || safe.state !== "recorded") return "";
+  // The client-safe projection drops option ids; read them from the same live (not stale) options it shows.
+  const ids = (item.answer.selected || []).filter((s) => !s?.stale).map((s) => s?.optionId);
+  if (safe.element || safe.zone || !ids.length || ids.some((id) => !ACCESS_KNOWN.has(id))) return "";
+  const pick = (map) => Object.keys(map).filter((id) => ids.includes(id)).map((id) => map[id]);
+  const is = pick(ACCESS_IS), withs = pick(ACCESS_WITH), plans = pick(ACCESS_PLAN);
+  const how = ids.includes("standard_driveway") ? ["by a standard driveway", ...is.map((a) => `is ${a}`)] : is;
+  const first = how.length ? `Site access is ${andList(how)}${withs.length ? `, with ${andList(withs)}` : ""}.` : withs.length ? `Site access has ${andList(withs)}.` : "";
+  const then = plans.length ? `${first ? capFirst(andList(plans)) : `Site access: ${andList(plans)}`} will need to be planned for.` : "";
+  return [first, then].filter(Boolean).join(" ");
+}
+
+/**
+ * A fact the client is unsure about, or that is still to be resolved, is never printed as settled (review CPB3-C03):
+ * "Site access: still to be confirmed (noted so far: steep access and crane or plant access)."
+ */
+const SETTLED_FACT = (i) => !["client_unsure", "unresolved"].includes(i?.answer?.state);
+const UNSURE_LABEL = /^(unsure|not sure|not decided|undecided|tbc|to be confirmed)$/i;
+const ordinaryWord = (w) => /^[A-Z][a-z]/.test(w) && !/[A-Z]/.test(w.slice(1));
+function unconfirmedFact(i) {
+  // What was noted, said exactly as a recorded answer would be (shared branch once, element and zone kept), minus "Unsure".
+  const live = (i.answer?.selected || []).filter((x) => !x?.stale && !UNSURE_LABEL.test(clean(x?.label)));
+  let noted = live.length ? readableList({ ...i, answer: { ...i.answer, state: "recorded", selected: live } }).replace(/\.$/, "") : "";
+  const first = noted.split(/\s/)[0] || "";
+  if (!clientSafeAnswer(i)?.element && ordinaryWord(first)) noted = noted.charAt(0).toLowerCase() + noted.slice(1);
+  return `${plainShort(i)}: still to be confirmed${noted ? ` (noted so far: ${noted})` : ""}.`;
+}
+
+/**
+ * Room-by-room scope said once per group of rooms (CPB2-02), as a fixed rule over the recorded words: nothing is
+ * generated, nothing is strengthened, and every record stays in the register.
+ *
+ * A record is grouped only when it answers a whole-room scope prompt (WHOLE_ROOM_PROMPTS; an element prompt such as
+ * hall finishes keeps its own line) and, apart from its room's name and words that add nothing ("as shown on the concept
+ * plans", "the", "full"), its typed words AND its card answer together say at most one kind of work, and that kind
+ * agrees with its disposition: "new" on a New record; "renovate", "refurbish" or "alter" on an Alter record. No work
+ * word: the disposition decides (New, or "Alterations to"). Anything else keeps its own line with the typed words: a
+ * renovation recorded as New, a qualifier ("alternative", "plan A"), a question mark, a hyphenated word ("built-in"), or
+ * a room whose name itself starts with a work word ("New kitchen", "Existing kitchen"). Each kind is its own group, so
+ * Renovated, Refurbished and Alterations to are never merged under one word.
+ *
+ * Groups follow the room list's order. A group of four or more rooms takes a short label ("New living areas: kitchen,
+ * scullery, living room …"); a smaller group is just its rooms ("New bathroom, ensuite and laundry"). A room name
+ * starting with an ordinary room word is lowercased mid-sentence ("Guest WC" → "guest WC"); any other name (a person's,
+ * "Mia's bedroom") prints as typed. A name that is only an adjective reads as a room ("Living" → "living room").
+ */
+const WORK_KINDS = [
+  { kind: "new", disposition: "new", words: ["new"], verb: (x) => `New ${x}` },
+  { kind: "renovate", disposition: "alter", words: ["renovate", "renovated", "renovation", "renovations", "renovating"], verb: (x) => `Renovated ${x}` },
+  { kind: "refurbish", disposition: "alter", words: ["refurbish", "refurbished", "refurbishment", "refurbishing"], verb: (x) => `Refurbished ${x}` },
+  { kind: "alter", disposition: "alter", words: ["alter", "altered", "alteration", "alterations", "altering"], verb: (x, common) => `Alterations to ${common ? "the " : ""}${x}` },
+];
+const DEFAULT_KIND = { new: "new", alter: "alter" };
+/** Whole-room scope prompts: their answer sets the room's disposition (New / Renovate / Alter / Retained …). */
+const WHOLE_ROOM_PROMPTS = new Set(["R-002", "R-003", "K-001", "B-001", "L-001", "V-001", "D-001"]);
+const NAME_WORK_WORDS = new Set(["existing", "old", "original", "current", ...WORK_KINDS.flatMap((w) => w.words)]);
+const ROOM_FILLER = new Set(["full", "fully", "complete", "completely", "as", "shown", "drawn", "per", "on", "in", "the", "concept", "plan", "plans", "drawing", "drawings", "sketch", "room", "area", "to", "be", "built", "work", "works", "of"]);
+const ROOM_FAMILIES = [
+  { types: ["kitchen", "scullery", "pantry", "living", "dining", "family", "theatre"], label: () => "living areas" },
+  { types: ["bedroom", "wir", "study"], label: (n) => andList([n.bedroom > 1 ? "bedrooms" : n.bedroom ? "bedroom" : n.wir ? "robes" : "", n.study > 1 ? "studies" : n.study ? "study" : ""].filter(Boolean)) },
+  { types: ["bathroom", "ensuite", "wc", "laundry", "mudroom"], label: (n) => { const b = n.bathroom + n.ensuite + n.wc, l = n.laundry + n.mudroom; return andList([b > 1 ? "bathrooms" : b ? "bathroom" : "", l > 1 ? "laundries" : l ? "laundry" : ""].filter(Boolean)); } },
+  { types: ["hall", "stairs"], label: (n) => andList([n.hall ? "halls" : "", n.stairs ? "stairs" : ""].filter(Boolean)) },
+  { types: ["garage"], label: () => "garages" },
+  { types: ["alfresco", "balcony", "external"], label: () => "outdoor areas" },
+];
+const LABEL_FROM = 4;   // a group of this many rooms or more takes a label
+// Words a room name can start with that are ordinary nouns or adjectives, lowercased mid-sentence. Anything else is a name.
+const ROOM_WORDS = new Set(["kitchen", "scullery", "butler's", "pantry", "bathroom", "ensuite", "powder", "laundry", "mudroom", "living", "dining", "family", "rumpus",
+  "theatre", "media", "bedroom", "main", "master", "guest", "walk-in", "robe", "study", "office", "stairs", "stair", "hall", "entry", "garage", "alfresco", "pergola",
+  "balcony", "deck", "lounge", "meals", "retreat", "games", "upstairs", "downstairs", "upper", "lower", "ground", "first", "front", "rear", "back", "side", "outdoor",
+  "sitting", "library", "cellar", "storage", "store", "workshop", "home", "kids", "nursery", "parents", "linen", "toilet", "shower", "spare", "second", "third",
+  "external", "room", "gym", "sunroom", "verandah", "veranda", "porch", "patio", "courtyard", "attic", "loft", "basement", "utility", "dressing", "drying"]);
+// A room named only by an adjective reads as a room mid-sentence: "Living" → "living room".
+const BARE_ROOM = new Set(["living", "dining", "family", "rumpus", "sitting", "games", "media"]);
+const roomOf = (register, i) => (register.meta.rooms || []).find((r) => r.id === i.roomId);
+/** The room name mid-sentence, and whether it is a common noun (so "the" may go before it). */
+function roomWords(name) {
+  const n = clean(name), first = n.split(/\s+/)[0] || "";
+  const common = ROOM_WORDS.has(first.toLowerCase());
+  const text = common && ordinaryWord(first) ? n.charAt(0).toLowerCase() + n.slice(1) : n;
+  return { text: BARE_ROOM.has(text) ? `${text} room` : text, common };
+}
+/** The kind of work a room record says, when it says nothing else; null when it must keep its own line. */
+function roomOnlyWork(register, i) {
+  const room = i.roomId && DEFAULT_KIND[i.disposition] && WHOLE_ROOM_PROMPTS.has(resolvePromptId(i.promptKey)) ? roomOf(register, i) : null;
+  const name = clean(room?.name).toLowerCase();
+  if (!name || NAME_WORK_WORDS.has(name.split(/\s+/)[0])) return null;
+  const kinds = new Set();
+  // The typed words and the card answer are read together, so "Refurbished" on the card still decides the kind when the
+  // typed words are only filler (verification V3-01), and two kinds between them keep the record on its own line.
+  const words = `${clean(i.description)} ${clean(answerSummary(i))}`.toLowerCase();
+  for (const t of words.split(name).join(" ").split(/[\s,.;:]+/).filter(Boolean)) {
+    const k = WORK_KINDS.find((w) => w.words.includes(t));
+    if (k) kinds.add(k.kind);
+    else if (!ROOM_FILLER.has(t)) return null;
+  }
+  if (kinds.size > 1) return null;
+  const kind = WORK_KINDS.find((w) => w.kind === (kinds.size ? [...kinds][0] : DEFAULT_KIND[i.disposition]));
+  return kind.disposition === i.disposition ? kind : null;
+}
+const plural = (w) => (/[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : /(s|sh|ch|x)$/.test(w) ? `${w}es` : `${w}s`);
+/**
+ * Room names in reading order; three or more numbered rooms that run on are named once: "bedrooms 2 to 4". The Hub names
+ * the first room of a type "Bedroom" and the next "Bedroom 2", so an unnumbered room straight before its run counts as
+ * number 1: "Bedroom, Bedroom 2, Bedroom 3" → "bedrooms 1 to 3" (verification V-05).
+ */
+function roomNames(rooms) {
+  const num = (r) => { const m = clean(r.name).match(/^(.*\S)\s+(\d+)$/); return m ? m : null; };
+  const words = [];
+  for (let k = 0; k < rooms.length; k++) {
+    const next = rooms[k + 1] && num(rooms[k + 1]);
+    if (!num(rooms[k]) && next && next[1].toLowerCase() === clean(rooms[k].name).toLowerCase() && Number(next[2]) === 2) {
+      let j = k + 1;
+      while (j + 1 < rooms.length && num(rooms[j + 1])?.[1] === next[1] && Number(num(rooms[j + 1])[2]) === Number(num(rooms[j])[2]) + 1) j++;
+      if (j >= k + 2) { words.push(`${plural(roomWords(next[1]).text)} 1 to ${num(rooms[j])[2]}`); k = j; continue; }
+    }
+    const m = num(rooms[k]);
+    let j = k;
+    while (m && j + 1 < rooms.length && num(rooms[j + 1])?.[1] === m[1] && Number(num(rooms[j + 1])[2]) === Number(num(rooms[j])[2]) + 1) j++;
+    if (m && j >= k + 2) { words.push(`${plural(roomWords(m[1]).text)} ${m[2]} to ${num(rooms[j])[2]}`); k = j; } else words.push(roomWords(rooms[k].name).text);
+  }
+  return andList(words);
+}
+function groupRoomScope(register, list, lineOf) {
+  const out = [], groups = new Map();
+  for (const i of list) {
+    const kind = roomOnlyWork(register, i);
+    if (!kind) { out.push(lineOf(i)); continue; }
+    const room = roomOf(register, i), fam = ROOM_FAMILIES.findIndex((f) => f.types.includes(room.roomType)), key = `${kind.kind}|${fam}`;
+    if (!groups.has(key)) { const g = { kind, fam, rooms: [], refs: [] }; groups.set(key, g); out.push(g); }
+    const g = groups.get(key);
+    if (!g.rooms.some((r) => r.id === room.id)) g.rooms.push(room);
+    g.refs.push(refCode(i));
+  }
+  const rank = new Map((register.meta.rooms || []).map((r, k) => [r.id, k]));
+  return out.map((x) => {
+    if (!x.rooms) return x;
+    const family = ROOM_FAMILIES[x.fam];
+    const rooms = x.rooms.slice().sort((a, b) => (family ? family.types.indexOf(a.roomType) - family.types.indexOf(b.roomType) : 0) || rank.get(a.id) - rank.get(b.id));
+    const count = Object.fromEntries((family?.types || []).map((t) => [t, rooms.filter((r) => r.roomType === t).length]));
+    const label = rooms.length >= LABEL_FROM ? (family ? family.label(count) : "rooms") : "";
+    const text = label ? `${x.kind.verb(label, true)}: ${roomNames(rooms)}` : x.kind.verb(roomNames(rooms), roomWords(rooms[0].name).common);
+    return { text, ref: x.refs[0], refs: x.refs };
+  });
+}
+
+/**
  * The brief's own pathway: the engagement pathway (stageGates), with a build-only delivery model on the design and
  * build pathway read as build only, so a build-only client is never told about concept design or a PTSA (CPB-01).
  * Which pipeline stages apply to build only is still an owner decision (R05 release package §4, #1).
@@ -184,18 +345,24 @@ export function cpbPathway(context) {
 }
 const PATHWAY_STAGE_LABEL = { build_only: "Scope and pricing", plans_supplied: "Plans and pricing", architect_tender: "Tender" };
 
-/** The client's next steps, by the brief's pathway and where the lead is (Tab 22 D4; stageGates pathway rules). */
-function cpbNextSteps(lead, context) {
+/**
+ * The client's next steps, by the brief's pathway and where the lead is (Tab 22 D4; stageGates pathway rules).
+ * technicalChecks "general" (a small job with no recorded site or structural check) names no consultant disciplines
+ * here either (CPB2-07, review CPB3-C08).
+ */
+function cpbNextSteps(lead, context, technicalChecks = "named") {
+  const general = technicalChecks === "general";
   const pathway = cpbPathway(context);
   const at = STAGE_ORDER.indexOf(lead.stage);
   const before = (st) => at <= STAGE_ORDER.indexOf(st);
   const mark = (steps, i) => steps.map((x, k) => ({ ...x, current: k === i }));
   if (lead.stage === LEAD_STAGES.WON) return { paras: ["The building contract is in place. Your project now moves to construction planning, and this brief stays on file as the record of the agreed direction."], steps: [], ptsa: null };
   if (pathway === "build_only") {
+    // CPB2-03: say how the engagement runs, never that drawings, consultants or approvals can be skipped.
     return {
-      paras: ["This project doesn't need a separate design stage. Next, we confirm the scope and measurements, then price the work."],
+      paras: ["This project is proceeding on a build-only pathway. We'll confirm the work, measurements and any drawings or approvals needed before finalising the price."],
       steps: mark([
-        { label: "Confirm the scope", text: "We confirm the scope, measurements and any drawings needed." },
+        { label: "Confirm the scope", text: "We confirm the work, measurements and any drawings or approvals needed." },
         { label: "Pricing", text: "We price the confirmed scope and your selections." },
         { label: "Building contract", text: "The contract confirms the scope, price and programme before work starts." },
         { label: "Construction", text: "The work is scheduled and carried out." },
@@ -205,9 +372,10 @@ function cpbNextSteps(lead, context) {
   }
   if (pathway === "plans_supplied") {
     return {
-      paras: ["Your plans are already prepared, so there is no separate concept or pre-construction design stage. Next, the consultant documents are confirmed and the work is priced."],
+      // Says how the engagement runs, never that design input can be skipped (as CPB2-03 for build only).
+      paras: ["Your plans are already prepared, so this project is proceeding on a plans-supplied pathway. Next, the consultant documents are confirmed against your plans and the work is priced."],
       steps: mark([
-        { label: "Consultant documents", text: "Engineering, energy and other consultant documents are confirmed against your plans." },
+        { label: "Consultant documents", text: general ? "Any consultant documents and approvals the work needs are confirmed against your plans." : "Engineering, energy and other consultant documents are confirmed against your plans." },
         { label: "Pricing", text: "The confirmed scope and selections are priced." },
         { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
       ], lead.stage === "tender" ? 1 : 0),
@@ -241,7 +409,7 @@ function cpbNextSteps(lead, context) {
   return {
     paras: ["Your pre-construction agreement is in place. The design is being coordinated with the consultants, and your selections and the scope are being developed for pricing."],
     steps: mark([
-      { label: "Design coordination", text: "Consultants coordinate the structure, services and energy requirements with the design." },
+      { label: "Design coordination", text: general ? "Any technical input the design needs is coordinated with the consultants." : "Consultants coordinate the structure, services and energy requirements with the design." },
       { label: "Selections", text: "Your finishes and fixtures are confirmed in the selections schedule." },
       { label: "Pricing", text: "The confirmed scope and selections are priced." },
       { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
@@ -271,8 +439,11 @@ function clientBriefFixture(input) {
 
   // 2 · Scope. Work only (a fact, risk, check or requirement is never work — Tab 27 MR-UX-02.8).
   const workWords = (i) => { const w = said(i) || dispositionLabel(i.disposition); return i.disposition === "remove" && !/demol|remov/i.test(w) ? `${w} (removal)` : i.disposition === "make_good" && !/make good|match/i.test(w) ? `${w} (make good)` : w; };
-  const scopeIn = items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided")).map((i) => entry(i, `${where(i)}${workWords(i)}`));
+  const scopeIn = groupRoomScope(register, items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided")), (i) => entry(i, `${where(i)}${workWords(i)}`));
   const isRisk = (i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site");
+  // CPB2-07: the consultant disciplines are named only where the project evidently needs them (new floor area, or a
+  // recorded site or structural check); otherwise the brief says it generally and implies no process the job may not need.
+  const technicalChecks = ["new_build", "knockdown_rebuild", "extension"].includes(context.projectType) || items.some(isRisk) ? "named" : "general";
   const block = (label, note, list) => ({ label, note, items: list });
   const physical = (i) => !NOT_WORK.has(natureOf(i));
 
@@ -309,7 +480,8 @@ function clientBriefFixture(input) {
   const preferences = [...CPB_GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g) })), ...(goals.length ? [{ group: "Requirements and goals", items: goals.slice(0, 8) }] : [])];
 
   // 6 · Noted facts stay facts.
-  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable").map((i) => `${plainShort(i)}: ${readableList(i)}`);
+  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable")
+    .map((i) => (!SETTLED_FACT(i) ? unconfirmedFact(i) : siteAccessSentence(i) || `${plainShort(i)}: ${readableList(i)}`));
 
   if (lead.stage !== LEAD_STAGES.WON) fx.project.stageLabel = PATHWAY_STAGE_LABEL[cpbPathway(context)] || fx.project.stageLabel;
   fx.clientBrief = {
@@ -319,11 +491,12 @@ function clientBriefFixture(input) {
     priorities, priorityNote,
     direction: vision && vision !== description ? vision : "",
     scopeIn,
+    technicalChecks,
     boundaries,
     preferences,
     noted: facts.length ? [{ label: "What we have noted about the site and household", items: facts }] : [],
     decisions: decisions.map(({ i, action }) => ({ ref: refCode(i), action: sentence(action), owner: i.responsibility ? responsibilityLabel(i.responsibility) : "" })),
-    nextSteps: cpbNextSteps(lead, context),
+    nextSteps: cpbNextSteps(lead, context, technicalChecks),
   };
   return fx;
 }

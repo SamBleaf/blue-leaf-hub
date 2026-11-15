@@ -61,10 +61,10 @@ ok("the architect brief lists card scope", arch.architectBrief.scheduleItems.som
 ok("an area reads as the room's name", brief.clientBrief.scopeIn.some((l) => l.text.startsWith("Kitchen:")));
 
 section("Facts never become priced scope (MR-UX-02.8)");
-ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /Narrow|Steep/.test(l.text)));
+ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /narrow|steep|site access/i.test(l.text)));
 ok("an older Included status on a fact doesn't print as work", !brief.clientBrief.scopeIn.some((l) => /Yes/.test(l.text)), flat(brief.clientBrief.scopeIn));
-ok("the architect's register doesn't list it as work", !arch.architectBrief.scheduleItems.some((r) => /Narrow|Steep/.test(r.requirement)));
-ok("it's noted as a fact", brief.clientBrief.noted.some((g) => /site and household/.test(g.label) && g.items.some((t) => /Narrow/.test(t))), flat(brief.clientBrief.noted));
+ok("the architect's register doesn't list it as work", !arch.architectBrief.scheduleItems.some((r) => /narrow|steep/i.test(r.requirement)));
+ok("it's noted as a fact", brief.clientBrief.noted.some((g) => /site and household/.test(g.label) && g.items.some((t) => /^Site access is .*narrow or restricted/.test(t))), flat(brief.clientBrief.noted));
 
 section("Performance goals stay intent (B04, DEC-MRUX-03)");
 ok("the goal is labelled for review", brief.clientBrief.preferences.flatMap((g) => g.items).some((x) => /Airtightness/.test(x.text) && x.status === "For consultant review") && /Airtightness[^"]*subject to consultant review/.test(flat(arch.architectBrief.scheduleItems)), flat(brief.clientBrief.preferences).slice(0, 800));

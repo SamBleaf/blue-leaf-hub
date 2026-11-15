@@ -58,11 +58,15 @@ It makes each document from the same register rows — nothing is retyped. Befor
 [insert screenshot: issue history showing R01 Superseded and R02 Current]
 [insert screenshot: received document under review with Set as source]
 
-### What the Client Project Brief contains (design cpb-2.0, from 15 Nov 2026)
+### What the Client Project Brief contains (design cpb-2.2, from 15 Nov 2026)
 
 The brief reads in this order and leaves out any section with nothing in it: **The project** (your Sales description, the client's top three priorities and their own note, the client vision as the design direction) → **Scope of works** (what we propose to build, then what stays, what's outside the scope, by others, items the client supplies, still to be decided, and what still needs checking, with who confirms) → **Design direction** (preferences with their status in words) → **Assumptions** → **Decisions to make** (only real actions, 3–7, client's first; an unassigned one reads "To be agreed") → **What happens next** (follows the pathway: the PTSA is only explained before it is signed, never on a plans-supplied or architect-tender lead).
 
 > 💡 **Tip:** If a decision you expected is missing, give it a next action in the register. A preference on its own is direction, not a decision.
+
+> 💡 **Tip:** A room that is simply new, such as "New study as shown on the concept plans" or just "New" on the card, prints once with the other rooms of its kind ("New bedrooms and study: main bedroom, bedrooms 2 to 4, walk-in robe and study"). The same goes for rooms marked Renovate, Refurbish or Alter: each keeps its own word, and they're never merged. For a room with particular work, write what happens there ("New ensuite with a walk-in shower and a freestanding bath"); it keeps its own line. A record whose words don't match its status (for example "Full renovation" on a room marked New) also prints exactly as typed, so check the status if it looks odd.
+
+> ℹ️ **Note:** The brief prints the drawing basis exactly as recorded on the Project step. When the client's plans change (for example, they supply their own set), update the drawing basis before you issue the next revision. The earlier revision keeps the set it was issued against.
 
 > ⚠️ **Engineered stone:** Engineered stone is prohibited in Australia from 1 July 2024.
 >
@@ -216,9 +220,11 @@ Next review date: 2027-05-07
 1. Preview the Client Project Brief on a lead with scope, preferences and decisions. Expected: every page has the logo, "Client Project Brief" and the address at the top, and "BLB-CPB-[ref] · Draft — not issued" and "Page X of Y" at the bottom; no revision number on a draft.
 2. Issue it. Expected: the PDF reads **BLB-CPB-[ref]-R0n · Issued [date]** on every page; `lead_documents.revision_label` is `R0n`.
 3. Expected content: no register codes in the scope or boundary lists (they stay in the decisions table only); no recorded preference listed as a decision; no decision owner invented ("To be agreed"); preferences grouped under category bands with the room named once; a long table repeats its header and never leaves a single row on a page; the closing note never sits on a page by itself; an empty section (e.g. no decisions) is left out and the numbers close up.
-4. On a plans-supplied lead, and on a build-only lead with no plans: no PTSA and no Concept or agreement step.
+4. On a plans-supplied lead, and on a build-only lead with no plans: no PTSA and no Concept or agreement step. The build-only brief says it is "proceeding on a build-only pathway" and that drawings or approvals needed are confirmed before the price; on a small job with no recorded site or structural check it names no consultant disciplines.
 5. Add a selection "Engineered stone benchtop" and try to issue. Expected: refused, with the reason; the Tender Notes still issue with a warning.
 6. Change it to "Porcelain instead of engineered stone". Expected: still refused (a selection names only what is supplied). Change it to "Porcelain benchtop, 20 mm". Expected: issues. Add "Existing engineered stone vanity top" with disposition **Retain**, and a requirement "No engineered stone in the kitchen". Expected: each issues, with a warning only.
+7. On a new home whose rooms each say only "New [room] as shown on the concept plans": the scope prints one line per group of rooms, with every room named. Mark one room Alter with the description "Full renovation". Expected: it keeps its own line. Make the scope list long enough to run onto a second page. Expected: that page opens with "What we propose to build" again. A boundary list or preference group that runs onto a new page opens it with its label or category band.
+8. Record site access as Steep and Narrow or restricted. Expected: "Site access is steep, with narrow or restricted areas." Add Crane or plant access. Expected: "Crane or plant access will need to be planned for." Mark the answer Client unsure. Expected: "Site access: still to be confirmed (noted so far: …)". Issue R01, change the drawing basis on the Project step, issue R02. Expected: R02 prints the new set; R01 still opens with the old one.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

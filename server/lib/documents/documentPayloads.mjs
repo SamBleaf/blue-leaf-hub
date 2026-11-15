@@ -41,7 +41,14 @@ function chrome(fx, { type, breadcrumb, sectionLabel, title, tagline }) {
   };
 }
 
-/** 01 — Client Project Brief (BLB-CPB, template cpb-2.0). Reader: the homeowner, after the concept presentation. */
+/** What happens to the proposed scope next, by the brief's pathway. */
+const SCOPE_NEXT = {
+  design_build: "It will be refined as the design develops.",
+  build_only: "We'll confirm it with you before pricing.",
+  plans_supplied: "We'll confirm it against your plans and the consultant documents before pricing.",
+  architect_tender: "We'll confirm it against your architect's documents before pricing.",
+};
+/** 01 — Client Project Brief (BLB-CPB, template cpb-2.2). Reader: the homeowner, after the concept presentation. */
 const two = (n) => String(n).padStart(2, "0");
 /**
  * Bounded table rows (independent review CPB-04/08), for a template dataTable({ bounded: true }):
@@ -67,11 +74,15 @@ export function buildClientBriefPayload(fx) {
     const rows = items.map((x, i) => ({ WHERE: i === 0 || items[i - 1].where !== x.where ? (x.where || "") : "", TEXT: x.text, STATUS: x.status || "" }));
     // Bounded per group: the band stays with its first two rows and the last two rows stay together.
     return { GROUP: g.group, ...boundedRows("ROWS", rows) };
-  }).filter((g) => g.ROWS_LAST.length);
+  }).filter((g) => g.ROWS_LAST.length).map((g, k, all) => ({ G_FIRST: k === 0, G_LAST: k === all.length - 1, ...g }));   // column header above the first group; status key under the last
   const drawing = String(p.drawingBasis || "").trim();
+  // Only design and build develops the design from here; every other pathway confirms what is drawn (review CPB3-H01).
+  const developing = !b.pathway || b.pathway === "design_build";
   const assumes = [
-    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be ${b.pathway === "build_only" ? "confirmed" : "developed"}.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
-    "The relevant consultants will need to confirm any structural, energy, drainage and approval requirements.",
+    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be ${developing ? "developed" : "confirmed"}.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
+    // CPB2-07: disciplines named only where the project evidently needs them (registerDocuments: technicalChecks).
+    b.technicalChecks === "general" ? "Any required technical checks and approvals will be confirmed before construction."
+      : "The relevant consultants will need to confirm any structural, energy, drainage and approval requirements.",
     "Final selections, quantities, timeframe and the construction price are not set by this document.",
   ];
   const noted = [...(b.noted || []).filter((g) => (g.items || []).length), { label: "This brief assumes", items: assumes }];
@@ -120,11 +131,14 @@ export function buildClientBriefPayload(fx) {
     HAS_DIRECTION: !!b.direction, DIRECTION: b.direction || "",
 
     HAS_S2: present.s2, S2_NUM: nums.s2 || "",
-    SCOPE_INTRO: `This is the building work we currently propose, based on ${drawing || "our conversations so far"}. ${b.pathway === "build_only" ? "We'll confirm it with you before pricing." : "It will be refined as the design develops."}`,
+    SCOPE_INTRO: `This is the building work we currently propose, based on ${drawing || "our conversations so far"}. ${SCOPE_NEXT[b.pathway] || SCOPE_NEXT.design_build}`,
     // CPB-06: register references stay in the record, not in the client's sentences.
-    HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text })),
+    // SCOPE_IN is the whole list (for checks); the template prints the bounded split SCOPE_ROWS_* under a title that
+    // repeats on the next page, so continued items are never shown without it (CPB2-01).
+    HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text })), ...boundedRows("SCOPE_ROWS", scopeIn.map((x) => ({ TEXT: x.text }))),
     HAS_BOUNDARIES: boundaries.length > 0,
-    BOUNDARIES: boundaries.map((g) => ({ B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: g.items.map((x) => ({ TEXT: x.text })) })),
+    // B_ITEMS is each whole list (for checks); the template prints the bounded split B_ROWS_* under a repeating label.
+    BOUNDARIES: boundaries.map((g) => { const rows = g.items.map((x) => ({ TEXT: x.text })); return { B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: rows, ...boundedRows("B_ROWS", rows) }; }),
 
     HAS_S3: present.s3, S3_NUM: nums.s3 || "",
     PREF_INTRO: "Your preferences so far describe a direction, not a final specification: products, sizes and details are confirmed as the project develops.",

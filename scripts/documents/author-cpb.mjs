@@ -12,12 +12,12 @@ import { fileURLToPath } from "url";
 import { Document, Packer } from "docx";
 import { fixDocxFooterFields } from "./fix-footer-page-fields.mjs";
 import {
-  CW, S, C, run, para, when, gap, titleBlock, metaGrid, callout, sectionHead, h2, label, body, bodyGrey, paraLoop, bulletLoop,
-  boundedBullets, dataTable, groupedTable, cardBand, tailNoteRow, tailCalloutRow, pageHeader, pageFooter, sectionProps, documentStyles, documentNumbering,
+  CW, S, C, run, para, when, gap, titleBlock, metaGrid, callout, sectionHead, h2, body, paraLoop,
+  dataTable, groupedTable, listTable, labelledList, tableGap, cardBand, tailNoteRow, tailCalloutRow, pageHeader, pageFooter, sectionProps, documentStyles, documentNumbering,
 } from "./design-system.mjs";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "../../public/templates/blb-client-brief-template.docx");
-export const CPB_TEMPLATE_VERSION = "cpb-2.1";   // checkpoint 2 (independent review CPB-01..12)
+export const CPB_TEMPLATE_VERSION = "cpb-2.2";   // checkpoint 3 (independent review CPB2-01..07)
 
 // Three priorities: cards; two: two columns; one: a single line (CPB-10).
 const priorities = [
@@ -34,35 +34,35 @@ const sectionProject = when("HAS_S1", [
   ...when("HAS_DIRECTION", [h2("The design direction"), body("{DIRECTION}")]),
 ]);
 
-const boundaryBlocks = when("BOUNDARIES", [
-  label("{B_LABEL}"),
-  ...when("HAS_B_NOTE", [bodyGrey("{B_NOTE}", { after: 60, keepNext: true })]),
-  ...bulletLoop("B_ITEMS"),
-]);
+// Each boundary list is a titled table: its label (and note) repeat when the list runs onto the next page (CPB3-L1).
+const boundaryBlocks = when("BOUNDARIES", [labelledList("B_ROWS", "B_LABEL", { noteCond: "HAS_B_NOTE", noteTag: "B_NOTE" }), tableGap()]);
 
 const sectionScope = when("HAS_S2", [
   ...sectionHead("S2_NUM", "Proposed works", "Scope of works"),
   body("{SCOPE_INTRO}"),
-  ...when("HAS_SCOPE_IN", [h2("What we propose to build"), ...bulletLoop("SCOPE_IN")]),
+  // The title repeats at the top of the next page when the list runs on (CPB2-01).
+  ...when("HAS_SCOPE_IN", [listTable("SCOPE_ROWS", "What we propose to build")]),
   ...when("HAS_BOUNDARIES", [h2("What stays, what's not included, and what still needs checking"), ...boundaryBlocks]),
 ]);
 
 const sectionDirection = when("HAS_S3", [
   ...sectionHead("S3_NUM", "Design direction", "Your preferences so far"),
-  body("{PREF_INTRO}", { keepNext: true }),
-  bodyGrey("{PREF_KEY}", { size: S.small, keepNext: true, after: 120 }),
-  // Grouped under a category band, the room named once per run, the header repeating on each page (CPB-07).
-  groupedTable("PREF_GROUPS", "GROUP", "ROWS", [
+  body("{PREF_INTRO}", { keepNext: true, after: 120 }),
+  // Grouped under a category band, the room named once per run (CPB-07). Each group is its own table, so a group that
+  // runs onto the next page repeats its band there (CPB2-06); the column header prints once, above the first group.
+  // The status key closes the last group (it travels with its last two rows), so it no longer lengthens the section's
+  // opening block (review CPB3-L4: that block no longer fit at the foot of Kestrel p2).
+  ...groupedTable("PREF_GROUPS", "GROUP", "ROWS", [
     { head: "Where", field: "WHERE", width: 2050, bold: true },
     { head: "Your preference", field: "TEXT", width: 5902 },
     { head: "Status", field: "STATUS", width: 1800, color: C.grey, size: S.small },
-  ]),
+  ], { tail: "PREF_KEY" }),
   gap(80),
 ]);
 
 const sectionNoted = when("HAS_S4", [
   ...sectionHead("S4_NUM", "Assumptions", "Assumptions and items to confirm"),
-  ...when("NOTED", [label("{N_LABEL}"), ...boundedBullets("N_BUL")]),
+  ...when("NOTED", [labelledList("N_BUL", "N_LABEL"), tableGap()]),
 ]);
 
 const sectionDecisions = when("HAS_S5", [
