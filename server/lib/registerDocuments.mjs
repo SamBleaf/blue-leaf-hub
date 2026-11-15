@@ -50,7 +50,7 @@ export const COORD_DISCIPLINES = { architect: "Architect", routleys: "Routleys (
 const STAGE_LABEL = { enquiry: "Enquiry", qualify: "Qualify", discovery: "Discovery", winning_offer: "Concept presentation", fee_proposal: "PTSA / plans", consultants: "Design coordination", tender: "Tender", won: "Contract" };
 const SCHEDULE_GROUPS = new Set(["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"]);
 const ENVELOPE_CATS = new Set(["roof", "cladding", "windows", "insulation", "structure", "existing", "demolition", "site", "external", "stairs"]);
-const isoDate = (d = new Date()) => new Date(d).toISOString().slice(0, 10);
+export const isoDate = (d = new Date()) => new Date(d).toISOString().slice(0, 10);
 const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 const sentence = (s) => { const t = clean(s); return t && !/[.!?]$/.test(t) ? `${t}.` : t; };
 
@@ -318,6 +318,14 @@ function templateFor(defKey) {
   return { def, bytes, file: def.templateFile, hash: createHash("sha256").update(bytes).digest("hex").slice(0, 16) };
 }
 
+/** The filled DOCX for a document, without the PDF step (the wording check reads and marks it: documentProofread.mjs). */
+export function fillRegisterDocx(docType, fx, { layout } = {}) {
+  const spec = REGISTER_DOC_TYPES[docType];
+  const defKey = layout === "client" && spec.altLayout ? spec.altLayout : spec.def;
+  const t = templateFor(defKey);
+  return renderDocxTemplate(t.bytes, t.def.build(fx));
+}
+
 export async function renderRegisterDocument(docType, fx, { layout } = {}) {
   const spec = REGISTER_DOC_TYPES[docType];
   const defKey = layout === "client" && spec.altLayout ? spec.altLayout : spec.def;
@@ -331,7 +339,7 @@ export async function renderRegisterDocument(docType, fx, { layout } = {}) {
 
 // ── load inputs ──────────────────────────────────────────────────────────────────────────────────
 
-async function loadInputs(sb, leadId, actor) {
+export async function loadInputs(sb, leadId, actor) {
   const { data: lead } = await sb.from("leads").select("id, name, stage, job_id, project_type").eq("id", leadId).maybeSingle();
   if (!lead) throw new DocumentError(404, "Lead not found", "NOT_FOUND");
   const loaded = await loadRegister(sb, leadId, { actor });
@@ -339,7 +347,7 @@ async function loadInputs(sb, leadId, actor) {
   return { lead, loaded, register: loaded.register, context };
 }
 
-async function nextVersion(sb, leadId, docType) {
+export async function nextVersion(sb, leadId, docType) {
   const { data, error } = await sb.from("lead_documents").select("version").eq("lead_id", leadId).eq("document_type", docType)
     .not("issued_at", "is", null).order("version", { ascending: false }).limit(1);
   if (error) {
@@ -355,7 +363,7 @@ async function nextVersion(sb, leadId, docType) {
 export function registerItemVersions(register) {
   return Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
 }
-function versionsDiffer(expected, current) {
+export function versionsDiffer(expected, current) {
   if (!expected || typeof expected !== "object") return false;        // no expectation sent → guard is inert
   const ek = Object.keys(expected), ck = Object.keys(current);
   if (ek.length !== ck.length) return true;

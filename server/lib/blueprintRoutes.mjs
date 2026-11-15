@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { callAI, wrapStream } from "./aiGateway.mjs";
+import { modelsFor, createForTask, streamForTask, aiModelStatus, classifyAiError, AI_ERROR_TEXT } from "./aiModels.mjs";
 import { createClient } from '@supabase/supabase-js';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
-import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus, buildChatSystemPrompt } from '../../src/blueprint/agent/runAgent.js';
+import { runBlueprintAgent, BLUEPRINT_AGENT_VERSION, getHubStatus, buildChatSystemPrompt, trimChatHistory, MAX_HISTORY } from '../../src/blueprint/agent/runAgent.js';
 import { requireAuth, requireRole } from './requireAuth.mjs';
 import { courseNameFromMarkdown } from '../../src/blueprint/lib/knowledgeChunking.js';
 import { indexLearnedKnowledge } from '../../src/blueprint/lib/knowledgeIndex.js';
@@ -17,9 +17,10 @@ import { getJobInsights } from './projectInsights.mjs';
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
-const VALID_MODELS = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514'];
-const _envModel = (_env.CLAUDE_MODEL || process.env.CLAUDE_MODEL || process.env.BLUEPRINT_MODEL || '').trim();
-const MODEL = VALID_MODELS.includes(_envModel) ? _envModel : 'claude-sonnet-4-6';
+// The model comes from the environment (BLUEPRINT_MODEL, then CLAUDE_MODEL), with a fallback model if it is refused for
+// this key: server/lib/aiModels.mjs. A whitelist here used to override the environment and pin one model, so when the
+// production key lost access to it Blueprint failed on every call and config couldn't recover it (Nov 2026).
+const chatModel = () => modelsFor('blueprint_chat').primary;
 
 const MAX_TOKENS = parseInt(_env.BLUEPRINT_MAX_TOKENS || process.env.BLUEPRINT_MAX_TOKENS || '8000');
 const DEFAULT_KNOWLEDGE_DIR = existsSync(join(process.cwd(), '../blueprint-agent/src/blueprint/knowledge'))
@@ -36,15 +37,31 @@ function getAnthropic() {
   return _anthropic;
 }
 
+/**
+ * A provider failure as a status and a plain-English message. A model the key can't use is named as such: that cause
+ * hid behind "Blueprint hit an unexpected error" for months (Nov 2026 handover).
+ */
+function friendlyAiError(err) {
+  const kind = classifyAiError(err);
+  if (kind === 'unknown' && /beta|anthropic-beta|not.*enabled|must include/i.test(err?.message || '')) {
+    return { status: 503, friendly: 'Blueprint API feature flag error — a required beta header is missing. Check the server deployment.' };
+  }
+  const status = { rate_limit: 429, billing: 503, auth: 503, overloaded: 503, model: 503 }[kind] || 500;
+  return { status, friendly: kind === 'unknown' ? 'Blueprint hit an unexpected error. Try again in a moment.' : AI_ERROR_TEXT[kind] };
+}
+
 async function callClaude(mode, messages, extras = {}) {
   const systemPromptAppend = await resolveWinningOfferAppend(extras.hubContext);
+  const anthropic = getAnthropic();
   return runBlueprintAgent({
-    anthropic: getAnthropic(),
-    model: MODEL,
+    anthropic,
+    model: chatModel(),
     maxTokens: MAX_TOKENS,
     mode,
     messages,
     extras: { ...extras, systemPromptAppend },
+    // Logged in ai_call_log, and retried once on the fallback model if this model is refused.
+    callModel: (params, opts) => createForTask(anthropic, 'blueprint_chat', params, { module: 'blueprintRoutes' }, opts),
   });
 }
 
@@ -233,10 +250,9 @@ function safeKnowledgeFileName(value) {
 }
 
 async function formatKnowledge(content) {
-  const response = await callAI(getAnthropic(), {
-    model: MODEL,
+  const response = await createForTask(getAnthropic(), 'blueprint_utility', {
     max_tokens: Math.min(MAX_TOKENS, 8000),
-    temperature: 0.2,
+    temperature: 0.2,   // dropped automatically for models that don't take it
     messages: [
       {
         role: 'user',
@@ -268,7 +284,8 @@ export function registerBlueprintRoutes(app) {
     res.json({
       ok: true,
       version: BLUEPRINT_AGENT_VERSION,
-      model: MODEL,
+      model: chatModel(),
+      ai: aiModelStatus(),
       tools: ['web_search', 'hub_list_subcontractors', 'hub_update_subcontractor', 'hub_list_jobs'],
       ...getHubStatus(),
     });
@@ -280,7 +297,8 @@ export function registerBlueprintRoutes(app) {
       if (Array.isArray(attachments) && attachments.length > 0) {
         return res.status(422).json({ fallback: true, reason: 'attachments' });
       }
-      const chatMessages = sanitizeMessages(messages);
+      // The same history bound as the non-streaming path: the last turns, not the whole chat (review CONV-01).
+      const chatMessages = trimChatHistory(sanitizeMessages(messages), MAX_HISTORY);
       const lastUserText = [...chatMessages].reverse().find((m) => m.role === 'user')?.content || '';
       let systemPrompt = await buildChatSystemPrompt('chat', lastUserText, { jobContext, hubContext });
       const woAppend = await resolveWinningOfferAppend(hubContext);
@@ -289,20 +307,18 @@ export function registerBlueprintRoutes(app) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
-      const stream = wrapStream(
-        await getAnthropic().messages.stream(
-          {
-            model: MODEL,
-            max_tokens: Math.min(MAX_TOKENS, 8000),
-            system: systemPrompt
-              ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-              : undefined,
-            messages: chatMessages,
-          },
-          { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31,web-search-2025-03-05' } },
-        ),
-        MODEL,
+      const stream = streamForTask(
+        getAnthropic(),
+        'blueprint_chat',
+        {
+          max_tokens: Math.min(MAX_TOKENS, 8000),
+          system: systemPrompt
+            ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+            : undefined,
+          messages: chatMessages,
+        },
         { module: 'blueprintRoutes' },
+        { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31,web-search-2025-03-05' } },
       );
       for await (const event of stream) {
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
@@ -313,10 +329,12 @@ export function registerBlueprintRoutes(app) {
       res.end();
     } catch (err) {
       console.error('[blueprint/chat/stream]', err.message);
+      // Never the provider's raw text (CLAUDE.md): say what kind of failure it was.
+      const { status, friendly } = friendlyAiError(err);
       if (!res.headersSent) {
-        res.status(500).json({ error: err.message });
+        res.status(status).json({ ok: false, error: friendly });
       } else {
-        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: friendly })}\n\n`);
         res.end();
       }
     }
@@ -369,27 +387,9 @@ export function registerBlueprintRoutes(app) {
       res.json({ reply });
     } catch (err) {
       console.error('[blueprint/chat]', err.message);
-      const msg = err?.message || 'Request failed';
       // Map known provider failures to friendly messages + a sensible status; never leak the raw
       // provider error string to the browser (CLAUDE.md).
-      let status = 500;
-      let friendly = 'Blueprint hit an unexpected error. Try again in a moment.';
-      if (/rate_limit/i.test(msg)) {
-        status = 429;
-        friendly = 'Anthropic rate limit — wait ~30 seconds and try again.';
-      } else if (/credit balance|billing|quota|payment/i.test(msg)) {
-        status = 503;
-        friendly = 'The AI service is unavailable (account credit/billing). Top up the Anthropic account, then try again.';
-      } else if (/api key|authentication|unauthorized|invalid x-api-key/i.test(msg)) {
-        status = 503;
-        friendly = 'The AI service is not configured correctly (API key). Check ANTHROPIC_API_KEY.';
-      } else if (/overloaded/i.test(msg)) {
-        status = 503;
-        friendly = 'Anthropic is temporarily overloaded — wait a moment and try again.';
-      } else if (/beta|anthropic-beta|not.*enabled|must include/i.test(msg)) {
-        status = 503;
-        friendly = 'Blueprint API feature flag error — a required beta header is missing. Check the server deployment.';
-      }
+      const { status, friendly } = friendlyAiError(err);
       res.status(status).json({ error: friendly });
     }
   });
@@ -454,8 +454,7 @@ export function registerBlueprintRoutes(app) {
         return res.status(400).json({ error: 'documentText is required' });
       }
 
-      const response = await callAI(getAnthropic(), {
-        model: MODEL,
+      const response = await createForTask(getAnthropic(), 'blueprint_utility', {
         max_tokens: MAX_TOKENS,
         temperature: 0.2,
         system: QC_REVIEW_SYSTEM_PROMPT,
@@ -509,5 +508,6 @@ export function registerBlueprintRoutes(app) {
     }
   });
 
-  console.log(`[blueprint] routes registered (${BLUEPRINT_AGENT_VERSION}, model=${MODEL})`);
+  const { primary, fallback } = modelsFor('blueprint_chat');
+  console.log(`[blueprint] routes registered (${BLUEPRINT_AGENT_VERSION}, model=${primary}, fallback=${fallback})`);
 }

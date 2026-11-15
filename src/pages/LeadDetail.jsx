@@ -1529,20 +1529,13 @@ export default function LeadDetail() {
     setBpLoading(true); setBpInsight("");
     const stageName = STAGES.find(s => s.id === l.stage)?.label || l.stage;
     const msg = `I have a sales lead named ${displayLeadName(l)} in the ${stageName} stage of my builder sales pipeline. Qualifying score: ${l.qualify_score ?? "not assessed"}/8. Project type: ${l.project_type || "unknown"}. Suburb: ${l.suburb || "unknown"}.${l.discovery_notes ? " Discovery: " + l.discovery_notes.slice(0, 200) : ""} Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences.`;
-    try {
-      const r = await authFetch("/api/blueprint/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: msg }], hubContext: { page: "lead_detail", stage: l.stage, leadId: l.id } })
-      });
-      const j = await r.json();
-      setBpInsight(j.reply || j.response || j.message || "No response.");
-      bpFetchedFor.current = cacheKey;
-    } catch {
-      setBpInsight("Blueprint unavailable — check API configuration.");
-    } finally {
-      setBpLoading(false);
-    }
+    // The server's plain-English error is shown ("The AI model isn't available to this API key…"), and a failure isn't
+    // cached, so the next visit tries again (Nov 2026 outage: the cause hid behind a generic message).
+    const r = await apiPost("/api/blueprint/chat", { messages: [{ role: "user", content: msg }], hubContext: { page: "lead_detail", stage: l.stage, leadId: l.id } });
+    setBpLoading(false);
+    if (!r.ok) { setBpInsight(r.network ? "Blueprint unavailable — check API configuration." : r.error); bpFetchedFor.current = null; return; }
+    setBpInsight(r.data?.reply || "No response.");
+    bpFetchedFor.current = cacheKey;
   }
 
   useEffect(() => {

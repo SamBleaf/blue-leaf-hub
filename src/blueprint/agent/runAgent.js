@@ -88,10 +88,13 @@ function messageHasDocumentBlock(messages) {
   });
 }
 
-function trimChatHistory(messages, maxTurns = 8) {
+export function trimChatHistory(messages, maxTurns = 8) {
   const cleaned = (messages || []).filter((m) => m?.role === 'user' || m?.role === 'assistant');
   if (cleaned.length <= maxTurns) return cleaned;
-  return cleaned.slice(-maxTurns);
+  const kept = cleaned.slice(-maxTurns);
+  // The API needs the conversation to open with the user's turn.
+  while (kept.length > 1 && kept[0].role !== 'user') kept.shift();
+  return kept;
 }
 
 export async function buildChatSystemPrompt(mode, lastUserText, extras = {}) {
@@ -99,7 +102,7 @@ export async function buildChatSystemPrompt(mode, lastUserText, extras = {}) {
   const ragContext = await getRelevantContext(lastUserText, { jobId, limit: 5 });
   let systemPrompt = buildSystemPrompt(mode, ragContext, extras.jobContext || null);
   if (extras.hubContext) {
-    systemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHUB UI CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${JSON.stringify(extras.hubContext, null, 2)}`;
+    systemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHUB UI CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${JSON.stringify(extras.hubContext)}`;
   }
   if (wantsSubcontractorData(lastUserText, extras.hubContext)) {
     systemPrompt = await appendSubcontractorSnapshot(systemPrompt);
@@ -110,9 +113,17 @@ export async function buildChatSystemPrompt(mode, lastUserText, extras = {}) {
   return systemPrompt;
 }
 
-export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {} }) {
+/** A long chat resends every earlier turn each time; the last turns carry the context that matters (token budget). */
+export const MAX_HISTORY = Math.max(4, Number(process.env.BLUEPRINT_MAX_HISTORY) || 16);
+
+/**
+ * @param {object} opts
+ * @param {(params: object, sdkOptions?: object) => Promise<object>} [opts.callModel] — sends one request; the server
+ *   passes one that logs the call and falls back to another model if this one is refused (server/lib/aiModels.mjs).
+ */
+export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {}, callModel }) {
   const compact = extras.compactContext === true || messageHasDocumentBlock(messages);
-  const workingMessages = compact ? trimChatHistory(messages, 6) : messages;
+  const workingMessages = trimChatHistory(messages, compact ? 6 : MAX_HISTORY);
   const lastUser = messageText([...workingMessages].reverse().find((m) => m.role === 'user'));
   const jobId = extras.jobContext?.id ?? null;
   const ragLimit = compact ? 2 : 5;
@@ -121,7 +132,7 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
   let systemPrompt = buildSystemPrompt(mode, ragContext, extras.jobContext || null);
 
   if (extras.hubContext) {
-    systemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHUB UI CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${JSON.stringify(extras.hubContext, null, 2)}`;
+    systemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHUB UI CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${JSON.stringify(extras.hubContext)}`;
   }
 
   const subDataQuery = wantsSubcontractorData(lastUser, extras.hubContext);
@@ -152,7 +163,8 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
       request.tool_choice = { type: 'tool', name: 'hub_list_subcontractors' };
     }
 
-    const response = await anthropic.messages.create(
+    const send = callModel || ((params, opts) => anthropic.messages.create(params, opts));
+    const response = await send(
       {
         ...request,
         system: request.system

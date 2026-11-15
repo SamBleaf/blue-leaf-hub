@@ -8,8 +8,10 @@
  *     dollar figure. Nothing is emailed from here — download the issued PDF and send it yourself.
  *   • Received consultant / supplier PDFs are kept intact, linked to register items and reconciled by staff;
  *     nothing in them is applied to an approved item automatically.
+ *   • "Check wording" asks Blueprint to proofread the draft just previewed: suggestions are listed and highlighted on
+ *     a copy of the draft. Nothing is changed and the issue is unaffected; staff fix the wording in the register.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../../../lib/apiFetch.js";
 import { roomLabel, refCode, outstandingReasons, isClientSelection, itemTitle } from "../../../../lib/register.js";
 import { Chip, Mini, Section, Select } from "./ui.jsx";
@@ -39,6 +41,10 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   const [msg, setMsg] = useState(null);
   const [layout, setLayout] = useState("technical");
   const [recipient, setRecipient] = useState({ name: "", email: "" });
+  const [proof, setProof] = useState(null);             // Blueprint's wording check: { url, issues, model, truncated }
+  const [proofView, setProofView] = useState("marked");  // which copy the preview shows: "marked" | "clean"
+  const [proofBusy, setProofBusy] = useState(false);
+  const proofSeq = useRef(0);                           // a check's answer is shown only if it's still for this preview
 
   const load = useCallback(async () => {
     const r = await apiFetch(`/api/register/leads/${lead.id}/documents`);
@@ -46,6 +52,10 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   }, [lead.id]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview]);
+  // Keyed on the URL itself, so switching between the copies never revokes the highlighted one (review PROOF-01).
+  const proofUrl = proof?.url;
+  useEffect(() => () => { if (proofUrl) URL.revokeObjectURL(proofUrl); }, [proofUrl]);
+  const dropProof = () => { proofSeq.current += 1; setProof(null); setProofBusy(false); };
 
   function defaultRecipient(key) {
     if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
@@ -57,7 +67,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   }
 
   async function openPreview(key) {
-    setMsg(null); setBusy(true); setActive(key);
+    setMsg(null); setBusy(true); setActive(key); dropProof();
     const rec = recipient.name && active === key ? recipient : defaultRecipient(key);
     setRecipient(rec);
     // Render from what is on screen — but SAVE it first. If the save does not land (conflict / guard / offline)
@@ -68,7 +78,25 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     setBusy(false);
     if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
     if (preview?.url) URL.revokeObjectURL(preview.url);
-    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name, itemVersions: r.data.itemVersions });
+    dropProof();   // a wording check belongs to the draft it read
+    // The layout is kept with the preview, so the wording check reads the same layout (review PROOF-05).
+    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name, itemVersions: r.data.itemVersions, layout: key === "selections_schedule" ? layout : undefined });
+  }
+
+  // Blueprint proofreads the draft just previewed (spelling, grammar, wording a reader would stumble on). It reads the
+  // same register version as the preview, or says to preview again. Suggestions only: nothing is changed.
+  async function checkWording() {
+    if (!active || !preview?.itemVersions) return;
+    const seq = ++proofSeq.current;
+    setProofBusy(true); setMsg(null);
+    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/proofread`, { layout: preview.layout, recipientName: preview.previewedFor, expectedVersions: preview.itemVersions });
+    // A newer preview, a close or an issue since then: this answer is for a draft no longer on screen (review PROOF-04).
+    if (seq !== proofSeq.current) return;
+    setProofBusy(false);
+    if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
+    const p = r.data.proofread;
+    setProof({ url: p.pdf ? b64ToBlobUrl(p.pdf) : null, issues: p.issues || [], model: p.model, truncated: !!p.truncated });
+    setProofView(p.pdf ? "marked" : "clean");
   }
 
   async function issue() {
@@ -85,13 +113,13 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
       const checks = r.body?.checks;
       const stale = r.code === "ISSUE_STALE";
       setMsg({ tone: "red", text: checks?.errors?.length ? `${r.error} ${checks.errors.join(" ")}` : r.error });
-      if (stale) { setPreview(null); }      // force a fresh preview of the current version before re-issuing
+      if (stale) { setPreview(null); dropProof(); }      // force a fresh preview of the current version before re-issuing
       return;
     }
     setMsg({ tone: "green", text: DOCS.find((d) => d.key === active)?.internal
       ? `Recorded ${r.data.document.revision_label} for ${recipient.name}. It's stored permanently for internal pricing. Don't send it to the client, consultants or trades.`
       : `Recorded ${r.data.document.revision_label} for ${recipient.name} — not emailed. The controlled PDF is stored permanently; download it below to send.` });
-    setPreview(null); setActive(null);
+    setPreview(null); setActive(null); dropProof();
     load();
   }
 
@@ -186,13 +214,43 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                     {preview.checks.warnings.map((w) => <li key={w} className="text-amber-700">! {w}</li>)}
                   </ul>
                 )}
-                <iframe title={`${d.label} draft`} src={preview.url} className="h-[28rem] w-full rounded border border-hairline bg-white" />
+                {proof?.url && (
+                  <div className="flex items-center gap-1 text-[11px]" role="group" aria-label="Which copy to show">
+                    {[["marked", "Highlighted copy"], ["clean", "Clean draft"]].map(([k, l]) => (
+                      <button key={k} type="button" onClick={() => setProofView(k)} aria-pressed={proofView === k}
+                        className={`rounded border px-2 py-0.5 font-semibold ${proofView === k ? "border-primary bg-primary/10 text-primary" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
+                    ))}
+                  </div>
+                )}
+                <iframe title={`${d.label} draft`} src={proof?.url && proofView === "marked" ? proof.url : preview.url} className="h-[28rem] w-full rounded border border-hairline bg-white" />
+                {proof && (
+                  <div className="rounded border border-hairline bg-page p-2 text-[11px]" data-testid={`proof-issues-${d.key}`}>
+                    <p className="font-semibold text-ink">{proof.issues.length ? `Blueprint's wording check: ${proof.issues.length} suggestion${proof.issues.length === 1 ? "" : "s"}` : "Blueprint's wording check found nothing to fix."}</p>
+                    <p className="text-muted">Suggestions only — nothing has been changed. Fix the wording in the register (fixed template wording: tell the office), then preview again. The issued document is never marked{proof.issues.length ? "; the highlighted copy's page breaks can shift slightly" : ""}.</p>
+                    {proof.truncated && <p className="text-amber-700">This document is very long: only the first part of its text was checked.</p>}
+                    {proof.issues.length > 0 && (
+                      <ol className="mt-1 space-y-1">
+                        {proof.issues.map((i) => (
+                          <li key={i.n} className="flex gap-2">
+                            <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{i.n}</span>
+                            <span>
+                              <span className="text-ink">“{i.text}” → <span className="font-semibold">“{i.suggestion}”</span></span>
+                              <span className="text-muted"> — {i.reason} <Chip tone="slate">{i.kind}</Chip>{!i.marked && " (not marked on the page)"}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-end gap-2">
                   <Mini label="Issue to (name)"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} className="inp w-48 text-[11px]" /></Mini>
                   <Mini label="Email (record only — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} className="inp w-56 text-[11px]" /></Mini>
                   <button type="button" disabled={busy || preview.checks.errors.length > 0 || !recipient.name.trim() || (preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim())} onClick={issue}
                     className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision P{String(preview.revision).padStart(2, "0")}</button>
-                  <button type="button" onClick={() => { setActive(null); setPreview(null); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
+                  <button type="button" disabled={busy || proofBusy} onClick={checkWording} title="Blueprint proofreads this draft for spelling, grammar and wording. Nothing is changed."
+                    className="rounded border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/5 disabled:opacity-40" data-testid={`proofread-${d.key}`}>{proofBusy ? "Checking the wording…" : proof ? "Check wording again" : "Check wording"}</button>
+                  <button type="button" onClick={() => { setActive(null); setPreview(null); dropProof(); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
                 </div>
                 {preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim() && (
                   <p className="text-[11px] text-amber-700">Recipient changed since this preview — <button type="button" onClick={() => openPreview(d.key)} className="font-semibold underline">preview again</button> to re-check the release blockers before issuing.</p>

@@ -254,7 +254,7 @@ Key tables:
 
 **Blueprint Insight** — conversational AI coaching panel using lead context as hub context:
 - `POST /api/blueprint/chat` body: `{ messages: [{ role, content }], hubContext }` → returns `{ reply }`
-- Model: `claude-sonnet-4-6`
+- Model: per task in `server/lib/aiModels.mjs`, from the environment (`BLUEPRINT_MODEL`, then `CLAUDE_MODEL`; default `claude-sonnet-5-5` at low effort), with a fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) when a model is refused for the key. Never pin a model in code: `/api/blueprint/health` shows what is in use.
 - **Critical**: response field is `reply` not `response` or `message` — always use `j.reply`
 
 **dotenv override issue:** If shell has `ANTHROPIC_API_KEY=''`, `dotenv.config()` won't override it. Pattern:

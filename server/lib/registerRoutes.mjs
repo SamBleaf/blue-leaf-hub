@@ -24,6 +24,7 @@ import {
   previewDocument, issueDocument, listDocuments, documentUrl, supplierPack, addSourceDocument, updateSourceDocument,
 } from "./registerDocuments.mjs";
 import { tenderSummary, latestBaseline, recordBaseline, handoverStatus } from "./registerHandover.mjs";
+import { proofreadDocument } from "./documentProofread.mjs";
 
 async function actorFor(sb, caller) {
   if (!caller) return null;
@@ -137,6 +138,19 @@ export function registerRegisterRoutes(app) {
       const out = await previewDocument(sb, req.params.leadId, req.params.docType, { layout: req.body?.layout, recipientName: req.body?.recipientName, actor });
       ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision, itemVersions: out.itemVersions });
     } catch (e) { sendRegisterError(res, e, "Could not render the draft."); }
+  });
+
+  // Blueprint's spelling and wording check of the draft just previewed: findings listed and highlighted on a copy of the
+  // draft. Changes nothing and never affects an issue (documentProofread.mjs).
+  app.post(`${base}/documents/:docType/proofread`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    try {
+      const actor = await actorFor(sb, req.caller);
+      const b = req.body || {};
+      const out = await proofreadDocument(sb, req.params.leadId, req.params.docType, { layout: b.layout, recipientName: b.recipientName, actor, expectedVersions: b.expectedVersions });
+      ok(res, { proofread: { issues: out.issues, pdf: out.pdf ? out.pdf.toString("base64") : null, model: out.model, truncated: out.truncated } });
+    } catch (e) { sendRegisterError(res, e, "Could not check the wording."); }
   });
 
   app.post(`${base}/documents/:docType/issue`, requireAuth, async (req, res) => {
