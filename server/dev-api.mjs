@@ -113,6 +113,7 @@ import { upsertJobKnowledge } from "./lib/jobResolver.mjs";
 import { processExtraction } from "./lib/rfqScopePipeline.mjs";
 import { requireAuth, requireRole, requireCronSecretOrAdmin } from "./lib/requireAuth.mjs";
 import { captureResendId } from "./lib/rfqEngagement.mjs";
+import { checkLatoRendering, latoCheckLine } from "./lib/documentFonts.mjs";
 import dns from "node:dns";
 
 console.log("[blue-leaf-api] booting…");
@@ -3123,6 +3124,15 @@ if (envBool(process.env.IMAP_POLL_ENABLED, true)) {
   setInterval(tick, pollMs);
   setTimeout(tick, 20_000);
   console.log(`[blue-leaf-api] IMAP_POLL_ENABLED: polling inbox every ${Math.round(pollMs / 60000)} min.`);
+}
+
+// Document fonts: once per boot on Railway, convert a three-line Lato test document and log one "[document-fonts]"
+// line saying whether LibreOffice embedded Lato (bundled in server/fonts/lato). Off in local dev, so nodemon restarts
+// don't each start LibreOffice; DOCUMENT_FONT_SELFTEST=true runs it anywhere, =false turns it off.
+if (envBool(process.env.DOCUMENT_FONT_SELFTEST, Boolean(process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT))) {
+  setTimeout(() => {
+    checkLatoRendering().then((r) => (r.ok ? console.log : console.error)(latoCheckLine(r)));
+  }, 20_000);
 }
 
 // ── Email open tracking pixel ────────────────────────────────────────────────
