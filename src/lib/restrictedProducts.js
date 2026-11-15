@@ -10,8 +10,10 @@
  *     option labels) name engineered stone, or whose card option is engineered stone. Negation doesn't count: a
  *     selection names only what will be supplied ("Porcelain benchtop, 20 mm"); existing or removed stone goes on a
  *     record marked Retain or Remove, and the register's history keeps the original choice.
- *   - WARNS: the same words anywhere else (a requirement such as "no engineered stone", the client's own note,
- *     retained or removed stone, the estimator's notes), and brands that also sell compliant ranges.
+ *   - WARNS here: the same words anywhere else (a requirement such as "no engineered stone", the client's own note,
+ *     retained or removed stone, the estimator's notes), and brands that also sell compliant ranges. The register's
+ *     document check (registerDocChecks) then also stops a client-facing document that would PRINT the words, whatever
+ *     the record (review rounds 1-5); the material of stone already installed is kept in an unprinted field.
  *
  * "Engineered stone" also matches common shorthand and misspellings (eng. stone, E-stone, engineerd, agglomerate,
  * engineered quartz). "Quartz" alone is ambiguous (a colour, a look, a sink, a brand), so it counts only as a bench
@@ -35,9 +37,9 @@ export const RESTRICTED_PRODUCTS = [
     rule: "Engineered stone is prohibited in Australia from 1 July 2024: it can't be manufactured, supplied, processed or installed.",
     reference: "https://www.safework.sa.gov.au/industry/construction/engineered-stone-prohibition",
     optionIds: ["engineered_stone"],
-    // Unambiguous: engineered stone, its shorthand and misspellings, agglomerate stone, engineered or reconstituted quartz,
+    // Unambiguous: engineered stone(s), its shorthand and misspellings, agglomerate stone, engineered or reconstituted quartz,
     // quartz stone or surface, and quartz within two words of a bench word. Engineered timber and quartzite don't match.
-    pattern: new RegExp(String.raw`\b(?:engineered|engineerd|enginered|engeneered|engenered|enginneered|eng\.?|agglomerated?)[\s-]*(?:stone|quartz)\b|\be[\s-]?stone\b|\breconstituted\s+quartz\b|${QUARTZ}[\s-]+(?:[a-z0-9]+[\s-]+){0,2}?(?:${BENCH_WORDS})\b`, "i"),
+    pattern: new RegExp(String.raw`\b(?:engineered|engineerd|enginered|engeneered|engenered|enginneered|eng\.?|agglomerated?)[\s-]*(?:stones?|quartz)\b|\be[\s-]?stones?\b|\breconstituted\s+quartz\b|${QUARTZ}[\s-]+(?:[a-z0-9]+[\s-]+){0,2}?(?:${BENCH_WORDS})\b`, "i"),
     // Bare "quartz" on a bench record, when the same field names no compliant material.
     benchPattern: new RegExp(QUARTZ, "i"),
     compliant: /\b(porcelain|sintered|granite|marble|natural\s+stone|quartzite|laminate|timber|glass|concrete|terrazzo|solid\s+surface|corian|stainless|travertine|limestone|soapstone|dekton|neolith)\b/i,
@@ -102,7 +104,30 @@ export function restrictedFindings(items) {
   return out;
 }
 
-/** Error-level products named anywhere in a document's own words (e.g. a pricing assumption). Always a warning. */
+/**
+ * Error-level products named in a piece of free text: the product pattern, or bare "quartz" in a clause that names a
+ * bench and no compliant material ("island top in white quartz"). The register's document check (registerDocChecks)
+ * scans every string a document prints this way, and stops a client-facing document that would print one (review
+ * rounds 1-6).
+ */
 export function restrictedInText(text) {
-  return RESTRICTED_PRODUCTS.filter((p) => p.level === "error" && p.pattern.test(String(text || "")));
+  const t = String(text || "");
+  const clauses = t.split(/[;,.\n]|\s[-–—]\s/);
+  return RESTRICTED_PRODUCTS.filter((p) => p.level === "error" && (p.pattern.test(t)
+    || (p.benchPattern && clauses.some((c) => BENCH_TEXT.test(c) && p.benchPattern.test(c) && !p.compliant.test(c)))));
+}
+
+/**
+ * Every printed field of a record (description, product, manufacturer, model, colour, supplier, source, chosen option)
+ * that names an error-level product, as [{ product, field, text }]. The document check stops a client document whose
+ * printed text contains one of them, whichever field it came from (review STONE4F-02).
+ */
+export function restrictedFieldsOf(item) {
+  const printed = printedOf(item);
+  const benchRecord = BENCH_CATEGORIES.has(item?.category) || BENCH_PROMPTS.has(item?.promptKey) || printed.some(([f, t]) => f !== "colour" && BENCH_TEXT.test(t));
+  const out = [];
+  for (const product of RESTRICTED_PRODUCTS.filter((p) => p.level === "error")) {
+    for (const [field, text] of printed) if (namedIn(product, [[field, text]], benchRecord)) out.push({ product, field, text });
+  }
+  return out;
 }

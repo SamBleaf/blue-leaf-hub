@@ -1,9 +1,9 @@
 /**
- * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.2) issued for real on the isolated sandbox (independent
+ * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.3) issued for real on the isolated sandbox (independent
  * reviews CPB-15, CPB2-04): preview → issue R01 through the API → download the stored PDF and match its checksum →
  * change a selection and the drawing basis, issue R02 → R02 prints the new drawing set, R01 still opens unchanged with
  * the set it was issued against → a client login can't see either. Evidence (the issued PDFs and the registry rows) is
- * written to ~/blh-register-evidence/docsuite/cpb3/. Refuses any non-loopback URL; credentials are
+ * written to ~/blh-register-evidence/docsuite/cpb4/. Refuses any non-loopback URL; credentials are
  * never printed. Nothing is emailed: an issue is a record. Run: node scripts/tests/sandbox-cpb-issue.test.mjs
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +21,7 @@ for (const u of [API, GW]) if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.tes
 const SB_DIR = join(homedir(), ".blh-register-sandbox");
 const secrets = JSON.parse(readFileSync(join(SB_DIR, "secrets.json"), "utf8"));
 const creds = JSON.parse(readFileSync(join(SB_DIR, "credentials.local.json"), "utf8"));
-const EVIDENCE = join(homedir(), "blh-register-evidence", "docsuite", "cpb3");
+const EVIDENCE = join(homedir(), "blh-register-evidence", "docsuite", "cpb4");
 mkdirSync(EVIDENCE, { recursive: true });
 const svc = createClient(GW, secrets.service_key, { auth: { persistSession: false } });
 const anon = () => createClient(GW, secrets.anon_key, { auth: { persistSession: false } });
@@ -69,10 +69,13 @@ async function main() {
   check("every page of the issued PDF carries BLB-CPB-[ref]-R01 and 'Issued'", /BLB-CPB-BL[0-9A-F]{6}-R01\s+·\s+Issued/.test(t1) && (t1.match(/BLB-CPB-BL[0-9A-F]{6}-R01/g) || []).length >= 3);
   check("the issued PDF is Lato only (font fail-safe)", pdfFontNames(f1).length > 0 && pdfFontNames(f1).every((f) => /^Lato-/.test(f)), pdfFontNames(f1).join());
   // The issue was rendered by the code and template in this checkout (review CPB3-H10): the recorded template hash is the
-  // file's own, and the cpb-2.2 wording is in the PDF (site access as a sentence; the status key under the last group).
+  // file's own, and the cpb-2.3 wording is in the PDF (site access as a sentence; each preference group's header with
+  // the column labels; the status key explaining Requirement).
   const templateHash = sha(readFileSync(new URL("../../public/templates/blb-client-brief-template.docx", import.meta.url))).slice(0, 16);
-  check("the issued brief used this checkout's cpb-2.2 template and wording", d1.template_version === `blb-client-brief-template.docx@${templateHash}`
-    && /Site access is steep, with narrow or restricted areas\./.test(t1.replace(/\s+/g, " ")) && /What we propose to build/.test(t1), `${d1.template_version} vs @${templateHash}`);
+  const flatT1 = t1.replace(/\s+/g, " ");
+  check("the issued brief used this checkout's cpb-2.3 template and wording", d1.template_version === `blb-client-brief-template.docx@${templateHash}`
+    && /Site access is steep, with narrow or restricted areas\./.test(flatT1) && /What we propose to build/.test(t1)
+    && /WHEREBATHROOMSANDLAUNDRYSTATUS/.test(t1.replace(/\s+/g, "")) && /Requirement: a need you've told us about\./.test(flatT1), `${d1.template_version} vs @${templateHash}`);
   check("R01 prints the drawing set it was issued against", t1.includes(k.register.meta.planRev) && !t1.includes(KESTREL_SUPPLIED_PLANS));
 
   section("Change the brief and its drawing basis, issue R02; R01 stays");

@@ -29,7 +29,7 @@ import { loadRegisterContext } from "./registerContext.mjs";
 import { issueRevisionLabel } from "./documents/documentIdentity.mjs";
 import { STAGE_ORDER } from "../../src/lib/stageGates.js";
 import { LEAD_STAGES } from "../../src/lib/constants.js";
-import { restrictedFindings, restrictedInText } from "../../src/lib/restrictedProducts.js";
+import { restrictedFindings, restrictedInText, restrictedFieldsOf } from "../../src/lib/restrictedProducts.js";
 import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
@@ -229,10 +229,25 @@ function unconfirmedFact(i) {
  * a room whose name itself starts with a work word ("New kitchen", "Existing kitchen"). Each kind is its own group, so
  * Renovated, Refurbished and Alterations to are never merged under one word.
  *
- * Groups follow the room list's order. A group of four or more rooms takes a short label ("New living areas: kitchen,
- * scullery, living room …"); a smaller group is just its rooms ("New bathroom, ensuite and laundry"). A room name
- * starting with an ordinary room word is lowercased mid-sentence ("Guest WC" → "guest WC"); any other name (a person's,
- * "Mia's bedroom") prints as typed. A name that is only an adjective reads as a room ("Living" → "living room").
+ * A group is one kind of work over one family of rooms (kitchen and living; bedrooms, robes and study; bathrooms and
+ * laundry; …), in the room list's order, and names its rooms only: "New kitchen, scullery, living room, dining room and
+ * family room". No category label: a label can't be both accurate and non-repetitive for every mix of rooms (CPB3-01/02:
+ * "New living areas: … scullery …", "New bedrooms and study: … study"). A room name starting with an ordinary room word
+ * is lowercased mid-sentence ("Guest WC" → "guest WC"); any other name (a person's, "Mia's bedroom") prints as typed. A
+ * name that is only an adjective reads as a room ("Living" → "living room").
+ *
+ * A group of New rooms the project's own description line already lists is folded into that line instead of printed
+ * again (CPB3-03: "New garage" after "New two-storey home with a double garage"). The fold must never hide a room's work,
+ * so it is narrow, and when in doubt the group keeps its own line (a repeat, never a loss). It is a whitelist, not a
+ * list of words to avoid (reviews CPB4-01, FOLD4B-01/02, FOLD4C-01): the line has no room and no area chips, is recorded
+ * New or Included, and its WHOLE text has the shape
+ *     new [storey/size words] home|house|dwelling|residence  with <list> [on|at a … block|site|lot]   (new build, knockdown)
+ *     new [storey/size words] [rear|side|front] extension|addition  with <list> […]           (extension, renovation)
+ * where every item of <list> is a room ("a double garage", "four bedrooms", "a study") with only an article, a number or
+ * a size word before it. Each room of the group must be one of those items. Anything else (a parenthesis, a semicolon,
+ * "excluded", "under separate contract", "a garage door", "New roof over the house with …") doesn't fold. The line keeps
+ * its words exactly; it gains the group's references. When two project-wide lines each describe a building (a house and a
+ * flat), nothing folds.
  */
 const WORK_KINDS = [
   { kind: "new", disposition: "new", words: ["new"], verb: (x) => `New ${x}` },
@@ -245,15 +260,15 @@ const DEFAULT_KIND = { new: "new", alter: "alter" };
 const WHOLE_ROOM_PROMPTS = new Set(["R-002", "R-003", "K-001", "B-001", "L-001", "V-001", "D-001"]);
 const NAME_WORK_WORDS = new Set(["existing", "old", "original", "current", ...WORK_KINDS.flatMap((w) => w.words)]);
 const ROOM_FILLER = new Set(["full", "fully", "complete", "completely", "as", "shown", "drawn", "per", "on", "in", "the", "concept", "plan", "plans", "drawing", "drawings", "sketch", "room", "area", "to", "be", "built", "work", "works", "of"]);
+// Room families, each in reading order: rooms of one family and one kind of work share a line.
 const ROOM_FAMILIES = [
-  { types: ["kitchen", "scullery", "pantry", "living", "dining", "family", "theatre"], label: () => "living areas" },
-  { types: ["bedroom", "wir", "study"], label: (n) => andList([n.bedroom > 1 ? "bedrooms" : n.bedroom ? "bedroom" : n.wir ? "robes" : "", n.study > 1 ? "studies" : n.study ? "study" : ""].filter(Boolean)) },
-  { types: ["bathroom", "ensuite", "wc", "laundry", "mudroom"], label: (n) => { const b = n.bathroom + n.ensuite + n.wc, l = n.laundry + n.mudroom; return andList([b > 1 ? "bathrooms" : b ? "bathroom" : "", l > 1 ? "laundries" : l ? "laundry" : ""].filter(Boolean)); } },
-  { types: ["hall", "stairs"], label: (n) => andList([n.hall ? "halls" : "", n.stairs ? "stairs" : ""].filter(Boolean)) },
-  { types: ["garage"], label: () => "garages" },
-  { types: ["alfresco", "balcony", "external"], label: () => "outdoor areas" },
+  ["kitchen", "scullery", "pantry", "living", "dining", "family", "theatre"],
+  ["bedroom", "wir", "study"],
+  ["bathroom", "ensuite", "wc", "laundry", "mudroom"],
+  ["hall", "stairs"],
+  ["garage"],
+  ["alfresco", "balcony", "external"],
 ];
-const LABEL_FROM = 4;   // a group of this many rooms or more takes a label
 // Words a room name can start with that are ordinary nouns or adjectives, lowercased mid-sentence. Anything else is a name.
 const ROOM_WORDS = new Set(["kitchen", "scullery", "butler's", "pantry", "bathroom", "ensuite", "powder", "laundry", "mudroom", "living", "dining", "family", "rumpus",
   "theatre", "media", "bedroom", "main", "master", "guest", "walk-in", "robe", "study", "office", "stairs", "stair", "hall", "entry", "garage", "alfresco", "pergola",
@@ -311,26 +326,62 @@ function roomNames(rooms) {
   }
   return andList(words);
 }
-function groupRoomScope(register, list, lineOf) {
+const escapeRx = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// The whole line, as a whitelist: new [modifiers] BUILDING with LIST [place]. The building must be the project's own: a
+// whole home on a new build or knockdown, an extension on an extension or renovation. "Rear", "ancillary" and the like
+// name a second building on the site, so they never come before a home (review FOLD4C-01).
+const FOLD_LINE = new RegExp(String.raw`^(?:brand-)?new(?:-build)?\s+(?:(?:[a-z]+-(?:storey|level|bedroom|floor)|single|double|upper|lower|ground|family|modern|contemporary|custom|large|compact)\s+){0,3}(?:(home|house|dwelling|residence)|(?:(?:rear|side|front)\s+)?(extension|addition))\s+with\s+(.+?)(?:\s+(?:on|at)\s+(?:a|an|the)\s+(?:[a-z-]+\s+){0,2}(?:block|site|lot|allotment))?$`);
+const FOLD_HOME_PROJECTS = new Set(["new_build", "knockdown_rebuild"]), FOLD_EXTENSION_PROJECTS = new Set(["extension", "renovation"]);
+// Any line that names a building, however it is written. With two of them (a house and a flat, two extensions) nothing
+// folds: the rooms can't be told apart by words (reviews FOLD4D-01, ONEBLD-01).
+const BUILDING_WORD = /\b(?:home|house|dwelling|residence|unit|flat|studio|cabin|cottage|annexe?|extension|addition|duplex|townhouse|villa|pavilion|bungalow|granny|build|rebuild|building|property|knock-?down)s?\b/i;
+const FOLD_COUNT = "a|an|the|one|two|three|four|five|six|single|double|triple|twin|tandem|separate|attached|detached|integrated|internal|large|new|lock-up";
+// Ordinary room nouns a description lists alongside the group's rooms ("four bedrooms, a study and a double garage").
+const FOLD_ROOM_NOUNS = ["bedroom", "bathroom", "ensuite", "study", "office", "garage", "laundry", "kitchen", "scullery", "pantry", "butler's pantry", "living area", "living room", "dining room",
+  "family room", "rumpus room", "media room", "theatre", "retreat", "powder room", "wc", "toilet", "walk-in robe", "robe", "mudroom", "alfresco", "deck", "balcony", "cellar", "workshop"];
+const foldItem = (noun) => new RegExp(`^(?:(?:${FOLD_COUNT})\\s+){0,3}${escapeRx(noun)}s?$`);
+/** Does this project-wide line already list every one of these rooms as part of the new building? (CPB3-03, CPB4-01) */
+function lineListsRooms(line, rooms, allRooms, projectType) {
+  // projectWide is also implied by the grammar (a room or area line starts "Room: "); kept so the rule never depends on it.
+  if (!line.projectWide || !["new", "included"].includes(line.disposition)) return false;
+  const m = clean(line.text).toLowerCase().replace(/\.$/, "").match(FOLD_LINE);
+  if (!m || !(m[1] ? FOLD_HOME_PROJECTS : FOLD_EXTENSION_PROJECTS).has(projectType)) return false;
+  const items = m[3].split(/\s*,\s*(?:and\s+)?|\s+and\s+/).map((x) => x.trim());
+  const nouns = [...FOLD_ROOM_NOUNS, ...allRooms.map((r) => roomWords(r.name).text.toLowerCase())].map(foldItem);
+  if (!items.every((x) => nouns.some((rx) => rx.test(x)))) return false;
+  return rooms.every((r) => { const rx = foldItem(roomWords(r.name).text.toLowerCase()); return items.some((x) => rx.test(x)); });
+}
+function groupRoomScope(register, list, lineOf, projectType) {
   const out = [], groups = new Map();
   for (const i of list) {
     const kind = roomOnlyWork(register, i);
-    if (!kind) { out.push(lineOf(i)); continue; }
-    const room = roomOf(register, i), fam = ROOM_FAMILIES.findIndex((f) => f.types.includes(room.roomType)), key = `${kind.kind}|${fam}`;
+    // Project-wide: no room and no area chips (an area-scoped record names its areas in a prefix, review SCOPE4-02).
+    const area = roomLabel(register, i);
+    if (!kind) { out.push({ ...lineOf(i), refs: [refCode(i)], projectWide: !i.roomId && (area === "Whole house" || area === "Site / existing"), disposition: i.disposition, section: i.section }); continue; }
+    const room = roomOf(register, i), fam = ROOM_FAMILIES.findIndex((f) => f.includes(room.roomType)), key = `${kind.kind}|${fam}`;
     if (!groups.has(key)) { const g = { kind, fam, rooms: [], refs: [] }; groups.set(key, g); out.push(g); }
     const g = groups.get(key);
     if (!g.rooms.some((r) => r.id === room.id)) g.rooms.push(room);
     g.refs.push(refCode(i));
   }
+  // CPB3-03: a New group the project's description line already lists is not printed twice; that line carries its
+  // references. Only New work folds (review CPB4-01): Renovated, Refurbished and Alterations to always keep their line.
+  const lines = out.filter((x) => !x.rooms);
+  // …and the target must be the project's only New or Included description line (site works aside), so a house line
+  // worded without a building word ("Two-storey new build …") still stops a flat's line from taking its rooms (FOLD5-01).
+  const oneBuilding = lines.filter((l) => BUILDING_WORD.test(clean(l.text))).length === 1
+    && lines.filter((l) => l.projectWide && l.section !== "site" && ["new", "included"].includes(l.disposition)).length === 1;
+  const folded = out.filter((x) => x.rooms && x.kind.kind === "new" && oneBuilding).filter((g) => {
+    const into = lines.find((l) => lineListsRooms(l, g.rooms, register.meta.rooms || [], projectType));
+    if (into) into.refs.push(...g.refs);
+    return !!into;
+  });
   const rank = new Map((register.meta.rooms || []).map((r, k) => [r.id, k]));
-  return out.map((x) => {
-    if (!x.rooms) return x;
+  return out.filter((x) => !folded.includes(x)).map((x) => {
+    if (!x.rooms) return { text: x.text, ref: x.ref, refs: x.refs };
     const family = ROOM_FAMILIES[x.fam];
-    const rooms = x.rooms.slice().sort((a, b) => (family ? family.types.indexOf(a.roomType) - family.types.indexOf(b.roomType) : 0) || rank.get(a.id) - rank.get(b.id));
-    const count = Object.fromEntries((family?.types || []).map((t) => [t, rooms.filter((r) => r.roomType === t).length]));
-    const label = rooms.length >= LABEL_FROM ? (family ? family.label(count) : "rooms") : "";
-    const text = label ? `${x.kind.verb(label, true)}: ${roomNames(rooms)}` : x.kind.verb(roomNames(rooms), roomWords(rooms[0].name).common);
-    return { text, ref: x.refs[0], refs: x.refs };
+    const rooms = x.rooms.slice().sort((a, b) => (family ? family.indexOf(a.roomType) - family.indexOf(b.roomType) : 0) || rank.get(a.id) - rank.get(b.id));
+    return { text: x.kind.verb(roomNames(rooms), roomWords(rooms[0].name).common), ref: x.refs[0], refs: x.refs };
   });
 }
 
@@ -372,8 +423,9 @@ function cpbNextSteps(lead, context, technicalChecks = "named") {
   }
   if (pathway === "plans_supplied") {
     return {
-      // Says how the engagement runs, never that design input can be skipped (as CPB2-03 for build only).
-      paras: ["Your plans are already prepared, so this project is proceeding on a plans-supplied pathway. Next, the consultant documents are confirmed against your plans and the work is priced."],
+      // Says how the engagement runs, never that design input can be skipped (as CPB2-03 for build only), and never that
+      // the supplied plans are complete or ready to build from (CPB3-07: the review's own wording).
+      paras: ["You've supplied plans for this project. We'll confirm the consultant information and any remaining details required before pricing."],
       steps: mark([
         { label: "Consultant documents", text: general ? "Any consultant documents and approvals the work needs are confirmed against your plans." : "Engineering, energy and other consultant documents are confirmed against your plans." },
         { label: "Pricing", text: "The confirmed scope and selections are priced." },
@@ -439,7 +491,7 @@ function clientBriefFixture(input) {
 
   // 2 · Scope. Work only (a fact, risk, check or requirement is never work — Tab 27 MR-UX-02.8).
   const workWords = (i) => { const w = said(i) || dispositionLabel(i.disposition); return i.disposition === "remove" && !/demol|remov/i.test(w) ? `${w} (removal)` : i.disposition === "make_good" && !/make good|match/i.test(w) ? `${w} (make good)` : w; };
-  const scopeIn = groupRoomScope(register, items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided")), (i) => entry(i, `${where(i)}${workWords(i)}`));
+  const scopeIn = groupRoomScope(register, items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided")), (i) => entry(i, `${where(i)}${workWords(i)}`), context.projectType);
   const isRisk = (i) => i.technicalStatus === "needs_verification" && (["site", "existing", "demolition", "structure"].includes(i.category) || i.section === "site");
   // CPB2-07: the consultant disciplines are named only where the project evidently needs them (new floor area, or a
   // recorded site or structural check); otherwise the brief says it generally and implies no process the job may not need.
@@ -475,7 +527,9 @@ function clientBriefFixture(input) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push({ where: area(i), text: clean(i.description || i.product) || said(i), status: selectionStatus(i), ref: refCode(i) });
   }
-  const goals = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005")
+  // An office-only technical note (R-015 tolerances) is never shown as the client's requirement (review CPB4-L01); a
+  // check it needs prints under "Still to be checked".
+  const goals = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005" && answerConfigFor(resolvePromptId(i.promptKey))?.tier !== "office_only")
     .map((i) => ({ where: area(i), text: `${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
   const preferences = [...CPB_GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g) })), ...(goals.length ? [{ group: "Requirements and goals", items: goals.slice(0, 8) }] : [])];
 
@@ -585,6 +639,25 @@ export function buildRegisterFixture(docType, input, opts = {}) {
 // ── pre-issue checks (Tab 14 release blockers) ───────────────────────────────────────────────────
 
 const MONEY_RX = /\$\s?\d/;
+/** SafeWork SA: notifying work with installed ("legacy") engineered stone. */
+const LEGACY_STONE_NOTICE = "https://www.safework.sa.gov.au/industry/construction/engineered-stone-prohibition/notification-of-work-with-legacy-engineered-stone";
+const LEGACY_DISPOSITION = { retain: "to remain", remove: "to be removed", make_good: "to be made good", alter: "to be altered" };
+const LEGACY_WHS = (url) => `controlled work, and SafeWork SA must be notified before it starts (${url}). Plan it through the job's WHS process: this document check is not WHS clearance.`;
+/**
+ * Every string a document prints: the template's data, built by the document's own payload builder. The stone check
+ * reads this, not the records, so every way a word reaches the page counts (a scope line, an item kept, a decision, the
+ * client's priority note …) and nothing has to be guessed about which fields print (review round 5).
+ */
+function printedStrings(docType, fx) {
+  const def = DOC_DEFS[REGISTER_DOC_TYPES[docType]?.def];
+  let data = fx;
+  try { if (def) data = def.build(fx); } catch { data = fx; }
+  const out = [];
+  const walk = (n) => { if (typeof n === "string") { if (n.trim()) out.push(n); } else if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === "object") Object.values(n).forEach(walk); };
+  walk(data);
+  return out;
+}
+const STONE_HOW = "A client document never names it, whatever the wording. Write new work as only what will be supplied (for example \"New porcelain island benchtop\"). Write work on stone already installed without the material (for example \"Remove the existing kitchen benchtops\"), mark the record Retain, Remove, Make good or Alter, and put the material in its Product field, which the document doesn't print: the register keeps it and the WHS notice still applies. The original wording stays in the register's history.";
 export function registerDocChecks(docType, fx, { register, recipientName, mode }) {
   const errors = [], warnings = [];
   if (!clean(fx.project.drawingBasis)) (mode === "issue" ? errors : warnings).push("Record the current drawing set / revision (Project step) before issuing.");
@@ -601,13 +674,34 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   // named, so two records with the same name can be told apart.
   const clientFacing = REGISTER_DOC_TYPES[docType]?.audience !== "internal";
   const found = restrictedFindings(register.items);
-  for (const { item, product, blocking } of found) {
+  // Five review rounds showed that free text can't be read for whether stone is new or already installed, so a client
+  // document that would PRINT engineered stone (or its shorthand) can't be issued, whatever the wording; staff write the
+  // line without it and keep the material in the record (review rounds 1-5). Supply selections block as before.
+  const shown = printedStrings(docType, fx), printedHit = (t) => !!t && shown.some((x) => x.includes(t));
+  const docLabel = REGISTER_DOC_TYPES[docType]?.label || "document";
+  const stop = (msg) => (mode === "issue" && clientFacing ? errors : warnings).push(msg);
+  const reported = [];
+  for (const { item, product, blocking, field } of found) {
     const room = roomLabel(register, item);
     const what = `"${clean(item.description || item.product) || itemShort(item)}"${room ? ` (${room})` : ""}`;
-    if (blocking) (mode === "issue" && clientFacing ? errors : warnings).push(`${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`);
+    const words = clean(said(item));
+    if (blocking) { stop(`${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`); reported.push(clean(item.description || item.product)); continue; }
+    // Any of the record's own fields that names it and that this document prints (its description, card answer,
+    // product, supplier …; review STONE4F-02).
+    const shownField = restrictedFieldsOf(item).find((h) => printedHit(clean(h.text))) || (product.level === "error" && ["description", "option"].includes(field) && printedHit(words) ? { text: words } : null);
+    if (shownField) { stop(`${what} names engineered stone in words the ${docLabel} prints. ${product.level === "error" ? product.rule : "Engineered stone is prohibited in Australia from 1 July 2024: it can't be manufactured, supplied, processed or installed."} ${STONE_HOW}`); reported.push(words, clean(shownField.text)); continue; }
+    // Not printed. A record kept, removed, made good or altered may be stone already installed: say what that needs,
+    // without claiming it is (checkpoint 3 review, Q5): it is never WHS clearance.
+    const label = LEGACY_DISPOSITION[item.disposition];
+    if (label) warnings.push(`${what} names ${product.level === "error" ? "engineered stone" : "a brand that has sold engineered stone"} (${label}). New engineered stone can't be supplied or installed (prohibited in Australia from 1 July 2024): check none is. If it is stone already installed, removing, repairing, making a minor modification to, or disposing of it is ${LEGACY_WHS(LEGACY_STONE_NOTICE)}`);
     else warnings.push(`${what} mentions ${product.label.toLowerCase()}. Check it isn't being supplied or installed. ${product.rule}`);
   }
-  if (!found.some((f) => f.product.level === "error")) for (const product of restrictedInText(strings)) warnings.push(`This document mentions ${product.label.toLowerCase()} (for example in a pricing assumption). ${product.rule}`);
+  // Anything else the document would print that names it: a decision, a priority note, a fact, an excluded item
+  // (review STONE4F-03: bare "quartz" with a bench word counts here as it does on a record).
+  for (const text of shown) {
+    const [product] = restrictedInText(text);
+    if (product && !reported.some((w) => w && text.includes(w))) { stop(`The ${docLabel} would print "${clean(text).slice(0, 90)}", which names engineered stone. ${product.rule} ${STONE_HOW}`); reported.push(text); }
+  }
   // Characters Lato can't print come out blank. Ranges checked against Lato's own character set: other scripts
   // (Hebrew to Tibetan, Hangul, CJK), technical symbols, dingbats, misc symbols and arrows, emoji.
   const unprintable = [...new Set((strings.match(/[\u0590-\u0FFF\u1100-\u11FF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]|[\uD800-\uDBFF][\uDC00-\uDFFF]/g) || []))];

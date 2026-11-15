@@ -198,13 +198,9 @@ export function bulletLoop(key, { textField = "TEXT", refField = null, keep = fa
  */
 export const boundedBullets = (key) => [...bulletLoop(`${key}_KEEP`, { keep: true }), ...bulletLoop(key), ...bulletLoop(`${key}_PEN`, { keep: true }), ...bulletLoop(`${key}_LAST`)];
 
-/** The column header row. cond: a condition key wrapping the row, so it prints only when the condition holds. */
-const headerRow = (cols, { cond = null } = {}) => new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
-  para([
-    ...(cond && i === 0 ? [run(`{#${cond}}`, { size: 2 })] : []),
-    run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }),
-    ...(cond && i === cols.length - 1 ? [run(`{/${cond}}`, { size: 2 })] : []),
-  ], { after: 0, line: 220, keepNext: true }),
+/** The column header row. */
+const headerRow = (cols) => new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
+  para(run(c.head, { size: S.th, bold: true, color: C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
   c.width, { fill: C.surface, pt: 80, pb: 80, pl: i === 0 ? 140 : 0, pr: 140, va: VerticalAlign.CENTER, borders: { top: none(), left: none(), right: none(), bottom: rule(C.blue, 6) } })) });
 
 /** One looped data row: {#key} in the first cell, {/key} (plus any closers) in the last. keep glues it to the next row. */
@@ -213,6 +209,8 @@ function loopRow(key, cols, { keep = false, closeExtra = "" } = {}) {
     const kids = [];
     if (i === 0) kids.push(run(`{#${key}}`, { size: 2 }));
     kids.push(run(`{${c.field}}`, { size: c.size || S.table, bold: !!c.bold, color: c.color || C.ink }));
+    // c.again: the same value printed quietly (the payload fills one of field / again, never both).
+    if (c.again) kids.push(run(`{${c.again}}`, { size: c.size || S.table, color: C.grey }));
     if (c.sub) kids.push(run(`{${c.sub}}`, { size: S.meta, color: C.grey }));
     if (i === cols.length - 1) kids.push(run(`{/${key}}${closeExtra}`, { size: 2 }));
     return cell(para(kids, { after: 0, line: 252, keepNext: keep }), c.width, { pt: 60, pb: 60, pl: i === 0 ? 140 : 0, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } });
@@ -241,29 +239,31 @@ export function dataTable(key, cols, o = {}) {
 }
 
 /**
- * A grouped table (independent reviews CPB-07, CPB2-06). Each group is its own table, so its band is a header row and
- * repeats at the top of the next page when the group runs on: a continued group is never shown without its category.
- * The column header prints once, above the first group (the payload marks it with firstKey), and repeats with that
- * group. The groups are separated by a hairline paragraph, so LibreOffice never merges two of them.
- * groupKey loops over [{ [firstKey], [lastKey], [bandField], ...boundedRows(rowsKey) }]: within a group the band keeps
- * its first two rows and the last two rows stay together, so neither end of a group is ever a single row on a page.
+ * A grouped table (independent reviews CPB-07, CPB2-06, CPB3-04/05). Each group is its own table whose one header row
+ * carries the column labels with the group's name in the middle column ("WHERE · BATHROOMS AND LAUNDRY · STATUS"). It
+ * is a repeating header row, so a group that runs onto the next page opens it with its name and the column labels.
+ * Every row names its place (the payload prints a repeat quietly through the column's `again` field), so a row at the
+ * top of a page is never without it. A 10 pt exact paragraph separates the groups, so LibreOffice never merges two.
+ * groupKey loops over [{ [lastKey], [bandField], ...boundedRows(rowsKey) }]: the header keeps its first two rows and
+ * the last two rows stay together, so neither end of a group is ever a single row on a page.
  * o.tail: a note field printed as the last row of the LAST group only (lastKey), so it always travels with that
  * group's last two rows (the status key under the preferences). Returns blocks (paragraphs and tables).
  */
-export function groupedTable(groupKey, bandField, rowsKey, cols, { firstKey = "G_FIRST", lastKey = "G_LAST", tail = null } = {}) {
+export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_LAST", tail = null } = {}) {
   const total = cols.reduce((a, c) => a + c.width, 0);
   if (total !== CW) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${CW}`);
-  const band = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(
-    para(run(`{${bandField}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 0, line: 220, keepNext: true }),
-    CW, { span: cols.length, pt: 130, pb: 40, pl: 140, pr: 140, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } })] });
-  const rows = [headerRow(cols, { cond: firstKey }), band, loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }),
+  if (cols.length !== 3) throw new Error(`groupedTable ${groupKey}: the group name takes the middle of three columns`);
+  const head = new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
+    para(run(i === 1 ? `{${bandField}}` : c.head, { size: S.th, bold: true, color: i === 1 ? C.ink : C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
+    c.width, { fill: C.surface, pt: 80, pb: 80, pl: i === 0 ? 140 : 0, pr: 140, va: VerticalAlign.CENTER, borders: { top: none(), left: none(), right: none(), bottom: rule(C.blue, 6) } })) });
+  const rows = [head, loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }),
     loopRow(`${rowsKey}_LAST`, cols, { keep: !!tail })];
   // {-w:tr …} makes the condition remove the whole row in every group but the last.
   if (tail) rows.push(new TableRow({ cantSplit: true, children: [cell(
     para([run(`{-w:tr ${lastKey}}`, { size: 2 }), run(`{${tail}}`, { size: S.small, color: C.grey }), run(`{/${lastKey}}`, { size: 2 })], { after: 0, line: 252 }),
     CW, { span: cols.length, pt: 120, pb: 40, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] }));
   const table = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
-  return when(groupKey, [table, tableGap()]);
+  return when(groupKey, [table, tableGap(200)]);
 }
 
 /**
@@ -298,7 +298,7 @@ export const labelledList = (key, labelTag, { noteCond = null, noteTag = null } 
   ...(noteCond ? when(noteCond, [para(run(`{${noteTag}}`, { size: S.small + 1, color: C.grey }), { before: 60, after: 0, keepNext: true })]) : []),
 ], { headTop: 150, headBottom: 60 });   // with the 1 pt gap, the same spacing as the old label (about 8.5 pt above, 3 pt below)
 /** The paragraph that keeps two looped tables apart: exactly 1 pt tall (an "auto" line takes the 10 pt default font's height). */
-export function tableGap() { return new Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT }, children: [run("", { size: 2 })] }); }
+export function tableGap(line = 20) { return new Paragraph({ spacing: { before: 0, after: 0, line, lineRule: LineRuleType.EXACT }, children: [run("", { size: 2 })] }); }
 
 /** A band of n numbered cards across the full width (no loop: one band per count, chosen by a condition). Fields {PREFIX1..n}. */
 export function cardBand(n, numPrefix, labelPrefix) {

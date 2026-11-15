@@ -17,7 +17,7 @@ import {
 } from "./design-system.mjs";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "../../public/templates/blb-client-brief-template.docx");
-export const CPB_TEMPLATE_VERSION = "cpb-2.2";   // checkpoint 3 (independent review CPB2-01..07)
+export const CPB_TEMPLATE_VERSION = "cpb-2.3";   // checkpoint 4 (independent review CPB3-01..07)
 
 // Three priorities: cards; two: two columns; one: a single line (CPB-10).
 const priorities = [
@@ -48,12 +48,12 @@ const sectionScope = when("HAS_S2", [
 const sectionDirection = when("HAS_S3", [
   ...sectionHead("S3_NUM", "Design direction", "Your preferences so far"),
   body("{PREF_INTRO}", { keepNext: true, after: 120 }),
-  // Grouped under a category band, the room named once per run (CPB-07). Each group is its own table, so a group that
-  // runs onto the next page repeats its band there (CPB2-06); the column header prints once, above the first group.
-  // The status key closes the last group (it travels with its last two rows), so it no longer lengthens the section's
-  // opening block (review CPB3-L4: that block no longer fit at the foot of Kestrel p2).
+  // Grouped by category (CPB-07). Each group is its own table with one header row, "WHERE · <CATEGORY> · STATUS", that
+  // repeats when the group runs onto the next page (CPB2-06, CPB3-05); every row names its place, bold where a place's
+  // run starts and quiet after that, so a continued row is never without it (CPB3-04). The status key closes the last
+  // group (it travels with its last two rows) and explains only the statuses printed (CPB3-06).
   ...groupedTable("PREF_GROUPS", "GROUP", "ROWS", [
-    { head: "Where", field: "WHERE", width: 2050, bold: true },
+    { head: "Where", field: "WHERE", again: "WHERE_AGAIN", width: 2050, bold: true },
     { head: "Your preference", field: "TEXT", width: 5902 },
     { head: "Status", field: "STATUS", width: 1800, color: C.grey, size: S.small },
   ], { tail: "PREF_KEY" }),

@@ -41,6 +41,19 @@ function chrome(fx, { type, breadcrumb, sectionLabel, title, tagline }) {
   };
 }
 
+/**
+ * The preference status key, in print order. A Requirement is a recorded need, not a verified outcome (CPB3-06).
+ * Whether "Client-approved" reads "Client-confirmed" to a client is an owner decision (checkpoint 3 review, Q3).
+ */
+const STATUS_KEY = [
+  ["Preferred", "the look you like."],
+  ["Proposed", "a specific option we're reviewing with you."],
+  ["Client-approved", "you've confirmed it with us."],
+  ["Requirement", "a need you've told us about. We'll assess whether and how it can be met; it isn't a confirmed outcome."],
+  ["For consultant review", "checked before it's relied on."],
+  ["Existing to Remain", "stays as it is."],
+  ["TBC", "still to be confirmed."],
+];
 /** What happens to the proposed scope next, by the brief's pathway. */
 const SCOPE_NEXT = {
   design_build: "It will be refined as the design develops.",
@@ -48,7 +61,7 @@ const SCOPE_NEXT = {
   plans_supplied: "We'll confirm it against your plans and the consultant documents before pricing.",
   architect_tender: "We'll confirm it against your architect's documents before pricing.",
 };
-/** 01 — Client Project Brief (BLB-CPB, template cpb-2.2). Reader: the homeowner, after the concept presentation. */
+/** 01 — Client Project Brief (BLB-CPB, template cpb-2.3). Reader: the homeowner, after the concept presentation. */
 const two = (n) => String(n).padStart(2, "0");
 /**
  * Bounded table rows (independent review CPB-04/08), for a template dataTable({ bounded: true }):
@@ -68,13 +81,17 @@ export function buildClientBriefPayload(fx) {
   const priorities = (b.priorities || []).filter(Boolean).slice(0, 3);
   const scopeIn = (b.scopeIn || []).filter((x) => x && x.text);
   const boundaries = (b.boundaries || []).map((g) => ({ ...g, items: (g.items || []).filter((x) => x && x.text) })).filter((g) => g.items.length);
-  // Preferences grouped under a category band; within a group the room is named once per run (CPB-07).
+  // Preferences grouped by category (CPB-07). Every row names its place: WHERE where a place's run starts, WHERE_AGAIN
+  // (printed quietly) after that, so a row at the top of a continued page is never without it (CPB3-04).
   const prefGroups = (b.preferences || []).map((g) => {
     const items = (g.items || []).filter((x) => x && x.text);
-    const rows = items.map((x, i) => ({ WHERE: i === 0 || items[i - 1].where !== x.where ? (x.where || "") : "", TEXT: x.text, STATUS: x.status || "" }));
-    // Bounded per group: the band stays with its first two rows and the last two rows stay together.
+    const rows = items.map((x, i) => { const first = i === 0 || items[i - 1].where !== x.where; return { WHERE: first ? (x.where || "") : "", WHERE_AGAIN: first ? "" : (x.where || ""), TEXT: x.text, STATUS: x.status || "" }; });
+    // Bounded per group: the header row stays with its first two rows and the last two rows stay together.
     return { GROUP: g.group, ...boundedRows("ROWS", rows) };
-  }).filter((g) => g.ROWS_LAST.length).map((g, k, all) => ({ G_FIRST: k === 0, G_LAST: k === all.length - 1, ...g }));   // column header above the first group; status key under the last
+  }).filter((g) => g.ROWS_LAST.length).map((g, k, all) => ({ G_LAST: k === all.length - 1, ...g }));   // the status key closes the last group
+  // The key explains every status printed, and only those (CPB3-06), in this order.
+  const printed = new Set((b.preferences || []).flatMap((g) => (g.items || []).filter((x) => x && x.text).map((x) => x.status)));
+  const prefKey = STATUS_KEY.filter(([s]) => printed.has(s)).map(([s, t]) => `${s}: ${t}`).join("  ");
   const drawing = String(p.drawingBasis || "").trim();
   // Only design and build develops the design from here; every other pathway confirms what is drawn (review CPB3-H01).
   const developing = !b.pathway || b.pathway === "design_build";
@@ -143,7 +160,7 @@ export function buildClientBriefPayload(fx) {
     HAS_S3: present.s3, S3_NUM: nums.s3 || "",
     PREF_INTRO: "Your preferences so far describe a direction, not a final specification: products, sizes and details are confirmed as the project develops.",
     PREF_GROUPS: prefGroups,
-    PREF_KEY: "Preferred: the look you like.  Proposed: a specific option we're reviewing with you.  Client-approved: you've confirmed it with us.  For consultant review: checked before it's relied on.",
+    PREF_KEY: prefKey,
 
     HAS_S4: present.s4, S4_NUM: nums.s4,
     // N_ITEMS is the whole list (for checks); the template prints the bounded split N_BUL_* so a list stays with its label.
@@ -312,7 +329,9 @@ export const DOC_DEFS = {
 };
 
 // ── Pre-issue validation (Tab 17 blockers) ───────────────────────────────────
-export const PLACEHOLDER_RX = /(\{\{|\}\}|\bTODO\b|\bTBD\b|REPLACE[_ ]?ME|\bXXX+\b|lorem ipsum|placeholder)/i;
+// REPLACE ME with no letter either side: "Full roof replacement" is real scope, "__REPLACE_ME__" is a placeholder
+// (review rounds 4-5).
+export const PLACEHOLDER_RX = /(\{\{|\}\}|\bTODO\b|\bTBD\b|(?<![a-z])REPLACE[_ ]?ME(?![a-z])|\bXXX+\b|lorem ipsum|placeholder)/i;
 const FAKE_MONEY_RX = /\$\s?0(?:[.,]0{1,2})?(?!\d)/;
 function walkStrings(node, visit, path = "") {
   if (node == null) return;
