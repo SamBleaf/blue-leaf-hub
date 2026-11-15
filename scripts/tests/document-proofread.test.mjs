@@ -5,7 +5,6 @@
  *
  *   node scripts/tests/document-proofread.test.mjs
  */
-for (const k of ["DOC_PROOFREAD_MODEL", "DOC_PROOFREAD_FALLBACK_MODEL", "AI_FALLBACK_MODEL"]) delete process.env[k];
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -13,10 +12,14 @@ import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import PizZip from "pizzip";
 import Anthropic from "@anthropic-ai/sdk";
-import { docxText, keepIssues, parseIssuesJson, highlightDocx, proofreadFixture, readerFor, PROOF_MAX_CHARS } from "../../server/lib/documentProofread.mjs";
-import { _resetAiModelState } from "../../server/lib/aiModels.mjs";
-import { DOC_DEFS } from "../../server/lib/documents/documentPayloads.mjs";
-import { renderRegisterDocument, fillRegisterDocx } from "../../server/lib/registerDocuments.mjs";
+// Set before the server modules load (static imports are hoisted, so these are dynamic): a local .env can't change the models.
+for (const k of ["DOC_PROOFREAD_MODEL", "DOC_PROOFREAD_FALLBACK_MODEL", "AI_FALLBACK_MODEL"]) delete process.env[k];
+process.env.AI_MODELS_IGNORE_DOTENV = "1";
+process.env.AI_CALL_LOG_DISABLED = "1";
+const { docxText, keepIssues, parseIssuesJson, highlightDocx, proofreadFixture, readerFor, findAll, PROOF_MAX_CHARS } = await import("../../server/lib/documentProofread.mjs");
+const { _resetAiModelState } = await import("../../server/lib/aiModels.mjs");
+const { DOC_DEFS } = await import("../../server/lib/documents/documentPayloads.mjs");
+const { renderRegisterDocument, fillRegisterDocx } = await import("../../server/lib/registerDocuments.mjs");
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 500)}` : ""}`); } };
@@ -78,6 +81,14 @@ ok("…the rest are numbered in page order, and an unknown kind reads as wording
 ok("a finding counts only as whole words: 'its' inside 'sits' is not a finding; a real 'its' is (review PROOF-02)",
   keepIssues([{ text: "its", suggestion: "it's", reason: "x", kind: "grammar" }], ["The cottage sits quietly."]).length === 0
   && keepIssues([{ text: "its", suggestion: "it's", reason: "x", kind: "grammar" }], ["The cottage sits in its garden."]).length === 1);
+{
+  const k = keepIssues([{ text: "in its garden", suggestion: "in it's garden", reason: "x", kind: "grammar" }, { text: "the shed", suggestion: "a shed", reason: "x", kind: "wording" }],
+    ["The cottage sits in its garden by the shed.", "Paint the shed."]);
+  ok("words that print in more than one place are listed but not marked (we can't tell which place); words that print once are marked (fix-check CLOSE-01)",
+    k.find((i) => i.text === "in its garden").unique === true && k.find((i) => i.text === "the shed").unique === false, JSON.stringify(k));
+}
+ok("a phrase in a double-spaced line is still found, and a space in the finding matches a run of spaces (fix-check CLOSE-02)",
+  findAll("Client Project Brief  /  Design Study", "Client Project Brief / Design Study").length === 1 && findAll("price $5 each", "$5").length === 1);
 ok("the reply is read as JSON, also when a model wraps it in words; nonsense is a clear error", parseIssuesJson('{"issues":[]}').length === 0 && parseIssuesJson('Here you go: {"issues":[{"text":"a"}]} done').length === 1
   && (() => { try { parseIssuesJson("no json here"); return false; } catch (e) { return e.code === "PROOF_UNREADABLE"; } })());
 
@@ -93,6 +104,9 @@ section("Marking the draft");
   ok("…every run stays well formed (balanced <w:r> tags)", (out.match(/<w:r>|<w:r\s/g) || []).length === (out.match(/<\/w:r>/g) || []).length);
   const z2 = new PizZip(); z2.file("word/document.xml", '<w:document><w:body><w:p><w:r><w:t xml:space="preserve">The cottage sits in its garden, together with their shed.</w:t></w:r></w:p></w:body></w:document>');
   const h2 = new PizZip(highlightDocx(z2.generate({ type: "nodebuffer" }), [{ n: 1, text: "its" }, { n: 2, text: "the" }]).docx).file("word/document.xml").asText();
+  const z3 = new PizZip(); z3.file("word/document.xml", '<w:document><w:body><w:p><w:r><w:t xml:space="preserve">Client Project Brief  /  Design Study</w:t></w:r></w:p><w:p><w:r><w:t>Paint the shed and the shed door.</w:t></w:r></w:p></w:body></w:document>');
+  const h3 = highlightDocx(z3.generate({ type: "nodebuffer" }), [{ n: 1, text: "Client Project Brief / Design Study", unique: true }, { n: 2, text: "the shed", unique: false }]);
+  ok("…a double-spaced phrase is marked; a repeated one is not", h3.marked.has(1) && !h3.marked.has(2) && (new PizZip(h3.docx).file("word/document.xml").asText().match(/<w:highlight/g) || []).length === 1);
   ok("…only whole words are marked: 'its' but not the 'its' in 'sits'; no 'the' inside 'together' or 'their' (review PROOF-02)",
     (h2.match(/<w:highlight/g) || []).length === 1 && /sits in <\/w:t>/.test(h2) && /together with their shed/.test(h2), h2);
 }

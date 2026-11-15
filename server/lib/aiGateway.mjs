@@ -42,6 +42,7 @@ export function estimateCost(model, inputTokens, outputTokens) {
 
 // ── Internal log insert (fire-and-forget) ─────────────────────────────────────
 async function _log({ model, usage, is_streaming, module: mod }) {
+  if (process.env.AI_CALL_LOG_DISABLED === "1") return;   // tests: a fake client's calls never reach the log
   const sb = getServiceSupabase();
   if (!sb) return;
   const input_tokens  = usage?.input_tokens  ?? null;

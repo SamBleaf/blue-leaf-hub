@@ -35,7 +35,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config as dotenvConfig } from "dotenv";
 import { callAI, wrapStream } from "./aiGateway.mjs";
 
-const { parsed: _env = {} } = dotenvConfig();
+// Tests set AI_MODELS_IGNORE_DOTENV=1 so a developer's .env can't change the defaults they check (fix-check REGR-04).
+const { parsed: _env = {} } = process.env.AI_MODELS_IGNORE_DOTENV === "1" ? { parsed: {} } : dotenvConfig();
 /** An env value, from the process first, then the .env file (a shell can export an empty value: CLAUDE.md). */
 const envVal = (name) => (process.env[name] || "").trim() || (_env[name] || "").trim();
 const firstEnv = (names) => names.map(envVal).find(Boolean) || "";

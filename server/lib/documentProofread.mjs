@@ -54,13 +54,17 @@ export function docxText(docx) {
 }
 
 const WORD = /[\p{L}\p{N}]/u;
-/** Is text[at, end) a whole-word occurrence of needle? Only where the needle itself starts or ends with a letter or digit. */
-export const wholeWordAt = (text, at, end, needle) =>
-  (!WORD.test(needle[0]) || at === 0 || !WORD.test(text[at - 1])) && (!WORD.test(needle.at(-1)) || end === text.length || !WORD.test(text[end]));
-/** The first whole-word occurrence of needle in text, or -1 (review PROOF-02: "its" is not in "sits"). */
-function findWhole(text, needle, from = 0) {
-  for (let at = text.indexOf(needle, from); at >= 0; at = text.indexOf(needle, at + 1)) if (wholeWordAt(text, at, at + needle.length, needle)) return at;
-  return -1;
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * Every place a finding's words print, as [start, end] offsets in `text`: whole words only ("its" is not in "sits",
+ * review PROOF-02), and any run of spaces in the finding matches any run of spaces on the page, so a phrase in the
+ * cover's double-spaced lines is still found (fix-check CLOSE-02).
+ */
+export function findAll(text, needle) {
+  const words = needle.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const re = new RegExp(`${WORD.test(needle.trim()[0]) ? "(?<![\\p{L}\\p{N}])" : ""}${words.map(escRe).join("\\s+")}${WORD.test(needle.trim().at(-1)) ? "(?![\\p{L}\\p{N}])" : ""}`, "gu");
+  return [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length]);
 }
 
 const SYSTEM = `You proofread documents for Blue Leaf Building, a residential builder in South Australia.
@@ -124,12 +128,13 @@ export function keepIssues(raw, strings) {
   for (const r of raw || []) {
     const text = norm(r?.text), suggestion = norm(r?.suggestion);
     if (!text || text.length > 400 || text === suggestion || seen.has(text)) continue;
-    // Where it first prints, as whole words: [paragraph, offset].
-    let pos = null;
-    for (let p = 0; p < strings.length && !pos; p++) { const at = findWhole(strings[p], text); if (at >= 0) pos = [p, at]; }
+    // Where it prints, as whole words: the first place ([paragraph, offset]) and how many places in all.
+    let pos = null, count = 0;
+    for (let p = 0; p < strings.length; p++) { const hits = findAll(strings[p], text); if (hits.length && !pos) pos = [p, hits[0][0]]; count += hits.length; }
     if (!pos) continue;
     seen.add(text);
-    kept.push({ text, suggestion, reason: norm(r?.reason).slice(0, 300), kind: KINDS.includes(r?.kind) ? r.kind : "wording", pos });
+    // Words that print in more than one place can't say which place is wrong: listed, not marked (fix-check CLOSE-01).
+    kept.push({ text, suggestion, reason: norm(r?.reason).slice(0, 300), kind: KINDS.includes(r?.kind) ? r.kind : "wording", unique: count === 1, pos });
   }
   return kept.slice(0, PROOF_MAX_ISSUES).sort((a, b) => a.pos[0] - b.pos[0] || a.pos[1] - b.pos[1]).map(({ pos, ...x }, i) => ({ n: i + 1, ...x }));
 }
@@ -185,10 +190,10 @@ const withProps = (rPr, add, drop = []) => {
 export function highlightDocx(docx, issues) {
   const zip = new PizZip(docx);
   const marked = new Set();
-  const byLength = [...issues].sort((a, b) => b.text.length - a.text.length);
+  const byLength = issues.filter((i) => i.unique !== false).sort((a, b) => b.text.length - a.text.length);
   const part = "word/document.xml";
   const xml = zip.file(part)?.asText();
-  if (!xml || !issues.length) return { docx, marked };
+  if (!xml || !byLength.length) return { docx, marked };
   const out = xml.replace(/<w:r(\s[^>]*)?>([\s\S]*?)<\/w:r>/g, (run, attrs = "", inner) => {
     const rPr = (inner.match(/^\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/) || [])[1] || "";
     let changed = false;
@@ -196,14 +201,7 @@ export function highlightDocx(docx, issues) {
       const text = unescXml(raw);
       const hits = [];
       for (const iss of byLength) {
-        let from = 0;
-        for (;;) {
-          const at = findWhole(text, iss.text, from);
-          if (at < 0) break;
-          const end = at + iss.text.length;
-          if (!hits.some((h) => at < h.end && end > h.at)) hits.push({ at, end, n: iss.n });
-          from = end;
-        }
+        for (const [at, end] of findAll(text, iss.text)) if (!hits.some((h) => at < h.end && end > h.at)) hits.push({ at, end, n: iss.n });
       }
       if (!hits.length) return whole;
       changed = true;

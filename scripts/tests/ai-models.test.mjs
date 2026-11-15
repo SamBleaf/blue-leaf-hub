@@ -8,6 +8,7 @@
 // Run from an empty folder: dotenv reads ./.env, and a checkout's real settings would change the result.
 process.chdir((await import("node:fs")).mkdtempSync((await import("node:path")).join((await import("node:os")).tmpdir(), "blh-ai-test-cwd-")));
 for (const k of ["BLUEPRINT_MODEL", "CLAUDE_MODEL", "BLUEPRINT_FALLBACK_MODEL", "AI_FALLBACK_MODEL", "DOC_PROOFREAD_MODEL", "DOC_PROOFREAD_FALLBACK_MODEL", "AI_MODEL_BLUEPRINT_CHAT"]) process.env[k] = "";
+process.env.AI_CALL_LOG_DISABLED = "1";      // fake calls are never written to ai_call_log
 const Anthropic = (await import("@anthropic-ai/sdk")).default;
 const { modelsFor, modelTraits, adaptParams, isModelProblem, classifyAiError, createForTask, streamForTask, aiModelStatus, _resetAiModelState, DEFAULT_FALLBACK_MODEL } = await import("../../server/lib/aiModels.mjs");
 const { trimChatHistory, runBlueprintAgent } = await import("../../src/blueprint/agent/runAgent.js");
