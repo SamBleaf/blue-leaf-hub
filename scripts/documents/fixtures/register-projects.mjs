@@ -46,7 +46,7 @@ function kestrel() {
     inRoom(R.wir, "R-003", { disposition: "new", description: "New walk-in robe between the main bedroom and the ensuite" }),
     inRoom(R.laundry, "R-003", { disposition: "alter", description: "Reconfigure the existing laundry as a laundry and mudroom with built-in storage and a bench for school bags" }),
     inRoom(R.entry, "R-003", { disposition: "alter", description: "Rework the entry so the existing hallway leads straight into the new living spaces" }),
-    rec("W-004", { disposition: "remove", description: "Remove the rear wall and the existing lean-to laundry" }),
+    rec("W-004", { disposition: "remove", description: "Remove the rear wall and the existing lean-to" }),
     rec("W-010", { disposition: "new", description: "New covered alfresco area connected to the rear living spaces" }),
     rec("W-006", { disposition: "make_good", description: "Make good existing floors and walls where they meet the extension" }),
     // Boundaries
@@ -121,7 +121,7 @@ function powder() {
     },
     register: { meta: emptyMeta({ planRev: "Measured sketch, 6 November 2026", rooms: [pr] }), items: [
       rec("P-005", { answer: pick("P-005", ["low_maintenance"]) }),
-      inRoom(pr, "B-001", { disposition: "new", description: "Full renovation of the powder room, keeping the existing door position" }),
+      inRoom(pr, "B-001", { disposition: "new", description: "Full renovation, keeping the existing door position" }),
       inRoom(pr, "B-003", { certainty: "preference", description: "Wall-hung toilet with a concealed cistern" }),
       inRoom(pr, "B-009", { certainty: "preference", description: "Large-format porcelain floor tiles in a warm grey" }),
       inRoom(pr, "B-015", { description: "Vanity size", nextAction: "Choose between a wall-hung vanity and a corner basin", responsibility: "client" }),
@@ -142,7 +142,7 @@ function ridgeline() {
     ...rooms.map((r) => inRoom(r, "R-003", { disposition: "new", description: `New ${r.name.toLowerCase()} as shown on the concept plans` })),
     rec("W-010", { disposition: "new", description: "Driveway, paths and a covered outdoor living area off the family room" }),
     rec("W-010", { disposition: "excluded", description: "Pool and pool fencing" }),
-    rec("W-010", { disposition: "by_others", description: "Landscaping and irrigation, by the client's landscaper" }),
+    rec("W-010", { disposition: "by_others", description: "Landscaping and irrigation, by your landscaper" }),
     rec("W-022", { supplyBy: "client", description: "Loose furniture, window furnishings and the home theatre system" }),
     rec("W-005", { technicalStatus: "needs_verification", responsibility: "consultant", category: "site", description: "Soil classification and the retaining needed on the sloping block" }),
     rec("W-001", { answer: pick("W-001", ["steep_access"], ["crane_or_plant_access"]) }),
@@ -187,7 +187,7 @@ function ridgeline() {
       identity: { clientName: "Alexander and Catherine Montgomery-Hargreaves", siteAddress: "27 Ridgeline Drive, Mount Barker SA 5251", suburb: "Mount Barker" },
       projectType: "new_build", deliveryModel: "design_build", engagementPathway: "design_build",
       goals: {
-        description: "A new two-storey family home on a north-facing sloping block, with living areas that open to the garden and views, four bedrooms, a study and a double garage. The family wants a home built to a high standard of comfort and energy performance that will suit them for the long term.",
+        description: "A new two-storey family home on a north-facing sloping block, with living areas that open to the garden and views, four bedrooms, a study and a double garage. You want a home built to a high standard of comfort and energy performance that will suit you for the long term.",
         vision: "Warm, natural materials, a strong connection to the outdoors and a simple, low-maintenance exterior.",
       },
       commercial: { ptsaStatus: "draft" }, consultants: [], drawings: [],

@@ -61,7 +61,7 @@ const SCOPE_NEXT = {
   plans_supplied: "We'll confirm it against your plans and the consultant documents before pricing.",
   architect_tender: "We'll confirm it against your architect's documents before pricing.",
 };
-/** 01 — Client Project Brief (BLB-CPB, template cpb-2.3). Reader: the homeowner, after the concept presentation. */
+/** 01 — Client Project Brief (BLB-CPB, template cpb-2.4). Reader: the homeowner, after the concept presentation. */
 const two = (n) => String(n).padStart(2, "0");
 /**
  * Bounded table rows (independent review CPB-04/08), for a template dataTable({ bounded: true }):
@@ -91,12 +91,15 @@ export function buildClientBriefPayload(fx) {
   }).filter((g) => g.ROWS_LAST.length).map((g, k, all) => ({ G_LAST: k === all.length - 1, ...g }));   // the status key closes the last group
   // The key explains every status printed, and only those (CPB3-06), in this order.
   const printed = new Set((b.preferences || []).flatMap((g) => (g.items || []).filter((x) => x && x.text).map((x) => x.status)));
-  const prefKey = STATUS_KEY.filter(([s]) => printed.has(s)).map(([s, t]) => `${s}: ${t}`).join("  ");
+  // A status name never breaks across a line ("For / consultant review"): non-breaking spaces inside it (verification CLOSE-02).
+  const prefKey = STATUS_KEY.filter(([s]) => printed.has(s)).map(([s, t]) => `${s.replace(/ /g, "\u00A0")}: ${t}`).join("  ");
   const drawing = String(p.drawingBasis || "").trim();
   // Only design and build develops the design from here; every other pathway confirms what is drawn (review CPB3-H01).
   const developing = !b.pathway || b.pathway === "design_build";
   const assumes = [
-    drawing ? `The drawings (${drawing}) are the basis of this brief. Dimensions and details are still to be ${developing ? "developed" : "confirmed"}.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
+    // The recorded drawing basis is a title as typed ("Measured sketch, 6 November 2026"), so it is never set into the
+    // grammar of a sentence (final inspection POWDER-01, CONSISTENCY-07).
+    drawing ? `This brief is based on the drawing basis recorded on page 1 (${drawing}). Dimensions and details are still to be ${developing ? "developed" : "confirmed"}.` : "This brief is based on our conversations so far. The drawings will become its basis once they are prepared.",
     // CPB2-07: disciplines named only where the project evidently needs them (registerDocuments: technicalChecks).
     b.technicalChecks === "general" ? "Any required technical checks and approvals will be confirmed before construction."
       : "The relevant consultants will need to confirm any structural, energy, drainage and approval requirements.",
@@ -137,7 +140,8 @@ export function buildClientBriefPayload(fx) {
     META_ROWS: metaRows(metaPairs),
     STATUS_LABEL: id.issued ? "Preliminary record" : "Draft for review — not issued",
     // CPB-03: no blanket "nothing is approved" — selections carry their own evidenced status.
-    STATUS_BODY: "This brief records the preferences and decisions discussed so far, so we can confirm them together. It is not a construction specification, a fixed-price quotation or a contract. It doesn't itself authorise purchasing, construction or changes to a contract, and each selection carries the status shown.",
+    // A later revision says which issued revision it replaces (final inspection R02-01).
+    STATUS_BODY: (id.issued && meta.supersedes?.label ? `This revision replaces ${meta.supersedes.label}${meta.supersedes.issuedDate ? `, issued ${fmtIdDate(meta.supersedes.issuedDate)}` : ""}. ` : "") + "This brief records the preferences and decisions discussed so far, so we can confirm them together. It is not a construction specification, a fixed-price quotation or a contract. It doesn't itself authorise purchasing, construction or changes to a contract, and each selection carries the status shown.",
 
     HAS_S1: present.s1, S1_NUM: nums.s1 || "",
     OVERVIEW: overview.map((t) => ({ PARA: t })),
@@ -148,12 +152,13 @@ export function buildClientBriefPayload(fx) {
     HAS_DIRECTION: !!b.direction, DIRECTION: b.direction || "",
 
     HAS_S2: present.s2, S2_NUM: nums.s2 || "",
-    SCOPE_INTRO: `This is the building work we currently propose, based on ${drawing || "our conversations so far"}. ${SCOPE_NEXT[b.pathway] || SCOPE_NEXT.design_build}`,
+    SCOPE_INTRO: `This is the building work we currently propose, based on ${drawing ? "the drawing basis above" : "our conversations so far"}. ${SCOPE_NEXT[b.pathway] || SCOPE_NEXT.design_build}`,
     // CPB-06: register references stay in the record, not in the client's sentences.
     // SCOPE_IN is the whole list (for checks); the template prints the bounded split SCOPE_ROWS_* under a title that
     // repeats on the next page, so continued items are never shown without it (CPB2-01).
     HAS_SCOPE_IN: scopeIn.length > 0, SCOPE_IN: scopeIn.map((x) => ({ TEXT: x.text })), ...boundedRows("SCOPE_ROWS", scopeIn.map((x) => ({ TEXT: x.text }))),
     HAS_BOUNDARIES: boundaries.length > 0,
+    BOUNDARY_TITLE: b.boundaryTitle || "What stays, what's not included and what still needs checking",
     // B_ITEMS is each whole list (for checks); the template prints the bounded split B_ROWS_* under a repeating label.
     BOUNDARIES: boundaries.map((g) => { const rows = g.items.map((x) => ({ TEXT: x.text })); return { B_LABEL: g.label, HAS_B_NOTE: !!g.note, B_NOTE: g.note || "", B_ITEMS: rows, ...boundedRows("B_ROWS", rows) }; }),
 
@@ -167,7 +172,7 @@ export function buildClientBriefPayload(fx) {
     NOTED: noted.map((g) => { const items = g.items.map((t) => ({ TEXT: t })); return { N_LABEL: g.label, N_ITEMS: items, ...boundedRows("N_BUL", items) }; }),
 
     HAS_S5: present.s5, S5_NUM: nums.s5 || "",
-    DECISIONS_INTRO: "These need someone's input before the project can move on. We'll work through them with you.",
+    DECISIONS_INTRO: decisions.length === 1 ? "This needs to be settled before the project can move on. We'll work through it with you." : "These need to be settled before the project can move on. We'll work through them with you.",
     ...boundedRows("DECISIONS", decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: d.owner || "To be agreed" }))),
 
     S6_NUM: nums.s6,
@@ -178,7 +183,9 @@ export function buildClientBriefPayload(fx) {
 
     ABOUT_LABEL: "About this document",
     ABOUT_BODY: id.issued
-      ? `${p.preparedBy || "Blue Leaf Building"} prepared this brief from our discussions and the information recorded for your project. It's a record for you to keep and doesn't need a signature. If anything here doesn't match what you told us, let us know and we'll issue a revised brief.`
+      // "We", not the issuer's name mid-sentence ("Sam Morris, Blue Leaf Building prepared …": final inspection KESTREL-03);
+      // the cover names who prepared it.
+      ? `We prepared this brief from our discussions and the information recorded for your project. It's a record for you to keep and doesn't need a signature. If anything here doesn't match what you told us, let us know and we'll issue a revised brief.`
       : "This is a draft for review. It has not been issued, and it will carry a revision number and issue date once it is.",
   };
 }

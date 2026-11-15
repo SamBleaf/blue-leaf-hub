@@ -1,5 +1,5 @@
 /**
- * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.3) issued for real on the isolated sandbox (independent
+ * sandbox-cpb-issue.test.mjs — the Client Project Brief (cpb-2.4) issued for real on the isolated sandbox (independent
  * reviews CPB-15, CPB2-04): preview → issue R01 through the API → download the stored PDF and match its checksum →
  * change a selection and the drawing basis, issue R02 → R02 prints the new drawing set, R01 still opens unchanged with
  * the set it was issued against → a client login can't see either. Evidence (the issued PDFs and the registry rows) is
@@ -69,11 +69,11 @@ async function main() {
   check("every page of the issued PDF carries BLB-CPB-[ref]-R01 and 'Issued'", /BLB-CPB-BL[0-9A-F]{6}-R01\s+·\s+Issued/.test(t1) && (t1.match(/BLB-CPB-BL[0-9A-F]{6}-R01/g) || []).length >= 3);
   check("the issued PDF is Lato only (font fail-safe)", pdfFontNames(f1).length > 0 && pdfFontNames(f1).every((f) => /^Lato-/.test(f)), pdfFontNames(f1).join());
   // The issue was rendered by the code and template in this checkout (review CPB3-H10): the recorded template hash is the
-  // file's own, and the cpb-2.3 wording is in the PDF (site access as a sentence; each preference group's header with
+  // file's own, and the cpb-2.4 wording is in the PDF (site access as a sentence; each preference group's header with
   // the column labels; the status key explaining Requirement).
   const templateHash = sha(readFileSync(new URL("../../public/templates/blb-client-brief-template.docx", import.meta.url))).slice(0, 16);
   const flatT1 = t1.replace(/\s+/g, " ");
-  check("the issued brief used this checkout's cpb-2.3 template and wording", d1.template_version === `blb-client-brief-template.docx@${templateHash}`
+  check("the issued brief used this checkout's cpb-2.4 template and wording", d1.template_version === `blb-client-brief-template.docx@${templateHash}`
     && /Site access is steep, with narrow or restricted areas\./.test(flatT1) && /What we propose to build/.test(t1)
     && /WHEREBATHROOMSANDLAUNDRYSTATUS/.test(t1.replace(/\s+/g, "")) && /Requirement: a need you've told us about\./.test(flatT1), `${d1.template_version} vs @${templateHash}`);
   check("R01 prints the drawing set it was issued against", t1.includes(k.register.meta.planRev) && !t1.includes(KESTREL_SUPPLIED_PLANS));
@@ -90,6 +90,9 @@ async function main() {
   check("issued as R02", r2.ok && d2.revision_label === "R02" && r2.body.supersededId === d1.id, JSON.stringify(r2.body).slice(0, 300));
   const f2 = await fetchIssued(id, d2.id);
   const t2 = pdfText(f2, "CPB-issued-R02.pdf");
+  // Final inspection R02-01: a later revision says which issued revision it replaces, with R01's own printed date.
+  const r01Date = (t1.replace(/\s+/g, " ").match(/Issued (\d{1,2} [A-Z][a-z]+ \d{4})/) || [])[1];
+  check("R02 says it replaces R01, with the date R01 printed", !!r01Date && t2.replace(/\s+/g, " ").includes(`This revision replaces R01, issued ${r01Date}.`) && !/This revision replaces/.test(t1), r01Date);
   check("R02 prints the new drawing set and the changed selection, not the old set", t2.includes(KESTREL_SUPPLIED_PLANS) && !t2.includes(k.register.meta.planRev) && /Undermount basin/.test(t2));
   const { data: rows } = await svc.from("lead_documents").select("id, revision_label, status, content_sha256, storage_path, filename, recipient_name, audience, template_version, issued_at").eq("lead_id", id).eq("document_type", "client_brief").order("version");
   check("R01 is superseded, R02 current, in the registry", rows.length === 2 && rows[0].status === "superseded" && rows[1].status === "current");

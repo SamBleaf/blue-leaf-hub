@@ -16,6 +16,7 @@ import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import {
+  HeightRule,
   Paragraph, TextRun, ImageRun, Table, TableRow, TableCell, Header, Footer, WidthType, BorderStyle, ShadingType,
   AlignmentType, VerticalAlign, TabStopType, PageNumber, LevelFormat, TableLayoutType, HeadingLevel, LineRuleType,
 } from "docx";
@@ -109,15 +110,26 @@ export function pageFooter() {
  * cond: an optional condition key wrapping the row. keep: glue it to the next row.
  */
 export function tailNoteRow(field, { cond = null, keep = false } = {}) {
+  // {-w:tr …} removes the whole row when the condition is false, so an absent note leaves no padded empty row
+  // (final inspection CONSISTENCY-09).
   return new TableRow({ cantSplit: true, children: [cell(
-    para([run(cond ? `{#${cond}}` : "", { size: 2 }), run(`{${field}}`, { size: S.small, color: C.grey }), run(cond ? `{/${cond}}` : "", { size: 2 })], { after: 0, line: 252, keepNext: keep }),
+    para([run(cond ? `{-w:tr ${cond}}` : "", { size: 2 }), run(`{${field}}`, { size: S.small, color: C.grey }), run(cond ? `{/${cond}}` : "", { size: 2 })], { after: 0, line: 252, keepNext: keep }),
     CW, { span: 2, pt: 140, pb: 60, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
 }
 export function tailCalloutRow(labelTag, bodyTag, span) {
+  // The gap above the box is its own borderless row (tailSpacerRow), not a white top border: a heavy white border
+  // painted over the closing rule of the table's last row whenever a conditional row between them was removed
+  // (final-inspection verification REG-01).
   return new TableRow({ cantSplit: true, children: [cell([
     para(run(`{${labelTag}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 40, keepNext: true }),
     para(run(`{${bodyTag}}`, { size: S.small + 1 }), { after: 0, line: 252 }),
-  ], CW, { span, fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: rule(C.white, 40), bottom: none(), right: none() } })] });
+  ], CW, { span, fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: none(), bottom: none(), right: none() } })] });
+}
+/** A fixed-height empty row with no borders: the space above a closing callout. Always present, so the rule above it stays. */
+export function tailSpacerRow(span, height = 100) {
+  return new TableRow({ cantSplit: true, height: { value: height, rule: HeightRule.EXACT }, children: [cell(
+    para(run("", { size: 2 }), { after: 0, line: 120, keepNext: true }),
+    CW, { span, pt: 0, pb: 0, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
 }
 
 export const sectionProps = () => ({ page: { size: { width: PAGE.w, height: PAGE.h }, margin: PAGE.margin } });
@@ -263,7 +275,9 @@ export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_
     para([run(`{-w:tr ${lastKey}}`, { size: 2 }), run(`{${tail}}`, { size: S.small, color: C.grey }), run(`{/${lastKey}}`, { size: 2 })], { after: 0, line: 252 }),
     CW, { span: cols.length, pt: 120, pb: 40, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] }));
   const table = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
-  return when(groupKey, [table, tableGap(200)]);
+  // The gap separates one group's table from the next; after the last group (the one carrying the tail) the section's
+  // own spacing follows, as after any other table (final inspection KESTREL-07).
+  return when(groupKey, tail ? [table, tag(`^${lastKey}`), tableGap(200), tag(`/${lastKey}`)] : [table, tableGap(200)]);
 }
 
 /**

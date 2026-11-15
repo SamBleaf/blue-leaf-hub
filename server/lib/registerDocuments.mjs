@@ -54,7 +54,11 @@ export const COORD_DISCIPLINES = { architect: "Architect", routleys: "Routleys (
 const STAGE_LABEL = { enquiry: "Enquiry", qualify: "Qualify", discovery: "Discovery", winning_offer: "Concept presentation", fee_proposal: "PTSA / plans", consultants: "Design coordination", tender: "Tender", won: "Contract" };
 const SCHEDULE_GROUPS = new Set(["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"]);
 const ENVELOPE_CATS = new Set(["roof", "cladding", "windows", "insulation", "structure", "existing", "demolition", "site", "external", "stairs"]);
-const isoDate = (d = new Date()) => new Date(d).toISOString().slice(0, 10);
+// The calendar date in Adelaide, where documents are issued: a UTC date printed the day before for anything issued
+// before 10:30 am (found in the final inspection). YYYY-MM-DD.
+const ADELAIDE_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Adelaide", year: "numeric", month: "2-digit", day: "2-digit" });
+const isoDate = (d = new Date()) => ADELAIDE_DAY.format(new Date(d));
+export const adelaideDay = isoDate;
 const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 const sentence = (s) => { const t = clean(s); return t && !/[.!?]$/.test(t) ? `${t}.` : t; };
 
@@ -121,12 +125,14 @@ export function selectionRows(register, { coord } = {}) {
  */
 export const legacyProjectRef = (leadId) => `BL${String(leadId).replace(/-/g, "").slice(0, 6).toUpperCase()}`;
 
-function baseFixture({ lead, context, register, revision, status, issuedDate, issuer, recipientName, projectRef }) {
+function baseFixture({ lead, context, register, revision, status, issuedDate, issuer, recipientName, projectRef, supersedes }) {
   const typeLabel = PROJECT_TYPE_LABELS[context.projectType] || "Residential project";
   const architect = (context.consultants || []).find((c) => ["architect", "designer", "interior_designer"].includes(c.role));
   const street = clean(String(context.identity.siteAddress || "").split(",")[0]);
   return {
-    meta: { ref: projectRef || legacyProjectRef(lead.id), revision, status, issuedDate: status === "Issued" ? issuedDate : undefined, preparedDate: issuedDate, recipient: clean(recipientName) || undefined },
+    meta: { ref: projectRef || legacyProjectRef(lead.id), revision, status, issuedDate: status === "Issued" ? issuedDate : undefined, preparedDate: issuedDate, recipient: clean(recipientName) || undefined,
+      // The issued revision this one replaces (final inspection R02-01): { label: "R01", issuedDate: "2026-10-28" }.
+      supersedes: status === "Issued" && supersedes?.label ? { label: supersedes.label, issuedDate: supersedes.issuedDate || undefined } : undefined },
     project: {
       clientName: context.identity.clientName,
       siteShort: [street, context.identity.suburb].filter(Boolean).filter((v, i, a) => i === 0 || !new RegExp(`,?\\s${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i").test(a[0])).join(", "),
@@ -278,6 +284,8 @@ const ROOM_WORDS = new Set(["kitchen", "scullery", "butler's", "pantry", "bathro
 // A room named only by an adjective reads as a room mid-sentence: "Living" → "living room".
 const BARE_ROOM = new Set(["living", "dining", "family", "rumpus", "sitting", "games", "media"]);
 const roomOf = (register, i) => (register.meta.rooms || []).find((r) => r.id === i.roomId);
+/** A place name for the start of a table cell: a room named only by an adjective reads as a room, "Family" → "Family room", as the scope list says it (final inspection RIDGELINE-03). */
+const placeName = (name) => (BARE_ROOM.has(clean(name).toLowerCase()) ? `${clean(name)} room` : name);
 /** The room name mid-sentence, and whether it is a common noun (so "the" may go before it). */
 function roomWords(name) {
   const n = clean(name), first = n.split(/\s+/)[0] || "";
@@ -394,7 +402,11 @@ export function cpbPathway(context) {
   const p = context.engagementPathway || "design_build";
   return p === "design_build" && context.deliveryModel === "build_only" ? "build_only" : p;
 }
-const PATHWAY_STAGE_LABEL = { build_only: "Scope and pricing", plans_supplied: "Plans and pricing", architect_tender: "Tender" };
+// The kicker names where the project is, never something the brief doesn't contain: no brief has a price, so no label
+// says "pricing" (checkpoint 4 review, finding 1).
+const PATHWAY_STAGE_LABEL = { build_only: "Scope review", plans_supplied: "Plans review", architect_tender: "Tender" };
+/** The cover's way of working, where the pathway isn't the delivery model itself. */
+const PATHWAY_PROJECT_LABEL = { plans_supplied: "Plans supplied", architect_tender: "Architect-led design" };
 
 /**
  * The client's next steps, by the brief's pathway and where the lead is (Tab 22 D4; stageGates pathway rules).
@@ -427,7 +439,7 @@ function cpbNextSteps(lead, context, technicalChecks = "named") {
       // the supplied plans are complete or ready to build from (CPB3-07: the review's own wording).
       paras: ["You've supplied plans for this project. We'll confirm the consultant information and any remaining details required before pricing."],
       steps: mark([
-        { label: "Consultant documents", text: general ? "Any consultant documents and approvals the work needs are confirmed against your plans." : "Engineering, energy and other consultant documents are confirmed against your plans." },
+        { label: "Plans review", text: general ? "Any consultant documents and approvals the work needs are confirmed against your plans." : "Engineering, energy and other consultant documents are confirmed against your plans." },
         { label: "Pricing", text: "The confirmed scope and selections are priced." },
         { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
       ], lead.stage === "tender" ? 1 : 0),
@@ -450,12 +462,13 @@ function cpbNextSteps(lead, context, technicalChecks = "named") {
     return {
       paras: ["The next step is to agree how the design and pricing will be developed. This brief sets the direction; the stages below turn it into coordinated drawings, confirmed selections and a defined scope for pricing."],
       steps: mark([
-        { label: "Concept", text: "We record the agreed direction in this brief." },
+        { label: "Concept", text: "We record the direction discussed so far in this brief." },
         { label: "Pre-construction agreement", text: "A separate agreement sets out the design and pricing services, responsibilities and fees." },
         { label: "Design, selections and pricing", text: "Consultants coordinate the design, your selections are confirmed and the scope is priced." },
         { label: "Building contract", text: "The contract confirms the scope, price and programme before construction starts." },
       ], lead.stage === "fee_proposal" ? 1 : 0),
-      ptsa: { text: "The pre-construction agreement (PTSA) is separate from this brief and from any building contract. It sets out the design and pricing services, responsibilities and fees before that work begins." },
+      // One concise clarification the table row doesn't already say, and no office acronym (final inspection KESTREL-01).
+      ptsa: { text: "The pre-construction agreement is separate from this brief and from any building contract." },
     };
   }
   return {
@@ -525,12 +538,12 @@ function clientBriefFixture(input) {
   for (const i of items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product))) {
     const g = cpbGroup(register, i);
     if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push({ where: area(i), text: clean(i.description || i.product) || said(i), status: selectionStatus(i), ref: refCode(i) });
+    groups.get(g).push({ where: placeName(area(i)), text: clean(i.description || i.product) || said(i), status: selectionStatus(i), ref: refCode(i) });
   }
   // An office-only technical note (R-015 tolerances) is never shown as the client's requirement (review CPB4-L01); a
   // check it needs prints under "Still to be checked".
   const goals = items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005" && answerConfigFor(resolvePromptId(i.promptKey))?.tier !== "office_only")
-    .map((i) => ({ where: area(i), text: `${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
+    .map((i) => ({ where: placeName(area(i)), text: `${plainShort(i)}: ${said(i)}`, status: reviewOnly(i) ? "For consultant review" : "Requirement", ref: refCode(i) }));
   const preferences = [...CPB_GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g) })), ...(goals.length ? [{ group: "Requirements and goals", items: goals.slice(0, 8) }] : [])];
 
   // 6 · Noted facts stay facts.
@@ -538,15 +551,27 @@ function clientBriefFixture(input) {
     .map((i) => (!SETTLED_FACT(i) ? unconfirmedFact(i) : siteAccessSentence(i) || `${plainShort(i)}: ${readableList(i)}`));
 
   if (lead.stage !== LEAD_STAGES.WON) fx.project.stageLabel = PATHWAY_STAGE_LABEL[cpbPathway(context)] || fx.project.stageLabel;
+  // The cover names the brief's own pathway, as the kicker and next steps do: a plans-supplied brief never reads
+  // "Design & build" (final inspection CONSISTENCY-01). Project types in sentence case, as the subtitle (RIDGELINE-08).
+  const typeWords = `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}`;
+  // Single spaces round the dot, as the STATUS cell beside it (verification CLOSE-01).
+  fx.project.projectLabel = [typeWords, PATHWAY_PROJECT_LABEL[cpbPathway(context)] || DELIVERY_MODELS[context.deliveryModel]].filter(Boolean).join(" · ");
+  // The boundaries heading names only the lists that print (final inspection RIDGELINE-11).
+  const has = (label) => boundaries.some((g) => g.label === label && g.items.length);
+  const titleParts = [has("Existing to remain or protect") && "what stays",
+    ["Not in the current scope", "By others", "Items you plan to supply"].some(has) && "what's not included",
+    ["Still to be decided", "Still to be checked"].some(has) && "what still needs checking"].filter(Boolean);
+  const boundaryTitle = titleParts.length ? `${andList(titleParts).charAt(0).toUpperCase()}${andList(titleParts).slice(1)}` : "";
   fx.clientBrief = {
     pathway: cpbPathway(context),
-    subtitle: `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
+    subtitle: `${typeWords}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
     overview: [description, occupancy].filter(Boolean),
     priorities, priorityNote,
     direction: vision && vision !== description ? vision : "",
     scopeIn,
     technicalChecks,
     boundaries,
+    boundaryTitle,
     preferences,
     noted: facts.length ? [{ label: "What we have noted about the site and household", items: facts }] : [],
     decisions: decisions.map(({ i, action }) => ({ ref: refCode(i), action: sentence(action), owner: i.responsibility ? responsibilityLabel(i.responsibility) : "" })),
@@ -777,14 +802,19 @@ async function loadInputs(sb, leadId, actor) {
   return { lead, loaded, register: loaded.register, context };
 }
 
-async function nextVersion(sb, leadId, docType) {
-  const { data, error } = await sb.from("lead_documents").select("version").eq("lead_id", leadId).eq("document_type", docType)
+/** The next revision number, and the issued revision it will replace (printed on the new one: final inspection R02-01). */
+async function issueHistory(sb, leadId, docType) {
+  // The date the earlier revision PRINTED is in its stored snapshot; issued_at is a moment later, and revisions issued
+  // before the Adelaide-day fix printed the UTC day (verification CODE-01). issued_at only when there is no snapshot.
+  const { data, error } = await sb.from("lead_documents").select("version, revision_label, issued_at, printed_date:source_snapshot->fixture->meta->>issuedDate").eq("lead_id", leadId).eq("document_type", docType)
     .not("issued_at", "is", null).order("version", { ascending: false }).limit(1);
   if (error) {
     if (error.code === "42703") throw new DocumentError(503, "Apply migration 213 first (document issue registry).", "SCHEMA");
     throw new DocumentError(400, "Could not read the issue history.", "HISTORY");
   }
-  return (data?.[0]?.version || 0) + 1;
+  const last = data?.[0];
+  const supersedes = last ? { label: last.revision_label || issueRevisionLabel(last.version), issuedDate: /^\d{4}-\d{2}-\d{2}$/.test(last.printed_date || "") ? last.printed_date : last.issued_at ? isoDate(last.issued_at) : undefined } : null;
+  return { revision: (last?.version || 0) + 1, supersedes };
 }
 
 // A stable fingerprint of the register content a document is rendered from: item id → version (updatedAt as
@@ -808,9 +838,9 @@ function versionsDiffer(expected, current) {
 export async function previewDocument(sb, leadId, docType, { layout, recipientName, actor } = {}) {
   if (!DOC_TYPE_KEYS.has(docType)) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
-  let revision = 1;
-  try { revision = await nextVersion(sb, leadId, docType); } catch { /* preview works pre-213 */ }
-  const input = { lead, context, register, revision, issuedDate: isoDate(), issuer: actor?.name, recipientName };
+  let revision = 1, supersedes = null;
+  try { ({ revision, supersedes } = await issueHistory(sb, leadId, docType)); } catch { /* preview works pre-213 */ }
+  const input = { lead, context, register, revision, supersedes, issuedDate: isoDate(), issuer: actor?.name, recipientName };
   const fx = buildRegisterFixture(docType, { ...input, status: "Draft" });
   // Show exactly what WOULD block an issue (checked on the issued form of the same document).
   const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }), { register, recipientName, mode: "issue" });
@@ -834,9 +864,9 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
     if (versionsDiffer(expectedVersions, registerItemVersions(register))) {
       throw new DocumentError(409, "The brief changed since you previewed it — nothing was issued. Re-open the preview to see the current version, then issue again.", "ISSUE_STALE");
     }
-    const revision = await nextVersion(sb, leadId, docType);
+    const { revision, supersedes } = await issueHistory(sb, leadId, docType);
     const issuedDate = isoDate();
-    const fx = buildRegisterFixture(docType, { lead, context, register, revision, status: "Issued", issuedDate, issuer: actor?.name, recipientName });
+    const fx = buildRegisterFixture(docType, { lead, context, register, revision, supersedes, status: "Issued", issuedDate, issuer: actor?.name, recipientName });
     // New issues are R01, R02 … (one convention, documentIdentity.mjs). Rows already issued keep their stored P labels.
     const revLabel = issueRevisionLabel(revision);
     const checks = registerDocChecks(docType, fx, { register, recipientName, mode: "issue" });

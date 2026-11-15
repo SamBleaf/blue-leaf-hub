@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import PizZip from "pizzip";
-import { buildRegisterFixture, renderRegisterDocument, registerDocChecks, legacyProjectRef, cpbPathway, fontVerdict, siteAccessSentence } from "../../server/lib/registerDocuments.mjs";
+import { buildRegisterFixture, renderRegisterDocument, registerDocChecks, legacyProjectRef, cpbPathway, fontVerdict, siteAccessSentence, adelaideDay } from "../../server/lib/registerDocuments.mjs";
 import { DOC_DEFS, buildClientBriefPayload, boundedRows, PLACEHOLDER_RX } from "../../server/lib/documents/documentPayloads.mjs";
 import { pdfFontNames } from "../../server/lib/docxToPdf.mjs";
 import { restrictedFindings, restrictedInText } from "../../src/lib/restrictedProducts.js";
@@ -62,7 +62,8 @@ ok("the garage the whole-house line already names isn't printed again; that line
     && new Set(all.flatMap((x) => x.refs)).size === all.flatMap((x) => x.refs).length && scopeRecords.length === all.flatMap((x) => x.refs).length
     && sameSet([...listed.map((w) => w.replace(/ room$/, "")), "garage"], rp.register.meta.rooms.map((r) => r.name.toLowerCase().replace(/ room$/, ""))), `${flat(listed)} | ${all.flatMap((x) => x.refs).length} refs`);
 }
-ok("the drawings are named once, in the scope introduction", (buildClientBriefPayload(rfxScope).SCOPE_INTRO.match(/Concept plans Rev B/g) || []).length === 1);
+ok("the drawings are named on page 1, and the scope introduction points to them rather than repeating them room by room", /based on the drawing basis above\./.test(buildClientBriefPayload(rfxScope).SCOPE_INTRO)
+  && buildClientBriefPayload(rfxScope).META_ROWS.some((r) => /Concept plans Rev B/.test(r.VB)) && !rScope.some((t) => /Concept plans Rev B/.test(t)));
 ok("a room record that says anything more keeps its own line (Kestrel unchanged)", cb.scopeIn.length === 9 && cb.scopeIn.every((x) => x.refs.length === 1 && x.refs[0] === x.ref) && cb.scopeIn.some((x) => x.text === "Main bedroom: New main bedroom in the upper-level extension, overlooking the garden"));
 {
   const mk = (rooms, descs, disposition = "new") => { const R = rooms.map(([name, roomType], k) => makeRoom({ id: `t_${k}`, name, roomType, order: k }));
@@ -179,11 +180,21 @@ ok("the client's decisions come first", cb.decisions[0].owner === "Client");
 
 section("Next steps follow the engagement pathway");
 const steps = (f) => f.clientBrief.nextSteps;
-ok("design and build before the PTSA: the separate agreement is explained once, Concept is where we are", !!steps(fx).ptsa && steps(fx).steps[0].label === "Concept" && steps(fx).steps[0].current && /pre-construction agreement \(PTSA\) is separate/.test(steps(fx).ptsa.text) && !steps(fx).ptsa.title);
+ok("design and build before the PTSA: the separate agreement is explained once, Concept is where we are", !!steps(fx).ptsa && steps(fx).steps[0].label === "Concept" && steps(fx).steps[0].current && steps(fx).ptsa.text === "The pre-construction agreement is separate from this brief and from any building contract." && !/PTSA/.test(steps(fx).ptsa.text) && !steps(fx).ptsa.title);
 const { fx: buildOnly } = build("powder", { recipientName: "Priya Raman" });
 ok("build only: no concept, no agreement, no PTSA; confirm the scope, price, contract, build (CPB-01)", cpbPathway({ engagementPathway: "design_build", deliveryModel: "build_only" }) === "build_only"
   && !steps(buildOnly).ptsa && !/Concept|agreement|PTSA/i.test(flat([steps(buildOnly).paras, steps(buildOnly).steps])) && steps(buildOnly).steps.map((x) => x.label).join("|") === "Confirm the scope|Pricing|Building contract|Construction"
-  && buildOnly.project.stageLabel === "Scope and pricing" && !/design develops/.test(buildClientBriefPayload(buildOnly).SCOPE_INTRO));
+  && buildOnly.project.stageLabel === "Scope review" && !/design develops/.test(buildClientBriefPayload(buildOnly).SCOPE_INTRO));
+{
+  // Checkpoint 4 review, finding 1: the kicker never promises a price. Every pathway at every stage before won.
+  const STAGES = ["enquiry", "qualify", "discovery", "winning_offer", "fee_proposal", "consultants", "tender"];
+  const PATHS = [{ engagementPathway: "design_build" }, { engagementPathway: "design_build", deliveryModel: "build_only" }, { engagementPathway: "plans_supplied" }, { engagementPathway: "architect_tender" }];
+  const labels = STAGES.flatMap((st) => PATHS.map((c) => build("powder", { recipientName: "Priya Raman" }, (p) => { p.lead.stage = st; Object.assign(p.context, c); }).fx.project.stageLabel));
+  ok("no brief's stage label mentions a price, a quote or a cost, on any pathway at any stage (review 4, finding 1)", labels.length === 28 && labels.every((l) => l && !/pric|quot|cost|estimat/i.test(l)), labels.join(" | "));
+  const plans = build("powder", { recipientName: "Priya Raman" }, (p) => { p.context.engagementPathway = "plans_supplied"; }).fx;
+  ok("…build only reads 'Scope review', plans supplied 'Plans review', and the kicker prints it", buildOnly.project.stageLabel === "Scope review" && plans.project.stageLabel === "Plans review"
+    && buildClientBriefPayload(buildOnly).DOC_KICKER === "Preliminary  /  Scope review", buildClientBriefPayload(buildOnly).DOC_KICKER);
+}
 ok("build only: no claim that design work isn't needed; drawings and approvals are confirmed before the price (CPB2-03)", !/doesn't need|no separate design|not need/i.test(flat(steps(buildOnly)))
   && steps(buildOnly).paras[0] === "This project is proceeding on a build-only pathway. We'll confirm the work, measurements and any drawings or approvals needed before finalising the price."
   && /drawings or approvals needed/.test(steps(buildOnly).steps[0].text));
@@ -216,7 +227,7 @@ ok("issued to the named recipient", r2.META_ROWS.some((r) => r.LB === "Issued to
 ok("the drawing basis is printed as recorded, not in Blue Leaf's revision format", r2.META_ROWS.some((r) => r.VB === "Concept Set C-02, 28 October 2026"));
 {
   const r02 = buildClientBriefPayload(plans), r01 = buildClientBriefPayload(fx);
-  ok("the plans-supplied R02 prints the supplied set it was issued against; R01 keeps the concept set (CPB2-04)", r02.META_ROWS.some((r) => r.VB === KESTREL_SUPPLIED_PLANS) && r02.SCOPE_INTRO.includes(KESTREL_SUPPLIED_PLANS)
+  ok("the plans-supplied R02 prints the supplied set it was issued against; R01 keeps the concept set (CPB2-04)", r02.META_ROWS.some((r) => r.VB === KESTREL_SUPPLIED_PLANS) && /based on the drawing basis above\./.test(r02.SCOPE_INTRO)
     && assumesOf(plans).some((t) => t.includes(KESTREL_SUPPLIED_PLANS)) && !/C-02/.test(flat(r02)) && r01.META_ROWS.some((r) => r.VB === "Concept Set C-02, 28 October 2026") && !flat(r01).includes(KESTREL_SUPPLIED_PLANS));
   const words = flat([r02.SCOPE_INTRO, r02.NOTED, allDecisions(r02).map((d) => d.ACTION), r02.NEXT_PARAS, [...r02.STEPS_KEEP, ...r02.STEPS, ...r02.STEPS_PEN, ...r02.STEPS_LAST]]);
   ok("…and the R02 reads as one plans-supplied brief: no concept drawings, no design still developing (review CPB3-H01)", !/concept drawings|design develops|still to be developed|design development|no separate/i.test(words)
@@ -266,7 +277,7 @@ const zoned = build("kestrel", {}, (p) => { Object.assign(access(p).answer, { el
 ok("a fact with an element, a zone or an unlisted option keeps every recorded word, and capitals (fallback)", zoned.includes("Site access: Driveway — Steep access, narrow or restricted access and NBN pit in the driveway — Front boundary."), flat(zoned));
 const onSite = build("kestrel", {}, (p) => { const w = p.register.items.find((i) => i.promptKey === "W-007"); w.answer.selected = ["Work zones", "Temporary kitchen", "Dust and noise separation"].map((l, k) => ({ optionId: `c${k}`, path: ["yes", `c${k}`], label: `Yes · ${l}` })); }).fx.clientBrief.noted.flatMap((g) => g.items);
 ok("a branch answer is said once: 'Yes — work zones, temporary kitchen and …'", onSite.includes("Living on site during works: Yes — work zones, temporary kitchen and dust and noise separation."), flat(onSite));
-ok("a won project keeps its own stage label and has no steps", won.project.stageLabel && !/Concept|Plans and pricing|Scope and pricing|Tender$/.test(won.project.stageLabel) && won.clientBrief.nextSteps.steps.length === 0, `${won.project.stageLabel} | ${flat(won.clientBrief.nextSteps)}`);
+ok("a won project keeps its own stage label and has no steps", won.project.stageLabel && !/Concept|Plans review|Scope review|Tender$/.test(won.project.stageLabel) && won.clientBrief.nextSteps.steps.length === 0, `${won.project.stageLabel} | ${flat(won.clientBrief.nextSteps)}`);
 ok("priorities: one is a single line, two are two columns, three are cards (CPB-10)", buildClientBriefPayload(buildOnly).PRI_INLINE === true && !buildClientBriefPayload(buildOnly).PRI_BAND_3
   && buildClientBriefPayload({ ...fx, clientBrief: { ...cb, priorities: cb.priorities.slice(0, 2) } }).PRI_BAND_2 === true && pay.PRI_BAND_3 === true);
 
@@ -380,7 +391,7 @@ const rows = (n) => Array.from({ length: n }, (_, i) => ({ i }));
 const shape = (n) => { const r = boundedRows("D", rows(n)); return [r.D_KEEP.length, r.D.length, r.D_PEN.length, r.D_LAST.length].join(","); };
 ok("up to three rows stay whole; four or more keep two at the top and two at the bottom", shape(1) === "0,0,0,1" && shape(3) === "2,0,0,1" && shape(4) === "1,1,1,1" && shape(7) === "1,4,1,1");
 
-section("Template structure (cpb-2.3)");
+section("Template structure (cpb-2.4)");
 const zip = new PizZip(fs.readFileSync(join(REPO, "public/templates", DOC_DEFS.client_brief.templateFile)));
 const docXml = zip.file("word/document.xml").asText(), hdr = zip.file("word/header1.xml")?.asText() || "", ftr = zip.file("word/footer1.xml")?.asText() || "";
 const media = Object.keys(zip.files).filter((n) => n.startsWith("word/media/"));
@@ -407,7 +418,7 @@ ok("the scope list's title is its header row, so it repeats on the next page (CP
 {
   // CPB3-06: the key explains every status printed, and only those; a Requirement is a need, not a confirmed outcome.
   const printedStatuses = (f) => [...new Set(f.clientBrief.preferences.flatMap((g) => g.items.map((x) => x.status)))];
-  const keyOf = (f) => buildClientBriefPayload(f).PREF_KEY;
+  const keyOf = (f) => buildClientBriefPayload(f).PREF_KEY.replace(/\u00A0/g, " ");
   const covers = (f) => printedStatuses(f).every((st) => keyOf(f).includes(`${st}: `)) && ["Preferred", "Proposed", "Client-approved", "Requirement", "For consultant review"].filter((st) => !printedStatuses(f).includes(st)).every((st) => !keyOf(f).includes(`${st}: `));
   ok("the status key explains every status printed, and only those (CPB3-06)", covers(fx) && covers(rfxScope) && covers(buildOnly) && keyOf(buildOnly) === "Preferred: the look you like.", keyOf(buildOnly));
   ok("…'Requirement' is explained as a need to be assessed, not a confirmed or promised outcome (review CPB4-W04)", /Requirement: a need you've told us about\. We'll assess whether and how it can be met; it isn't a confirmed outcome\./.test(keyOf(fx)));
@@ -416,9 +427,45 @@ ok("the scope list's title is its header row, so it repeats on the next page (CP
   ok("…an office-only tolerance note is never shown as a client Requirement; it stays under 'Still to be checked'", !flat(tol.clientBrief.preferences).includes("Floor level within 3 mm")
     && tol.clientBrief.boundaries.find((b) => b.label === "Still to be checked").items.some((x) => /Floor level within 3 mm/.test(x.text)), flat(tol.clientBrief.preferences.at(-1)));
 }
+ok("a multi-word status name can't break across a line: non-breaking spaces inside it (verification CLOSE-02)", buildClientBriefPayload(fx).PREF_KEY.includes("For\u00A0consultant\u00A0review: ")
+  && !/For consultant review/.test(buildClientBriefPayload(fx).PREF_KEY));
+ok("the closing box sits under a fixed spacer row, not a white border that would paint over the steps table's last rule (verification REG-01)",
+  /\{\/HAS_PTSA\}[\s\S]{0,2500}?<w:trHeight w:val="100" w:hRule="exact"\/>[\s\S]{0,2500}?\{ABOUT_LABEL\}/.test(docXml) && !/<w:top w:val="single" w:color="FFFFFF" w:sz="40"\/>/.test(docXml));
 ok("headings are Word styles (PDF outline, editable DOCX)", /w:styleId="Heading1"/.test(zip.file("word/styles.xml").asText()) && (docXml.match(/<w:pStyle w:val="Heading1"\/>/g) || []).length >= 6);
 ok("no forced page breaks", !/w:type="page"|pageBreakBefore/.test(docXml));
 ok("Lato only in the template", !/w:ascii="(?!Lato)[^"]+"/.test(docXml + hdr + ftr));
+
+section("Final inspection of the five specimens (review 4)");
+{
+  const pay = buildClientBriefPayload(fx), bo = buildClientBriefPayload(buildOnly);
+  const { fx: rf } = build("ridgeline", { recipientName: "X" }), rpay = buildClientBriefPayload(rf);
+  const plans = build("kestrel", { revision: 2, supersedes: { label: "R01", issuedDate: "2026-11-15" }, issuedDate: "2026-11-16" }, plansSuppliedRevision).fx;
+  ok("the PTSA note adds one fact and no acronym; the table row isn't repeated (KESTREL-01)", !pay.PTSA_NOTE.includes("PTSA") && !pay.PTSA_NOTE.includes("design and pricing services")
+    && [...pay.STEPS_KEEP, ...pay.STEPS, ...pay.STEPS_PEN, ...pay.STEPS_LAST].some((r) => /design and pricing services/.test(r.STEXT)), pay.PTSA_NOTE);
+  ok("the closing note says 'We prepared this brief', never the issuer's name mid-sentence (KESTREL-03)", /^We prepared this brief from our discussions and the information recorded for your project\./.test(pay.ABOUT_BODY)
+    && !buildClientBriefPayload(build("kestrel", { issuer: "Sam Morris, Blue Leaf Building" }).fx).ABOUT_BODY.includes("Sam Morris"), pay.ABOUT_BODY);
+  ok("one decision reads 'This needs …', several 'These need …', and nobody is 'someone' (POWDER-03)", buildOnly.clientBrief.decisions.length === 1 && /^This needs to be settled/.test(bo.DECISIONS_INTRO)
+    && /^These need to be settled/.test(pay.DECISIONS_INTRO) && !/someone/.test(bo.DECISIONS_INTRO + pay.DECISIONS_INTRO), bo.DECISIONS_INTRO);
+  const boAssume = bo.NOTED.at(-1).N_ITEMS.map((x) => x.TEXT).join(" ");
+  ok("the drawing basis is quoted, never set into a sentence's grammar (POWDER-01, CONSISTENCY-07)", /^This is the building work we currently propose, based on the drawing basis above\./.test(bo.SCOPE_INTRO)
+    && /This brief is based on the drawing basis recorded on page 1 \(Measured sketch, 6 November 2026\)\./.test(boAssume) && !/based on Measured|The drawings \(/.test(bo.SCOPE_INTRO + boAssume), `${bo.SCOPE_INTRO} | ${boAssume}`);
+  const label = (f) => buildClientBriefPayload(f).META_ROWS.flatMap((r) => Object.values(r)).join(" | ");
+  ok("the cover names the brief's own pathway and the type in sentence case (CONSISTENCY-01, RIDGELINE-08)", plans.project.projectLabel === "Renovation · Plans supplied" && buildOnly.project.projectLabel === "Renovation · Build only"
+    && rf.project.projectLabel === "New build · Design & build" && !/Design & build/.test(label(plans)), `${plans.project.projectLabel} | ${rf.project.projectLabel}`);
+  const wheres = rf.clientBrief.preferences.flatMap((g) => g.items.map((x) => x.where));
+  ok("a room named only by an adjective reads as a room in the table, as in the scope list (RIDGELINE-03)", wheres.includes("Family room") && !wheres.includes("Family"), [...new Set(wheres)].join());
+  ok("the boundaries heading names only the lists that print (RIDGELINE-11)", cb.boundaryTitle === "What stays, what's not included and what still needs checking"
+    && !/stays/i.test(rf.clientBrief.boundaryTitle) && rpay.BOUNDARY_TITLE === rf.clientBrief.boundaryTitle && /\{BOUNDARY_TITLE\}/.test(docXml) && !/What stays, what's not included, and/.test(docXml), rf.clientBrief.boundaryTitle);
+  const plansPay = buildClientBriefPayload(plans);
+  ok("a later revision says which issued revision it replaces, on page 1; R01 and a draft don't (R02-01)", /^This revision replaces R01, issued 15 November 2026\. This brief records/.test(plansPay.STATUS_BODY)
+    && !/replaces/.test(pay.STATUS_BODY) && !/replaces/.test(buildClientBriefPayload(build("kestrel", { status: "Draft", revision: 2, supersedes: { label: "R01", issuedDate: "2026-11-15" } }).fx).STATUS_BODY), plansPay.STATUS_BODY);
+  const pSteps = plans.clientBrief.nextSteps.steps;
+  ok("plans supplied: where we are now is 'Plans review', as the label says (CONSISTENCY-04); design and build records the direction discussed, not 'agreed' (KESTREL-05)",
+    pSteps[0].label === "Plans review" && pSteps[0].current && plans.project.stageLabel === "Plans review" && steps(fx).steps[0].text === "We record the direction discussed so far in this brief.", flat(pSteps[0]));
+  ok("an issue is dated by the Adelaide calendar, not UTC (9 am in Adelaide on 16 Nov is 16 Nov)", adelaideDay(new Date("2026-11-15T22:30:00Z")) === "2026-11-16" && adelaideDay(new Date("2026-11-15T12:00:00Z")) === "2026-11-15");
+  ok("an absent PTSA note removes its whole row, and the last preference group adds no extra gap (CONSISTENCY-09, KESTREL-07)",
+    /\{-w:tr HAS_PTSA\}[\s\S]{0,1500}?\{PTSA_NOTE\}[\s\S]{0,1500}?\{\/HAS_PTSA\}/.test(docXml) && !/\{#HAS_PTSA\}/.test(docXml) && /\{\^G_LAST\}[\s\S]{0,2000}?\{\/G_LAST\}[\s\S]{0,1500}?\{\/PREF_GROUPS\}/.test(docXml));
+}
 
 section("Rendered through LibreOffice");
 const tmp = fs.mkdtempSync(join(tmpdir(), "cpb-test-"));
@@ -441,6 +488,18 @@ else {
   ok("the decisions table never leaves a single row on a page", decPages.every((n) => decisionRefs(kPdf, n) >= 2), `rows per page ${decPages.map((n) => decisionRefs(kPdf, n))}`);
   const lastLines = (pdf) => { const n = pdfPages(pdf); return text(pdf, n).split("\n").filter((l) => l.trim()).length; };
   ok("no near-empty last page (at least 25 lines on it)", lastLines(kPdf) >= 25, `last page ${lastLines(kPdf)} lines`);
+  {
+    // Final inspection KESTREL-07: the gap above "04 / ASSUMPTIONS" (after the preference tables and their key) is no
+    // larger than the gap above "06 / NEXT STEPS" (after the decisions table). Measured from the PDF's word boxes.
+    const gapAbove = (pdf, word) => { let html = ""; try { html = execFileSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" }); } catch { return null; }
+      for (const pg of html.split("<page ").slice(1)) {
+        const words = [...pg.matchAll(/yMin="([\d.]+)" xMax="[\d.]+" yMax="([\d.]+)">([^<]*)</g)].map((m) => ({ y0: +m[1], y1: +m[2], w: m[3] }));
+        const at = words.find((x, k) => x.w === word && words[k + 1]?.w === "/"); if (!at) continue;
+        const above = words.filter((x) => x.y1 < at.y0 - 0.5).map((x) => x.y1); return above.length ? at.y0 - Math.max(...above) : null; }
+      return null; };
+    const g4 = gapAbove(kPdf, "04"), g6 = gapAbove(kPdf, "06");
+    ok("the gap above '04 / Assumptions' is no larger than the gap after any other table (KESTREL-07)", g4 !== null && g6 !== null && g4 <= g6 + 4, `04: ${g4?.toFixed(1)} pt, 06: ${g6?.toFixed(1)} pt`);
+  }
   ok("the closing note shares its page with the end of the steps table", /ABOUTTHISDOCUMENT/.test(text(kPdf, kPages).replace(/\s+/g, "")) && /Building contract/.test(text(kPdf, kPages)));
   ok("every font is Lato, read straight from the PDF (the issue fail-safe)", kOut.fonts.length > 0 && kOut.fonts.every((f) => /^Lato-/.test(f)), kOut.fonts.join());
   ok("a substituted font is caught", pdfFontNames(Buffer.from("<< /Type /Font /BaseFont /ABCDEF+LiberationSerif >> << /BaseFont /Lato-Bold >>")).join() === "LiberationSerif,Lato-Bold");

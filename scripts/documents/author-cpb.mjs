@@ -13,11 +13,11 @@ import { Document, Packer } from "docx";
 import { fixDocxFooterFields } from "./fix-footer-page-fields.mjs";
 import {
   CW, S, C, run, para, when, gap, titleBlock, metaGrid, callout, sectionHead, h2, body, paraLoop,
-  dataTable, groupedTable, listTable, labelledList, tableGap, cardBand, tailNoteRow, tailCalloutRow, pageHeader, pageFooter, sectionProps, documentStyles, documentNumbering,
+  dataTable, groupedTable, listTable, labelledList, tableGap, cardBand, tailNoteRow, tailCalloutRow, tailSpacerRow, pageHeader, pageFooter, sectionProps, documentStyles, documentNumbering,
 } from "./design-system.mjs";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "../../public/templates/blb-client-brief-template.docx");
-export const CPB_TEMPLATE_VERSION = "cpb-2.3";   // checkpoint 4 (independent review CPB3-01..07)
+export const CPB_TEMPLATE_VERSION = "cpb-2.4";   // final candidate: cpb-2.3 design plus the final-inspection fixes
 
 // Three priorities: cards; two: two columns; one: a single line (CPB-10).
 const priorities = [
@@ -42,7 +42,8 @@ const sectionScope = when("HAS_S2", [
   body("{SCOPE_INTRO}"),
   // The title repeats at the top of the next page when the list runs on (CPB2-01).
   ...when("HAS_SCOPE_IN", [listTable("SCOPE_ROWS", "What we propose to build")]),
-  ...when("HAS_BOUNDARIES", [h2("What stays, what's not included, and what still needs checking"), ...boundaryBlocks]),
+  // The heading names only the lists that print (final inspection RIDGELINE-11): a new build has nothing that stays.
+  ...when("HAS_BOUNDARIES", [h2("{BOUNDARY_TITLE}"), ...boundaryBlocks]),
 ]);
 
 const sectionDirection = when("HAS_S3", [
@@ -85,7 +86,7 @@ const sectionNext = [
     dataTable("STEPS", [
       { head: "Stage", field: "SLABEL", width: 2900, bold: true, sub: "SNOW" },
       { head: "What happens", field: "STEXT", width: 6852 },
-    ], { bounded: true, tail: [tailNoteRow("PTSA_NOTE", { cond: "HAS_PTSA", keep: true }), tailCalloutRow("ABOUT_LABEL", "ABOUT_BODY", 2)] }),
+    ], { bounded: true, tail: [tailNoteRow("PTSA_NOTE", { cond: "HAS_PTSA", keep: true }), tailSpacerRow(2), tailCalloutRow("ABOUT_LABEL", "ABOUT_BODY", 2)] }),
   ]),
 ];
 
