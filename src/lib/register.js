@@ -467,7 +467,9 @@ export function makeRoom(partial = {}) {
     level: partial.level || "Ground",
     name: partial.name || "Room",
     roomType: ROOM_TYPES[partial.roomType] ? partial.roomType : "generic",
-    scope: ROOM_SCOPES[partial.scope] ? partial.scope : "new",
+    // A scope this screen doesn't know yet (a newer release's word, such as "altered") is kept, never turned into "new"
+    // and saved back: step 1 of the two-step "Altered" release (REGISTER_SCREENS_SPEC.md, owner decision 4, 17 Nov 2026).
+    scope: ROOM_SCOPES[partial.scope] || /^[a-z][a-z_]{0,31}$/.test(String(partial.scope || "")) ? partial.scope : "new",
     order: Number.isFinite(partial.order) ? partial.order : 0,
     sheet: partial.sheet || "",                                // drawing sheet/revision for this room
     defaultConfirmations: normaliseRoomConfirmations(partial.defaultConfirmations), // staff confirmed these defaults apply here
