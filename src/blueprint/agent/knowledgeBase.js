@@ -4,13 +4,19 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { embedQueryVector } from '../lib/voyageEmbeddings.js';
 
+/**
+ * Server-side client. The WebSocket transport is required: on Node 20 (Railway's nixpacks image) supabase-js refuses
+ * to create a client without one ("Node.js 20 detected without native WebSocket support"), and that error took down
+ * every Blueprint chat before the model was ever called (Nov 2026).
+ */
 function getSupabase() {
   const url = process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) return null;
-  return createClient(url, key);
+  return createClient(url, key, { realtime: { transport: WebSocket } });
 }
 
 function formatVectorRows(rows) {
@@ -55,9 +61,10 @@ async function vectorSimilaritySearch(supabase, query, limit) {
 
 export async function getRelevantContext(query, options = {}) {
   const { limit = 5, category = null, apbLevel = null, jobId = null } = options;
-  const supabase = getSupabase();
-  if (!supabase) return '';
   try {
+    // Inside the try: the knowledge base is an extra. If it can't be reached, Blueprint answers without it.
+    const supabase = getSupabase();
+    if (!supabase) return '';
     const parts = [];
 
     if (jobId) {

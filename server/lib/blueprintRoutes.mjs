@@ -1,5 +1,6 @@
 import { aiClient, modelsFor, createForTask, streamForTask, aiModelStatus, classifyAiError, AI_ERROR_TEXT } from "./aiModels.mjs";
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
 import { join } from 'path';
@@ -192,7 +193,8 @@ function getSupabaseForLearn() {
   const url = supabaseUrl();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
-  return createClient(url, key);
+  // A WebSocket transport, or supabase-js refuses to create the client on Node 20 (see knowledgeBase.js).
+  return createClient(url, key, { realtime: { transport: WebSocket } });
 }
 
 function detectTargetFile(content) {
