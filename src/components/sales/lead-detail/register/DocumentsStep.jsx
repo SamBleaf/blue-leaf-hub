@@ -250,6 +250,12 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                     className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision P{String(preview.revision).padStart(2, "0")}</button>
                   <button type="button" disabled={busy || proofBusy} onClick={checkWording} title="Blueprint proofreads this draft for spelling, grammar and wording. Nothing is changed."
                     className="rounded border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/5 disabled:opacity-40" data-testid={`proofread-${d.key}`}>{proofBusy ? "Checking the wording…" : proof ? "Check wording again" : "Check wording"}</button>
+                  {/* Safari shows a PDF in a frame with no toolbar, so the draft can't be saved from the frame itself. A draft
+                      download is for review only (always the clean draft, never the marked proofread copy); a copy to send
+                      comes from the issued record below. */}
+                  <a href={preview.url} download={`${d.label} - DRAFT (not issued) - ${new Date().toISOString().slice(0, 10)}.pdf`}
+                    className="rounded border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page" data-testid={`download-draft-${d.key}`}>Download draft PDF</a>
+                  <a href={preview.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary hover:underline">Open in new tab</a>
                   <button type="button" onClick={() => { setActive(null); setPreview(null); dropProof(); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
                 </div>
                 {preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim() && (
