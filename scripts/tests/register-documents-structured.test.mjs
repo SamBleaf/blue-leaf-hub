@@ -54,7 +54,7 @@ ok("two wall systems are two lines", sel.selections.filter((r) => r.item.include
 ok("gutters say which roof", sel.selections.some((r) => /Quad/.test(r.product) && /Main roof/.test(r.product)));
 // Pair 2 (SELECTIONS_SPEC.md): no system tags. A house default is said as such (house-wide, location blank in the
 // schedule); a room's own choice names its room, and what it replaces only when that default applies to the room.
-ok("a project default is a house-wide record, with no system tag", sel.selections.some((r) => r.house) && !/project default|room exception|Whole house/i.test(flat(sel.technicalSchedule)));
+ok("a project default is a house-wide record (or its zone's), with no system tag", sel.selections.some((r) => r.house || r.zone) && !/project default|room exception|Whole house/i.test(flat(sel.technicalSchedule)));
 ok("a room exception names its room", sel.selections.some((r) => r.location === "Bed 1" && r.roomId));
 ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.ref)));
 ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferences)));

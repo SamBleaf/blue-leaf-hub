@@ -52,11 +52,15 @@ section("Technical Selections Schedule (spec §3)");
   ok("no system terms: no TBC, Whole house, (project default) or (room exception)", !/\bTBC\b|Whole house|project default|room exception/i.test(flat(t)), flat(t).match(/.{40}(TBC|Whole house|project default|room exception).{40}/i)?.[0]);
   ok("a house-wide row has a blank location (said once, in the reading note)", rows.some((r) => r.item === "Paint & ceiling direction" && r.location === ""));
   ok("rooms with identical records share a row, keeping every reference", rows.some((r) => r.location === "Ensuite and bathroom" && r.item === "Vanity" && r.ref.split(", ").length === 2), flat(rows.filter((r) => r.item === "Vanity")));
-  // The shower system is identical in both rooms, so it prints once for "Ensuite and bathroom".
-  const ensuiteTaps = rows.filter((r) => r.item === "Tapware & accessories" && /^Ensuite/.test(r.location));
-  ok("one record per product: the ensuite's tapware is three products, each with its own code", ensuiteTaps.length === 3 && ensuiteTaps.every((r) => /\b\d{5}\b/.test(r.detail))
-    && ensuiteTaps.some((r) => r.location === "Ensuite and bathroom" && /Glide/.test(r.product)), flat(ensuiteTaps));
-  ok("manufacturer, supplier and code on the product's second line", rows.some((r) => r.detail === "Caroma · Routleys · 57525 · supply: blue leaf"), flat(rows.map((r) => r.detail)));
+  // A counted product never merges across rooms (QA R01): the ensuite's three products are its own rows.
+  const ensuiteTaps = rows.filter((r) => r.item === "Tapware & accessories" && r.location === "Ensuite");
+  ok("one record per product: the ensuite's tapware is three products, each with its own code and count", ensuiteTaps.length === 3 && ensuiteTaps.every((r) => /Routleys code \d{5}$/.test(r.detail) && r.quantity)
+    && ensuiteTaps.some((r) => /Glide/.test(r.product)) && !rows.some((r) => r.quantity && /\band\b/.test(r.location)), flat(ensuiteTaps));
+  ok("manufacturer, then the supplier's code labelled as theirs (Blue Leaf supply said once, not per row)", rows.some((r) => r.detail === "Caroma · Routleys code 57525") && !rows.some((r) => /supply/i.test(r.detail)), flat(rows.map((r) => r.detail)));
+  ok("supplier words print as printed, truncation kept", rows.some((r) => r.product === "Urbane II Cleanflush Back To Wall Toilet Suite Back inlet with Vogue Soft Close Seat...") && rows.some((r) => r.product === "Maci Wall Bath / Basin Mixer Set with 180mm Spout"));
+  ok("a laundry trough on Routleys' selection is a plumbing fixture (the supplier's document decides the trade)", t.groups.find((g) => g.group === "Plumbing fixtures and tiling")?.rows.some((r) => /Kubic Deep Galley/.test(r.product)));
+  ok("the bath's spout and mixers wait on the bath's room: Proposed, not Client-approved", rows.filter((r) => /Bath Spout|Bath Shower Mixer/.test(r.product) && r.location === "Bathroom").every((r) => r.selection === "Proposed"));
+  ok("Routleys' WC room and the cut-off toilet line are open actions, never dropped silently", t.actions.some((a) => /WC'S room/.test(a.text)) && t.actions.some((a) => /toilet suite's full description/.test(a.text)));
   ok("a supplier's count prints as it was recorded; nothing prints as 0", rows.some((r) => r.item === "Basin" && r.quantity === "2") && !rows.some((r) => /^0\b/.test(r.quantity)));
   ok("the source is a key, listed once in the source documents", rows.some((r) => r.source === "S1") && t.sources.length === 1 && t.sources[0].key === "S1" && /Routleys 452499/.test(t.sources[0].document) && /No revision printed/.test(t.sources[0].revision));
   ok("the requirements these selections must meet are listed, with their status", t.requirements.some((r) => /Double glazing/.test(r.text) && r.applies === "Windows and doors" && /To verify/.test(r.status)));
@@ -96,8 +100,12 @@ section("Client Selections Presentation (spec §4)");
     const f = buildRegisterFixture("client_presentation", input(q)); return flat(f.clientSelections).includes("Handmade-look tile splashback") && !flat(f.clientSelections).includes("Supplier tile 12345");
   })());
   ok("a proposal that replaces what they asked for shows both, when it's been raised with them", c.groups.some((g) => g.rows.some((r) => r.status === "Proposed" && /Acero\+/.test(r.text) && /undermount sink with a matte black mixer/i.test(r.earlier))));
+  ok("a supplier's line in capitals or as a code reaches the client as the record's own description",
+    (() => { const k = buildRegisterFixture("client_presentation", input(kestrelRelinked())); const rows = k.clientSelections.groups.flatMap((g) => g.rows);
+      return rows.some((r) => r.text === "Ensuite window, with privacy glass") && !flat(k.clientSelections).includes("CHAINWINDER") && !flat(k.clientSelections).includes("TLI-D700"); })());
   ok("a staff label is never shown as the client's earlier words", !c.groups.some((g) => g.rows.some((r) => /Ensuite window|External door/.test(r.earlier || ""))));
-  ok("what we need from you: the client's own actions, never a row per proposal", c.needs.length > 0 && c.needs.every((n) => !/^Let us know whether the proposed/.test(n.text)) && c.proposals > 0 && /marked Proposed/.test(pay.NEEDS_INTRO), flat(c.needs));
+  ok("what we need from you: the client's own actions, never a row per proposal, and no count", c.needs.length > 0 && c.needs.every((n) => !/^Let us know whether the proposed/.test(n.text)) && c.proposals === true
+    && /each selection marked Proposed/.test(pay.NEEDS_INTRO) && !/\d+ selections/.test(pay.NEEDS_INTRO), flat(c.needs));
   ok("the status note makes no process promise", /isn't a contract document, a price or a technical approval/.test(pay.STATUS_BODY) && !/before it is ordered|confirm every product|the trades/.test(pay.STATUS_BODY));
   // Portal states (critique): a choice the client made, or a change they asked for, is never asked again.
   const q = ridge();
@@ -108,8 +116,10 @@ section("Client Selections Presentation (spec §4)");
   const f2 = buildRegisterFixture("client_presentation", input(q));
   const rows2 = f2.clientSelections.groups.flatMap((g) => g.rows);
   ok("a portal choice reads Client's choice, with Blue Leaf; a requested change reads so too", rows2.some((r) => /Luxe LF/.test(r.text) && r.status === "Client's choice, with Blue Leaf") && rows2.some((r) => r.status === "Change requested, with Blue Leaf"));
-  ok("…and neither is counted as a proposal awaiting their answer", f2.clientSelections.proposals === c.proposals - 2, `${f2.clientSelections.proposals} vs ${c.proposals}`);
-  const unreleased = ridge(); unreleased.register.items.find((x) => /back-to-wall/.test(x.product || "")).sync = { mode: "project", status: "not_started", clientVisible: false };
+  ok("…and neither is asked about again", f2.clientSelections.needs.length === c.needs.length && typeof f2.clientSelections.proposals === "boolean");
+  ok("two identical records in one room stay two rows (Routleys lists 62412 twice in the bathroom)", buildRegisterFixture("selections_schedule", input(ridge())).technicalSchedule.groups.flatMap((g) => g.rows)
+    .filter((r) => r.location === "Bathroom" && /Bath Shower Mixer/.test(r.product)).length === 2);
+  const unreleased = ridge(); unreleased.register.items.find((x) => /back to wall/i.test(x.product || "")).sync = { mode: "project", status: "not_started", clientVisible: false };
   ok("an item not yet released on the portal is never asked about", !buildRegisterFixture("client_presentation", input(unreleased)).clientSelections.needs.some((n) => /back-to-wall/.test(n.text)));
   // A legacy schedule row: "item — Supplier: X — notes" (readRegister). Only its item reaches the client.
   const leg = REGISTER_PROJECTS.powder();
@@ -137,7 +147,7 @@ section("Pre-issue checks (spec §5)");
     bfx.selections.find((r) => r.product === "Granite benchtops with a 40 mm edge")?.selection === "Proposed" && checks("selections_schedule", board).errors.some((e) => /approved on the portal board with no recorded evidence/.test(e)));
   const zero = ridge(); zero.register.items.find((x) => x.id === "ri_rd_s04").quantity = 0;
   ok("a quantity of 0 prints blank and warns", buildRegisterFixture("selections_schedule", input(zero)).selections.find((r) => r.id === "ri_rd_s04").quantity === "" && checks("selections_schedule", zero).warnings.some((w) => /quantity of 0/.test(w)));
-  const leak = ridge(); leak.register.items.find((x) => /back-to-wall/.test(x.product || "")).nextAction = "Confirm Routleys code 57525 for the ensuite toilet";
+  const leak = ridge(); leak.register.items.find((x) => /back to wall/i.test(x.product || "")).nextAction = "Confirm Routleys code 57525 for the ensuite toilet";
   ok("the presentation refuses to print a product code in staff wording", checks("client_presentation", leak).errors.some((e) => /shouldn't see \(.*57525/.test(e)));
   const pref = REGISTER_PROJECTS.ridgeline(); Object.assign(pref.register.items.find((x) => x.description === "Handmade-look tile splashback"), { description: "", product: "Supplier tile" });
   ok("a preference with only a product warns on the presentation", checks("client_presentation", pref).warnings.some((w) => /a preference with only a product recorded/.test(w)));
@@ -152,9 +162,9 @@ section("Coordination packs (spec §3.4)");
   const r = buildRegisterFixture("selections_schedule", input(ridge(), { status: "Draft" }), { coord: "routleys" });
   ok("the Routleys pack holds the Routleys records and names its party", r.selections.length >= 10 && r.selections.every((x) => x.coord === "routleys" || /Routleys/.test(x.supplier)) && /Routleys/.test(buildSelectionsSchedulePayload(r).DOC_KICKER));
   const w = buildRegisterFixture("selections_schedule", input(kestrelRelinked(), { status: "Draft" }), { coord: "windows" });
-  ok("the windows pack holds the Rylock openings through the cited document's discipline", w.selections.some((x) => /Chainwinder awning/.test(x.product)) && w.technicalSchedule.actions.some((a) => /U-value/.test(a.text)));
+  ok("the windows pack holds the Rylock openings through the cited document's discipline", w.selections.some((x) => /Chainwinder awning/i.test(x.product)) && w.technicalSchedule.actions.some((a) => /U-value/.test(a.text)));
   const tli = buildRegisterFixture("selections_schedule", input(kestrelRelinked(), { status: "Draft" }), { coord: "tli" });
-  ok("the TLI pack holds the TLI fittings", tli.selections.some((x) => x.item === "Downlights") && !tli.selections.some((x) => /Chainwinder/.test(x.product)));
+  ok("the TLI pack holds the TLI fittings", tli.selections.some((x) => x.item === "Downlights") && !tli.selections.some((x) => /Chainwinder/i.test(x.product)));
 }
 
 section("Templates (design system)");

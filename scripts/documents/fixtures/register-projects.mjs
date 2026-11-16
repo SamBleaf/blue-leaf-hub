@@ -272,13 +272,15 @@ export function designCoordination(p) {
 // ── Supplier evidence (Pair 2: Technical Selections Schedule + Client Selections Presentation) ──────────
 // FIXTURE POLICY (docs/documents/SELECTIONS_SPEC.md §8). The product data below is copied from the ZJ example documents
 // in Dropbox (SALES/ZJ EXAMPLE MATERIAL): Rylock quotation RM-6403 Ver 1, the TLI lighting legend and Routleys product
-// selection 452499. Product words, codes and quantities are as those documents print them; nothing is invented. What a
-// person had to decide is marked "staff:" beside it (which room a supplier's line belongs to, a manufacturer read from
-// a warranty web address printed on the line, a finish split from a product line, a series code moved to the model
-// field). One record per product the client chooses; accessories and rough-in parts (wastes, grates, isolation stops,
-// flush plates, roll holders, towel rails) stay in the supplier's document, which the record cites. Approvals, dates
-// and recipients are this fictional project's, like every other record in this file.
+// selection 452499. A product line is the supplier's words exactly as printed (truncation "..." kept), with its
+// labelled sizes; the only change is a finish split from the end of a Routleys line ("… in Brushed Nickel"). What a
+// person had to decide is marked "staff:" beside it: which room a supplier's line belongs to, a manufacturer read from
+// the warranty web address printed on the line, a plain description for the client where the supplier wrote only
+// capitals or codes. One record per product the client chooses; accessories and rough-in parts (wastes, grates,
+// isolation stops, flush plates, roll holders, towel rails) stay in the supplier's document, which the record cites.
+// Approvals, dates and recipients are this fictional project's, like every other record in this file.
 const custom = (id, fields) => makeItem({ id, itemKind: "selection", section: "project", category: "notes", ...fields });   // the register's "Add item"
+const X = " × ";   // a size never breaks across lines
 
 /** Kestrel Court at design coordination, with the Rylock quote and the TLI legend received (after designCoordination). */
 export const KESTREL_SOURCES = {
@@ -294,44 +296,49 @@ export function kestrelSupplierEvidence(p) {
   const R = Object.fromEntries((p.register.meta.rooms || []).map((r) => [r.id, r]));
   const by = (desc) => p.register.items.find((i) => i.description === desc);
   const cite = (doc) => ({ sourceDocId: doc.id, source: [doc.issuer, doc.docNumber, doc.revision].filter(Boolean).join(" ") || doc.filename.replace(/\.pdf$/i, "") });
-  // Rylock item 2 ("LIVING", staff: the kitchen and living room): the corner window the record proposes. The quote's
-  // frame colour is "CHOOSE FINISH", so no finish is recorded; the colour is the client's to choose (ri_kc_s03).
+  // Rylock item 2 (COMMENTS "LIVING"; staff: the kitchen and living room): the corner window the record proposes.
+  // The quote's frame colour is "CHOOSE FINISH", so no finish is recorded; choosing it is the client's (ri_kc_s03).
   Object.assign(by("Dark slimline window frames, with large north-facing glazing to the living area"), {
-    product: "Fixed corner window, butt-jointed at 90°, 2700 × 1950, 165 mm frame", supplier: "Rylock", model: "CS series (quote item 2)", ...cite(S.rylock) });
+    product: "CS DESIGN FIXED LIGHT BUTT JOIN 90 DEG EXTERNAL, Height 2700" + X + "Width 1950, Depth 165MM", supplier: "Rylock", model: "quote item 2", ...cite(S.rylock) });
   // The cabinetry still cites the superseded concept set: the draft flags it and issue is refused until it is relinked.
   Object.assign(by("Large central island and a walk-in butler's pantry, with cabinetry finishes still to be developed"), { sourceDocId: "doc_kc_c01", source: "Concept Set C-01" });
   p.register.items.push(
-    // Rylock item 1 ("PANTRY - OPEN IN DOOR", staff: the kitchen's butler's pantry) and item 4 ("ENSUITE").
+    // Rylock item 1 (COMMENTS "PANTRY - OPEN IN DOOR"; staff: the kitchen's butler's pantry). Handing as the quote states
+    // it, with its viewpoint ("displayed from the outside, looking inwards").
     makeItem({ id: "ri_kc_s01", itemKind: "selection", category: "doors", promptKey: "R-007", section: "room", roomId: R.k_kitchen.id, room: R.k_kitchen.name, certainty: "proposed",
-      product: "Hinged door, opening in, left-hand hinged, 2400 × 935 frame (suits an 820 mm door)", colour: "Black lever handle",
-      supplier: "Rylock", model: "CS series (quote item 1)", responsibility: "blue_leaf", nextAction: "Confirm the overall frame depth with Rylock: the quote leaves it to the builder", ...cite(S.rylock) }),
+      description: "Door from the butler's pantry",   // staff: the plain description the client reads
+      product: "CS Hinged Door Open In LHH (Lock on Right, Hinges Left, viewed from outside), Height 2400" + X + "Width 935, Depth 165, Tapered Lever BLACK (935MM FRAME SUITS 820MM DOOR)",
+      supplier: "Rylock", model: "quote item 1", responsibility: "blue_leaf", nextAction: "Confirm the overall frame depth with Rylock: the quote leaves it to the builder (\"TBA ...Builder to confirm Overall Frame Depth\")", ...cite(S.rylock) }),
+    // Rylock item 4 (COMMENTS "ENSUITE").
     makeItem({ id: "ri_kc_s02", itemKind: "selection", category: "doors", promptKey: "R-007", section: "room", roomId: R.k_ensuite.id, room: R.k_ensuite.name, certainty: "proposed",
-      product: "Chainwinder awning window, fixed–sash–fixed, 600 × 2400", colour: "Privacy glass, black winder",
-      supplier: "Rylock", model: "AA 65 series (quote item 4)", ...cite(S.rylock) }),
-    // Quote-wide points, as records of their own (one next action per record).
-    makeItem({ id: "ri_kc_s03", itemKind: "action", category: "windows", promptKey: "W-025", section: "project", description: "Window frame colour",
-      responsibility: "client", nextAction: "Choose the frame colour for the new windows and doors" }),
-    makeItem({ id: "ri_kc_s04", itemKind: "action", category: "windows", promptKey: "W-025", section: "project", description: "Glazing performance",
+      description: "Ensuite window, with privacy glass",   // staff: the plain description the client reads
+      product: "AA 65 SERIES CHAINWINDER AWNING OVO, Height 600" + X + "Width 2400, Depth 165MM, SAFETY TOUGHENED PRIVACY 4/12/4mm, Operator Colour BLACK",
+      supplier: "Rylock", model: "quote item 4", ...cite(S.rylock) }),
+    // Quote-wide points, as action records citing the quote (the register gives a W-025 action no trade category).
+    makeItem({ id: "ri_kc_s03", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Window frame colour",
+      responsibility: "client", nextAction: "Choose the frame colour for the new windows and doors", ...cite(S.rylock) }),
+    makeItem({ id: "ri_kc_s04", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Glazing performance",
       responsibility: "blue_leaf", nextAction: "Ask Rylock for the glazing U-value and SHGC: the quote gives none, and says the energy report wasn't sighted", ...cite(S.rylock) }),
-    makeItem({ id: "ri_kc_s05", itemKind: "action", category: "windows", promptKey: "W-025", section: "project", description: "Rylock quote note",
-      responsibility: "blue_leaf", nextAction: "Ask Rylock what \"Builder to C.O.S\" on quote item 2 requires", ...cite(S.rylock) }),
+    makeItem({ id: "ri_kc_s05", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Rylock quote note",
+      responsibility: "blue_leaf", nextAction: "Ask Rylock what \"BUILDER TO C.O.S\" on quote item 2 requires", ...cite(S.rylock) }),
     // TLI legend: one record per legend line, added by hand (no library question covers lighting). The legend has no
-    // rooms (only the pendants name one) and keys a lighting plan not yet received, so a fitting's room isn't known;
-    // its quantity is TLI's whole-plan total.
-    custom("ri_kc_s06", { certainty: "proposed", description: "Downlights", product: "D700+ downlight, 10.6W, 3K", model: "DL.2: TLI-D700+-10.6W-WH-3K", supplier: "TLI", quantity: 46, unit: "EA", ...cite(S.tli) }),
-    custom("ri_kc_s07", { certainty: "proposed", description: "Wall lights", product: "ORB wall light, 3W, 3K", model: "WL.1: TLI-ORB-B-3W-WH-3K", supplier: "TLI", quantity: 5, unit: "EA", ...cite(S.tli) }),
-    // "( Entrance / Entry Hall ) TBC by Designer" (staff: the Entry; the designer is the architect on file).
-    custom("ri_kc_s08", { roomId: R.k_entry.id, room: R.k_entry.name, section: "room", description: "Entry pendants", model: "PL.1", supplier: "TLI", quantity: 3, unit: "EA",
-      responsibility: "architect", nextAction: "Select the entry pendants: TLI's legend leaves them to the designer (PL.1)", ...cite(S.tli) }),
-    custom("ri_kc_s09", { description: "Exhaust fans", supplier: "TLI", quantity: 5, unit: "EA",
-      responsibility: "trade", nextAction: "Select the exhaust fans: TLI's legend leaves them to the electrician", ...cite(S.tli) }),
+    // rooms (only the pendants name one) and keys a lighting plan not yet received, so a fitting's room isn't known; its
+    // quantity is TLI's whole-plan total. The legend line is the product; its key is the code.
+    custom("ri_kc_s06", { certainty: "proposed", description: "Downlights", product: "TLI-D700+-10.6W-WH-3K", model: "DL.2", supplier: "TLI", quantity: 46, unit: "EA", ...cite(S.tli) }),
+    custom("ri_kc_s07", { certainty: "proposed", description: "Wall lights", product: "TLI-ORB-B-3W-WH-3K", model: "WL.1", supplier: "TLI", quantity: 5, unit: "EA", ...cite(S.tli) }),
+    // "( PL.1 ) - ( Entrance / Entry Hall ) TBC by Designer" (staff: the Entry; the designer is the architect on file).
+    // TLI isn't their supplier: the legend leaves them to the designer and the electrician (QA K-01).
+    custom("ri_kc_s08", { roomId: R.k_entry.id, room: R.k_entry.name, section: "room", description: "Entry pendants", model: "PL.1", quantity: 3, unit: "EA",
+      responsibility: "architect", nextAction: "Select the entry pendants: TLI's legend leaves them to the designer (\"( PL.1 ) - ( Entrance / Entry Hall ) TBC by Designer\")", ...cite(S.tli) }),
+    custom("ri_kc_s09", { description: "Exhaust fans", quantity: 5, unit: "EA",
+      responsibility: "trade", nextAction: "Select the exhaust fans: TLI's legend leaves them to the electrician (\"Exhaust Fan TBC by Electrician\")", ...cite(S.tli) }),
   );
   return p;
 }
 
 /** Ridgeline Drive at tender, with Routleys selection 452499 reconciled to the register. */
 export const RIDGELINE_SOURCES = {
-  // Routleys prints no revision; the selection number and its printed date identify it (staff: entered at upload).
+  // Routleys prints no revision; the selection number identifies it (staff: entered at upload).
   routleys: { id: "doc_rd_routleys", filename: "Routleys product selection 452499.pdf", type: "supplier_document", discipline: "routleys", issuer: "Routleys", docNumber: "452499", revision: null, receivedAt: "2026-11-14", reviewStatus: "reconciled" },
   plans: { id: "doc_rd_dd02", filename: "Developed design DD-02.pdf", type: "working_drawings", discipline: "architect", issuer: "Studio Example", docNumber: "DD-02", revision: "B", receivedAt: "2026-11-10", reviewStatus: "reconciled" },
 };
@@ -343,38 +350,46 @@ export function ridgelineTender(p) {
   p.context.drawings = [S.plans, S.routleys];
   const R = Object.fromEntries((p.register.meta.rooms || []).map((r) => [r.name, r]));
   const find = (room, promptKey) => p.register.items.find((i) => i.roomId === R[room]?.id && i.promptKey === promptKey);
-  const set = (room, promptKey, fields) => { const i = find(room, promptKey); if (!i) throw new Error(`ridgelineTender: no ${promptKey} in ${room}`); Object.assign(i, fields); return i; };
+  const set = (room, promptKey, fields) => { const i = find(room, promptKey); if (!i) throw new Error("ridgelineTender: no " + promptKey + " in " + room); Object.assign(i, fields); return i; };
   const routleys = { supplier: "Routleys", supplyBy: "blue_leaf", sourceDocId: S.routleys.id, source: "Routleys 452499" };
   const meeting = { at: "2026-11-14", by: "Sam (Blue Leaf)", method: "meeting", ref: "Selections meeting, 14 Nov 2026" };
+  // staff: the maker, read from the warranty web address printed on the line ("visit caroma.com.au", "visit greenstapware.com.au").
+  const CAROMA = "Caroma", GREENS = "Greens Tapware";
   let n = 0;
-  const line = (room, promptKey, fields) => makeItem({ id: `ri_rd_s${String(++n).padStart(2, "0")}`, itemKind: "selection", category: "sanitary", promptKey, section: "room", roomId: R[room].id, room, ...routleys, ...fields });
-  // KITCHEN (staff: Routleys' KITCHEN is the kitchen). 65821 sink and 68845 mixer. The client asked for an undermount
-  // sink and a matte black mixer: their words stay on the record, beside the product proposed.
-  set("Kitchen", "K-007", { ...routleys, product: "Acero+ 860 single bowl inset sink, one tap hole, left-hand end bowl", colour: "Stainless steel", model: "65821", quantity: 1,
-    responsibility: "client", nextAction: "Confirm Routleys' inset sink and brushed nickel mixer, in place of the undermount sink and matte black mixer first asked for" });
-  // ENSUITE (staff: Routleys' ENSUITE is the ensuite; maker read from the warranty web address on each line).
-  set("Ensuite", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: "Greens", product: "Maci wall basin mixer set with 180 mm spout", colour: "Brushed nickel", model: "62397", quantity: 2 });
-  set("Bathroom", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: "Greens", product: "Maci wall basin mixer set with 180 mm spout", colour: "Brushed nickel", model: "62397", quantity: 1 });
-  // 57525 suite: back-to-wall, where the client asked for wall-hung.
-  set("Ensuite", "B-003", { ...routleys, certainty: "proposed", manufacturer: "Caroma", product: "Urbane II Cleanflush back-to-wall toilet suite, back inlet, with soft-close seat", model: "57525", quantity: 1,
-    responsibility: "client", nextAction: "Confirm the back-to-wall toilet Routleys selected for the ensuite, in place of the wall-hung toilet first asked for" });
+  const line = (room, promptKey, fields) => makeItem({ id: "ri_rd_s" + String(++n).padStart(2, "0"), itemKind: "selection", category: "sanitary", promptKey, section: "room", roomId: R[room].id, room, ...routleys, ...fields });
+  // KITCHEN (staff: Routleys' KITCHEN is the kitchen). 65821 sink and 68845 mixer. The record's earlier direction was an
+  // undermount sink and a matte black mixer: both stay on the record, and the change is the client's to confirm.
+  set("Kitchen", "K-007", { ...routleys, product: "Acero+ 860 Single Bowl Inset Sink 1 Tap Hole Left Hand End Bowl", colour: "Stainless Steel", model: "65821", quantity: 1,
+    responsibility: "client", nextAction: "Confirm the inset sink and brushed nickel mixer Routleys selected, in place of the undermount sink and matte black mixer recorded earlier" });
+  // ENSUITE and BATHROOM (staff: Routleys' rooms of the same names).
+  set("Ensuite", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 2 });
+  set("Bathroom", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 1 });
+  // 57525: the line is cut off on the page ("...Vogue Soft Close Seat..."), and the suite is back-to-wall where the
+  // record's direction was wall-hung.
+  set("Ensuite", "B-003", { ...routleys, certainty: "proposed", manufacturer: CAROMA, product: "Urbane II Cleanflush Back To Wall Toilet Suite Back inlet with Vogue Soft Close Seat...", model: "57525", quantity: 1,
+    responsibility: "client", nextAction: "Confirm the back-to-wall toilet Routleys selected for the ensuite, in place of the wall-hung toilet recorded earlier" });
   p.register.items.push(
-    line("Kitchen", "K-007", { certainty: "proposed", product: "Luxe LF pull-down sink mixer", colour: "Brushed nickel", model: "68845", quantity: 1 }),
-    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: "Greens", product: "Maci bath/shower mixer, mini plate", colour: "Brushed nickel", model: "62412", quantity: 1 }),
-    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, product: "Glide twin rail shower system with rain boost", colour: "Brushed nickel", model: "58127", quantity: 1 }),
-    line("Ensuite", "B-005", { certainty: "proposed", manufacturer: "Caroma", product: "Liano II 530 pill oval inset basin, no tap hole", colour: "White", model: "63633", quantity: 2 }),
-    // BATHROOM: 62412 is listed twice with nothing to tell the two apart, so one record carries both (staff).
-    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: "Greens", product: "Maci bath/shower mixer, mini plate", colour: "Brushed nickel", model: "62412", quantity: 2 }),
-    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: "Greens", product: "Maci/Mika bath spout, 180 mm", colour: "Brushed nickel", model: "62417", quantity: 1 }),
-    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, product: "Glide twin rail shower system with rain boost", colour: "Brushed nickel", model: "58127", quantity: 1 }),
-    line("Bathroom", "B-005", { certainty: "proposed", manufacturer: "Caroma", product: "Liano II 530 pill oval inset basin, no tap hole", colour: "White", model: "63633", quantity: 1 }),
-    // LAUNDRY: 53012 trough, whose finish is cut off on the page ("1 Tap Hole in..."), and 68713 mixer.
-    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Kubic deep galley undermount/overmount sink, 35 L, with tap landing, one tap hole", model: "53012", quantity: 1,
+    line("Kitchen", "K-007", { certainty: "proposed", product: "Luxe LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68845", quantity: 1 }),   // staff: finish split without "in"
+    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),
+    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1 }),
+    line("Ensuite", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 2 }),
+    // BATHROOM: the shower system is settled; the bath's spout and mixers wait on where the bath goes (QA R04).
+    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1 }),
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),   // listed twice by Routleys, 1 each
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci / Mika Bath Spout 180mm", colour: "Brushed Nickel", model: "62417", quantity: 1 }),
+    line("Bathroom", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 1 }),
+    // LAUNDRY: 53012 trough, its finish cut off on the page ("1 Tap Hole in..."), and 68713 mixer.
+    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Kubic Deep Galley Undermount / Overmount Sink 35 Ltr with Tap Landing 1 Tap Hole in...", model: "53012", quantity: 1,
       responsibility: "blue_leaf", nextAction: "Ask Routleys for the laundry sink's finish: its line is cut off in selection 452499" }),
-    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Astro II LF pull-down sink mixer", colour: "Brushed nickel", model: "68713", quantity: 1 }),
-    // BATHROOM bath (49905): the plans put the bath in the ensuite, so the line isn't entered until the room is settled.
-    makeItem({ id: "ri_rd_a01", itemKind: "action", category: "sanitary", promptKey: "W-025", section: "project", description: "Bath location",
-      responsibility: "blue_leaf", nextAction: "Routleys lists a freestanding bath (49905) in the bathroom; the plans show it in the ensuite. Confirm the room with the client and Routleys", ...routleys }),
+    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Astro II LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68713", quantity: 1 }),
+    // Actions citing the selection (the register gives a W-025 action no trade category).
+    makeItem({ id: "ri_rd_a01", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Bath location",
+      responsibility: "blue_leaf", nextAction: "Routleys lists a freestanding bath (49905) in the bathroom, with its spout (62417) and bath/shower mixers (62412); the plans show the bath in the ensuite. Confirm the room with the client and Routleys", ...routleys }),
+    makeItem({ id: "ri_rd_a02", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Routleys WC room",
+      responsibility: "blue_leaf", nextAction: "Routleys' selection 452499 includes a WC'S room (toilet suite 57525, basin 63633, mixer 62397); the plans have no separate WC. Confirm with the client and Routleys whether it is withdrawn or belongs to another room", ...routleys }),
+    makeItem({ id: "ri_rd_a03", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Toilet suite description",
+      responsibility: "blue_leaf", nextAction: "Ask Routleys for the toilet suite's full description (57525): its line is cut off in selection 452499", ...routleys }),
   );
   return p;
 }

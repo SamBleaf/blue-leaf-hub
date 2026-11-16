@@ -341,6 +341,7 @@ export function buildSelectionsSchedulePayload(fx) {
       tech.has("to_verify") ? "To verify: a technical check is still open." : "",
       tech.has("verified") ? "Verified: technically checked, with the reference on file." : "",
       t.hasDirection ? "Where a record's own words differ from the product named, they are shown under it as the recorded direction." : "",
+      t.supplyNoted ? "Blue Leaf supplies each item unless its supply is noted." : "",
       t.sources?.length ? "A source key (S1 …) is listed in the source documents at the end." : "",
       "A blank finish or quantity hasn't been recorded; a quantity from a supplier's schedule is that supplier's count."].filter(Boolean).join(" "),
     SUMMARY: t.total ? summaryOf(t.total, t.knowledge || {}) : "",
@@ -351,7 +352,8 @@ export function buildSelectionsSchedulePayload(fx) {
       const loc = [r.location, r.replaces ? `instead of the ${r.replaces}` : ""].filter(Boolean).join(", ");
       return {
         REF: r.ref, ITEM: r.item, LOC: nl(loc.charAt(0).toUpperCase() + loc.slice(1)),
-        SEL: r.product || "Not yet chosen", DETAIL: nl([r.detail, r.direction ? `Recorded direction: ${r.direction}` : ""].filter(Boolean).join("\n")),
+        // No product: the Status says "To be decided" once; the cell holds only the detail (QA K-08).
+        ...(() => { const sel = twoLines(r.product, [r.detail, r.direction ? `Recorded direction: ${r.direction}` : ""].filter(Boolean).join("\n")); return { SEL: sel.a, DETAIL: sel.b }; })(),
         FINISH: r.finish || "", QTY: r.quantity || "", STATUS: st.a, TECH: st.b, SOURCE: src.a, FLAG: src.b,
       };
     })) })),
@@ -361,7 +363,8 @@ export function buildSelectionsSchedulePayload(fx) {
     ...boundedRows("REQS", reqs.map((x) => ({ REF: x.ref || "", TEXT: x.text, APPLIES: x.applies || "", STATUS: x.status || "", WHO: nl(x.who && /To verify/.test(x.status || "") ? x.who : "") }))),
 
     HAS_S3: present.s3, S3_NUM: nums.s3 || "",
-    ACTIONS_INTRO: "Everything still open on these selections, by reference. A row in section 01 changes only once its action is closed and the register updated.",
+    // Not "everything still open": a To-verify row's check is marked where it prints (QA K-06).
+    ACTIONS_INTRO: "The open actions on these selections and the decisions they wait on, by reference. A row in section 01 changes only once its action is closed and the register updated; a row marked To verify still needs its technical check.",
     ...boundedRows("ACTIONS", actions.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
 
     HAS_S4: present.s4, S4_NUM: nums.s4 || "",
@@ -410,7 +413,7 @@ export function buildClientPresentationPayload(fx) {
     HAS_S1: present.s1, S1_NUM: nums.s1 || "",
     // Proposals are marked where they print; said once here, never a row each (editorial rule).
     NEEDS_INTRO: [needs.length ? (needs.length === 1 ? "One decision we need from you before these selections can be settled." : "The decisions we need from you before these selections can be settled.") : "",
-      proposals ? `${needs.length ? "Also, please" : "Please"} let us know whether ${proposals === 1 ? "the selection" : `each of the ${proposals} selections`} marked Proposed in the next section ${proposals === 1 ? "suits" : "suit"} you.` : ""].filter(Boolean).join(" "),
+      proposals ? `${needs.length ? "Also, please" : "Please"} let us know whether each selection marked Proposed in the next section suits you.` : ""].filter(Boolean).join(" "),
     HAS_NEEDS: needs.length > 0,
     ...boundedRows("NEEDS", needs.map((x) => ({ ITEM: x.item, WHERE: nl(x.where), TEXT: x.text }))),
 
@@ -424,10 +427,13 @@ export function buildClientPresentationPayload(fx) {
       statuses.has("Existing to remain") ? "Existing to remain: staying as it is." : "",
       statuses.has("Client's choice, with Blue Leaf") ? "Client's choice, with Blue Leaf: you've told us your choice and we're reviewing it." : "",
       statuses.has("Change requested, with Blue Leaf") ? "Change requested, with Blue Leaf: you've asked for a change and we're looking at it." : "",
-      groups.some((g) => g.rows.some((r) => r.earlier)) ? "Where we've proposed something different from what you first asked for, your earlier choice is shown under it." : ""].filter(Boolean).join(" "),
+      groups.some((g) => g.rows.some((r) => r.earlier)) ? "Where we've proposed something different from what was recorded before, the earlier direction is shown under it." : ""].filter(Boolean).join(" "),
     SEL_GROUPS: groups.map((g, k) => ({ G_LAST: k === groups.length - 1, GROUP: g.group, ...boundedRows("ROWS", g.rows.map((r) => ({
-      ITEM: r.item, TEXT: `${r.text || "Not chosen yet"}${r.replaces ? `, instead of the ${r.replaces}` : ""}`,
-      FINISH: nl([r.finish, r.earlier ? `You first asked for: ${r.earlier.charAt(0).toLowerCase()}${r.earlier.slice(1)}` : ""].filter(Boolean).join("\n")), STATUS: r.status || "",
+      // Nothing chosen: the status says "To be decided" once (QA C08).
+      ITEM: r.item, STATUS: r.status || "",
+      // Neutral: the earlier words may have been a proposal, not the client's own ask (QA C05). Never an empty first line.
+      ...(() => { const c = twoLines(`${r.text || ""}${r.text && r.replaces ? `, instead of the ${r.replaces}` : ""}`,
+        [r.finish, r.earlier ? `Previously recorded: ${r.earlier.charAt(0).toLowerCase()}${r.earlier.slice(1)}` : ""].filter(Boolean).join("\n")); return { TEXT: c.a, FINISH: c.b }; })(),
     }))) })),
 
     _docNumber: id.number, _id: id,

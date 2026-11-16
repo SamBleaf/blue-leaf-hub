@@ -46,7 +46,8 @@ const TSS_VARIANTS = [
   { name: "kestrel-coordination-draft", project: "kestrel", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer, tweak: kestrelSelections },
   { name: "ridgeline-tender", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Brightwater Design", tweak: ridgelineTender },
   { name: "ridgeline-routleys-pack", project: "ridgeline", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer, tweak: ridgelineTender, opts: { coord: "routleys" } },
-  { name: "ridgeline-concept", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Brightwater Design" },
+  // The early form, before any supplier document: a draft (QA R08).
+  { name: "ridgeline-concept", project: "ridgeline", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer },
 ];
 const CSP_VARIANTS = [
   { name: "kestrel-coordination", project: "kestrel", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Jordan & Mia Whitcombe", tweak: kestrelRelinked },

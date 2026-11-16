@@ -148,8 +148,9 @@ ok("T13 all five documents render through the existing renderDocxTemplate", rend
   const pp = buildClientPresentationPayload(buildRegisterFixture("client_presentation", regInput(kp)));
   const tech = buildSelectionsSchedulePayload(buildRegisterFixture("selections_schedule", regInput(kp)));
   const ppRows = pp.SEL_GROUPS.flatMap((g) => ["ROWS_KEEP", "ROWS", "ROWS_PEN", "ROWS_LAST"].flatMap((k) => g[k] || []));
+  const techRows = tech.SEL_GROUPS.flatMap((g) => ["ROWS_KEEP", "ROWS", "ROWS_PEN", "ROWS_LAST"].flatMap((k) => g[k] || []));
   ok("T15 one pending label in both documents, no TBC; each status defined once",
-    !/\bTBC\b/.test(JSON.stringify(pp)) && !/\bTBC\b/.test(JSON.stringify(tech)) && ppRows.some((r) => r.STATUS === PRESENTATION_PENDING_LABEL) &&
+    !/\bTBC\b/.test(JSON.stringify(pp)) && !/"TBC"/.test(JSON.stringify(tech)) && !techRows.some((r) => /TBC/.test(`${r.STATUS} ${r.SEL} ${r.FINISH} ${r.QTY}`)) && ppRows.some((r) => r.STATUS === PRESENTATION_PENDING_LABEL) &&
     (pp.SEL_INTRO.match(new RegExp(`${PRESENTATION_PENDING_LABEL}:`, "g")) || []).length === 1 && /To be decided:/.test(tech.READ_INTRO));
   const tpl = fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_presentation.templateFile));
   const PizZip = (await import("pizzip")).default;

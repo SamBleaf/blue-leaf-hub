@@ -792,8 +792,17 @@ const CHOICE_QUESTIONS = new Set(["K-012"]);
  */
 const DISCIPLINE_GROUP = { tli: "Lighting and electrical", windows: "Windows and doors", routleys: "Plumbing fixtures and tiling", joiner: "Joinery and benchtops" };
 
-/** A received document as one line: "Rylock RM-6403 Ver 1"; with no number, its file name. */
-const sourceDocLabel = (d) => clean([d.issuer, d.docNumber, d.revision].filter(Boolean).join(" ")) || clean(String(d.filename || "").replace(/\.(pdf|docx?|xlsx?)$/i, "")) || "Document on file";
+/**
+ * A received document as one line: its issuer and number ("Rylock RM-6403"); with no number, its file name ("TLI
+ * lighting legend"), with the issuer first when the name doesn't start with it. The revision is printed in its own
+ * column, never repeated here (QA K-07).
+ */
+function sourceDocLabel(d) {
+  const stem = clean(String(d.filename || "").replace(/\.(pdf|docx?|xlsx?)$/i, ""));
+  if (clean(d.docNumber)) return clean([d.issuer, d.docNumber].filter(Boolean).join(" "));
+  if (stem) return d.issuer && !stem.toLowerCase().startsWith(clean(d.issuer).toLowerCase()) ? `${clean(d.issuer)} ${stem}` : stem;
+  return clean(d.issuer) || "Document on file";
+}
 const reviewOf = (d) => d?.reviewStatus ?? d?.review_status ?? null;
 /**
  * Approved with real evidence: who, when and how recorded on the record. An approval that exists only as the portal
@@ -871,11 +880,13 @@ export function selectionRecords(register, context = {}, { coord } = {}) {
     const qty = Number(i.quantity);
     return {
       id: i.id, ref: refCode(i), category: i.category, coord: coordOf(i), promptId: q?.id || null,
-      group: TRADE_OF.has(i.category) ? tradeGroupFor(i.category) : DISCIPLINE_GROUP[disciplineOf(i)] || "Other selections",
+      // A supplier's document decides the trade (a laundry trough on Routleys' selection is a plumbing fixture, QA R07);
+      // otherwise the category; a hand-added record goes with the discipline of the document it cites (S11).
+      group: (doc?.type === "supplier_document" && DISCIPLINE_GROUP[clean(doc.discipline)]) || (TRADE_OF.has(i.category) ? tradeGroupFor(i.category) : DISCIPLINE_GROUP[disciplineOf(i)] || "Other selections"),
       item: custom ? (legacy ? clean(String(i.description || "").split(" — ")[0]) : clientWords(i.description)) || categoryLabel(i.category) : clean(itemShort(i).replace(/\s*—\s*who\?$/i, "")),
       roomId: room?.id || null, location, sheet: clean(room?.sheet), level: clean(room?.level),
-      house: !room && !areas.length && !!i.isDefault, zoneKey: clean(i.answer?.zone?.key), elementKey: clean(i.answer?.element?.key), replaces: defWords ? `${defWords.charAt(0).toLowerCase()}${defWords.slice(1)}` : "",
-      product: words, named: !!product,
+      house: !room && !areas.length && !!i.isDefault && !zone, zone: !room && !areas.length && i.isDefault ? zone : "", zoneKey: clean(i.answer?.zone?.key), elementKey: clean(i.answer?.element?.key), replaces: defWords ? `${defWords.charAt(0).toLowerCase()}${defWords.slice(1)}` : "",
+      product: words, named: !!product, description: custom ? "" : clientWords(i.description),
       // The client's own words beside a product put to them, when they differ: the selected-vs-proposed pair (spec §4).
       direction: product && typed && !i.sync?.boardCreated && typed.toLowerCase() !== product.toLowerCase() ? typed : "",
       // A preference shows the client's words, never a product someone else wrote on it (spec critique).
@@ -907,14 +918,20 @@ function mergeByRoom(rows, sig) {
   for (const r of rows) {
     if (!r.roomId) { out.push({ ...r, rooms: [], refs: [r.ref] }); continue; }
     const k = sig(r);
-    if (seen.has(k)) { const g = seen.get(k); g.rooms.push(r.location); g.refs.push(r.ref); continue; }
-    const g = { ...r, rooms: [r.location], refs: [r.ref] };
+    // Two identical records in one room are two items (a supplier listing a product twice), never one merged row.
+    if (seen.has(k) && !seen.get(k).roomIds.includes(r.roomId)) { const g = seen.get(k); g.rooms.push(r.location); g.refs.push(r.ref); g.roomIds.push(r.roomId); continue; }
+    const g = { ...r, rooms: [r.location], refs: [r.ref], roomIds: [r.roomId] };
     seen.set(k, g); out.push(g);
   }
   return out;
 }
 const roomList = (names) => andList(names.map((n, k) => (k ? n.charAt(0).toLowerCase() + n.slice(1) : n)));
 const byIdOf = (register, id) => register.items.find((i) => i.id === id);
+function selectionAction(x, records, opts = {}) {
+  const cites = !!x.sourceDocId && records.some((r) => r.sourceDocId === x.sourceDocId);
+  if (opts.coord) return questionById(resolvePromptId(x.promptKey))?.coord === opts.coord || (opts.coord === "routleys" && /routleys/i.test(`${x.supplier || ""}`)) || (opts.coord === "tli" && /\btli\b/i.test(`${x.supplier || ""}`)) || cites;
+  return TRADE_OF.has(x.category) || CHOICE_QUESTIONS.has(resolvePromptId(x.promptKey)) || cites;
+}
 const REVIEW_WORDS = { received: "Received, not yet reviewed", under_review: "Under review", reconciled: "Reconciled", superseded: "Superseded" };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const longDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || "")); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : clean(d); };
@@ -926,22 +943,28 @@ function technicalScheduleFixture(input, opts = {}) {
   const fx = baseFixture(input);
   const records = selectionRecords(register, context, opts);
   const coordLabel = opts.coord ? COORD_DISCIPLINES[opts.coord] || opts.coord : "";
-  // 04 · Source documents, keyed once (S1, S2 …): a row prints the key, not the document again (editorial rule).
-  const cited = [...new Set(records.map((r) => r.sourceDocId).filter(Boolean))];
+  // A counted product never merges across rooms: one quantity can't speak for two (QA R01).
+  const sig = (r) => [r.group, r.item, r.product, r.direction, r.manufacturer, r.model, r.supplier, r.supplyBy, r.finish, r.quantity, r.selection, r.technical, r.sourceDocId || r.source, r.sourceFlag, r.replaces, r.quantity ? r.roomId : ""].join("|");
+  const merged = mergeByRoom(records, sig);
+  const ordered = TRADE_ORDER.map((g) => ({ group: g, rows: merged.filter((r) => r.group === g) })).filter((g) => g.rows.length);
+  // 04 · Source documents, keyed once (S1, S2 …) in the order rows print: a row prints the key, not the document again.
   const docOf = new Map((context.drawings || []).filter((d) => d?.id).map((d) => [d.id, d]));
-  const keyOf = new Map(cited.map((id, k) => [id, `S${k + 1}`]));
-  const sources = cited.map((id) => { const d = docOf.get(id); return { key: keyOf.get(id), document: sourceDocLabel(d),
+  const keyOf = new Map();
+  for (const g of ordered) for (const r of g.rows) if (r.sourceDocId && !keyOf.has(r.sourceDocId)) keyOf.set(r.sourceDocId, `S${keyOf.size + 1}`);
+  const sources = [...keyOf.keys()].map((id) => { const d = docOf.get(id); return { key: keyOf.get(id), document: sourceDocLabel(d),
     revision: [clean(d.revision) || "No revision printed", d.receivedAt ? `received ${longDate(d.receivedAt)}` : ""].filter(Boolean).join(", "),
     review: REVIEW_WORDS[reviewOf(d)] || "On file" }; });
-  const sig = (r) => [r.group, r.item, r.product, r.direction, r.manufacturer, r.model, r.supplier, r.supplyBy, r.finish, r.quantity, r.selection, r.technical, r.sourceDocId || r.source, r.sourceFlag, r.replaces].join("|");
-  const merged = mergeByRoom(records, sig);
-  const groups = TRADE_ORDER.map((g) => ({ group: g, rows: merged.filter((r) => r.group === g) })).filter((g) => g.rows.length)
-    .map((g) => ({ group: g.group, rows: g.rows.map((r) => ({
+  // A supplier's code says whose it is ("Routleys code 62397"); supply is said only where it isn't Blue Leaf (the
+  // reading note says so once; QA R03).
+  // A code ("62397", "DL.2") says whose it is; a reference in words ("quote item 2") reads as it is.
+  const owned = (r) => (/^[a-z]+\s/i.test(r.model) ? `${r.supplier} ${r.model}` : `${r.supplier} code ${r.model}`);
+  const detailOf = (r) => [r.manufacturer, r.supplier && r.model ? owned(r) : r.supplier || (r.model ? `Code ${r.model}` : ""),
+    r.supplyBy && r.supplyBy !== supplyLabel("blue_leaf") ? `Supply: ${r.supplyBy}` : ""].filter(Boolean).join(" · ");
+  const groups = ordered.map((g) => ({ group: g.group, rows: g.rows.map((r) => ({
       ref: r.refs.join(", "), item: r.item,
       // A house-wide row's location is blank: "throughout the house" is said once, in the reading note.
-      location: r.house && r.location === "Throughout the house" ? "" : r.rooms.length > 1 ? roomList(r.rooms) : r.location, replaces: r.replaces,
-      product: r.product, direction: r.direction,
-      detail: [r.manufacturer, r.supplier, r.model, r.supplyBy ? `supply: ${r.supplyBy.toLowerCase()}` : ""].filter(Boolean).join(" · "),
+      location: r.house ? "" : r.rooms.length > 1 ? roomList(r.rooms) : r.location, replaces: r.replaces,
+      product: r.product, direction: r.direction, detail: detailOf(r),
       finish: r.finish, quantity: r.quantity, selection: r.selection,
       technical: r.technical === "to_verify" ? "To verify" : r.technical === "verified" ? "Verified" : "",
       source: r.sourceDocId ? keyOf.get(r.sourceDocId) : r.source, sourceFlag: SOURCE_FLAG_WORDS[r.sourceFlag] || "",
@@ -962,10 +985,9 @@ function technicalScheduleFixture(input, opts = {}) {
   // are the preview's pre-issue checks, never instructions printed for outside readers (spec critique).
   const actions = records.filter((r) => r.next).map((r) => ({ ref: r.ref, text: r.next, who: adbWho(context, byIdOf(register, r.id)) }));
   const recordIds = new Set(records.map((r) => r.id));
-  const forPack = (x) => questionById(resolvePromptId(x.promptKey))?.coord === opts.coord || (opts.coord === "routleys" && /routleys/i.test(`${x.supplier || ""}`)) || (opts.coord === "tli" && /\btli\b/i.test(`${x.supplier || ""}`))
-    || (x.sourceDocId && records.some((r) => r.sourceDocId === x.sourceDocId));
+  // Every selection decision the presentation asks the client about is here too (QA K-04): the same rule.
   for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && x.itemKind === "action" && !x.resolved && clean(x.nextAction)
-    && (opts.coord ? forPack(x) : TRADE_OF.has(x.category))))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i) });
+    && selectionAction(x, records, opts)))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i) });
   const tally = Object.fromEntries(KNOWLEDGE.map((k) => [k, records.filter((r) => r.knowledge === k).length]));
   fx.selections = records;
   if (context.sourcesUnchecked) fx.__sourcesUnchecked = true;
@@ -975,6 +997,7 @@ function technicalScheduleFixture(input, opts = {}) {
     statuses: [...new Set(records.map((r) => r.state))],
     technicalShown: [...new Set(records.map((r) => r.technical).filter(Boolean))],
     hasQuantities: records.some((r) => r.quantity), hasHouse: groups.some((g) => g.rows.some((r) => r.location === "")),
+    supplyNoted: records.some((r) => r.supplyBy),
     hasDirection: records.some((r) => r.direction), hasFlags: records.some((r) => r.sourceFlag),
   };
   return fx;
@@ -994,7 +1017,13 @@ function clientSelectionsFixture(input) {
   const named = (r) => clean([r.manufacturer && !r.product.toLowerCase().startsWith(r.manufacturer.toLowerCase()) ? r.manufacturer : "", r.product].filter(Boolean).join(" "));
   // A preference is the client's own direction; a product shows only once it has been put to them (proposed), chosen
   // or approved. A preference that has only a product typed on it says so at issue (pre-issue warning).
-  const yours = (r) => (r.state === "preferred" ? r.preferenceWords || (r.named ? named(r) : "") : r.named ? named(r) : r.product);
+  // A supplier's line printed in capitals or as a code ("CS DESIGN FIXED LIGHT…", "TLI-D700+-10.6W-WH-3K") isn't words
+  // a client reads: the record's own description says what it is, and the schedule keeps the supplier's line.
+  // Mostly capitals (over half the letters), or one word with no space: a supplier's line or code, not reading words.
+  const codeLike = (t) => { if (!t) return false; if (!/\s/.test(t.trim())) return true; const letters = t.match(/[A-Za-z]/g) || [];
+    return letters.length > 0 && (t.match(/[A-Z]/g) || []).length / letters.length > 0.5; };
+  const yours = (r) => (r.state === "preferred" ? r.preferenceWords || (r.named ? named(r) : "")
+    : r.named ? (codeLike(r.product) ? r.description : named(r)) : r.product);
   // The client's earlier words show beside a proposal only when staff have raised the difference with them (an open
   // action the client owns): a description can also be a staff label ("Ensuite window"), never shown as the client's.
   const row = (r) => ({ item: r.item, text: yours(r), finish: r.finish, status: r.selection, replaces: r.replaces,
@@ -1002,7 +1031,8 @@ function clientSelectionsFixture(input) {
   const sig = (x) => `${x.item}|${x.text}|${x.finish}|${x.status}|${x.replaces}|${x.earlier}`;
   // By location: throughout the house first, then each room in order; rooms with identical selections share a group.
   const house = records.filter((r) => r.house).map(row);
-  const loose = records.filter((r) => !r.house && !r.roomId).map(row);
+  const zones = [...new Set(records.filter((r) => r.zone).map((r) => r.zone))].map((z) => ({ group: z, rows: records.filter((r) => r.zone === z).map(row) }));
+  const loose = records.filter((r) => !r.house && !r.zone && !r.roomId).map(row);
   const perRoom = rooms.map((rm) => ({ room: rm, rows: records.filter((r) => r.roomId === rm.id).map(row) })).filter((g) => g.rows.length);
   const holders = new Map();
   for (const g of perRoom) for (const x of g.rows) { const k = sig(x); if (!holders.has(k)) holders.set(k, []); holders.get(k).push(g.room); }
@@ -1017,6 +1047,7 @@ function clientSelectionsFixture(input) {
   const order = new Map(rooms.map((r, k) => [r.id, k]));
   const groups = [
     ...(house.length ? [{ group: "Throughout the house", rows: house }] : []),
+    ...zones,
     ...[...byRooms.values()].sort((a, b) => order.get(a.rooms[0].id) - order.get(b.rooms[0].id) || b.rooms.length - a.rooms.length)
       .map((g) => ({ group: roomList(g.rooms.map((r) => placeName(clean(r.name)))), rows: g.rows })),
     ...(loose.length ? [{ group: "Not yet placed in a room", rows: loose }] : []),
@@ -1032,10 +1063,12 @@ function clientSelectionsFixture(input) {
     if (r.next && r.responsibility === "client") needs.push({ item: r.item, where, text: sentence(r.next) });
     else if (["undecided", "not_discussed"].includes(r.state) && r.responsibility === "client") needs.push({ item: r.item, where, text: `Choose the ${r.item.toLowerCase()}.` });
   }
-  const proposals = records.filter((r) => r.state === "proposed" && r.clientVisible && !(r.next && r.responsibility === "client")).length;
+  // Whether any proposal awaits the client's answer: asked once, without a number (a count of records never matched the
+  // merged rows, QA C04).
+  const proposals = records.some((r) => r.state === "proposed" && r.clientVisible && !(r.next && r.responsibility === "client"));
   const recordIds = new Set(all.map((r) => r.id));
   for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && !x.resolved && x.responsibility === "client" && clean(x.nextAction)
-    && (TRADE_OF.has(x.category) || CHOICE_QUESTIONS.has(resolvePromptId(x.promptKey))) && answerConfigFor(resolvePromptId(x.promptKey))?.tier !== "office_only"))) {
+    && selectionAction(x, all) && answerConfigFor(resolvePromptId(x.promptKey))?.tier !== "office_only"))) {
     const room = rooms.find((r) => r.id === i.roomId);
     needs.push({ item: clientWords(i.description) || plainShort(i), where: room ? placeName(clean(room.name)) : "", text: sentence(i.nextAction) });
   }
@@ -1186,7 +1219,9 @@ function selectionChecks(docType, fx, { register, errors, warnings, shown }) {
   // Verified against a document nobody has reviewed: a supplier's quote is not technical verification (spec critique).
   for (const r of recs.filter((x) => x.technical === "verified" && x.sourceFlag === "unreviewed")) errors.push(`${name(r)} is marked verified against ${r.source}, which hasn't been reviewed. Review the document (mark it reconciled) or step the record back to "needs verification".`);
   const unreviewed = recs.filter((x) => x.sourceFlag === "unreviewed" && x.technical !== "verified");
-  if (unreviewed.length) warnings.push(`${unreviewed.length} selection(s) cite a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). They print as cited, flagged "Source not yet reviewed".`);
+  if (unreviewed.length) warnings.push(docType === "client_presentation"
+    ? `${unreviewed.length} selection(s) come from a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). The presentation shows them to the client as they stand, without naming the source: review the document first if they may change.`
+    : `${unreviewed.length} selection(s) cite a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). They print as cited, flagged "Source not yet reviewed".`);
   // An approval held only as the portal board's status, with no who, when or how (research A, SFS-15).
   for (const r of recs.filter((x) => x.boardOnlyApproval)) errors.push(`${name(r)} is approved on the portal board with no recorded evidence of who approved it, when and how. Record the approval, or step it back; until then it prints as Proposed.`);
   // Two approved records for one element in one place: identified by question, room, zone and element (spec critique).

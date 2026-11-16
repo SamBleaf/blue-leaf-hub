@@ -11,6 +11,7 @@
    - the design system.
 2. **A first spec,** reviewed by three independent critics (the brief, the Master Register rules, the code) before any code was built.
 3. **This revision,** which takes their findings: 3 blockers and 28 other findings, recorded in the checkpoint's `QA.md`.
+4. **One focused QA round** on the rendered specimens: four reviewers, each checked by a sceptic. 40 findings, 32 confirmed, all fixed or recorded below.
 
 ---
 
@@ -30,6 +31,7 @@ Each is reversible. The owner's confirmation is asked for in §9.
 | S8 | **One record per product the client chooses** (a fixture, fitting or finish), each with its own code and quantity. One element can hold several (the ensuite's basin mixer, bath/shower mixer and shower system are three B-008 records). Accessories and rough-in parts stay in the supplier's document, which the record cites: wastes, grates, isolation stops, flush plates, roll holders and towel rails. | The supplier documents examined print several lines per element. One record per element would need concatenated codes and quantities. One record per supplier line would re-key whole supplier tables, which Tab 14:76 forbids. |
 | S9 | **A supplier's document is cited, never adopted.** The schedule's note says citing it isn't acceptance of its content. "Mark verified by this document" is now offered only for a consultant document marked reconciled. | Tab 14:76, Tab 15:51 ("receiving a PDF is never equivalent to client approval"). |
 | S10 | **An approval held only as the portal board's status prints as Proposed**, and blocks issue in both documents until the who, when and how are recorded. | Research A SFS-15: a promoted scratchpad approval gets made-up evidence ("Portal board"). Applied to the selections documents only; the CPB and ADB are frozen (§9). |
+| S12 | **A supplier's words print as the supplier wrote them.** On the schedule, a product line is verbatim (truncation kept, sizes labelled as printed, handing with its viewpoint); the only change is a finish split from the end of a Routleys line. A code says whose it is ("Routleys code 62397"). In the presentation, a supplier's line written mostly in capitals or as a bare code is replaced by the record's own description ("Ensuite window, with privacy glass"); other supplier wording prints as written. Plain client wording for every supplier product needs a field of its own: **owner decision (§9)**. | QA: paraphrased supplier lines can't be checked against the supplier's document, and a truncated line read as complete. |
 | S11 | **A hand-added record goes to the trade of the document it cites.** A hand-added record has category `notes` (the register can't set another). It joins the trade of its cited document's discipline (TLI → Lighting and electrical, windows → Windows and doors, Routleys → Plumbing fixtures, joiner → Joinery). A coordination pack also takes a record by that discipline. | Without this, every TLI fitting and window maker's opening would land in "Other selections". No supplier name is guessed. |
 
 ---
@@ -41,9 +43,9 @@ One record per client selection: an item of kind `selection` that isn't excluded
 | Field | From | Rule |
 |---|---|---|
 | `ref` | `refCode` | Printed by the schedule only |
-| `group` | `category` → trade group (§3.2); a hand-added record → its cited document's discipline | S11 |
+| `group` | a cited **supplier** document's discipline (a laundry trough on Routleys' selection is a plumbing fixture); else `category` → trade group (§3.2); else a hand-added record's cited document's discipline | S11 |
 | `item` | the question's short label, without "— who?"; a hand-added record's description; a legacy row's item only | |
-| `location` | the room; else the rooms `answer.areaIds` names; else, for a house default, its zone or "Throughout the house"; else "Site"; else the portal row's area; else "No room recorded" | Never claims "throughout the house" for a record that isn't a default |
+| `location` | the room; else the rooms `answer.areaIds` names; else, for a house default, its zone or "Throughout the house"; else "Site"; else the portal row's area; else "No room recorded" | Never claims "throughout the house" for a record that isn't a default, or for a zoned default (the presentation groups it under its zone) |
 | `replaces` | `overridesDefaultId` → the default's words, only when `roomDefaultsFor` includes it | ADB-01 |
 | `product` | the named product, else the client's words (description, else the card answer), with the parent ("Main roof") kept | |
 | `direction` | the client's words, when a named product differs from them (not for portal-created rows) | |
@@ -63,7 +65,7 @@ The CSP reads only `item`, `location`, `replaces`, the client's words or the nam
 
 ## 3. Technical Selections Schedule (TSS)
 
-**Reader:** Blue Leaf staff and the estimator, the architect and consultants, suppliers and subcontractors. **Format:** A4 landscape (`usePage("landscape")`). The PDF is authoritative; a controlled DOCX is available on request (owner decision Q5). **Stage:** consultants, tender and won. Preview at any stage.
+**Reader:** Blue Leaf staff and the estimator, the architect and consultants, suppliers and subcontractors. **Format:** A4 landscape (`usePage("landscape")`). The PDF is authoritative; a controlled DOCX is available on request (owner decision Q5). **Stage:** offered from consultants, tender and won; previewed and issued at any stage, with no further restriction (the principle of the owner's ADB decision Q6). The early specimen is a draft.
 
 ### 3.1 Pages
 
@@ -73,12 +75,12 @@ The CSP reads only `item`, `location`, `replaces`, the client's words or the nam
 | Title block | Kicker "Selections and coordination" (a pack: "Coordination request: Routleys (plumbing fixtures)"); "Draft /" when not issued | `titleBlock` |
 | Metadata | Prepared for, Client, Site, Drawing basis, Stage, Document, Prepared by, Status. A pack keeps its Status row | `metaGrid` |
 | Status note | **"Issued for coordination"** or **"Draft for coordination — not issued"**. "It isn't a purchase order, a variation or a technical approval. A product is the client's choice only where it is marked Client-approved, and a technical item is settled only where it is marked Verified. A supplier's document cited here is that supplier's own information: citing it isn't acceptance of its content." | `callout` |
-| Reading this schedule (page 1) | Each printed status defined once. "A row with no location applies throughout the house." The recorded direction. The source key. "A blank finish or quantity hasn't been recorded; a quantity from a supplier's schedule is that supplier's count." | label + body |
+| Reading this schedule (page 1) | Each printed status defined once. "A row with no location applies throughout the house." The recorded direction. "Blue Leaf supplies each item unless its supply is noted." The source key. "A blank finish or quantity hasn't been recorded; a quantity from a supplier's schedule is that supplier's count." | label + body |
 | Summary (page 1) | "27 selections. Known: 8 (…); Provisional: 19 (…); Unresolved: …", each class defined in brackets | body |
-| **01 Selections by trade** | One table per trade group. Its name and column labels repeat on every page: **Ref · Item and location · Selection · Finish · Qty · Status · Source**. Item cell: the item, then the location (and "instead of …"). Selection cell: the product; then manufacturer · supplier · code · supply; then "Recorded direction: …". Status cell: the selection status, then To verify / Verified. Source cell: the key (S1), then a flag. | `bandTable` (new, multi-column) |
+| **01 Selections by trade** | One table per trade group. Its name and column labels repeat on every page: **Ref · Item and location · Selection · Finish · Qty · Status · Source**. Item cell: the item, then the location (and "instead of …"). Selection cell: the product; then manufacturer · the supplier's code ("Routleys code 62397") · supply when it isn't Blue Leaf; then "Recorded direction: …". With no product, only the detail line, and the Status says "To be decided" once. Status cell: the selection status, then To verify / Verified. Source cell: the key (S1), then a flag. | `bandTable` (new, multi-column) |
 | **02 Requirements these selections must meet** | Ref · Requirement · Applies to (trade) · Status (Client-approved / To verify / Verified / For consultant review, with who confirms) | `dataTable` |
-| **03 Open actions and checks** | Ref · What is needed · Who. Each open next action on a schedule record, and open actions recorded against the schedule's trades. Source problems are pre-issue checks in the Hub, never printed as instructions. | `dataTable` |
-| **04 Source documents** | Key · Document · Revision and date ("No revision printed, received 14 November 2026") · Review status | `dataTable` |
+| **03 Open actions and checks** | Ref · What is needed · Who. Each open next action on a schedule record, and each open action that is a selection decision: an action in a trade, a K-012 choice, or one citing a document the schedule's records cite. **The same rule picks the client's asks in the presentation**, so every decision the client is asked about is here too. The intro says a To-verify row in 01 still needs its check. Source problems are pre-issue checks in the Hub, never printed as instructions. | `dataTable` |
+| **04 Source documents** | Key (numbered in the order rows print) · Document (issuer and number, or its title: "TLI lighting legend") · Revision and date ("No revision printed, received 14 November 2026") · Review status | `dataTable` |
 
 Every section is optional; the numbers count only what prints.
 
@@ -96,7 +98,7 @@ Every section is optional; the numbers count only what prints.
 
 ### 3.3 Rows
 
-- One row per record. Rows whose printed content is identical except the room merge, keeping every reference.
+- One row per record. Rows whose printed content is identical except the room merge, keeping every reference, except a counted product (one quantity can't speak for two rooms) and two records in the same room (a product the supplier listed twice is two items).
 - No "TBC", "Whole house", "(project default)" or "(room exception)". An open selection reads "To be decided"; blank only ever means a recorded preference. This applies the editorial rule in place of Tab 13:67's "explicit TBC".
 
 ### 3.4 Coordination packs
@@ -122,8 +124,8 @@ Before a pack is produced, the issue checks run (superseded source, a price, eng
 | Title block | "Client selections", "Your selections", the project | `titleBlock` |
 | Metadata | Prepared for, Site, Prepared by, Date, Document, Status | `metaGrid` |
 | Status note | **Negative statements only:** "This records your selections as they stand on <date>. It isn't a contract document, a price or a technical approval. A selection marked Client-approved records your choice; it doesn't mean the item has been checked or ordered." | `callout` |
-| **01 What we need from you** (optional) | Item (with its room) · What we need. Each open action the client owns on a selection, or on a selection decision recorded elsewhere (K-012), in the record's words. Also each selection the client is to decide. Proposals are not listed one per row: one sentence asks about every selection marked Proposed. Never anything the client has already answered, and never an unreleased item. | `dataTable` |
-| **02 Your selections, room by room** | "Throughout the house" first, then each room, with identical rooms sharing a group; "Not yet placed in a room" last. **Item · Your selection · Status.** Your selection is the client's own words for a preference. For anything proposed, chosen or approved, it is the product named, manufacturer first, with no code. The finish is a quieter second line. Where staff have raised a replacement with the client, a further line reads "You first asked for: …". The status shows only when marked. The intro defines each printed status once. | `groupedTable` |
+| **01 What we need from you** (optional) | Item (with its room) · What we need. Each open action the client owns on a selection, or on a selection decision recorded elsewhere (K-012), in the record's words. Also each selection the client is to decide. Proposals are not listed one per row: one sentence, with no count, asks about each selection marked Proposed. Never anything the client has already answered, and never an unreleased item. | `dataTable` |
+| **02 Your selections, room by room** | "Throughout the house" first, then a zoned default under its zone ("Main floor"), then each room, with identical rooms sharing a group; "Not yet placed in a room" last. **Item · Your selection · Status.** Your selection is the client's own words for a preference. For anything proposed, chosen or approved, it is the product named, manufacturer first, with no code. The finish is a quieter second line. Where staff have raised a replacement with the client, a further line reads "Previously recorded: …" (neutral: the earlier words may have been a proposal). A supplier's line in capitals or a code shows as the record's description (S12). Nothing chosen: the cell is empty and the status says "To be decided". The status shows only when marked. The intro defines each printed status once. | `groupedTable` |
 
 **Never in the presentation:**
 - register references, product codes or supplier document numbers (checked at issue);
@@ -172,11 +174,12 @@ New, for both documents unless stated:
 - **Verbatim from the document:**
   - Routleys: code → `model`, labelled as Routleys' code; quantity; product line → `product`; Routleys → `supplier`.
   - TLI: legend key and code → `model`; total → `quantity` + `unit`.
-  - Rylock: description and size → `product`; series → `model`; quote number, version and date → the received document.
+  - Rylock: description and size → `product`, verbatim; item number → `model` ("quote item 2"); quote number and version → the received document.
 - **Entered by staff at upload:**
   - TLI's identity (nothing printed).
-  - Routleys' revision: none; the selection number and printed date identify it, and "Stage n" is never used.
+  - Routleys' revision: none; the selection number identifies it, and "Stage n" is never used.
   - Discipline.
+  - **Not captured:** a document's own printed date (Rylock 4 Mar 2025, Routleys 7 Mar 2025 11:16 am). The received document has a received date only (§7).
 - **Staff review:** every room mapping; TBC owners → responsibility; maker vs supplier. `model` stays blank where nothing printed is a code.
 
 **2. What needs staff review**
@@ -236,6 +239,8 @@ New, for both documents unless stated:
 | Option lists (S6) | Load `selection_options` into the register (project mode), without prices. |
 | Size as a field | A `size` field (database change). |
 | Assisted supplier import | Read a received PDF into proposed rows (Claude PDF reading exists in the codebase) for staff to accept line by line. Never auto-accept (Tab 18:10, Tab 08:99). It must ignore content hidden in the file. |
+| A received document's own date | A document-date field captured at upload and printed beside its revision. |
+| Plain client wording for supplier products | A "client description" field on a record, printed by the presentation in place of the supplier's line (S12). |
 | Revision linking, checksum, link divergence | `supersedes_id` and `content_sha256` on received documents; one link between a record and its source. |
 | SFS-15 in the CPB and ADB | The same rule as S10 in `approvalIsEvidenced`, once the frozen briefs are reopened. |
 | Packs not recorded | Record a pack as an issue (recipient, revision, date) so a returned revision can be compared with what was sent. |
@@ -251,13 +256,13 @@ New, for both documents unless stated:
 - **Ridgeline at concept**, with no supplier data.
 
 **Fixture policy** (`register-projects.mjs`):
-- Supplier product words, codes and quantities are copied verbatim from the ZJ documents.
+- Supplier product words, codes and quantities are copied verbatim from the ZJ documents (truncation kept); the only change is a finish split from the end of a Routleys line.
 - Every staff decision is marked "staff:" in the code.
 - Accessories aren't entered.
 - Approvals, dates and recipients are the fictional project's, like every other record in the file.
 
 **Tests:**
-- `documents-selections` (60): the model, both documents, every check above, packs, templates.
+- `documents-selections` (66): the model, both documents, every check above, packs, templates, and the QA fixes.
 - Updated to the new shape: `documents-r01` T3, T11 and T15, `register-documents-structured`, `register-structured-store`, and `register-e2e` #17. New `register-e2e` #18b: issuing the presentation leaves the schedule's R02 current, and no code prints.
 - Unchanged and passing: `documents-cpb` 152, `documents-adb` 63.
 - The CPB and ADB templates re-author identical except their timestamps.
@@ -273,3 +278,4 @@ New, for both documents unless stated:
 5. **Engineered stone on the technical schedule:** existing stone to be retained or removed can't be named on the schedule today. The rule blocks any client-facing document that prints it, and the schedule prints the product field where staff are told to record it. Recommended: the schedule may name existing stone on a Retain, Remove, Make good or Alter record, with the SafeWork SA notice as a warning; supply selections still block. This changes a release blocker.
 6. **One record per product (S8):** confirm. The alternative is one record per element carrying only the principal product, with "plus further lines, see the supplier's document".
 7. **"Client-approved" or "Client-confirmed"** (release checklist R4, B2): this pair uses whichever the owner chooses for the suite.
+8. **Plain client wording for supplier products (S12):** add a "client description" field, so a homeowner never reads "CS Hinged Door Open In LHH…"? Until then, only capitals-and-code lines are replaced.
