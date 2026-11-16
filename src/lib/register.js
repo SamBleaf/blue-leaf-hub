@@ -361,6 +361,10 @@ export function makeItem(partial = {}) {
     promptKey: partial.promptKey || null,                      // Tab 21 question ID that seeded it
     disposition: oneOf(partial.disposition, REGISTER_DISPOSITIONS, "undecided"),
     description: partial.description || "",
+    // Client-facing, staff-reviewed (owner decision 8, selections pair): the short name and the words the Client
+    // Selections Presentation prints in place of a supplier's technical line. Never changes the product itself.
+    clientLabel: partial.clientLabel || "",
+    clientDescription: partial.clientDescription || "",
     product: partial.product || "",
     manufacturer: partial.manufacturer || "",
     model: partial.model || "",

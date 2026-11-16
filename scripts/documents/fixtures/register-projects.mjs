@@ -276,8 +276,10 @@ export function designCoordination(p) {
 // labelled sizes; the only change is a finish split from the end of a Routleys line ("… in Brushed Nickel"). What a
 // person had to decide is marked "staff:" beside it: which room a supplier's line belongs to, a manufacturer read from
 // the warranty web address printed on the line, a plain description for the client where the supplier wrote only
-// capitals or codes. One record per product the client chooses; accessories and rough-in parts (wastes, grates,
-// isolation stops, flush plates, roll holders, towel rails) stay in the supplier's document, which the record cites.
+// capitals or codes, and a client label and description (owner decision 8) for what the presentation prints. One record
+// per product the client chooses, including the visible accessories they choose (towel rails, roll holders, flush
+// buttons, wastes, grates: owner decision 6); concealed rough-in parts (isolating cocks, isolation stops) stay in the
+// supplier's document, which the record cites.
 // Approvals, dates and recipients are this fictional project's, like every other record in this file.
 const custom = (id, fields) => makeItem({ id, itemKind: "selection", section: "project", category: "notes", ...fields });   // the register's "Add item"
 const X = " × ";   // a size never breaks across lines
@@ -299,33 +301,39 @@ export function kestrelSupplierEvidence(p) {
   // Rylock item 2 (COMMENTS "LIVING"; staff: the kitchen and living room): the corner window the record proposes.
   // The quote's frame colour is "CHOOSE FINISH", so no finish is recorded; choosing it is the client's (ri_kc_s03).
   Object.assign(by("Dark slimline window frames, with large north-facing glazing to the living area"), {
-    product: "CS DESIGN FIXED LIGHT BUTT JOIN 90 DEG EXTERNAL, Height 2700" + X + "Width 1950, Depth 165MM", supplier: "Rylock", model: "quote item 2", ...cite(S.rylock) });
+    product: "CS DESIGN FIXED LIGHT BUTT JOIN 90 DEG EXTERNAL, Height 2700" + X + "Width 1950, Depth 165MM", supplier: "Rylock", model: "quote item 2", ...cite(S.rylock),
+    clientLabel: "Corner window", clientDescription: "Fixed glass corner window to the living area, 2.7 m high" });   // staff: client wording
   // The cabinetry still cites the superseded concept set: the draft flags it and issue is refused until it is relinked.
   Object.assign(by("Large central island and a walk-in butler's pantry, with cabinetry finishes still to be developed"), { sourceDocId: "doc_kc_c01", source: "Concept Set C-01" });
   p.register.items.push(
     // Rylock item 1 (COMMENTS "PANTRY - OPEN IN DOOR"; staff: the kitchen's butler's pantry). Handing as the quote states
     // it, with its viewpoint ("displayed from the outside, looking inwards").
     makeItem({ id: "ri_kc_s01", itemKind: "selection", category: "doors", promptKey: "R-007", section: "room", roomId: R.k_kitchen.id, room: R.k_kitchen.name, certainty: "proposed",
-      description: "Door from the butler's pantry",   // staff: the plain description the client reads
+      description: "Door from the butler's pantry",
+      clientLabel: "Pantry door", clientDescription: "Glazed hinged door from the butler's pantry, opening in",   // staff: client wording
       product: "CS Hinged Door Open In LHH (Lock on Right, Hinges Left, viewed from outside), Height 2400" + X + "Width 935, Depth 165, Tapered Lever BLACK (935MM FRAME SUITS 820MM DOOR)",
       supplier: "Rylock", model: "quote item 1", responsibility: "blue_leaf", nextAction: "Confirm the overall frame depth with Rylock: the quote leaves it to the builder (\"TBA ...Builder to confirm Overall Frame Depth\")", ...cite(S.rylock) }),
     // Rylock item 4 (COMMENTS "ENSUITE").
     makeItem({ id: "ri_kc_s02", itemKind: "selection", category: "doors", promptKey: "R-007", section: "room", roomId: R.k_ensuite.id, room: R.k_ensuite.name, certainty: "proposed",
-      description: "Ensuite window, with privacy glass",   // staff: the plain description the client reads
+      description: "Ensuite window, with privacy glass",
+      clientLabel: "Ensuite window", clientDescription: "Awning window with privacy glass and a black winder",   // staff: client wording
       product: "AA 65 SERIES CHAINWINDER AWNING OVO, Height 600" + X + "Width 2400, Depth 165MM, SAFETY TOUGHENED PRIVACY 4/12/4mm, Operator Colour BLACK",
       supplier: "Rylock", model: "quote item 4", ...cite(S.rylock) }),
     // Quote-wide points, as action records citing the quote (the register gives a W-025 action no trade category).
     makeItem({ id: "ri_kc_s03", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Window frame colour",
       responsibility: "client", nextAction: "Choose the frame colour for the new windows and doors", ...cite(S.rylock) }),
     makeItem({ id: "ri_kc_s04", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Glazing performance",
-      responsibility: "blue_leaf", nextAction: "Ask Rylock for the glazing U-value and SHGC: the quote gives none, and says the energy report wasn't sighted", ...cite(S.rylock) }),
+      responsibility: "trade", nextAction: "Provide the glazing U-value and SHGC for each item: the quote gives none, and says the energy report wasn't sighted", ...cite(S.rylock) }),
     makeItem({ id: "ri_kc_s05", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Rylock quote note",
-      responsibility: "blue_leaf", nextAction: "Ask Rylock what \"BUILDER TO C.O.S\" on quote item 2 requires", ...cite(S.rylock) }),
+      responsibility: "trade", nextAction: "Explain what \"BUILDER TO C.O.S\" on quote item 2 requires", ...cite(S.rylock) }),
     // TLI legend: one record per legend line, added by hand (no library question covers lighting). The legend has no
     // rooms (only the pendants name one) and keys a lighting plan not yet received, so a fitting's room isn't known; its
     // quantity is TLI's whole-plan total. The legend line is the product; its key is the code.
-    custom("ri_kc_s06", { certainty: "proposed", description: "Downlights", product: "TLI-D700+-10.6W-WH-3K", model: "DL.2", supplier: "TLI", quantity: 46, unit: "EA", ...cite(S.tli) }),
-    custom("ri_kc_s07", { certainty: "proposed", description: "Wall lights", product: "TLI-ORB-B-3W-WH-3K", model: "WL.1", supplier: "TLI", quantity: 5, unit: "EA", ...cite(S.tli) }),
+    // staff: client wording read from the code (WH white, 3K warm white), to confirm with TLI before it is shown.
+    custom("ri_kc_s06", { certainty: "proposed", description: "Downlights", product: "TLI-D700+-10.6W-WH-3K", model: "DL.2", supplier: "TLI", quantity: 46, unit: "EA", ...cite(S.tli),
+      clientDescription: "Recessed LED downlights, white, warm-white light" }),
+    custom("ri_kc_s07", { certainty: "proposed", description: "Wall lights", product: "TLI-ORB-B-3W-WH-3K", model: "WL.1", supplier: "TLI", quantity: 5, unit: "EA", ...cite(S.tli),
+      clientDescription: "Round LED wall lights, white, warm-white light" }),
     // "( PL.1 ) - ( Entrance / Entry Hall ) TBC by Designer" (staff: the Entry; the designer is the architect on file).
     // TLI isn't their supplier: the legend leaves them to the designer and the electrician (QA K-01).
     custom("ri_kc_s08", { roomId: R.k_entry.id, room: R.k_entry.name, section: "room", description: "Entry pendants", model: "PL.1", quantity: 3, unit: "EA",
@@ -359,37 +367,74 @@ export function ridgelineTender(p) {
   const line = (room, promptKey, fields) => makeItem({ id: "ri_rd_s" + String(++n).padStart(2, "0"), itemKind: "selection", category: "sanitary", promptKey, section: "room", roomId: R[room].id, room, ...routleys, ...fields });
   // KITCHEN (staff: Routleys' KITCHEN is the kitchen). 65821 sink and 68845 mixer. The record's earlier direction was an
   // undermount sink and a matte black mixer: both stay on the record, and the change is the client's to confirm.
+  // staff: every client label and description below is Blue Leaf's wording of the supplier's line.
   set("Kitchen", "K-007", { ...routleys, product: "Acero+ 860 Single Bowl Inset Sink 1 Tap Hole Left Hand End Bowl", colour: "Stainless Steel", model: "65821", quantity: 1,
+    clientLabel: "Kitchen sink", clientDescription: "Acero+ single-bowl inset sink, stainless steel",
     responsibility: "client", nextAction: "Confirm the inset sink and brushed nickel mixer Routleys selected, in place of the undermount sink and matte black mixer recorded earlier" });
   // ENSUITE and BATHROOM (staff: Routleys' rooms of the same names).
-  set("Ensuite", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 2 });
-  set("Bathroom", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 1 });
+  set("Ensuite", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 2,
+    clientLabel: "Basin mixers", clientDescription: "Maci wall-mounted basin mixers with a 180 mm spout" });
+  set("Bathroom", "B-008", { ...routleys, certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Wall Bath / Basin Mixer Set with 180mm Spout", colour: "Brushed Nickel", model: "62397", quantity: 1,
+    clientLabel: "Basin mixer", clientDescription: "Maci wall-mounted basin mixer with a 180 mm spout" });
   // 57525: the line is cut off on the page ("...Vogue Soft Close Seat..."), and the suite is back-to-wall where the
   // record's direction was wall-hung.
   set("Ensuite", "B-003", { ...routleys, certainty: "proposed", manufacturer: CAROMA, product: "Urbane II Cleanflush Back To Wall Toilet Suite Back inlet with Vogue Soft Close Seat...", model: "57525", quantity: 1,
+    clientDescription: "Caroma Urbane II back-to-wall toilet suite with a soft-close seat",
     responsibility: "client", nextAction: "Confirm the back-to-wall toilet Routleys selected for the ensuite, in place of the wall-hung toilet recorded earlier" });
   p.register.items.push(
-    line("Kitchen", "K-007", { certainty: "proposed", product: "Luxe LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68845", quantity: 1 }),   // staff: finish split without "in"
-    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),
-    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1 }),
-    line("Ensuite", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 2 }),
+    line("Kitchen", "K-007", { certainty: "proposed", product: "Luxe LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68845", quantity: 1,   // staff: finish split without "in"
+      clientLabel: "Kitchen mixer", clientDescription: "Luxe pull-down sink mixer" }),
+    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1,
+      clientLabel: "Shower mixer", clientDescription: "Maci wall mixer for the shower" }),
+    line("Ensuite", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1,
+      clientLabel: "Shower rail and head", clientDescription: "Glide twin-rail shower with a rain head" }),
+    line("Ensuite", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 2,
+      clientLabel: "Basins", clientDescription: "Caroma Liano II oval inset basins" }),
+    // ENSUITE visible accessories (owner decision 6): what the client sees and chooses has its own record.
+    line("Ensuite", "B-008", { certainty: "proposed", manufacturer: CAROMA, product: "Urbane II Flush Button only for Wall faced Close Coupled Suite", colour: "Brushed Nickel", model: "58296", quantity: 1,
+      clientLabel: "Flush button", clientDescription: "Urbane II flush button" }),
+    line("Ensuite", "B-008", { certainty: "proposed", product: "V & B Soho / Architectura Toilet Roll Holder Right Hand Face", colour: "Brushed Nickel", model: "60818", quantity: 1,
+      clientLabel: "Toilet roll holder", clientDescription: "Soho toilet roll holder" }),
+    line("Ensuite", "B-008", { certainty: "proposed", product: "V & B Soho / Architectura Double Towel Rail 800mm", colour: "Brushed Nickel", model: "60815", quantity: 1,
+      clientLabel: "Towel rails", clientDescription: "Soho double towel rail, 800 mm" }),
+    line("Ensuite", "B-008", { certainty: "proposed", product: "V & B Soho / Architectura Single Towel Rail 300mm", colour: "Brushed Nickel", model: "60799", quantity: 1,
+      clientLabel: "Hand towel rail", clientDescription: "Soho single towel rail, 300 mm" }),
+    line("Ensuite", "B-008", { certainty: "proposed", product: "Basin 4 in1 Pop Down Waste 32x40mm", colour: "Brushed Nickel", model: "53395", quantity: 2,
+      clientLabel: "Basin wastes", clientDescription: "Pop-down basin wastes" }),
+    // The square grates don't match the linear floor waste recorded earlier: raised with the client.
+    line("Ensuite", "B-008", { certainty: "proposed", product: "Bermuda Square Tile Grate 80mm", colour: "Chrome", model: "30411", quantity: 2,
+      clientLabel: "Floor grates", clientDescription: "Square tile floor grates, 80 mm", responsibility: "client",
+      nextAction: "Confirm the square floor grates Routleys selected for the ensuite, in place of the linear floor waste recorded earlier" }),
     // BATHROOM: the shower system is settled; the bath's spout and mixers wait on where the bath goes (QA R04).
-    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1 }),
-    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),
-    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1 }),   // listed twice by Routleys, 1 each
-    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci / Mika Bath Spout 180mm", colour: "Brushed Nickel", model: "62417", quantity: 1 }),
-    line("Bathroom", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 1 }),
+    line("Bathroom", "B-008", { certainty: "client_approved", evidence: meeting, manufacturer: GREENS, product: "Glide Twin Rail Shower System with Rain Boost", colour: "Brushed Nickel", model: "58127", quantity: 1,
+      clientLabel: "Shower rail and head", clientDescription: "Glide twin-rail shower with a rain head" }),
+    // Routleys lists 62412 twice, 1 each, with nothing between them; the room has a bath and a shower, so one is the
+    // bath's and one the shower's (staff: reconciled by location, each labelled for the client).
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1,
+      clientLabel: "Bath mixer", clientDescription: "Maci wall mixer for the bath" }),
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci Bath Shower Mixer Mini Plate", colour: "Brushed Nickel", model: "62412", quantity: 1,
+      clientLabel: "Shower mixer", clientDescription: "Maci wall mixer for the shower" }),
+    line("Bathroom", "B-008", { certainty: "proposed", manufacturer: GREENS, product: "Maci / Mika Bath Spout 180mm", colour: "Brushed Nickel", model: "62417", quantity: 1,
+      clientLabel: "Bath spout", clientDescription: "Maci wall bath spout, 180 mm" }),
+    line("Bathroom", "B-005", { certainty: "proposed", manufacturer: CAROMA, product: "Liano II 530 Pill Oval Inset Basin No Tap Hole", colour: "White", model: "63633", quantity: 1,
+      clientLabel: "Basin", clientDescription: "Caroma Liano II oval inset basin" }),
+    line("Bathroom", "B-008", { certainty: "proposed", product: "V & B Soho / Architectura Double Towel Rail 800mm", colour: "Brushed Nickel", model: "60815", quantity: 1,
+      clientLabel: "Towel rails", clientDescription: "Soho double towel rail, 800 mm" }),
+    line("Bathroom", "B-008", { certainty: "proposed", product: "V & B Soho / Architectura Single Towel Rail 300mm", colour: "Brushed Nickel", model: "60799", quantity: 1,
+      clientLabel: "Hand towel rail", clientDescription: "Soho single towel rail, 300 mm" }),
     // LAUNDRY: 53012 trough, its finish cut off on the page ("1 Tap Hole in..."), and 68713 mixer.
     line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Kubic Deep Galley Undermount / Overmount Sink 35 Ltr with Tap Landing 1 Tap Hole in...", model: "53012", quantity: 1,
-      responsibility: "blue_leaf", nextAction: "Ask Routleys for the laundry sink's finish: its line is cut off in selection 452499" }),
-    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Astro II LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68713", quantity: 1 }),
+      clientLabel: "Laundry sink", clientDescription: "Kubic deep laundry sink with a tap landing",
+      responsibility: "trade", nextAction: "Confirm the laundry sink's finish: its line is cut off in selection 452499 (\"1 Tap Hole in...\")" }),
+    line("Laundry", "L-003", { category: "joinery", certainty: "proposed", product: "Astro II LF Pull Down Sink Mixer", colour: "Brushed Nickel", model: "68713", quantity: 1,
+      clientLabel: "Laundry mixer", clientDescription: "Astro II pull-down sink mixer" }),
     // Actions citing the selection (the register gives a W-025 action no trade category).
     makeItem({ id: "ri_rd_a01", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Bath location",
       responsibility: "blue_leaf", nextAction: "Routleys lists a freestanding bath (49905) in the bathroom, with its spout (62417) and bath/shower mixers (62412); the plans show the bath in the ensuite. Confirm the room with the client and Routleys", ...routleys }),
     makeItem({ id: "ri_rd_a02", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Routleys WC room",
       responsibility: "blue_leaf", nextAction: "Routleys' selection 452499 includes a WC'S room (toilet suite 57525, basin 63633, mixer 62397); the plans have no separate WC. Confirm with the client and Routleys whether it is withdrawn or belongs to another room", ...routleys }),
     makeItem({ id: "ri_rd_a03", itemKind: "action", category: "notes", promptKey: "W-025", section: "project", description: "Toilet suite description",
-      responsibility: "blue_leaf", nextAction: "Ask Routleys for the toilet suite's full description (57525): its line is cut off in selection 452499", ...routleys }),
+      responsibility: "trade", nextAction: "Confirm the toilet suite's full description (57525): its line is cut off in selection 452499", ...routleys }),
   );
   return p;
 }

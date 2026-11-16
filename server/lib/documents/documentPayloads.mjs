@@ -303,10 +303,10 @@ export function buildSelectionsSchedulePayload(fx) {
   const t = fx.technicalSchedule || {}, p = fx.project || {}, meta = fx.meta || {};
   const id = documentIdentity({ type: "selections_schedule", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
   const groups = (t.groups || []).filter((g) => g.rows && g.rows.length);
-  const reqs = t.requirements || [], actions = t.actions || [], sources = t.sources || [];
-  const present = { s1: groups.length > 0, s2: reqs.length > 0, s3: actions.length > 0, s4: sources.length > 0 };
+  const reqs = t.requirements || [], actions = t.actions || [], pending = t.pending || [], sources = t.sources || [];
+  const present = { s1: groups.length > 0, s2: reqs.length > 0, s3: actions.length > 0, s3b: pending.length > 0, s4: sources.length > 0 };
   const nums = {}; let n = 0;
-  for (const k of ["s1", "s2", "s3", "s4"]) if (present[k]) nums[k] = two(++n);
+  for (const k of ["s1", "s2", "s3", "s3b", "s4"]) if (present[k]) nums[k] = two(++n);
   const states = new Set(t.statuses || []), tech = new Set(t.technicalShown || []);
   const drawing = String(p.drawingBasis || "").trim();
   const pack = t.coord ? `Coordination request: ${t.coord}` : "";
@@ -363,9 +363,16 @@ export function buildSelectionsSchedulePayload(fx) {
     ...boundedRows("REQS", reqs.map((x) => ({ REF: x.ref || "", TEXT: x.text, APPLIES: x.applies || "", STATUS: x.status || "", WHO: nl(x.who && /To verify/.test(x.status || "") ? x.who : "") }))),
 
     HAS_S3: present.s3, S3_NUM: nums.s3 || "",
+    // A pack asks its party for what is theirs to answer (owner review: the Routleys pack read as Blue Leaf's to-do list).
+    S3_KICKER: t.party ? "Requests" : "Open items", S3_TITLE: t.party ? `What we need from ${t.party}` : "Open actions and checks",
     // Not "everything still open": a To-verify row's check is marked where it prints (QA K-06).
-    ACTIONS_INTRO: "The open actions on these selections and the decisions they wait on, by reference. A row in section 01 changes only once its action is closed and the register updated; a row marked To verify still needs its technical check.",
+    ACTIONS_INTRO: t.party ? "Please reply against these references. A row in section 01 changes only once Blue Leaf has checked your reply and updated the register."
+      : "The open actions on these selections and the decisions they wait on, by reference. A row in section 01 changes only once its action is closed and the register updated; a row marked To verify still needs its technical check.",
     ...boundedRows("ACTIONS", actions.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
+
+    HAS_S3B: present.s3b, S3B_NUM: nums.s3b || "",
+    PENDING_INTRO: "Decisions and follow-ups with the client and Blue Leaf that affect these selections, for information. Nothing here is asked of you.",
+    ...boundedRows("PENDING", pending.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
 
     HAS_S4: present.s4, S4_NUM: nums.s4 || "",
     SOURCES_INTRO: "The received documents this schedule cites, by key. The originals are kept as received; Blue Leaf reconciles each against the register by hand.",
@@ -393,7 +400,7 @@ export function buildClientPresentationPayload(fx) {
   const present = { s1: needs.length > 0 || proposals > 0, s2: groups.length > 0 };
   const nums = {}; let n = 0;
   for (const k of ["s1", "s2"]) if (present[k]) nums[k] = two(++n);
-  const marked = ["Proposed", "Client-approved", "To be decided", "Existing to remain", "Client's choice, with Blue Leaf", "Change requested, with Blue Leaf"].filter((st) => statuses.has(st));
+  const marked = ["Proposed", "Being confirmed", "Client-approved", "To be decided", "Existing to remain", "Client's choice, with Blue Leaf", "Change requested, with Blue Leaf"].filter((st) => statuses.has(st));
   return {
     HDR_DOC_TYPE: "Your selections",
     HDR_PROJECT: p.siteShort || p.siteAddress || "",
@@ -422,6 +429,7 @@ export function buildClientPresentationPayload(fx) {
     SEL_INTRO: [groups[0]?.group === "Throughout the house" ? "What applies throughout the house comes first, then each room." : "Room by room.",
       marked.length ? `Each item is your preferred direction unless it is marked ${andWords(marked)}.` : "Each item is your preferred direction.",
       statuses.has("Proposed") ? "Proposed: an option we've put to you, not yet accepted." : "",
+      statuses.has("Being confirmed") ? "Being confirmed: we're checking the supplier's details before putting an option to you." : "",
       statuses.has("Client-approved") ? "Client-approved: you've confirmed it with us." : "",
       statuses.has("To be decided") ? "To be decided: not chosen yet." : "",
       statuses.has("Existing to remain") ? "Existing to remain: staying as it is." : "",

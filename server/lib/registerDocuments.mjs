@@ -892,6 +892,9 @@ export function selectionRecords(register, context = {}, { coord } = {}) {
       // A preference shows the client's words, never a product someone else wrote on it (spec critique).
       preferenceWords: typed || "",
       manufacturer: clean(i.manufacturer), model: clean(i.model), supplier: clean(i.supplier),
+      // Staff-reviewed client wording (owner decision 8): the presentation's label and words; the schedule keeps the
+      // supplier's own line.
+      clientLabel: clean(i.clientLabel), clientDescription: clean(i.clientDescription),
       finish: clean(i.colour),
       // Never a zero (Tab 22:25): 0 or blank is not recorded.
       quantity: Number.isFinite(qty) && qty > 0 ? clean(`${i.quantity} ${i.unit || ""}`) : "", zeroQuantity: i.quantity !== null && i.quantity !== undefined && i.quantity !== "" && Number(i.quantity) === 0,
@@ -983,16 +986,20 @@ function technicalScheduleFixture(input, opts = {}) {
   // 03 · Open actions and checks: every open next action on a schedule record, and the open actions recorded against
   // the schedule's trades (in a pack, that party's). Linked by reference; nothing repeats a product. Source problems
   // are the preview's pre-issue checks, never instructions printed for outside readers (spec critique).
-  const actions = records.filter((r) => r.next).map((r) => ({ ref: r.ref, text: r.next, who: adbWho(context, byIdOf(register, r.id)) }));
+  const actions = records.filter((r) => r.next).map((r) => ({ ref: r.ref, text: r.next, who: adbWho(context, byIdOf(register, r.id)), resp: r.responsibility }));
   const recordIds = new Set(records.map((r) => r.id));
   // Every selection decision the presentation asks the client about is here too (QA K-04): the same rule.
   for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && x.itemKind === "action" && !x.resolved && clean(x.nextAction)
-    && selectionAction(x, records, opts)))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i) });
+    && selectionAction(x, records, opts)))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i), resp: i.responsibility });
+  // In a coordination pack, the party's own requests (owner Trade / supplier) come first, addressed to them; everything
+  // else waits on the client or Blue Leaf and is listed for information only.
+  const requests = opts.coord ? actions.filter((a) => a.resp === "trade").map((a) => ({ ...a, who: coordLabel })) : actions;
+  const pending = opts.coord ? actions.filter((a) => a.resp !== "trade") : [];
   const tally = Object.fromEntries(KNOWLEDGE.map((k) => [k, records.filter((r) => r.knowledge === k).length]));
   fx.selections = records;
   if (context.sourcesUnchecked) fx.__sourcesUnchecked = true;
   fx.technicalSchedule = {
-    coord: coordLabel, groups, requirements, actions, sources,
+    coord: coordLabel, party: opts.coord ? coordLabel.replace(/\s*\(.*\)$/, "") : "", groups, requirements, actions: requests, pending, sources,
     knowledge: tally, total: records.length,
     statuses: [...new Set(records.map((r) => r.state))],
     technicalShown: [...new Set(records.map((r) => r.technical).filter(Boolean))],
@@ -1022,20 +1029,35 @@ function clientSelectionsFixture(input) {
   // Mostly capitals (over half the letters), or one word with no space: a supplier's line or code, not reading words.
   const codeLike = (t) => { if (!t) return false; if (!/\s/.test(t.trim())) return true; const letters = t.match(/[A-Za-z]/g) || [];
     return letters.length > 0 && (t.match(/[A-Z]/g) || []).length / letters.length > 0.5; };
-  const yours = (r) => (r.state === "preferred" ? r.preferenceWords || (r.named ? named(r) : "")
-    : r.named ? (codeLike(r.product) ? r.description : named(r)) : r.product);
+  // A supplier's product is put to the client only once Blue Leaf has reconciled its document (owner, checkpoint 01
+  // review): until then the client sees their own direction, marked "Being confirmed".
+  const reconciled = (r) => !["unreviewed", "superseded", "missing"].includes(r.sourceFlag);
+  const productWords = (r) => r.clientDescription || (r.named ? (codeLike(r.product) ? r.description : named(r)) : r.product);
+  const yours = (r) => {
+    if (r.state === "preferred") return r.clientDescription || r.preferenceWords || (r.named ? named(r) : "");
+    if (r.state === "proposed" && r.named && !reconciled(r)) return r.preferenceWords;
+    return productWords(r);
+  };
+  // What the client is told: a proposal they can't identify is still to be decided (a Proposed item always describes
+  // a real option); one waiting on an unreconciled supplier document is being confirmed (owner, checkpoint 01 review).
+  const clientState = (r) => (r.state !== "proposed" ? r.state : !reconciled(r) && r.named ? "confirming" : !yours(r) ? "undecided" : "proposed");
+  const STATUS = { ...STATE_WORDS, confirming: "Being confirmed", not_discussed: "" };
   // The client's earlier words show beside a proposal only when staff have raised the difference with them (an open
   // action the client owns): a description can also be a staff label ("Ensuite window"), never shown as the client's.
-  const row = (r) => ({ item: r.item, text: yours(r), finish: r.finish, status: r.selection, replaces: r.replaces,
-    earlier: ["proposed", "with_blue_leaf"].includes(r.state) && r.next && r.responsibility === "client" ? r.direction : "", roomId: r.roomId });
+  // The finish line is left out when the client's words already say it ("…, stainless steel").
+  const saysFinish = (r) => !!r.finish && !!r.clientDescription && r.clientDescription.toLowerCase().includes(r.finish.toLowerCase());
+  const row = (r) => { const st = clientState(r); return { item: r.clientLabel || r.item, text: yours(r), finish: st === "confirming" || saysFinish(r) ? "" : r.finish, status: STATUS[st], state: st,
+    replaces: r.replaces, earlier: ["proposed", "with_blue_leaf"].includes(st) && r.next && r.responsibility === "client" ? r.direction : "", roomId: r.roomId, id: r.id }; };
   const sig = (x) => `${x.item}|${x.text}|${x.finish}|${x.status}|${x.replaces}|${x.earlier}`;
+  const strip = (x) => { const { state, id, ...rest } = x; return rest; };
   // By location: throughout the house first, then each room in order; rooms with identical selections share a group.
   const house = records.filter((r) => r.house).map(row);
   const zones = [...new Set(records.filter((r) => r.zone).map((r) => r.zone))].map((z) => ({ group: z, rows: records.filter((r) => r.zone === z).map(row) }));
   const loose = records.filter((r) => !r.house && !r.zone && !r.roomId).map(row);
   const perRoom = rooms.map((rm) => ({ room: rm, rows: records.filter((r) => r.roomId === rm.id).map(row) })).filter((g) => g.rows.length);
   const holders = new Map();
-  for (const g of perRoom) for (const x of g.rows) { const k = sig(x); if (!holders.has(k)) holders.set(k, []); holders.get(k).push(g.room); }
+  // Each room once per shared row: two identical records in one room never make "Bathroom and bathroom" (owner review).
+  for (const g of perRoom) for (const x of g.rows) { const k = sig(x); if (!holders.has(k)) holders.set(k, []); const hs = holders.get(k); if (!hs.some((h) => h.id === g.room.id)) hs.push(g.room); }
   const byRooms = new Map();
   for (const g of perRoom) for (const x of g.rows) {
     const hs = holders.get(sig(x));
@@ -1060,12 +1082,13 @@ function clientSelectionsFixture(input) {
   for (const r of all) {
     if (!r.clientVisible || ["with_blue_leaf", "change_requested", "approved", "existing"].includes(r.state)) continue;
     const where = r.roomId ? r.location : r.house ? "Throughout the house" : "";
-    if (r.next && r.responsibility === "client") needs.push({ item: r.item, where, text: sentence(r.next) });
-    else if (["undecided", "not_discussed"].includes(r.state) && r.responsibility === "client") needs.push({ item: r.item, where, text: `Choose the ${r.item.toLowerCase()}.` });
+    const label = r.clientLabel || r.item;
+    if (r.next && r.responsibility === "client") needs.push({ item: label, where, text: sentence(r.next) });
+    else if (["undecided", "not_discussed"].includes(r.state) && r.responsibility === "client") needs.push({ item: label, where, text: `Choose the ${label.toLowerCase()}.` });
   }
   // Whether any proposal awaits the client's answer: asked once, without a number (a count of records never matched the
   // merged rows, QA C04).
-  const proposals = records.some((r) => r.state === "proposed" && r.clientVisible && !(r.next && r.responsibility === "client"));
+  const proposals = records.some((r) => clientState(r) === "proposed" && r.clientVisible && !(r.next && r.responsibility === "client"));
   const recordIds = new Set(all.map((r) => r.id));
   for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && !x.resolved && x.responsibility === "client" && clean(x.nextAction)
     && selectionAction(x, all) && answerConfigFor(resolvePromptId(x.promptKey))?.tier !== "office_only"))) {
@@ -1074,7 +1097,9 @@ function clientSelectionsFixture(input) {
   }
   fx.selections = all;
   if (context.sourcesUnchecked) fx.__sourcesUnchecked = true;
-  fx.clientSelections = { groups, needs, proposals };
+  // What changed from the record's own state, for the pre-issue checks (never printed).
+  const shownAs = Object.fromEntries(records.map((r) => [r.id, clientState(r)]));
+  fx.clientSelections = { groups: groups.map((g) => ({ ...g, rows: g.rows.map(strip) })), needs, proposals, shownAs };
   return fx;
 }
 
@@ -1220,7 +1245,7 @@ function selectionChecks(docType, fx, { register, errors, warnings, shown }) {
   for (const r of recs.filter((x) => x.technical === "verified" && x.sourceFlag === "unreviewed")) errors.push(`${name(r)} is marked verified against ${r.source}, which hasn't been reviewed. Review the document (mark it reconciled) or step the record back to "needs verification".`);
   const unreviewed = recs.filter((x) => x.sourceFlag === "unreviewed" && x.technical !== "verified");
   if (unreviewed.length) warnings.push(docType === "client_presentation"
-    ? `${unreviewed.length} selection(s) come from a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). The presentation shows them to the client as they stand, without naming the source: review the document first if they may change.`
+    ? `${unreviewed.length} selection(s) come from a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). Until it is reconciled, their products aren't put to the client: they print as Being confirmed, with the client's own direction.`
     : `${unreviewed.length} selection(s) cite a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). They print as cited, flagged "Source not yet reviewed".`);
   // An approval held only as the portal board's status, with no who, when or how (research A, SFS-15).
   for (const r of recs.filter((x) => x.boardOnlyApproval)) errors.push(`${name(r)} is approved on the portal board with no recorded evidence of who approved it, when and how. Record the approval, or step it back; until then it prints as Proposed.`);
@@ -1237,6 +1262,15 @@ function selectionChecks(docType, fx, { register, errors, warnings, shown }) {
     && (list.every((r) => !r.model) || new Set(list.map((r) => r.model)).size < list.length)) warnings.push(`${list.length} client-approved records for ${name(list[0])} name different products (${list.map((r) => `"${r.product}"`).join(", ")}). Check they are separate items, not one changed choice.`);
   for (const r of recs.filter((x) => x.zeroQuantity)) warnings.push(`${name(r)} has a quantity of 0. A quantity that isn't known is left blank; it prints blank.`);
   if (docType === "client_presentation") {
+    const shownAs = fx.clientSelections?.shownAs || {};
+    const notReady = recs.filter((x) => x.state === "proposed" && shownAs[x.id] === "undecided");
+    if (notReady.length) warnings.push(`${notReady.length} proposal(s) have nothing a client can read (${notReady.map(name).join(", ")}). They print as To be decided: record a client description, or the client's own words.`);
+    // Two rows in one location under one name can't be told apart (owner review: "Sink & mixer" twice).
+    for (const g of fx.clientSelections?.groups || []) {
+      const seen = new Map();
+      for (const x of g.rows) seen.set(x.item, (seen.get(x.item) || 0) + 1);
+      for (const [label, n] of seen) if (n > 1) warnings.push(`${n} rows in ${g.group} print as "${label}". Give each a client label (for example "Kitchen sink", "Kitchen mixer").`);
+    }
     // A preference shows the client's words; one with only a product typed on it shows the product as theirs.
     for (const r of recs.filter((x) => x.state === "preferred" && !x.preferenceWords && x.named)) warnings.push(`${name(r)} is a preference with only a product recorded ("${r.product}"). The presentation shows it as the client's preferred direction: record the client's own words, or mark it Proposed if it was put to them.`);
     // The client never sees a register reference, a product code or a supplier's document number.

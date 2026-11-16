@@ -95,6 +95,7 @@ export function selRowToItem(row, { isPreconstruction } = {}) {
     resolved: !!d.resolved,
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
+    clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
     evidence: row.approval_evidence || (approved && row.approved_at ? { at: row.approved_at, by: "Portal board", method: "board" } : null),
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -148,6 +149,7 @@ export function rsiRowToItem(row) {
     resolved: !!d.resolved,
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
+    clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
     evidence: row.approval_evidence || null,
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -161,6 +163,7 @@ function detailOf(item) {
     promptKey: item.promptKey || null, categoryKey: item.category, section: item.section, level: item.level || "",
     isDefault: !!item.isDefault, overridesDefaultId: item.overridesDefaultId || null, resolved: !!item.resolved,
     description: item.description || "",
+    clientLabel: item.clientLabel || "", clientDescription: item.clientDescription || "",
     ...(item.answer ? { answer: item.answer } : {}),                // internal: register_detail is never in a client projection
   };
 }

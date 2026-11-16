@@ -12,6 +12,7 @@
 2. **A first spec,** reviewed by three independent critics (the brief, the Master Register rules, the code) before any code was built.
 3. **This revision,** which takes their findings: 3 blockers and 28 other findings, recorded in the checkpoint's `QA.md`.
 4. **One focused QA round** on the rendered specimens: four reviewers, each checked by a sceptic. 40 findings, 32 confirmed, all fixed or recorded below.
+5. **The owner's review of checkpoint 01** (16 Nov): TSS close to ready; CSP needs one focused correction pass. Six rendered-page defects, the release-control concern and decisions 1 to 8 (§9) are answered in **checkpoint 02**. The TSS design and the shared model are unchanged.
 
 ---
 
@@ -32,6 +33,10 @@ Each is reversible. The owner's confirmation is asked for in §9.
 | S9 | **A supplier's document is cited, never adopted.** The schedule's note says citing it isn't acceptance of its content. "Mark verified by this document" is now offered only for a consultant document marked reconciled. | Tab 14:76, Tab 15:51 ("receiving a PDF is never equivalent to client approval"). |
 | S10 | **An approval held only as the portal board's status prints as Proposed**, and blocks issue in both documents until the who, when and how are recorded. | Research A SFS-15: a promoted scratchpad approval gets made-up evidence ("Portal board"). Applied to the selections documents only; the CPB and ADB are frozen (§9). |
 | S12 | **A supplier's words print as the supplier wrote them.** On the schedule, a product line is verbatim (truncation kept, sizes labelled as printed, handing with its viewpoint); the only change is a finish split from the end of a Routleys line. A code says whose it is ("Routleys code 62397"). In the presentation, a supplier's line written mostly in capitals or as a bare code is replaced by the record's own description ("Ensuite window, with privacy glass"); other supplier wording prints as written. Plain client wording for every supplier product needs a field of its own: **owner decision (§9)**. | QA: paraphrased supplier lines can't be checked against the supplier's document, and a truncated line read as complete. |
+| S13 | **Client wording (owner decision 8).** Each record has an optional, staff-reviewed **client label** ("Kitchen mixer") and **client description** ("Luxe pull-down sink mixer"), entered in the register's office fields and kept in `register_detail` (no database column). The presentation prints them; the schedule keeps the supplier's line untouched. They are wording, so editing them never needs the client's re-approval. | Owner review: "CS Hinged Door Open In LHH" reached the client; two rows both read "Sink & mixer". |
+| S14 | **A supplier's product reaches the client only once its document is reconciled** (owner review, release control). A proposal citing a document still received or under review prints in the presentation as **Being confirmed**, with the client's own direction and no product. A proposal with nothing a client can read prints **To be decided**. So a Proposed row always describes a real option. The technical schedule keeps both, flagged. | The Kestrel presentation was issued with seven selections from documents under review. |
+| S15 | **Visible accessories get their own records (owner decision 6):** towel rails, roll holders, flush buttons, wastes and grates the client sees and chooses. Concealed rough-in parts (isolating cocks, isolation stops) stay in the supplier's schedule. | Supersedes the accessories part of S8. |
+| S16 | **A coordination pack asks its party for what is theirs.** Section 03 becomes "What we need from Routleys": the actions owned by the trade or supplier, Who = the party. A following section, "Waiting on others", lists the client's and Blue Leaf's open items for information only. | Owner review: the Routleys pack read as Blue Leaf's to-do list. |
 | S11 | **A hand-added record goes to the trade of the document it cites.** A hand-added record has category `notes` (the register can't set another). It joins the trade of its cited document's discipline (TLI → Lighting and electrical, windows → Windows and doors, Routleys → Plumbing fixtures, joiner → Joinery). A coordination pack also takes a record by that discipline. | Without this, every TLI fitting and window maker's opening would land in "Other selections". No supplier name is guessed. |
 
 ---
@@ -125,7 +130,7 @@ Before a pack is produced, the issue checks run (superseded source, a price, eng
 | Metadata | Prepared for, Site, Prepared by, Date, Document, Status | `metaGrid` |
 | Status note | **Negative statements only:** "This records your selections as they stand on <date>. It isn't a contract document, a price or a technical approval. A selection marked Client-approved records your choice; it doesn't mean the item has been checked or ordered." | `callout` |
 | **01 What we need from you** (optional) | Item (with its room) · What we need. Each open action the client owns on a selection, or on a selection decision recorded elsewhere (K-012), in the record's words. Also each selection the client is to decide. Proposals are not listed one per row: one sentence, with no count, asks about each selection marked Proposed. Never anything the client has already answered, and never an unreleased item. | `dataTable` |
-| **02 Your selections, room by room** | "Throughout the house" first, then a zoned default under its zone ("Main floor"), then each room, with identical rooms sharing a group; "Not yet placed in a room" last. **Item · Your selection · Status.** Your selection is the client's own words for a preference. For anything proposed, chosen or approved, it is the product named, manufacturer first, with no code. The finish is a quieter second line. Where staff have raised a replacement with the client, a further line reads "Previously recorded: …" (neutral: the earlier words may have been a proposal). A supplier's line in capitals or a code shows as the record's description (S12). Nothing chosen: the cell is empty and the status says "To be decided". The status shows only when marked. The intro defines each printed status once. | `groupedTable` |
+| **02 Your selections, room by room** | Item = the client label, else the question's label; Your selection = the client description, else the rules below (S13, S14). Each room appears once in a group's name ("Bathroom and bathroom" is impossible); two identical records in one room are two rows. A finish line already said by the client description is left out. "Throughout the house" first, then a zoned default under its zone ("Main floor"), then each room, with identical rooms sharing a group; "Not yet placed in a room" last. **Item · Your selection · Status.** Your selection is the client's own words for a preference. For anything proposed, chosen or approved, it is the product named, manufacturer first, with no code. The finish is a quieter second line. Where staff have raised a replacement with the client, a further line reads "Previously recorded: …" (neutral: the earlier words may have been a proposal). A supplier's line in capitals or a code shows as the record's description (S12). Nothing chosen: the cell is empty and the status says "To be decided". The status shows only when marked. The intro defines each printed status once. | `groupedTable` |
 
 **Never in the presentation:**
 - register references, product codes or supplier document numbers (checked at issue);
@@ -271,6 +276,17 @@ New, for both documents unless stated:
 
 ## 9. Decisions for the owner
 
+**Owner's answers, 16 Nov (checkpoint 01 review):**
+1. Separate document types: **yes**. Migration 220 needs controlled deployment.
+2. Images: verified Blue Leaf photography, or images with confirmed reuse rights; text-only where no reliable image exists.
+3. Option lists: show only options intentionally released for client review.
+4. Codes on approved items: an administrative code correction, with product and finish unchanged, shouldn't automatically need re-approval; a material change does. **Not built yet:** today the register steps an approved record back when its code changes (§6.2, question 5).
+5. Existing engineered stone: keep the current protection until a separate compliance review.
+6. One record per product: yes, with visible client-chosen accessories as their own records (S15).
+7. Keep "Client-approved" across the suite for now.
+8. Client descriptions: yes (S13).
+
+**The questions as asked at checkpoint 01:**
 1. **S1 confirmed:** two documents, two revision series, codes TSS and CSP. Then apply migration 220 after 218.
 2. **Images (S5):** use supplier imagery (needs Routleys' reuse terms, and a check that each image is the selected variant), Blue Leaf's own sample photography, or neither for now.
 3. **Option lists (S6):** show the portal's options (without prices) in the presentation, or keep proposals only.

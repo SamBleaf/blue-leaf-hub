@@ -211,6 +211,10 @@ export default function PromptRow({
             <Mini label="Model / code"><input value={it.model} disabled={disabled || locked} onChange={(e) => set({ model: e.target.value })} className="inp text-[11px]" /></Mini>
             <Mini label="Finish / colour"><input value={it.colour} disabled={disabled || locked} onChange={(e) => set({ colour: e.target.value })} className="inp text-[11px]" /></Mini>
             <Mini label="Supplier"><input value={it.supplier} disabled={disabled || locked} onChange={(e) => set({ supplier: e.target.value })} placeholder="e.g. Routleys" className="inp text-[11px]" /></Mini>
+            {/* What the client reads in the Client Selections Presentation; the supplier's wording above stays as it is
+                for the technical schedule. Wording only, so it stays editable after approval. */}
+            <Mini label="Client label (presentation)"><input value={it.clientLabel || ""} disabled={disabled} onChange={(e) => set({ clientLabel: e.target.value })} placeholder="e.g. Kitchen mixer" className="inp text-[11px]" /></Mini>
+            <Mini label="Client description (presentation)"><input value={it.clientDescription || ""} disabled={disabled} onChange={(e) => set({ clientDescription: e.target.value })} placeholder="Plain words for the client, e.g. Pull-down sink mixer, brushed nickel" className="inp text-[11px]" /></Mini>
             {usesDisposition && <Mini label="Scope / disposition"><Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} disabled={disabled || locked} /></Mini>}
           </>}
           {guided && kind === "scope" && usesDisposition && <Mini label="Scope / disposition"><Select value={it.disposition} onChange={(v) => set({ disposition: v })} options={dispOptions} disabled={disabled || locked} /></Mini>}

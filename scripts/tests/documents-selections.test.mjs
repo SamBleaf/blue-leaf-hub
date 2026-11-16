@@ -54,7 +54,8 @@ section("Technical Selections Schedule (spec §3)");
   ok("rooms with identical records share a row, keeping every reference", rows.some((r) => r.location === "Ensuite and bathroom" && r.item === "Vanity" && r.ref.split(", ").length === 2), flat(rows.filter((r) => r.item === "Vanity")));
   // A counted product never merges across rooms (QA R01): the ensuite's three products are its own rows.
   const ensuiteTaps = rows.filter((r) => r.item === "Tapware & accessories" && r.location === "Ensuite");
-  ok("one record per product: the ensuite's tapware is three products, each with its own code and count", ensuiteTaps.length === 3 && ensuiteTaps.every((r) => /Routleys code \d{5}$/.test(r.detail) && r.quantity)
+  ok("one record per product: the ensuite's tapware and visible accessories each have their own row, code and count", ensuiteTaps.length >= 3 && ensuiteTaps.every((r) => /Routleys code \d{5}$/.test(r.detail) && r.quantity)
+    && ["62397", "62412", "58127", "60815", "30411"].every((c) => ensuiteTaps.some((r) => r.detail.endsWith(c)))
     && ensuiteTaps.some((r) => /Glide/.test(r.product)) && !rows.some((r) => r.quantity && /\band\b/.test(r.location)), flat(ensuiteTaps));
   ok("manufacturer, then the supplier's code labelled as theirs (Blue Leaf supply said once, not per row)", rows.some((r) => r.detail === "Caroma · Routleys code 57525") && !rows.some((r) => /supply/i.test(r.detail)), flat(rows.map((r) => r.detail)));
   ok("supplier words print as printed, truncation kept", rows.some((r) => r.product === "Urbane II Cleanflush Back To Wall Toilet Suite Back inlet with Vogue Soft Close Seat...") && rows.some((r) => r.product === "Maci Wall Bath / Basin Mixer Set with 180mm Spout"));
@@ -64,7 +65,7 @@ section("Technical Selections Schedule (spec §3)");
   ok("a supplier's count prints as it was recorded; nothing prints as 0", rows.some((r) => r.item === "Basin" && r.quantity === "2") && !rows.some((r) => /^0\b/.test(r.quantity)));
   ok("the source is a key, listed once in the source documents", rows.some((r) => r.source === "S1") && t.sources.length === 1 && t.sources[0].key === "S1" && /Routleys 452499/.test(t.sources[0].document) && /No revision printed/.test(t.sources[0].revision));
   ok("the requirements these selections must meet are listed, with their status", t.requirements.some((r) => /Double glazing/.test(r.text) && r.applies === "Windows and doors" && /To verify/.test(r.status)));
-  ok("open actions carry their owner, and nothing repeats a product", t.actions.some((a) => /trough's finish|sink's finish/.test(a.text) && a.who === "Blue Leaf") && t.actions.some((a) => /back-to-wall toilet/.test(a.text) && a.who === "Client"));
+  ok("open actions carry their owner, and nothing repeats a product", t.actions.some((a) => /sink's finish/.test(a.text) && a.who === "Trade / supplier") && t.actions.some((a) => /back-to-wall toilet/.test(a.text) && a.who === "Client"));
   ok("the client's own words show under a product proposed in their place", rows.some((r) => r.item === "Toilet" && r.direction === "Wall-hung toilet"));
   ok("a preference with nothing recorded reads To be decided, so blank only ever means a recorded preference",
     selectionRecords({ meta: emptyMeta({ rooms: [] }), items: [makeItem({ id: "x1", itemKind: "selection", category: "paint", promptKey: "W-019", certainty: "preference" })] }, {})[0].selection === "To be decided");
@@ -115,7 +116,7 @@ section("Client Selections Presentation (spec §4)");
   basin.sync = { mode: "project", status: "changes_requested", clientVisible: true };
   const f2 = buildRegisterFixture("client_presentation", input(q));
   const rows2 = f2.clientSelections.groups.flatMap((g) => g.rows);
-  ok("a portal choice reads Client's choice, with Blue Leaf; a requested change reads so too", rows2.some((r) => /Luxe LF/.test(r.text) && r.status === "Client's choice, with Blue Leaf") && rows2.some((r) => r.status === "Change requested, with Blue Leaf"));
+  ok("a portal choice reads Client's choice, with Blue Leaf; a requested change reads so too", rows2.some((r) => /Luxe/.test(r.text) && r.status === "Client's choice, with Blue Leaf") && rows2.some((r) => r.status === "Change requested, with Blue Leaf"));
   ok("…and neither is asked about again", f2.clientSelections.needs.length === c.needs.length && typeof f2.clientSelections.proposals === "boolean");
   ok("two identical records in one room stay two rows (Routleys lists 62412 twice in the bathroom)", buildRegisterFixture("selections_schedule", input(ridge())).technicalSchedule.groups.flatMap((g) => g.rows)
     .filter((r) => r.location === "Bathroom" && /Bath Shower Mixer/.test(r.product)).length === 2);
@@ -126,6 +127,30 @@ section("Client Selections Presentation (spec §4)");
   leg.register.items.push(makeItem({ id: "ri_legacy_x", itemKind: "selection", category: "notes", certainty: "preference", description: "Mirror cabinet — Supplier: Acme Bath — staff: chase price", supplier: "Acme Bath", updatedAt: "1970-01-01T00:00:00.000Z" }));
   const lf = flat(buildRegisterFixture("client_presentation", input(leg)).clientSelections);
   ok("a legacy row prints only its item, never its supplier or notes", lf.includes("Mirror cabinet") && !/Acme|chase price/.test(lf));
+}
+
+section("Owner's checkpoint 01 review: the six rendered-page defects");
+{
+  const rf = buildRegisterFixture("client_presentation", input(ridge())), rg = rf.clientSelections.groups;
+  ok("no group names a room twice ('Bathroom and bathroom')", !rg.some((g) => /\b(\w+) and \1\b/i.test(g.group)), flat(rg.map((g) => g.group)));
+  const bath = rg.find((g) => g.group === "Bathroom")?.rows || [];
+  ok("the bathroom's two identical mixers are reconciled: one bath mixer, one shower mixer", bath.some((r) => r.item === "Bath mixer") && bath.some((r) => r.item === "Shower mixer"), flat(bath.map((r) => r.item)));
+  const kitchen = rg.find((g) => g.group === "Kitchen")?.rows || [];
+  ok("the kitchen's sink and mixer have their own labels", kitchen.some((r) => r.item === "Kitchen sink") && kitchen.some((r) => r.item === "Kitchen mixer"));
+  ok("every group's labels are distinct (no two rows under one name)", rg.every((g) => new Set(g.rows.map((r) => `${r.item}|${r.text}`)).size === g.rows.length));
+  const kf = buildRegisterFixture("client_presentation", input(kestrelRelinked())), kr = kf.clientSelections.groups.flatMap((g) => g.rows);
+  ok("a supplier's technical wording never reaches the client (client descriptions, else the record's own words)", !/LHH|CHAINWINDER|CS DESIGN|TLI-/.test(flat(kf.clientSelections)));
+  ok("a Proposed row always describes a real option", [...kr, ...rg.flatMap((g) => g.rows)].every((r) => r.status !== "Proposed" || r.text));
+  ok("products from a supplier document still under review aren't put to the client: they read Being confirmed", kr.some((r) => r.item === "Downlights" && r.status === "Being confirmed") && kr.some((r) => r.status === "Being confirmed" && /Dark slimline/.test(r.text)) && !kr.some((r) => r.status === "Proposed" && /Glazed hinged door/.test(r.text)));
+  ok("…and the presentation's reading note defines it", /Being confirmed: we're checking the supplier's details/.test(buildClientPresentationPayload(kf).SEL_INTRO));
+  const blank = ridge(); Object.assign(blank.register.items.find((x) => x.id === "ri_rd_s01"), { product: "TLI-X1", clientDescription: "", clientLabel: "" });
+  const bf = buildRegisterFixture("client_presentation", input(blank));
+  ok("a proposal with nothing readable prints To be decided and warns", bf.clientSelections.shownAs.ri_rd_s01 === "undecided" && checks("client_presentation", blank).warnings.some((w) => /nothing a client can read/.test(w)));
+  const pk = buildRegisterFixture("selections_schedule", input(ridge(), { status: "Draft" }), { coord: "routleys" });
+  const pp = buildSelectionsSchedulePayload(pk);
+  ok("the Routleys pack asks Routleys for what is theirs, and lists the rest for information", pp.S3_TITLE === "What we need from Routleys" && pk.technicalSchedule.actions.every((a) => a.who === "Routleys (plumbing fixtures)")
+    && pk.technicalSchedule.actions.some((a) => /sink's finish/.test(a.text)) && pk.technicalSchedule.pending.some((a) => a.who === "Client") && pk.technicalSchedule.pending.every((a) => a.who !== "Routleys (plumbing fixtures)"), flat([pk.technicalSchedule.actions, pk.technicalSchedule.pending]));
+  ok("the client wording leaves the supplier's specification untouched on the schedule", buildRegisterFixture("selections_schedule", input(ridge())).technicalSchedule.groups.flatMap((g) => g.rows).some((r) => r.product === "Luxe LF Pull Down Sink Mixer"));
 }
 
 section("Pre-issue checks (spec §5)");

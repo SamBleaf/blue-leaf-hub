@@ -49,10 +49,18 @@ const sectionRequirements = when("HAS_S2", [
   gap(80),
 ]);
 
+// In a coordination pack, 03 is what the party is asked for, and the next section what waits on the client or Blue
+// Leaf, for information only (owner, checkpoint 01 review).
 const sectionActions = when("HAS_S3", [
-  ...sectionHead("S3_NUM", "Open items", "Open actions and checks"),
+  ...sectionHead("S3_NUM", "{S3_KICKER}", "{S3_TITLE}"),
   body("{ACTIONS_INTRO}", { keepNext: true }),
   dataTable("ACTIONS", [REF, { head: "What is needed", field: "TEXT", width: 10434 }, { head: "Who", field: "WHO", width: W - 1250 - 10434 }], { bounded: true }),
+  gap(80),
+]);
+const sectionPending = when("HAS_S3B", [
+  ...sectionHead("S3B_NUM", "For information", "Waiting on others"),
+  body("{PENDING_INTRO}", { keepNext: true }),
+  dataTable("PENDING", [REF, { head: "What is open", field: "TEXT", width: 10434 }, { head: "With", field: "WHO", width: W - 1250 - 10434 }], { bounded: true }),
   gap(80),
 ]);
 
@@ -82,6 +90,7 @@ const doc = new Document({
       ...sectionSelections,
       ...sectionRequirements,
       ...sectionActions,
+      ...sectionPending,
       ...sectionSources,
     ],
   }],
