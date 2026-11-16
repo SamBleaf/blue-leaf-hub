@@ -1,5 +1,7 @@
 # PBSA / Tender Proposal: review of both template versions, and a recommendation
 
+> **Superseded in part (16 Nov 2026).** The owner confirmed these are **two documents, both to be built**: the PBSA (the paid pre-construction services agreement) and the Tender Proposal (the fixed-price construction offer). The owner's five answers, the SA legal findings and the planning questions are in `PBSA_AND_TENDER_PROPOSAL_PLAN.md`. The template defects recorded below still stand.
+
 16 November 2026. Read-only research: the repository and its history, Google Drive, Dropbox, the Master Register (all tabs) and the ZJ example. Every claim is cited in the research reports, kept in the session scratchpad (`pbsa/research/A–C`). **Nothing has been changed, and the working template is untouched.**
 
 ## What "PBSA" means: the working assumption
