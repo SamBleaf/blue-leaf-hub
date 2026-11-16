@@ -633,7 +633,8 @@ export function registerMarketingIntelligenceRoutes(app) {
     // ── AI performance summary (P2.4) — Haiku, cached by ISO week ────────────
     let aiSummary = null;
     const weekKey = isoWeekKey();
-    if (_apiKey && !_aiCache.has(weekKey) && contentItems.length >= 3) {
+    const failedAt = _aiCache.get(`${weekKey}:failed`) || 0;
+    if (_apiKey && !_aiCache.has(weekKey) && contentItems.length >= 3 && Date.now() - failedAt > 60 * 60 * 1000) {
       try {
         const topItems = contentItems.slice(0, 5).map(i => ({
           title: i.title,
@@ -655,10 +656,10 @@ Write a 3-sentence plain-English performance summary. Focus on what's working, w
         const summary = await createForTask(ai(), "marketing_insights", {
           max_tokens: 1024, // three sentences plus room for a short think
           messages: [{ role: "user", content: prompt }],
-        }, { module: "marketingIntelligence" });
+        }, { module: "marketingIntelligence" }, { timeout: 8000, maxRetries: 0 });   // on the dashboard's request path: never long (PR #5 review C1)
         aiSummary = replyText(summary) || null;
         if (aiSummary) _aiCache.set(weekKey, aiSummary);
-      } catch { /* non-fatal */ }
+      } catch { _aiCache.set(`${weekKey}:failed`, Date.now()); /* non-fatal; not retried for an hour */ }
     } else if (_aiCache.has(weekKey)) {
       aiSummary = _aiCache.get(weekKey);
     }

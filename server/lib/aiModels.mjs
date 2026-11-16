@@ -294,17 +294,19 @@ export async function createForTask(client, task, params, meta = {}, sdkOptions)
   if (!client) throw noKeyError();
   const { chain, effort } = liveChain(task);
   let rejected = null;   // [model, error]: skipped only once another model has answered (review MODEL-01)
+  let declined = null;   // the primary's decline, returned if the fallback then fails (PR #5 review A3)
   for (let i = 0; i < chain.length; i++) {
     let response;
     try {
       response = await callAI(client, adaptParams(params, chain[i], { effort }), { module: meta.module || task }, sdkOptions);
     } catch (err) {
+      if (declined) { console.warn(`[ai] ${task}: fallback ${chain[i]} failed after a decline (${err?.status || "?"}): returning the decline`); return declined; }
       if (i === chain.length - 1 || !isModelProblem(err)) throw err;
       rejected = [chain[i], err];
       continue;
     }
     if (rejected) { markUnavailable(rejected[0], rejected[1], task); rejected = null; }
-    if (response?.stop_reason === "refusal" && i < chain.length - 1) { noteDeclined(chain[i], response, task); continue; }
+    if (response?.stop_reason === "refusal" && i < chain.length - 1) { noteDeclined(chain[i], response, task); declined = response; continue; }
     return response;
   }
   throw new Error("unreachable");

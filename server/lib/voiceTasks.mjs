@@ -125,12 +125,13 @@ export async function splitTranscriptToTasks(transcript, opts = {}) {
   const workStreams = Array.isArray(opts.workStreams) ? opts.workStreams : [];
   const allowedCategories = workStreams.map((s) => s.value).filter(Boolean);
   // max_tokens scales with transcript length (more tasks possible), capped; +1024 leaves room for a short think.
-  const maxTokens = Math.min(5120, 1536 + Math.ceil(text.length / 4));
+  const maxTokens = Math.min(8192, 1536 + Math.ceil(text.length / 3));   // PR #5 review B3
   const completion = await createForTask(client, "voice_tasks", {
     max_tokens: maxTokens,
     temperature: 0, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [{ role: "user", content: [{ type: "text", text: buildSplitPrompt(text, opts.jobLabel, workStreams) }] }],
   }, { module: "voiceTasks" });
+  if (completion?.stop_reason === "max_tokens") console.warn(`[voiceTasks] reply cut short at ${maxTokens} tokens (transcript ${text.length} chars): the task list may be incomplete`);
   const out = replyText(completion);
   return parseTasksFromModelText(out, allowedCategories);
 }

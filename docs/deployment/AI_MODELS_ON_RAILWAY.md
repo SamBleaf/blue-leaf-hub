@@ -84,7 +84,8 @@ There should be no `claude-sonnet-4-5` rows.
 ## 5. If something goes wrong
 
 - **One feature:** set `AI_MODEL_<TASK>` to a model the key reaches (for example `claude-haiku-4-5-20251001`) and redeploy. Never `claude-sonnet-4-5`.
-- **Everything, before 30 Nov, without this branch:** on the old code, set `CLAUDE_MODEL=claude-sonnet-4-6` on Railway, if the key can reach it. The old code sends `temperature` and reads the first content block, and Sonnet 4.6 accepts both. That buys time only: it is not the fix.
+- **Most of the Hub, before 30 Nov, without this branch:** on the old code, set `CLAUDE_MODEL=claude-sonnet-4-6` on Railway, if the key can reach it. The old code sends `temperature` and reads the first content block, and Sonnet 4.6 accepts both. **It doesn't cover everything:** Content Studio generation, campaign preload and drone-frame analysis hard-code `claude-sonnet-4-5` in the old code (`marketingAgent.mjs`, `marketingRoutes.mjs`, `marketingMedia.mjs`) and still stop on 30 Nov. That buys time only: it is not the fix.
+- **`FINANCE_AI_JOB_MATCH`:** leave it unset. Before it is turned on, the AI job match needs two changes: its candidates must be active jobs ranked by address (today any 30 jobs), and it must run after the carpentry-job and overhead routing on the email-inbox path (today it can override them).
 
 ## 6. The tasks
 
