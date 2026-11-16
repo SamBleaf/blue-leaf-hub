@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-11-16
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin / Director
@@ -99,9 +99,10 @@ Uses Claude (Sonnet — higher quality needed for SEO work) to generate a struct
 - Regeneration blocked if `generated_at > now() - 90 days` (warning shown; Admin can override)
 - Brief approved by Admin: `seo_content_briefs.approved_by` and `approved_at` set
 - Brief used downstream: when generating website content in Create tab with a page context set, the brief is included in the AI prompt automatically
+- **AI model (Nov 2026):** task `marketing_seo_brief` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_MARKETING_SEO_BRIEF`; effort with `AI_EFFORT_MARKETING_SEO_BRIEF`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingIntelligence`). Was hard-coded to claude-sonnet-4-6. `seo_content_briefs.model_used` now records the model that answered.
 
 ## 12. Edge cases and limits
-- Brief generation uses Sonnet (not Haiku) — higher quality, higher cost. One brief = approximately $0.05–0.10 USD in API cost.
+- Brief generation uses Sonnet (not Haiku) — higher quality, higher cost. One brief = about 2–5 US cents in API cost on Sonnet 5.5 ($2 / $10 per million tokens).
 - Briefs expire at 90 days — after expiry, a "Brief expired" badge shows and the brief can be regenerated
 - If a keyword changes ranking by > 5 positions, the system automatically flags the brief as "may need review" even if not yet expired
 - Competing pages analysis (what's on page 1) requires either an external API call (Ahrefs) or a manual step — initially this section will show "Not available" until integrated

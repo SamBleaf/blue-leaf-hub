@@ -74,8 +74,7 @@ async function appendSubcontractorSnapshot(systemPrompt) {
 
 /**
  * @param {object} opts
- * @param {import('@anthropic-ai/sdk').Anthropic} opts.anthropic
- * @param {string} opts.model
+ * @param {string} opts.model — the task's primary model (callModel sets the model each request is actually sent to)
  * @param {number} opts.maxTokens
  * @param {string} opts.mode - chat | qc | sop | troubleshoot | proposal
  * @param {Array<{role:string, content:string}>} opts.messages
@@ -118,10 +117,10 @@ export const MAX_HISTORY = Math.max(4, Number(process.env.BLUEPRINT_MAX_HISTORY)
 
 /**
  * @param {object} opts
- * @param {(params: object, sdkOptions?: object) => Promise<object>} [opts.callModel] — sends one request; the server
- *   passes one that logs the call and falls back to another model if this one is refused (server/lib/aiModels.mjs).
+ * @param {(params: object, sdkOptions?: object) => Promise<object>} opts.callModel — sends one request (required); the
+ *   server passes one that logs the call and falls back to another model if this one is refused (server/lib/aiModels.mjs).
  */
-export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, messages, extras = {}, callModel }) {
+export async function runBlueprintAgent({ model, maxTokens, mode, messages, extras = {}, callModel }) {
   const compact = extras.compactContext === true || messageHasDocumentBlock(messages);
   const workingMessages = trimChatHistory(messages, compact ? 6 : MAX_HISTORY);
   const lastUser = messageText([...workingMessages].reverse().find((m) => m.role === 'user'));
@@ -163,7 +162,9 @@ export async function runBlueprintAgent({ anthropic, model, maxTokens, mode, mes
       request.tool_choice = { type: 'tool', name: 'hub_list_subcontractors' };
     }
 
-    const send = callModel || ((params, opts) => anthropic.messages.create(params, opts));
+    // Every Hub AI call goes through server/lib/aiModels.mjs (logging, per-model request shape, fallback).
+    if (typeof callModel !== 'function') throw new Error('runBlueprintAgent: callModel is required (createForTask from server/lib/aiModels.mjs)');
+    const send = callModel;
     const response = await send(
       {
         ...request,

@@ -138,9 +138,15 @@ _resetAiModelState();
 }
 _resetAiModelState();
 {
-  const client = fakeClient([], { "claude-haiku-5-5": "refusal" });
+  const client = fakeClient([], { "claude-haiku-5-5": "refusal", "claude-haiku-4-5-20251001": "refusal" });
   let e = null; try { await proofreadFixture({ client, docType: "client_brief", fx: reno }); } catch (x) { e = x; }
-  ok("a refusal is said plainly", e?.code === "PROOF_REFUSED");
+  ok("a refusal is said plainly (after the fallback model declined too)", e?.code === "PROOF_REFUSED" && client.calls.length === 2, client.calls.map((c) => c.model).join());
+}
+_resetAiModelState();
+{
+  const client = fakeClient([], { "claude-haiku-5-5": "refusal" });
+  let e = null, r = null; try { r = await proofreadFixture({ client, docType: "client_brief", fx: reno }); } catch (x) { e = x; }
+  ok("…a request one model declines is checked once more on the fallback model", !e && !!r && client.calls.map((c) => c.model).join() === "claude-haiku-5-5,claude-haiku-4-5-20251001", e?.message || client.calls.map((c) => c.model).join());
 }
 _resetAiModelState();
 {

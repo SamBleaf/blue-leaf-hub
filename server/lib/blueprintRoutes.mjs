@@ -1,5 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { modelsFor, createForTask, streamForTask, aiModelStatus, classifyAiError, AI_ERROR_TEXT } from "./aiModels.mjs";
+import { aiClient, modelsFor, createForTask, streamForTask, aiModelStatus, classifyAiError, AI_ERROR_TEXT } from "./aiModels.mjs";
 import { createClient } from '@supabase/supabase-js';
 import { config as dotenvConfig } from 'dotenv';
 import fs, { existsSync } from 'fs';
@@ -32,7 +31,7 @@ let _anthropic;
 function getAnthropic() {
   if (!_anthropic) {
     if (!_apiKey) throw new Error('ANTHROPIC_API_KEY not set in .env');
-    _anthropic = new Anthropic({ apiKey: _apiKey });
+    _anthropic = aiClient();
   }
   return _anthropic;
 }
@@ -349,12 +348,14 @@ export function registerBlueprintRoutes(app) {
       );
 
       if (hasReviewableAttachment) {
+        const reviewClient = getAnthropic();
         const reply = await runAttachmentDocumentReview({
-          anthropic: getAnthropic(),
+          // Task "blueprint_document_review" (env AI_MODEL_BLUEPRINT_DOCUMENT_REVIEW, or the older BLUEPRINT_REVIEW_MODEL).
+          callModel: (params) => createForTask(reviewClient, 'blueprint_document_review', params, { module: 'blueprintDocumentReview' }),
           attachments,
           messages,
           jobContext,
-          maxTokens: Math.min(MAX_TOKENS, 4096),
+          maxTokens: Math.min(MAX_TOKENS, 8192), // room to think: the review model thinks before it writes
         });
         return res.json({ reply });
       }

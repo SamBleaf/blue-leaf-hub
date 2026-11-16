@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-07-02
+sop_version: 2.1
+last_reviewed: 2026-11-16
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -167,6 +167,7 @@ In this case, uncheck all suggestion boxes and click "Apply & Save" to store the
 - `bp_suggestions` is the full AI suggestions object (saved for audit trail even if no fields were applied)
 - On save: updates `leads` table with all `applied_fields`, inserts `lead_activities` meeting record (if `selected.activity = true`), sets `last_activity_at = now()`
 - Transcript saved to `lead_conversations.transcript_text`; AI output saved to `lead_conversations.bp_suggestions`; `applied_at` set to now if any fields applied
+- **AI model (Nov 2026):** task `sales_transcript` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_SALES_TRANSCRIPT`; effort with `AI_EFFORT_SALES_TRANSCRIPT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `salesRoutes`). Was `CLAUDE_MODEL` (claude-sonnet-4-5 in production, retired 2026-11-30).
 
 ## 13. Owner of the process
 Admin / Staff

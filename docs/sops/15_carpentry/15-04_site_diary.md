@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -148,6 +148,7 @@ Supervisors and admins can hold-drag the ⠿ grip handle on any task row in the 
 - Actual Start is NOT written when a diary entry is created. It is derived on read from the earliest approved timesheet with `carpentry_job_id` matching this job.
 
 ---
+- **AI model (Nov 2026):** task `voice_tasks` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_VOICE_TASKS`; effort with `AI_EFFORT_VOICE_TASKS`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `voiceTasks`). Used by task extraction from a transcript; diary structuring is task `site_diary_structure` (Haiku 5.5).
 
 ## 12. Edge cases and limits
 

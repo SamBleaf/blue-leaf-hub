@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin
@@ -111,6 +111,8 @@ Nothing is sent automatically. You copy the draft and send it yourself, keeping 
 - No emails, no POs, no DB writes to any procurement table from any AI endpoint.
 
 ---
+- **AI model (Nov 2026):** task `procurement_draft` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_PROCUREMENT_DRAFT`; effort with `AI_EFFORT_PROCUREMENT_DRAFT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `procurementAi`). Used for the supplier email draft.
+- **AI model (Nov 2026):** task `procurement_summary` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_PROCUREMENT_SUMMARY`; effort with `AI_EFFORT_PROCUREMENT_SUMMARY`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `procurementAi`). Used for the selection reminder, reply summary, weekly digest and delay note.
 
 ## 12. Edge cases and limits
 

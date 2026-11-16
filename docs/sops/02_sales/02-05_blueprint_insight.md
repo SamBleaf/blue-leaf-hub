@@ -1,5 +1,5 @@
 ---
-sop_version: 2.1
+sop_version: 2.2
 last_reviewed: 2026-11-16
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
@@ -119,12 +119,13 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 - Auto-fetch: `POST /api/blueprint/chat` called on mount (and after stage change) with a structured message: `"I have a sales lead named [name] in the [stage] stage... Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences."`
 - `hubContext` passed: `{ page: "lead_detail", stage, leadId }`
 - Response field: `j.reply` (not `j.response` or `j.message`) — always use `j.reply`
-- Model: set per task in `server/lib/aiModels.mjs`, read from the environment. Blueprint chat: `BLUEPRINT_MODEL`, then `CLAUDE_MODEL`, default `claude-sonnet-5-5` at effort "low" (a coaching chat; low effort keeps thinking, and the token bill, small). If that model is refused for the key (not found, no permission, or a request it can't accept), the same request is retried once on the fallback (`BLUEPRINT_FALLBACK_MODEL`, then `AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) and the refused model is skipped for 10 minutes. Rate limits, billing and key errors never fall back. The request is adapted to each model (no `temperature` or forced tool choice where a model refuses them; `effort` only where accepted). Every call is logged in `ai_call_log` with its cost.
+- Model: set per task in `server/lib/aiModels.mjs`, read from the environment. Blueprint chat: `AI_MODEL_BLUEPRINT_CHAT`, then `BLUEPRINT_MODEL` (the shared `CLAUDE_MODEL` is no longer read), default `claude-sonnet-5-5` at effort "low" (a coaching chat; low effort keeps thinking, and the token bill, small). If that model is refused for the key (not found, no permission, or a request it can't accept), the same request is retried once on the fallback (`BLUEPRINT_FALLBACK_MODEL`, then `AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) and the refused model is skipped for 10 minutes. Rate limits, billing and key errors never fall back. The request is adapted to each model (no `temperature` or forced tool choice where a model refuses them; `effort` only where accepted). Every call is logged in `ai_call_log` with its cost.
 - History: only the last 16 messages of a chat are resent each turn (`BLUEPRINT_MAX_HISTORY`), to bound the tokens per reply.
 - Nov 2026 outage: a whitelist here pinned `claude-sonnet-4-6` and ignored the environment; the production key couldn't use that model, so every chat failed with "Blueprint hit an unexpected error". The whitelist is gone and the error now says the model isn't available.
 - Cache: `bpFetchedFor.current` stores `leadId:stage` — prevents double-fetch on re-render; cleared on stage advance
 - Conversations are not persisted to the database — session memory only
 - Blueprint panel in AppShell: separate from this auto-insight; uses `useBlueprintContext` — a global context provider that shares screen context with the Blueprint sidebar
+- **AI model (Nov 2026):** task `blueprint_document_review` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_BLUEPRINT_DOCUMENT_REVIEW`; effort with `AI_EFFORT_BLUEPRINT_DOCUMENT_REVIEW`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `blueprintDocumentReview`). Used when a PDF or text file is attached to a Blueprint chat (QC against the APB proposal standard); the older `BLUEPRINT_REVIEW_MODEL` still works. Was Haiku 4.5, sent directly and not logged.
 
 ## 12. Edge cases and limits
 - Blueprint responses exist only in the browser session — they are not saved to the lead record. Paste valuable insights into a Note activity if you want to preserve them.

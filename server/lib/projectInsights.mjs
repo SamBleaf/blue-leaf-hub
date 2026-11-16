@@ -8,14 +8,13 @@
  */
 
 import { createHash } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
-const HAIKU_MODEL = "claude-haiku-4-5";
+// Model: task "project_insight" in aiModels.mjs (env AI_MODEL_PROJECT_INSIGHT).
 const INSIGHT_EXPIRES_DAYS = 30;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -58,11 +57,10 @@ export async function generateInsight(deltaJson, insightType, apiKey) {
   if (!key) return { title: "Project insight", body: "A threshold was breached — review in Command Centre." };
 
   try {
-    const client = new Anthropic({ apiKey: key, maxRetries: 1 });
-    const resp = await callAI(client,
+    const client = aiClient({ maxRetries: 1, apiKey: key });
+    const resp = await createForTask(client, "project_insight",
       {
-        model: HAIKU_MODEL,
-        max_tokens: 256,
+        max_tokens: 1024, // a short JSON answer plus room for a short think
         system: [{ type: "text", text: INSIGHT_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{
           role: "user",
@@ -70,10 +68,9 @@ export async function generateInsight(deltaJson, insightType, apiKey) {
         }],
       },
       { module: "projectInsights" },
-      { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } }
     );
 
-    const raw = resp.content.find(b => b.type === "text")?.text?.trim() || "";
+    const raw = replyText(resp);
     const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     const parsed = JSON.parse(jsonStr);
     if (parsed.title && parsed.body) return { title: String(parsed.title).slice(0, 50), body: String(parsed.body).slice(0, 180) };

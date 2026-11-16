@@ -126,6 +126,18 @@ const { data, count } = await paginate(
 ok(res, { leads: data, total: count });
 ```
 
+### AI calls — always through aiModels.mjs
+```js
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
+
+const response = await createForTask(aiClient(), "invoice_extract", { max_tokens: 2048, messages }, { module: "financeRoutes" });
+const text = replyText(response);   // never response.content[0].text: a reply can start with a thinking block
+```
+- Every Claude call names a **task** in `server/lib/aiModels.mjs` (`createForTask` / `streamForTask`). The task sets the model and effort (env `AI_MODEL_<TASK>`, `AI_EFFORT_<TASK>`), adapts the request to the model, logs it in `ai_call_log`, and falls back to `AI_FALLBACK_MODEL` when a model is refused or declines.
+- **Never** create your own Anthropic client (use `aiClient()`), call `messages.create` / `callAI` directly, hard-code a model id, or read `CLAUDE_MODEL` (no longer read anywhere). A new AI feature adds a task to the table.
+- Defaults: Haiku 5.5 for extraction / classification / short internal text, Sonnet 5.5 for reasoning and writing that leaves the business. `temperature` and forced `tool_choice` reach only models that take them (`adaptParams` drops them for the rest); no assistant prefill (ask for the format in the prompt, or `output_config.format`); leave room for thinking in `max_tokens` (≥ 1024).
+- `node scripts/tests/ai-models-migration.test.mjs` fails on any of the above. Owner steps and the task table: `docs/deployment/AI_MODELS_ON_RAILWAY.md`.
+
 ### Dropbox sequential reads
 Never `Promise.all` for Dropbox file reads. Always a sequential `for` loop.
 
@@ -247,14 +259,14 @@ Key tables:
 
 **Conversations / Transcript feature:**
 - User pastes meeting transcript → hits "Analyse with Blueprint"
-- API: `POST /api/sales/leads/:id/conversations/analyse` — sends transcript to Claude (model: `claude-opus-4-5`) with APB extraction prompt, returns `{ suggestions }` as structured JSON (stage, qualifying score updates, next action, notes)
+- API: `POST /api/sales/leads/:id/conversations/analyse` — sends transcript to Claude (task `sales_transcript`: `claude-sonnet-5-5` at low effort) with APB extraction prompt, returns `{ suggestions }` as structured JSON (stage, qualifying score updates, next action, notes)
 - User reviews suggestions in `SuggestionReviewPanel`, approves/rejects each
 - `POST /api/sales/leads/:id/conversations` saves transcript + applied suggestions → updates lead record
 - Table: `lead_conversations` (id, lead_id, title, transcript_text, bp_suggestions JSONB, applied_suggestions JSONB, applied_at)
 
 **Blueprint Insight** — conversational AI coaching panel using lead context as hub context:
 - `POST /api/blueprint/chat` body: `{ messages: [{ role, content }], hubContext }` → returns `{ reply }`
-- Model: per task in `server/lib/aiModels.mjs`, from the environment (`BLUEPRINT_MODEL`, then `CLAUDE_MODEL`; default `claude-sonnet-5-5` at low effort), with a fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) when a model is refused for the key. Never pin a model in code: `/api/blueprint/health` shows what is in use.
+- Model: per task in `server/lib/aiModels.mjs`, from the environment (`AI_MODEL_BLUEPRINT_CHAT`, then `BLUEPRINT_MODEL`; default `claude-sonnet-5-5` at low effort), with a fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) when a model is refused for the key. Never pin a model in code: `/api/blueprint/health` shows what is in use.
 - **Critical**: response field is `reply` not `response` or `message` — always use `j.reply`
 
 **dotenv override issue:** If shell has `ANTHROPIC_API_KEY=''`, `dotenv.config()` won't override it. Pattern:
@@ -416,7 +428,7 @@ _All previously logged bugs (BUG-UI-1, BUG-UI-2, BUG-S1, BUG-S2) shipped in the 
 
 | Service | Env vars | Purpose | Status |
 |---|---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` | RFQ extraction, schedule generation, transcript analysis, Blueprint AI | Required |
+| Anthropic | `ANTHROPIC_API_KEY`; optional `AI_MODEL_<TASK>`, `AI_EFFORT_<TASK>`, `AI_FALLBACK_MODEL` (`CLAUDE_MODEL` is no longer read) | Every AI feature: one task per call in `server/lib/aiModels.mjs` | Required |
 | Gmail OAuth | `GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN/SENDER_EMAIL` | Outbound email via Gmail | Required |
 | Google Drive | `GOOGLE_DRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Fee proposal Google Docs workflow + **shared OAuth base for GSC/GA4/GBP** | Required |
 | Google Search Console | `GOOGLE_SEARCH_CONSOLE_SITE_URL` (+ Drive OAuth) | Marketing Intelligence — keyword position tracking | Optional |

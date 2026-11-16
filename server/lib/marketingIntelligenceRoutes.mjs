@@ -41,13 +41,13 @@ import { sendEnquiryAck } from "./leadReminders.mjs";
 import { normalizeLeadSourceCategory } from "./leadSourceCategory.mjs";
 import { preScoreEnquiry } from "./enquiryPreScore.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const _anthropic = _apiKey ? new Anthropic({ apiKey: _apiKey, maxRetries: 1 }) : null;
+// Models: tasks marketing_insights (Haiku) and marketing_seo_brief (Sonnet) in aiModels.mjs.
+const ai = () => aiClient({ maxRetries: 1 });
 
 // ─── Module-level AI cache ───────────────────────────────────────────────────
 // Key: "YYYY-Www" — ISO year + week number. Invalidates weekly (5-min cache TTL).
@@ -651,12 +651,12 @@ This Month KPIs: ${kpis.enquiries} marketing enquiries, ${kpis.qualified} qualif
 
 Write a 3-sentence plain-English performance summary. Focus on what's working, what's trending, and one specific recommendation. Be concrete — mention content types and channels by name. No fluff.`;
 
-        const summary = await callAI(_anthropic, {
-          model: "claude-haiku-20240307",
-          max_tokens: 150,
+        // (Named "claude-haiku-20240307", which is not a model id, until the Nov 2026 migration: this summary never ran.)
+        const summary = await createForTask(ai(), "marketing_insights", {
+          max_tokens: 1024, // three sentences plus room for a short think
           messages: [{ role: "user", content: prompt }],
-        });
-        aiSummary = summary?.content?.[0]?.text?.trim() || null;
+        }, { module: "marketingIntelligence" });
+        aiSummary = replyText(summary) || null;
         if (aiSummary) _aiCache.set(weekKey, aiSummary);
       } catch { /* non-fatal */ }
     } else if (_aiCache.has(weekKey)) {
@@ -1390,14 +1390,15 @@ All recommendations must be specific to Blue Leaf Building — never generic bui
 Return ONLY the JSON object.`;
 
     let briefData;
+    let modelUsed = null;
     try {
-      const response = await callAI(_anthropic, {
-        model:      "claude-sonnet-4-6",
+      const response = await createForTask(ai(), "marketing_seo_brief", {
         system:     seoBriefSystemPrompt(),
-        max_tokens: 2000,
+        max_tokens: 4096,
         messages:   [{ role: "user", content: userPrompt }],
-      });
-      const raw = response.content?.[0]?.text || "";
+      }, { module: "marketingIntelligence" });
+      modelUsed = response.model || null;
+      const raw = replyText(response);
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       briefData = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     } catch (e) {
@@ -1419,7 +1420,7 @@ Return ONLY the JSON object.`;
       internal_link_suggestions:    briefData.internal_link_suggestions || [],
       content_angles:               briefData.content_angles || [],
       schema_markup_type:           briefData.schema_markup_type || null,
-      model_used:                   "claude-sonnet-4-6",
+      model_used:                   modelUsed,
       expires_at:                   expiresAt,
     }).select().single();
 
@@ -1535,12 +1536,11 @@ Return ONLY the JSON object.`;
     for (let i = 0; i < items.length; i += 20) {
       const batch = items.slice(i, i + 20);
       try {
-        const response = await callAI(_anthropic, {
-          model:      "claude-haiku-4-5",
-          max_tokens: 2000,
+        const response = await createForTask(ai(), "marketing_insights", {
+          max_tokens: 4096,
           messages:   [{ role: "user", content: questionScanPrompt(batch) }],
-        });
-        const raw = response.content?.[0]?.text || "[]";
+        }, { module: "marketingIntelligence" });
+        const raw = replyText(response) || "[]";
         const jsonMatch = raw.match(/\[[\s\S]*\]/);
         const results = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
 
@@ -1682,12 +1682,11 @@ Prioritise content that closes the gap between current performance and opportuni
 
     let suggestions;
     try {
-      const response = await callAI(_anthropic, {
-        model:      "claude-haiku-4-5",
-        max_tokens: 800,
+      const response = await createForTask(ai(), "marketing_insights", {
+        max_tokens: 2048,
         messages:   [{ role: "user", content: prompt }],
-      });
-      const raw = response.content?.[0]?.text || "[]";
+      }, { module: "marketingIntelligence" });
+      const raw = replyText(response) || "[]";
       const jsonMatch = raw.match(/\[[\s\S]*\]/);
       suggestions = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
       if (!Array.isArray(suggestions)) throw new Error("AI did not return an array");

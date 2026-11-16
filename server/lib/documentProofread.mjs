@@ -17,7 +17,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import PizZip from "pizzip";
-import { createForTask, classifyAiError, AI_ERROR_TEXT, modelsFor, anthropicApiKey } from "./aiModels.mjs";
+import { aiClient, createForTask, classifyAiError, AI_ERROR_TEXT, modelsFor, anthropicApiKey } from "./aiModels.mjs";
 import { convertDocxToPdfBuffer } from "./docxToPdf.mjs";
 import {
   REGISTER_DOC_TYPES, DocumentError, buildRegisterFixture, fillRegisterDocx, loadInputs, nextVersion, versionsDiffer,
@@ -265,7 +265,7 @@ function defaultClient() {
   if (_client) return _client;
   const key = anthropicApiKey();
   if (!key) throw new DocumentError(503, AI_ERROR_TEXT.auth, "AI_AUTH");
-  _client = new Anthropic({ apiKey: key });
+  _client = aiClient();
   return _client;
 }
 

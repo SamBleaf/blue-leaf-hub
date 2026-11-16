@@ -2,8 +2,7 @@
  * Cost Intelligence API — Buildxact estimate template + per-job estimate sync.
  */
 import { createHash } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { setFact, emitEvent } from "./factsService.mjs";
@@ -206,7 +205,7 @@ export function registerCostIntelligenceRoutes(app) {
       }
     }
 
-    const client = new Anthropic({ apiKey });
+    const client = aiClient();
 
     const prompt = `You are extracting project metrics from an architectural plan PDF for a residential building project in South Australia.
 
@@ -244,9 +243,8 @@ Definitions:
 - site_slope: assess from section drawings or site plan notation`;
 
     try {
-      const response = await callAI(client, {
-        model: process.env.CLAUDE_MODEL || "claude-haiku-4-5",
-        max_tokens: 1024,
+      const response = await createForTask(client, "cost_plan_metrics", {
+        max_tokens: 4096, // the JSON is ~600 tokens; the rest is room to think over the drawings
         messages: [{
           role: "user",
           content: [
@@ -259,7 +257,7 @@ Definitions:
         }],
       }, { module: "costIntelligenceRoutes" });
 
-      const raw = response.content[0]?.text || "";
+      const raw = replyText(response);
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return res.status(422).json({ ok: false, error: "Claude did not return valid JSON", raw });
 

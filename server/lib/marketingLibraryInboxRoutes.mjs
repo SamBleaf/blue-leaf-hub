@@ -72,8 +72,7 @@ import {
 } from "./marketingLibraryRoutes.mjs";
 import { mapAssetToCategory } from "./marketingLibraryBackfillRoutes.mjs";
 import { haversineMeters }     from "./geoDistance.mjs";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 // ─── Folder path constants ────────────────────────────────────────────────────
@@ -99,8 +98,7 @@ function db() {
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
-/** Haiku model id — vision-capable, cheapest Anthropic tier. */
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+// Photo sorting model: task "marketing_photo_sort" in aiModels.mjs (vision-capable Haiku).
 
 /**
  * Attempt to dynamically require sharp.
@@ -403,17 +401,17 @@ function findNearestJob(lat, lng, geocodedJobs) {
  * @param {string} mediaType — MIME type (e.g. "image/jpeg")
  * @returns {Promise<string>}
  */
-async function classifyWithHaiku(buffer, mediaType) {
+export async function classifyWithHaiku(buffer, mediaType) {
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-  const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1 });
   const base64 = buffer.toString("base64");
   const categoryList = LIBRARY_CATEGORIES.join("\n");
 
-  const response = await callAI(
+  const response = await createForTask(
     client,
+    "marketing_photo_sort",
     {
-      model: HAIKU_MODEL,
-      max_tokens: 64,
+      max_tokens: 1024, // one category name; the rest is room for a short think
       messages: [
         {
           role: "user",
@@ -433,7 +431,7 @@ async function classifyWithHaiku(buffer, mediaType) {
     { module: "marketingInboxSort" }
   );
 
-  const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+  const raw = replyText(response);
   // Validate — must exactly match one of the 7 categories
   const match = LIBRARY_CATEGORIES.find((c) => raw.includes(c));
   if (!match) throw new Error(`Haiku returned unrecognised category: ${raw}`);

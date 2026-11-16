@@ -5,7 +5,9 @@
  *
  *   node scripts/tests/ai-models.test.mjs
  */
-for (const k of ["BLUEPRINT_MODEL", "CLAUDE_MODEL", "BLUEPRINT_FALLBACK_MODEL", "AI_FALLBACK_MODEL", "DOC_PROOFREAD_MODEL", "DOC_PROOFREAD_FALLBACK_MODEL"]) delete process.env[k];
+// Run from an empty folder: dotenv reads ./.env, and a checkout's real settings would change the result.
+process.chdir((await import("node:fs")).mkdtempSync((await import("node:path")).join((await import("node:os")).tmpdir(), "blh-ai-test-cwd-")));
+for (const k of ["BLUEPRINT_MODEL", "CLAUDE_MODEL", "BLUEPRINT_FALLBACK_MODEL", "AI_FALLBACK_MODEL", "DOC_PROOFREAD_MODEL", "DOC_PROOFREAD_FALLBACK_MODEL", "AI_MODEL_BLUEPRINT_CHAT"]) process.env[k] = "";
 const Anthropic = (await import("@anthropic-ai/sdk")).default;
 const { modelsFor, modelTraits, adaptParams, isModelProblem, classifyAiError, createForTask, streamForTask, aiModelStatus, _resetAiModelState, DEFAULT_FALLBACK_MODEL } = await import("../../server/lib/aiModels.mjs");
 const { trimChatHistory, runBlueprintAgent } = await import("../../src/blueprint/agent/runAgent.js");
@@ -45,13 +47,13 @@ section("Which model each task uses (environment first, then the task's default)
 ok("Blueprint chat defaults to the current Sonnet at low effort; proofreading to the current Haiku; both fall back to Haiku 4.5",
   modelsFor("blueprint_chat").primary === "claude-sonnet-5-5" && modelsFor("blueprint_chat").effort === "low" && modelsFor("document_proofread").primary === "claude-haiku-5-5"
   && modelsFor("blueprint_chat").fallback === DEFAULT_FALLBACK_MODEL && DEFAULT_FALLBACK_MODEL === "claude-haiku-4-5-20251001", JSON.stringify(modelsFor("blueprint_chat")));
-process.env.CLAUDE_MODEL = "claude-sonnet-4-6";
-ok("CLAUDE_MODEL is honoured — no whitelist overrides the environment any more", modelsFor("blueprint_chat").primary === "claude-sonnet-4-6");
+process.env.CLAUDE_MODEL = "claude-sonnet-4-5";
+ok("the shared CLAUDE_MODEL is no longer read (it pointed every module at claude-sonnet-4-5, retired 2026-11-30)", modelsFor("blueprint_chat").primary === "claude-sonnet-5-5");
 process.env.BLUEPRINT_MODEL = "claude-opus-5-5";
-ok("BLUEPRINT_MODEL beats CLAUDE_MODEL for Blueprint, and doesn't touch proofreading", modelsFor("blueprint_chat").primary === "claude-opus-5-5" && modelsFor("document_proofread").primary === "claude-haiku-5-5");
+ok("BLUEPRINT_MODEL is honoured for Blueprint — no whitelist overrides the environment — and doesn't touch proofreading", modelsFor("blueprint_chat").primary === "claude-opus-5-5" && modelsFor("document_proofread").primary === "claude-haiku-5-5");
 process.env.BLUEPRINT_MODEL = DEFAULT_FALLBACK_MODEL;
 ok("a primary equal to the fallback is tried once", modelsFor("blueprint_chat").chain.length === 1);
-delete process.env.BLUEPRINT_MODEL; delete process.env.CLAUDE_MODEL;
+process.env.BLUEPRINT_MODEL = ""; process.env.CLAUDE_MODEL = "";
 ok("an unknown task is a programming error", (() => { try { modelsFor("nope"); return false; } catch { return true; } })());
 
 section("The request is adapted to the model it's sent to");

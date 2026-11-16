@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -115,6 +115,7 @@ Once an invoice is approved with a job assigned:
 - `ai_job_match_confidence` stored on `financial_documents.ai_job_match_confidence`
 - Manual reassignment: `PATCH /api/finance/documents/:id` with `{ job_id: "<uuid>" }`
 - Job match confidence displayed in Requires Action section of Job Command Centre
+- **AI model (Nov 2026):** task `invoice_classify` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_INVOICE_CLASSIFY`; effort with `AI_EFFORT_INVOICE_CLASSIFY`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `financeRoutes`). The AI tier is **off unless `FINANCE_AI_JOB_MATCH=1`**: it never ran before the Nov 2026 migration (the code named an undefined model constant and the error was swallowed), so turning it on is the owner's decision. When on, it runs only when exact and fuzzy matching can't decide, a match needs confidence ≥ 65 (`match_method: "ai"`), and its confidence is capped at 90 so it is never auto-approved (auto-approval needs 100).
 
 ## 12. Edge cases and limits
 - Only jobs with status 'active' appear in the job search — archived or cancelled jobs are excluded

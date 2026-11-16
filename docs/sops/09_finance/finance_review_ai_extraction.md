@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -83,7 +83,8 @@ A job match confidence score also appears (e.g., "Job match: 87%"). See SOP 09-0
 - [ ] Auto-tagged trade category with "Auto-tagged" green badge
 
 ## 11. Automation notes
-- Extraction cascade: regex patterns first, then Claude Haiku, then Claude Sonnet if Haiku confidence < 60%
+- Extraction: one Claude call per document (no Sonnet escalation since Oct 2026); regex patterns fill fields it missed
+- **AI model (Nov 2026):** task `invoice_extract` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_INVOICE_EXTRACT`; effort with `AI_EFFORT_INVOICE_EXTRACT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `financeRoutes`).
 - `ai_extraction_confidence` stored on `financial_documents` row
 - Supplier ABN match → `supplier_trade_defaults` → if `auto_tag = true`, trade is pre-filled
 
@@ -92,7 +93,7 @@ A job match confidence score also appears (e.g., "Job match: 87%"). See SOP 09-0
 - Photo uploads (JPEG/PNG from mobile) are lower quality than PDFs — expect more amber/red confidence fields; always verify manually
 - If the PDF is password-protected, extraction will fail entirely — ask the supplier to resend without a password
 - Some invoices do not include GST (supplier not GST registered) — the GST field will be 0, which is correct; do not add GST manually
-- The extraction cascade escalates to Claude Sonnet only if Haiku confidence < 60% — very low quality documents may return Sonnet-level confidence scores
+- There is no escalation to a bigger model: a very low quality scan gets one read, so expect low confidence fields and check them by hand
 
 ## 13. Owner
 Admin  
@@ -142,11 +143,12 @@ Next review: 2026-11-29
 3. Expected: matched job address displayed
 - [ ] Pass  [ ] Fail
 
-**TC-06 — Extraction cascade (Sonnet fallback)**
+**TC-06 — Extraction model (one call, fallback only when refused)**
 1. Upload a low-quality or hand-written invoice scan
-2. Check server logs for extraction model used (look for `claude-sonnet` or `claude-haiku` log entries)
-3. Expected: if Haiku extraction confidence < 60%, Sonnet is invoked as a fallback
-4. Expected: the final extraction result appears in the UI regardless of which model was used
+2. Check `ai_call_log` (Settings → AI usage, or the table) for the newest `financeRoutes` row
+3. Expected: exactly one row for the document, model `claude-haiku-5-5` (or whatever `AI_MODEL_INVOICE_EXTRACT` is set to)
+4. Expected: a second row on `claude-haiku-4-5-20251001` appears only if the first model was refused or declined; the API log then shows `[ai] invoice_extract: …`
+5. Expected: the final extraction result appears in the UI regardless of which model was used
 - [ ] Pass  [ ] Fail  [ ] Skip (cannot access server logs)
 
 ### Post-test checklist

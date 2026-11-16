@@ -1,30 +1,24 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { fileJobRecord } from "./jobRecordsFiler.mjs";
 import { buildSiteDiaryPdfBuffer } from "./module6PdfKit.mjs";
 import { requireAuth } from "./requireAuth.mjs";
 import { syncDiaryToPortalUpdate } from "./portalIntegration.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-haiku-4-5-20251001";
+// Model: task "site_diary_structure" in aiModels.mjs (env AI_MODEL_SITE_DIARY_STRUCTURE).
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 async function claudeText(prompt) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
-  const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await callAI(client, {
-    model: MODEL,
-    max_tokens: 512,
-    temperature: 0.2,
+  const client = aiClient({ maxRetries: 0 });
+  const completion = await createForTask(client, "site_diary_structure", {
+    max_tokens: 2048, // a short JSON entry plus room for a short think
+    temperature: 0.2, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
   }, { module: "siteDiaryRoutes" });
-  return completion.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  return replyText(completion);
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────

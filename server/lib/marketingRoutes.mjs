@@ -22,7 +22,6 @@ import {
   parseMarketingResponse,
   MODE_PROMPTS,
   CONTENT_PILLARS,
-  MODEL,
   PHOTO_ANALYSIS_SYSTEM_PROMPT,
 } from "./marketingAgent.mjs";
 import {
@@ -32,8 +31,7 @@ import {
   formatPhotoAnalysisForPrompt,
   enrichUserRequest,
 } from "./marketingPrompts.mjs";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI, wrapStream } from "./aiGateway.mjs";
+import { aiClient, createForTask, streamForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 import {
   assertVisionMediaType,
@@ -45,8 +43,7 @@ const execP = promisify(exec);
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const VISION_MODEL =
-  process.env.CLAUDE_MODEL?.trim() || _env.CLAUDE_MODEL?.trim() || "claude-sonnet-4-6";
+// Models: tasks marketing_content (copy) and marketing_vision (photo analysis) in aiModels.mjs.
 
 function sbClient() {
   return getServiceSupabase();
@@ -213,19 +210,17 @@ export function registerMarketingRoutes(app) {
       const { systemPrompt, messages } = await buildGenerationMessages(
         sb, mode, generationContext, enrichedRequest, photo_asset_id || null, content_mode,
       );
-      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const response = await callAI(client,
+      const client = aiClient({ maxRetries: 1 });
+      const response = await createForTask(client, "marketing_content",
         {
-          model: MODEL,
-          max_tokens: 2048,
-          temperature: 0.7,
+          max_tokens: 4096, // the JSON copy plus room for a short think
+          temperature: 0.7, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
           system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
           messages,
         },
         { module: "marketingRoutes" },
-        { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
       );
-      const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+      const raw = replyText(response);
       const content = parseMarketingResponse(raw);
 
       const review_scores = runReviewChecks(content, mode, generationContext.photo_analysis);
@@ -271,19 +266,17 @@ export function registerMarketingRoutes(app) {
     res.flushHeaders();
 
     try {
-      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const stream = wrapStream(
-        await client.messages.stream(
-          {
-            model: MODEL,
-            max_tokens: 2048,
-            temperature: 0.7,
-            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-            messages,
-          },
-          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
-        ),
-        MODEL,
+      const client = aiClient({ maxRetries: 1 });
+      // Falls back to the task's fallback model if this one is refused before the first word (aiModels.mjs).
+      const stream = streamForTask(
+        client,
+        "marketing_content",
+        {
+          max_tokens: 4096,
+          temperature: 0.7, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
+          system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+          messages,
+        },
         { module: "marketingRoutes" },
       );
 
@@ -752,7 +745,7 @@ export function registerMarketingRoutes(app) {
     const { BLUE_LEAF_IDENTITY: BLI, CONTENT_MODE_MODIFIERS: CMM, formatPhotoAnalysisForPrompt: fpa } = await import("./marketingPrompts.mjs");
     const { MODE_PROMPTS, runReviewChecks, parseMarketingResponse } = await import("./marketingAgent.mjs");
     const { resolveVisionMediaType } = await import("./visionImage.mjs");
-    const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+    const client = aiClient({ maxRetries: 1 });
 
     const previews = [];
     for (let i = 0; i < Math.min(count, targetSlots.length); i++) {
@@ -780,18 +773,16 @@ export function registerMarketingRoutes(app) {
       } catch { /* non-fatal */ }
       userContent.push({ type: "text", text: userText });
       try {
-        const response = await callAI(client,
+        const response = await createForTask(client, "marketing_content",
           {
-            model: "claude-sonnet-4-5",
-            max_tokens: 1024,
-            temperature: 0.7,
+            max_tokens: 2048,
+            temperature: 0.7, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
             system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
             messages: [{ role: "user", content: userContent }],
           },
           { module: "marketingRoutes" },
-          { headers: { "anthropic-beta": "prompt-caching-2024-07-31" } },
         );
-        const raw = response.content.find((b) => b.type === "text")?.text?.trim() || "";
+        const raw = replyText(response);
         const content = parseMarketingResponse(raw);
         const review_scores = runReviewChecks(content, channelMode);
         previews.push({
@@ -1132,10 +1123,9 @@ export function registerMarketingRoutes(app) {
         base64 = buf.toString("base64");
       }
 
-      const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
-      const response = await callAI(client, {
-        model: VISION_MODEL,
-        max_tokens: 2048,
+      const client = aiClient({ maxRetries: 1 });
+      const response = await createForTask(client, "marketing_vision", {
+        max_tokens: 4096,
         system: PHOTO_ANALYSIS_SYSTEM_PROMPT,
         messages: [{
           role: "user",
@@ -1149,7 +1139,7 @@ export function registerMarketingRoutes(app) {
         }],
       }, { module: "marketingRoutes" });
 
-      const raw = response.content.find((b) => b.type === "text")?.text || "{}";
+      const raw = replyText(response) || "{}";
       const analysis = parseVisionAnalysisJson(raw);
 
       const stage =
