@@ -215,7 +215,7 @@ async function main() {
   const abUrl = ab.ok ? await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${ab.body.document.id}/url`) : null;
   const abText = abUrl?.ok ? pdfText(Buffer.from(await (await fetch(abUrl.body.url.startsWith("http") ? abUrl.body.url : GW + "/storage/v1" + abUrl.body.url)).arrayBuffer()), "A-architect-brief-P01.pdf") : "";
   check("#16", "Architect Brief issued with the drawing basis and architect / consultant actions",
-    ab.ok && /Concept set C/.test(abText) && /junction where the extension meets/i.test(abText) && /To verify/i.test(abText), ab.body?.error || abText.slice(0, 300));
+    ab.ok && /Concept set C/.test(abText) && /junction where the extension meets/i.test(abText) && /technical check pending|To verify/i.test(abText) && /What we need from the design team/.test(abText), ab.body?.error || abText.slice(0, 300));
   const ss1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/selections_schedule/issue`, { recipientName: "Morgan & Alex Hart" });
   const fetchDoc = async (id, name) => { const u = await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${id}/url`); if (!u.ok) return ""; const href = u.body.url.startsWith("http") ? u.body.url : GW + "/storage/v1" + u.body.url; return pdfText(Buffer.from(await (await fetch(href)).arrayBuffer()), name); };
   const ss1Text = ss1.ok ? await fetchDoc(ss1.body.document.id, "A-selections-P01.pdf") : "";

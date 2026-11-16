@@ -13,7 +13,7 @@ export const SELECTION_STATUSES = [
   "N/A", "Excluded", "By Others", "Existing to Remain", "Undecided", "Hold", "Design", "Retain", "Deferred",
 ];
 /** Architect design-register status vocabulary (Tab 17 #9): intent vs technical verification. */
-export const ARCHITECT_ITEM_STATUSES = ["Client-approved", "Proposed", "To verify"];
+export const ARCHITECT_ITEM_STATUSES = ["Client-approved", "For consultant review", "Proposed", "To verify", "Verified"];
 
 const GROUP_ORDER = ["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"];
 const paras = (arr) => (arr || []).map((t) => ({ PARA_TEXT: String(t || "") }));
@@ -190,39 +190,97 @@ export function buildClientBriefPayload(fx) {
   };
 }
 
-// Design-register grouping: an explicit row group (live register data) wins; fixtures fall back to ID prefixes.
-const archGroup = (id, group) => group || (/^(EX|WN|ST|RF|PL)/.test(id) ? "Envelope & structure" : "Internal & services");
-
-/** 02 — Architect Design Brief (coordination-first). */
+/**
+ * 02 — Architect Design Brief (BLB-ADB, template adb-1.0 on the CPB design system). Reader: the architect and the design
+ * team. Coordination first (Master Register Tab 17:36): what we need from them, then the decisions that affect the
+ * drawings, then what the design must achieve, the changes to the building, the design direction by location and the
+ * documents on file. Statuses print only where they say something (owner's editorial rule, 16 Nov 2026).
+ */
 export function buildArchitectBriefPayload(fx) {
-  const a = fx.architectBrief || {}, p = fx.project;
-  const c = chrome(fx, { type: "architect_brief", breadcrumb: "Architect / Consultant  /  Design Study",
-    sectionLabel: "Design coordination  /  Architect", title: "Architect design brief",
-    tagline: "Requirements, decisions and actions to progress the next drawing issue." });
-  // design register, grouped by element
-  const byGroup = new Map();
-  for (const r of a.scheduleItems || []) { const g = archGroup(r.itemId || "", r.group); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(r); }
-  const GROUPS = ["Envelope & structure", "Internal & services"].filter((g) => byGroup.has(g)).map((g) => ({
-    GROUP_NAME: g, ITEMS: byGroup.get(g).map((r) => ({ REF_ID: r.itemId || "", LOCATION: r.location || "", DIRECTION: r.requirement || "", STATUS: r.status || "", RESPONSE: r.action || "", DWG: r.dwgRef || "" })),
-  }));
+  const a = fx.architectBrief || {}, p = fx.project || {}, meta = fx.meta || {};
+  const id = documentIdentity({ type: "architect_brief", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
+  const overview = (a.overview || []).filter(Boolean);
+  const requests = (a.requests || []).filter((x) => x && x.text);
+  const decisions = (a.decisions || []).filter((x) => x && x.text);
+  const reqs = (a.requirements || []).filter((x) => x && x.text);
+  const scope = (a.scope || []).map((g) => ({ ...g, rows: (g.rows || []).filter((r) => r && r.text) })).filter((g) => g.rows.length);
+  const direction = (a.directionGroups || []).map((g) => ({ ...g, rows: (g.rows || []).filter((r) => r && r.text) })).filter((g) => g.rows.length);
+  const refs = (a.references || []).filter(Boolean);
+  // The documents on file sit with the project and its design basis (Tab 11:28, section 1), not at the end.
+  const present = { s1: overview.length > 0 || refs.length > 0, s2: requests.length > 0, s3: decisions.length > 0, s4: reqs.length > 0, s5: scope.length > 0, s6: direction.length > 0 };
+  const nums = {}; let n = 0;
+  for (const k of ["s1", "s2", "s3", "s4", "s5", "s6"]) if (present[k]) nums[k] = two(++n);
+  const refsOf = (r) => (r.refs && r.refs.length ? r.refs.join(", ") : r.ref || "");
+  // Grouped tables (design-system groupedTable): one repeating header row per group, rows bounded.
+  const groups = (list, bandKey, rowsKey, lastKey, rowOf) => list.map((g, k) => ({ [lastKey]: k === list.length - 1, [bandKey]: g.group, ...boundedRows(rowsKey, g.rows.map(rowOf)) }));
+  const reqStatuses = new Set(reqs.map((r) => r.status).filter(Boolean));
+  const dirStatuses = new Set(direction.flatMap((g) => g.rows.flatMap((r) => String(r.status || "").split(", ").map((x) => x.charAt(0).toUpperCase() + x.slice(1)))).filter(Boolean));
+  const anyCheck = scope.some((g) => g.rows.some((r) => r.check));
+  const drawing = String(p.drawingBasis || "").trim();
   return {
-    ...c,
-    META_ROWS: metaRows([["Project", p.projectDescription], ["Design basis", p.drawingBasis], ["Site", p.siteAddress], ["Audience", p.architect], ["Issued status", c._statusValue], ["Prepared by", p.preparedBy || "Blue Leaf Building"]]),
-    CALLOUT_LABEL: "Please read first",
-    CALLOUT_BODY: "Approved client requirements are instructions about desired outcomes. Technical design solutions are not approved until the responsible designer or consultant has reviewed and documented them.",
-    ACTIONS_INTRO: paras([a.actionsIntro || "The following are the decisions most likely to delay the next coordinated drawing issue. Reference IDs match the register and the design schedule below."]),
-    ACTIONS: (a.actions || []).map((x) => ({ REF_ID: x.id || "", ACTION: x.action || "", OWNER: x.owner || "—", STATUS: x.status || "OPEN" })),
-    CONFIRMED_REQS: (a.confirmedReqs || []).map((t, i) => ({ REF_ID: `REQ-${String(i + 1).padStart(2, "0")}`, REF_TEXT: String(t || "") })),
-    PREFERENCES: paras([a.clientPrefs && a.clientPrefs.length ? `Client preferences requiring development: ${a.clientPrefs.map((s) => String(s).replace(/\.\s*$/, "")).join("; ")}. These preferences are not final product or technical approvals.` : ""]),
-    GROUPS,
-    ...(() => {
-      // Deliberate pagination (Tab 17 #1): a short/medium brief stays one tight page; a long brief moves
-      // the Design register to its own page and fills that page with the referenced-documents list, so
-      // page 2 is a composed reference page — never a split table or a sliver.
-      const total = (a.actions || []).length + (a.confirmedReqs || []).length + (a.scheduleItems || []).length;
-      const brk = total >= 13;
-      return { ARCH_BREAK: brk, HAS_REFS: (brk && (a.references || []).length) ? [{}] : [], REFERENCES: items(a.references) };
-    })(),
+    HDR_DOC_TYPE: "Architect Design Brief",
+    HDR_PROJECT: p.siteShort || p.siteAddress || "",
+    FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
+    DOC_KICKER: id.issued ? "Design coordination" : "Draft  /  Design coordination",
+    DOC_TITLE: "Design brief",
+    HAS_SUBTITLE: !!a.subtitle, DOC_SUBTITLE: a.subtitle || "",
+    META_ROWS: metaRows([
+      ["Prepared for", a.preparedFor || meta.recipient || "The design team"], ["Site", p.siteAddress],
+      ["Client", p.clientName], ["Drawing basis", drawing || "Not yet recorded"],
+      ["Project", p.projectLabel || p.projectDescription], ["Document", id.number],
+      ["Prepared by", p.preparedBy || "Blue Leaf Building"], ["Status", id.issued ? `${id.revision} · ${id.statusText}` : id.statusText],
+    ]),
+    STATUS_LABEL: id.issued ? "Coordination brief" : "Draft for review — not issued",
+    // Tab 11:30, Tab 17:20/:86: never imply approval of a technical solution or consultant sign-off.
+    STATUS_BODY: (id.issued && meta.supersedes?.label ? `This revision replaces ${meta.supersedes.label}${meta.supersedes.issuedDate ? `, issued ${fmtIdDate(meta.supersedes.issuedDate)}` : ""}. ` : "")
+      + "This brief sets out what we need from the design team, what the client needs the design to achieve and the design direction so far. It isn't a construction instruction, and it doesn't approve a technical solution or stand in for consultant sign-off: technical design stays with the architect and the relevant consultants.",
+
+    HAS_S1: present.s1, S1_NUM: nums.s1 || "",
+    OVERVIEW: overview.map((t) => ({ PARA: t })),
+    HAS_REFS: refs.length > 0, REFS_LABEL: "Drawings and documents on file",
+    ...boundedRows("REFS", refs.map((t) => ({ TEXT: t }))),
+
+    HAS_S2: present.s2, S2_NUM: nums.s2 || "",
+    // Said once, here (the brief's only response protocol): no closing box repeating it.
+    REQUESTS_INTRO: "Please reply against these references, quoting the drawing number and revision. A request stays open until we've checked your revised drawings against it; nothing you send changes the client's choices until they confirm it.",
+    ...boundedRows("REQUESTS", requests.map((x) => ({ REF: x.ref || "", TEXT: x.text, WHO: x.who || "To be agreed" }))),
+
+    HAS_S3: present.s3, S3_NUM: nums.s3 || "",
+    DECISIONS_INTRO: `${decisions.length === 1 ? "This is" : "These are"} being settled with the client or by Blue Leaf. We'll confirm each outcome in writing before you rely on it.`,
+    ...boundedRows("DECISIONS", decisions.map((x) => ({ REF: x.ref || "", TEXT: x.text, WHO: x.who || "To be agreed" }))),
+
+    HAS_S4: present.s4, S4_NUM: nums.s4 || "",
+    // The statuses printed are explained here, once, and only those (as the client brief's key, CPB3-06).
+    REQS_INTRO: ["What the client needs the design to achieve.",
+      reqs.some((r) => !r.status) ? "Unmarked: the client's stated requirement, not yet confirmed in writing." : "",
+      reqStatuses.has("Client-approved") ? "Client-approved: the client has confirmed it with us; it isn't a technical approval." : "",
+      reqStatuses.has("For consultant review") ? "For consultant review: a performance direction for the relevant consultant to assess, not a specified product." : "",
+      reqStatuses.has("To verify") ? "To verify: the design team still needs to confirm how it is met." : "",
+      reqStatuses.has("Verified") ? "Verified: confirmed by the design team, with its reference on file." : ""].filter(Boolean).join(" "),
+    ...boundedRows("REQS", reqs.map((x) => ({ REF: x.ref || "", TEXT: x.text, STATUS: x.status || "" }))),
+
+    HAS_S5: present.s5, S5_NUM: nums.s5 || "",
+    // Says only what the groups below hold (QA RID-11: a new build has nothing that stays).
+    SCOPE_INTRO: `${(() => { const has = (g) => scope.some((x) => x.group === g); const parts = [has("Existing to remain or protect") && "what stays",
+      ["Not in the current scope", "By others", "Supplied by the client", "Still to be decided"].some(has) && "what sits outside it"].filter(Boolean);
+      return parts.length ? `The work as recorded now, with ${parts.join(" and ")}.` : "The work as recorded now."; })()}${anyCheck ? " To verify marks an item whose technical check is still open." : ""}`,
+    // The Check column is labelled only when a row has a check open; otherwise it stays quiet (owner's editorial rule).
+    SCOPE_CHECK_HEAD: anyCheck ? "Check" : "",
+    SCOPE_GROUPS: groups(scope, "SG", "SROWS", "S_LAST", (r) => ({ REF: refsOf(r), TEXT: r.text, CHECK: r.check || "" })),
+
+    HAS_S6: present.s6, S6_NUM: nums.s6 || "",
+    HAS_DIRECTION: !!a.direction, DIRECTION: a.direction ? `The design direction: ${a.direction}` : "",
+    DIR_INTRO: ["What applies throughout the house is listed once; each room then shows its own choices and where it differs from the house.",
+      ["Proposed", "Client-approved"].some((st) => dirStatuses.has(st)) ? `Each item is the client's preferred direction unless marked ${["Proposed", "Client-approved"].filter((st) => dirStatuses.has(st)).join(" or ")}; none is a product or technical approval.` : "Each item is the client's preferred direction; none is a product or technical approval.",
+      // Each printed status defined once (QA REC-10: Proposed means put to the client, not a proposed technical solution).
+      dirStatuses.has("Proposed") ? "Proposed: a specific option put to the client, not yet decided." : "",
+      dirStatuses.has("Client-approved") ? "Client-approved: the client has confirmed it with us." : "",
+      dirStatuses.has("To verify") ? "To verify: the design team still needs to confirm it." : "",
+      dirStatuses.has("Verified") ? "Verified: confirmed by the design team, with its reference on file." : ""].filter(Boolean).join(" "),
+    DIR_GROUPS: groups(direction, "DG", "DROWS", "D_LAST", (r) => ({ ITEM: r.item || "", ITEM_REF: r.ref ? `\n${r.ref}` : "", TEXT: r.text, STATUS: r.status || "" })),
+
+
+    _docNumber: id.number, _id: id,
   };
 }
 
@@ -360,7 +418,9 @@ export function validateFixture(fx, { mode = "issue", logoPresent = true } = {})
     if (FAKE_MONEY_RX.test(s)) errors.push(`Suspect $0 / blank money value at ${path}: "${s.slice(0, 48)}".`);
   });
   for (const r of fx?.selections || []) if (r.status && !SELECTION_STATUSES.includes(r.status)) errors.push(`Selection ${r.itemId || "?"} has unknown status "${r.status}".`);
-  for (const r of fx?.architectBrief?.scheduleItems || []) if (r.status && !ARCHITECT_ITEM_STATUSES.includes(r.status)) errors.push(`Architect item ${r.itemId || "?"} status "${r.status}" is not in the coordination vocabulary.`);
+  const ab = fx?.architectBrief || {};
+  for (const r of [...(ab.requirements || []), ...(ab.directionGroups || []).flatMap((g) => g.rows || []), ...(ab.scope || []).flatMap((g) => (g.rows || []).map((x) => ({ ...x, status: x.check })))])
+    if (r.status && !String(r.status).split(", ").every((x) => ARCHITECT_ITEM_STATUSES.some((st) => st.toLowerCase() === x.toLowerCase()))) errors.push(`Architect brief item ${r.ref || "?"} status "${r.status}" is not in the coordination vocabulary.`);
   if (mode === "draft") return { ok: true, errors: [], warnings: errors };
   if (meta.status !== "Issued") errors.push('Document is not marked "Issued" (a Draft/specimen may not be issued to a client).');
   if (meta.status === "Issued" && !/^\d{4}-\d{2}-\d{2}$/.test(String(meta.issuedDate || ""))) errors.push("Issued document has no valid issued date.");

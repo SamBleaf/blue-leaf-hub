@@ -34,13 +34,12 @@ ok("T1b identity: a draft has no revision and says so; an issued copy prints BLB
   /^BLB-CPB-0417\s+·\s+Draft — not issued$/.test(cbDraft.FTR_IDENTITY) && !/R0\d/.test(cbDraft.FTR_IDENTITY) && /^Draft/.test(cbDraft.DOC_KICKER) &&
   /^BLB-CPB-0417-R0\d\s+·\s+Issued 6 November 2026$/.test(cbIssued.FTR_IDENTITY) && cbIssued.META_ROWS.some((r) => r.VA === `BLB-CPB-0417-R0${reno.meta.revision}` || r.VB === `BLB-CPB-0417-R0${reno.meta.revision}`));
 
-// 2. Architect-brief: actions (ID/owner/status), REQ reference list, and a grouped design register with the coordination vocabulary.
+// 2. Architect brief (adb-1.0 on the shared design system; the full checks are in documents-adb.test.mjs): the payload
+//    builds from a fixture, carries its identity, and a section with nothing in it doesn't print.
 const ab = buildArchitectBriefPayload(reno);
-const regItems = ab.GROUPS.flatMap((g) => g.ITEMS);
-ok("T2 architect brief: actions w/ owner+status; REQ-xx list; grouped design register w/ coordination statuses",
-  ab.ACTIONS.length === 4 && ab.ACTIONS.every((a) => a.REF_ID && a.OWNER && a.STATUS) &&
-  ab.CONFIRMED_REQS.every((r) => /^REQ-\d\d$/.test(r.REF_ID)) &&
-  ab.GROUPS.length >= 1 && regItems.length === 5 && regItems.every((r) => ARCHITECT_ITEM_STATUSES.includes(r.STATUS)));
+ok("T2 architect brief: identity and cover from the fixture; empty sections don't print",
+  ab.DOC_TITLE === "Design brief" && /^BLB-ADB-0417/.test(ab.FTR_IDENTITY) && ab.META_ROWS.length === 4 && ab.HAS_S2 === false && ab.HAS_S5 === false
+  && ARCHITECT_ITEM_STATUSES.includes("Client-approved") && ARCHITECT_ITEM_STATUSES.includes("To verify"));
 
 // 3. Selections payload is grouped (not a flat list), group-ordered, 22 items total.
 const ss = buildSelectionsSchedulePayload(long);
@@ -71,7 +70,7 @@ ok("T7 validation: placeholder text & $0 money both block issue",
 
 // 8. Status vocabularies enforced: unknown selection status blocks; non-decision states allowed; architect status vocabulary enforced.
 const badSel = JSON.parse(JSON.stringify(issuedReno)); badSel.selections = [{ group: "External", itemId: "X", category: "c", product: "p", finish: "f", status: "Maybe-ish", responsibility: "BLB" }];
-const badArch = JSON.parse(JSON.stringify(issuedReno)); badArch.architectBrief.scheduleItems[0].status = "Confirmed";
+const badArch = JSON.parse(JSON.stringify(issuedReno)); badArch.architectBrief.requirements = [{ ref: "W015-TU4", text: "Good daylight", status: "Confirmed" }];
 ok("T8 validation: unknown selection status blocks; special states allowed; architect 'Confirmed' rejected (intent≠verification)",
   validateFixture(badSel, { mode: "issue" }).ok === false &&
   ["By Others", "N/A", "Excluded", "Existing to Remain", "Undecided"].every((s) => SELECTION_STATUSES.includes(s)) &&
@@ -97,12 +96,11 @@ ok("T11 client presentation: same selections regrouped into client areas; decisi
   cpShort.HAS_PALETTE.length === 0 && cpShort.AREAS.length >= 1);
 
 // 12. Deliberate pagination flags (no fabricated geometry — just content-size signals the template reads).
-const abReno = buildArchitectBriefPayload(reno), abLong = buildArchitectBriefPayload(long), abShort = buildArchitectBriefPayload(short);
 const cbReno = buildClientBriefPayload(reno), cbShort = buildClientBriefPayload(short);
 const cpbXml = new (await import("pizzip")).default(fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_brief.templateFile))).file("word/document.xml").asText();
-ok("T12 pagination: short/medium architect stay one page; long breaks + shows references; the client brief flows (no forced breaks) and hides empty sections",
-  abShort.ARCH_BREAK === false && abReno.ARCH_BREAK === false && abLong.ARCH_BREAK === true &&
-  abLong.HAS_REFS.length === 1 && abReno.HAS_REFS.length === 0 &&
+const adbXml = new (await import("pizzip")).default(fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.architect_brief.templateFile))).file("word/document.xml").asText();
+ok("T12 pagination: the client brief and the architect brief flow (no forced breaks) and hide empty sections",
+  !/w:type="page"|pageBreakBefore/.test(adbXml) &&
   !/w:type="page"|pageBreakBefore/.test(cpbXml) && cbReno.HAS_STEPS === true && cbShort.HAS_STEPS === false &&
   cbShort.NOTED.at(-1).N_LABEL === "This brief assumes" && cbShort.HAS_S5 === (short.clientBrief.decisions.length > 0) &&
   buildClientBriefPayload({ ...short, clientBrief: { ...short.clientBrief, decisions: [], preferences: [] } }).HAS_S5 === false);

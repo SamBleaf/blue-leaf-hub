@@ -261,7 +261,7 @@ export function dataTable(key, cols, o = {}) {
  * o.tail: a note field printed as the last row of the LAST group only (lastKey), so it always travels with that
  * group's last two rows (the status key under the preferences). Returns blocks (paragraphs and tables).
  */
-export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_LAST", tail = null } = {}) {
+export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_LAST", tail = null, lastGap = true } = {}) {
   const total = cols.reduce((a, c) => a + c.width, 0);
   if (total !== CW) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${CW}`);
   if (cols.length !== 3) throw new Error(`groupedTable ${groupKey}: the group name takes the middle of three columns`);
@@ -277,7 +277,8 @@ export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_
   const table = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
   // The gap separates one group's table from the next; after the last group (the one carrying the tail) the section's
   // own spacing follows, as after any other table (final inspection KESTREL-07).
-  return when(groupKey, tail ? [table, tag(`^${lastKey}`), tableGap(200), tag(`/${lastKey}`)] : [table, tableGap(200)]);
+  // lastGap: false — the table ends the document, so nothing trails the last group onto an empty page.
+  return when(groupKey, tail || !lastGap ? [table, tag(`^${lastKey}`), tableGap(200), tag(`/${lastKey}`)] : [table, tableGap(200)]);
 }
 
 /**

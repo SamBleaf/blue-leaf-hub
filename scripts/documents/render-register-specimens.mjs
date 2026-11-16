@@ -9,7 +9,7 @@ import fs from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { buildRegisterFixture, renderRegisterDocument, registerDocChecks } from "../../server/lib/registerDocuments.mjs";
-import { REGISTER_PROJECTS, plansSuppliedRevision } from "./fixtures/register-projects.mjs";
+import { REGISTER_PROJECTS, plansSuppliedRevision, designCoordination } from "./fixtures/register-projects.mjs";
 
 const [outDir, docType = "client_brief"] = process.argv.slice(2);
 if (!outDir) { console.error("usage: render-register-specimens.mjs <outDir> [docType]"); process.exit(2); }
@@ -25,6 +25,15 @@ const variants = [
   { name: "powder-issued", project: "powder", ...ISSUED, recipientName: "Priya Raman" },
   { name: "ridgeline-issued", project: "ridgeline", ...ISSUED, recipientName: "Alexander and Catherine Montgomery-Hargreaves" },
 ];
+
+// The Architect Design Brief goes to the design team: Kestrel Court at design coordination (architect, engineer and energy
+// assessor engaged), as a draft and issued, and Ridgeline Drive as an early first issue after the concept presentation.
+const ADB_VARIANTS = [
+  { name: "kestrel-coordination", project: "kestrel", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Mara Ellison", tweak: designCoordination },
+  { name: "kestrel-coordination-draft", project: "kestrel", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer, tweak: designCoordination },
+  { name: "ridgeline-first-issue", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Brightwater Design" },
+];
+if (docType === "architect_brief") variants.splice(0, variants.length, ...ADB_VARIANTS);
 
 const tool = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: "utf8" }); } catch { return null; } };
 const summary = [];

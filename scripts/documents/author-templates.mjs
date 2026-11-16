@@ -247,7 +247,8 @@ const technicalSchedule = makeDoc([
 const jobs = [
   // The Client Project Brief is authored by author-cpb.mjs on the shared design system (doc suite R01).
   // ["blb-client-brief-template.docx", clientBrief],
-  ["blb-architect-brief-template.docx", architectBrief],
+  // The Architect Design Brief is authored by author-adb.mjs on the shared design system (doc suite R01).
+  // ["blb-architect-brief-template.docx", architectBrief],
   ["blb-client-presentation-template.docx", clientPresentation],
   ["blb-selections-schedule-template.docx", technicalSchedule],
 ];

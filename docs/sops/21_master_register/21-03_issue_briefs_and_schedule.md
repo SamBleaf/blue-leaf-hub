@@ -43,7 +43,7 @@ It makes each document from the same register rows — nothing is retyped. Befor
 6. Click **Issue revision R01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
 7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: R01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
    - **Selections & Finishes Schedule, Client presentation:** an item with nothing chosen yet says **Still to be decided** once, with the item as its heading, instead of repeating "TBC". The **Technical register** layout keeps TBC for the trade.
-   - **Architect Design Brief:** a client-approved requirement that still needs a technical check is listed under Confirmed project requirements with **(technical check pending)** after it.
+   - **Architect Design Brief:** a client-approved requirement that still needs a technical check is listed under **What the design must achieve**, marked Client-approved, with **(technical check pending: [who confirms it])** after it — the owner on the record, or "owner to be agreed".
    - Every document's footer reads **PAGE 1 / 2** in the same small grey type as the label.
 8. **Coordination packs:** under **Coordination requests (draft packs from the same register)** click a pack — Architect, Routleys (plumbing fixtures), TLI (lighting & electrical), Window supplier, Engineer, Energy assessor, Joiner — to get a draft list of only the items tagged for them.
 9. **Received documents:** click **Add received document**:
@@ -61,6 +61,18 @@ It makes each document from the same register rows — nothing is retyped. Befor
 ### What the Client Project Brief contains (design cpb-2.4, from 16 Nov 2026)
 
 The brief reads in this order and leaves out any section with nothing in it: **The project** (your Sales description, the client's top three priorities and their own note, the client vision as the design direction) → **Scope of works** (what we propose to build, then, under a heading that names only the lists shown: what stays, what's outside the scope, by others, items the client supplies, still to be decided, and what still needs checking, with who confirms) → **Design direction** (preferences grouped by category, every row naming its room, each status in words, with a key under the last group explaining the statuses used) → **Assumptions** → **Decisions to make** (only real actions, 3–7, client's first; an unassigned one reads "To be agreed") → **What happens next** (follows the pathway: the PTSA is only explained before it is signed, never on a plans-supplied or architect-tender lead).
+
+### What the Architect Design Brief contains (design adb-1.0, from 16 Nov 2026)
+
+It goes to the architect and the design team, and reads coordination first. It leaves out any section with nothing in it:
+1. **The project and its design basis.** The Sales description, and the drawings and documents on file. A superseded document isn't listed, and the drawing basis is on the cover.
+2. **What we need from the design team.** Each open next action, or technical check, whose Who is Architect / designer, Engineer / consultant or Trade. It names the firm from the Consultants step (for example "Ellison Architecture"), or the discipline if none is recorded ("Engineer").
+3. **Decisions that affect the drawings.** Open next actions for the client or Blue Leaf. An action with no Who reads "To be agreed": it is never handed to the architect.
+4. **What the design must achieve.** The client's priorities in their own words, then the requirements. Only Client-approved (with evidence) and For consultant review are labelled.
+5. **Changes to the building.** The work, then what stays, what's out, by others, what the client supplies, what's still to be decided, and the site and household facts. "To verify" marks an open technical check.
+6. **Design direction by location.** What applies throughout the house is listed once. Each room then lists its own choices, including where it differs from the house default. Rooms with identical choices share one group. Proposed and Client-approved are marked; preferred is the unmarked norm.
+
+> 💡 **Tip:** To put a request to the architect, engineer or energy assessor, give the record a next action and set **Who** to Architect / designer or Engineer / consultant. Record the firm on the Consultants step so the brief names it.
 
 > 💡 **Tip:** If a decision you expected is missing, give it a next action in the register. A preference on its own is direction, not a decision.
 
@@ -211,7 +223,7 @@ Next review date: 2027-05-07
 **TC-10 — Tab 26 R05 retest follow-ups**
 1. Issue any document. Expected: the card reads **Recorded: R0n (current) · date · for [name] · not emailed**, not "Issued … to".
 2. Preview the Selections & Finishes Schedule as **Client presentation** with one item that has nothing chosen. Expected: that item says **Still to be decided** once, with no "TBC" anywhere and no stray "/" where there's no supplier; the reading key explains the label. Switch to **Technical register**: TBC is still used.
-3. Mark a requirement client-approved (with evidence) while its technical status is **Needs verification**, then preview the Architect Design Brief. Expected: it reads "… (technical check pending)" under Confirmed project requirements.
+3. Mark a requirement client-approved (with evidence) while its technical status is **Needs verification**, then preview the Architect Design Brief. Expected: under What the design must achieve it reads "… (technical check pending: [the record's owner])", with the status Client-approved.
 4. Look at any two-page preview's footer. Expected: **PAGE 1 / 2** with the numbers the same size and grey as the word PAGE.
 - [ ] Pass  [ ] Fail
 
@@ -224,6 +236,15 @@ Next review date: 2027-05-07
 6. Change it to "Porcelain instead of engineered stone". Expected: still refused (a selection names only what is supplied). Change it to "Porcelain benchtop, 20 mm". Expected: issues. Add a scope line "Existing vanity top" with disposition **Retain** and Product "Engineered stone". Expected: issues, with a warning that says it is not WHS clearance and that SafeWork SA must be notified before installed stone is removed, repaired, modified or disposed of. Change its description to "Existing engineered stone vanity top", or add a requirement "No engineered stone in the kitchen", or a scope line "New engineered stone island benchtop". Expected: each is refused, naming the line.
 7. On a new home whose rooms each say only "New [room] as shown on the concept plans": the scope prints one line per group of rooms, with every room named and no category label. Where the project description line already names a room (a double garage), there is no separate "New garage" line. Mark one room Alter with the description "Full renovation". Expected: it keeps its own line. Make the scope list long enough to run onto a second page. Expected: that page opens with "What we propose to build" again. A boundary list that runs onto a new page opens it with its label. Add enough selections to the ensuite, bathroom and laundry that the bathrooms group runs onto a new page. Expected: that page opens with "WHERE · BATHROOMS AND LAUNDRY · STATUS", and its first row names its room.
 8. Record site access as Steep and Narrow or restricted. Expected: "Site access is steep, with narrow or restricted areas." Add Crane or plant access. Expected: "Crane or plant access will need to be planned for." Mark the answer Client unsure. Expected: "Site access: still to be confirmed (noted so far: …)". Issue R01, change the drawing basis on the Project step, issue R02. Expected: R02 prints the new set; R01 still opens with the old one.
+- [ ] Pass  [ ] Fail
+
+**TC-12 — Architect Design Brief (adb-1.0)**
+1. On a lead at Consultants with an architect, an engineer and an energy assessor on the Consultants step, preview the Architect Design Brief.
+2. Expected: the cover reads **Prepared for** the architect (name, firm) and shows the client, drawing basis, document number BLB-ADB-[ref] and status. Every page has the header ARCHITECT DESIGN BRIEF with the address, and the footer with the identity and Page X of Y.
+3. Give a record a next action with Who = Architect / designer. Expected: it appears under **What we need from the design team** with the architect's firm. Give one Who = Client. Expected: it appears under **Decisions that affect the drawings** as Client. Leave Who blank. Expected: "To be agreed", under decisions.
+4. Expected: "Whole house" and "(project default)" appear nowhere. House-wide choices are listed once under **Throughout the house**, and a room exception reads "…, in place of the house default".
+5. Give two rooms the same choices. Expected: one group names both rooms ("Ensuite and bathroom") and lists both references on each row.
+6. Expected: nothing reads Preferred. Only Proposed and Client-approved are marked in the design direction.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

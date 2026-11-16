@@ -142,7 +142,7 @@ function ridgeline() {
     ...rooms.map((r) => inRoom(r, "R-003", { disposition: "new", description: `New ${r.name.toLowerCase()} as shown on the concept plans` })),
     rec("W-010", { disposition: "new", description: "Driveway, paths and a covered outdoor living area off the family room" }),
     rec("W-010", { disposition: "excluded", description: "Pool and pool fencing" }),
-    rec("W-010", { disposition: "by_others", description: "Landscaping and irrigation, by your landscaper" }),
+    rec("W-010", { disposition: "by_others", description: "Landscaping and irrigation, by a separate landscaper" }),
     rec("W-022", { supplyBy: "client", description: "Loose furniture, window furnishings and the home theatre system" }),
     rec("W-005", { technicalStatus: "needs_verification", responsibility: "consultant", category: "site", description: "Soil classification and the retaining needed on the sloping block" }),
     rec("W-001", { answer: pick("W-001", ["steep_access"], ["crane_or_plant_access"]) }),
@@ -187,7 +187,7 @@ function ridgeline() {
       identity: { clientName: "Alexander and Catherine Montgomery-Hargreaves", siteAddress: "27 Ridgeline Drive, Mount Barker SA 5251", suburb: "Mount Barker" },
       projectType: "new_build", deliveryModel: "design_build", engagementPathway: "design_build",
       goals: {
-        description: "A new two-storey family home on a north-facing sloping block, with living areas that open to the garden and views, four bedrooms, a study and a double garage. You want a home built to a high standard of comfort and energy performance that will suit you for the long term.",
+        description: "A new two-storey family home on a north-facing sloping block, with living areas that open to the garden and views, four bedrooms, a study and a double garage. The aim is a home built to a high standard of comfort and energy performance that will suit the family for the long term.",
         vision: "Warm, natural materials, a strong connection to the outdoors and a simple, low-maintenance exterior.",
       },
       commercial: { ptsaStatus: "draft" }, consultants: [], drawings: [],
@@ -215,5 +215,52 @@ export function plansSuppliedRevision(p) {
     "Ensuite heating": "Decide whether underfloor heating in the ensuite is included in the scope for pricing",
     "Envelope review": "Check the cladding and glazing on the supplied plans against the energy assessment before pricing" };
   for (const i of p.register.items) if (next[i.description]) i.nextAction = next[i.description];
+  return p;
+}
+
+/**
+ * Kestrel Court at design coordination, for the Architect Design Brief: the PTSA is signed and the design team is
+ * engaged (architect, engineer, energy assessor, all fictional), and the register carries what the Consultants stage
+ * records: the design team's open requests, an approved glazing requirement, and the documents on file. The same
+ * records as the client brief (same ids and references), brought forward; nothing here is prose for the document.
+ */
+export const KESTREL_DESIGN_TEAM = [
+  { role: "architect", status: "engaged", name: "Mara Ellison", company: "Ellison Architecture" },
+  { role: "engineer", status: "engaged", name: "Dev Corbett", company: "Corbett Structural" },
+  { role: "consultant", status: "engaged", name: "Lena Ruiz", company: "Hills Energy Rating" },
+];
+export function designCoordination(p) {
+  p.lead.stage = "consultants";
+  p.context.commercial = { ...(p.context.commercial || {}), ptsaStatus: "signed" };
+  p.context.consultants = KESTREL_DESIGN_TEAM;
+  // In the shape the register context gives them (revision, reviewStatus: registerContext.mjs).
+  p.context.drawings = [
+    { filename: "Concept Set C-02.pdf", revision: "C-02", issuer: "Ellison Architecture", reviewStatus: "reconciled" },
+    { filename: "Feature and level survey SV-14.pdf", revision: "A", issuer: "Hills Surveying", reviewStatus: "reconciled" },
+    { filename: "Structural advice S-01.pdf", revision: "1", issuer: "Corbett Structural", reviewStatus: "under_review" },
+    { filename: "Concept Set C-01.pdf", revision: "C-01", issuer: "Ellison Architecture", reviewStatus: "superseded" },
+  ];
+  const by = (desc) => p.register.items.find((i) => i.description === desc);
+  const set = (desc, fields) => { const i = by(desc); if (!i) throw new Error(`designCoordination: no record "${desc}"`); Object.assign(i, fields); return i; };
+  // The concept presentation settled the glazing intent; the client approved it at the PTSA meeting.
+  set("Good daylight to the living areas, with glazing performance coordinated with the energy assessment",
+    { certainty: "client_approved", evidence: { at: "2026-11-11", by: "Sam (Blue Leaf)", method: "meeting", ref: "PTSA meeting, 11 Nov 2026" }, technicalStatus: "needs_verification", responsibility: "consultant" });
+  // The design team's open items, on the records they belong to.
+  set("Stair options", { nextAction: "Develop two stair location options for the extension, showing how each meets the existing hallway" });
+  set("Dark slimline window frames, with large north-facing glazing to the living area",
+    { responsibility: "architect", nextAction: "Size the north-facing glazing once the energy model is back, and show the frame colour on the elevations" });
+  set("Large central island and a walk-in butler's pantry, with cabinetry finishes still to be developed",
+    { responsibility: "architect", nextAction: "Show the island, the butler's pantry and the appliance positions on the next kitchen plan" });
+  set("Condition of the roof framing over the retained front rooms",
+    { nextAction: "Inspect the roof framing over the retained front rooms and advise on any strengthening before the new roof ties in" });
+  set("Footings under the rear wall, unknown until the wall is opened up",
+    { nextAction: "Confirm the footing design under the new rear opening; allow for a hold point once the wall is opened up" });
+  set("An airtight, well-insulated extension that stays comfortable year-round",
+    { responsibility: "consultant", nextAction: "Model the extension's walls, roof and glazing for the energy assessment, and advise on insulation and airtightness" });
+  set("Make good existing floors and walls where they meet the extension",
+    { responsibility: "architect", nextAction: "Detail how the new floor level meets the existing jarrah floors at the extension junction" });
+  // Decided at the PTSA meeting, so no longer open; Blue Leaf's envelope review is now the energy assessor's model.
+  set("Extension footprint", { resolved: true, nextAction: "" });
+  set("Envelope review", { resolved: true, nextAction: "" });
   return p;
 }

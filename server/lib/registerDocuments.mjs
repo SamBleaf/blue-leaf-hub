@@ -580,32 +580,195 @@ function clientBriefFixture(input) {
   return fx;
 }
 
+// ── Architect Design Brief (BLB-ADB): coordination first ─────────────────────────────────────────
+// Master Register Tab 11:25-30 (T2), Tab 22:14-22 (D2), Tab 17:36/:84-86 (coordination first; client-approved intent
+// vs technical solution to verify), Tab 27:20 (an action and its requirement are linked by reference, never repeated).
+// Owner's editorial rule (16 Nov 2026): common information once, then the meaningful exceptions; statuses only where
+// they say something; no system wording repeated row after row.
+const DESIGN_TEAM = new Set(["architect", "consultant", "trade"]);
+// "Energy" by its own words, never a bare "rating" (a BAL, wind or fire rating isn't the energy assessor's: QA REC-03).
+const ENERGY_WORDS = /\benergy\b|\bthermal\b|\bnathers\b/i;
+/** The design team on file: current roles only (job_contact_roles status active or unset), architects before designers. */
+function designTeam(context) {
+  const ROLE_ORDER = { architect: 0, designer: 1, interior_designer: 2, engineer: 3, consultant: 4, other: 5 };
+  return (context.consultants || []).filter((c) => !["completed", "inactive"].includes(c.status)).slice().sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9));
+}
+/** Who acts on a record, in an architect's words: the named consultant where one is recorded, else the discipline. */
+function adbWho(context, i) {
+  const r = i.responsibility;
+  if (!r) return "To be agreed";
+  if (r === "client") return "Client";
+  if (r === "blue_leaf") return "Blue Leaf";
+  if (r === "trade") return "Trade / supplier";
+  const people = designTeam(context);
+  const named = (roles, test) => { const c = people.find((x) => roles.includes(x.role) && (!test || test(x))); return c ? clean(c.company || c.name) : ""; };
+  if (r === "architect") return named(["architect", "designer", "interior_designer"]) || "Architect";
+  const coord = questionById(resolvePromptId(i.promptKey))?.coord;
+  // The engineer's by its question or its category first; then the energy assessor's; any other discipline by its name.
+  if (coord === "engineer" || ["structure", "existing", "site"].includes(i.category)) return named(["engineer"]) || "Engineer";
+  if (coord === "energy" || ENERGY_WORDS.test(`${i.description || ""} ${i.nextAction || ""}`)) return named(["consultant", "other"], (x) => ENERGY_WORDS.test(`${x.company || ""} ${x.name || ""}`)) || "Energy assessor";
+  if (coord && COORD_DISCIPLINES[coord]) return COORD_DISCIPLINES[coord];
+  return "Consultant";
+}
+/** Requests in discipline order: the architect's first, then the engineer's, the energy assessor's, everyone else's. */
+const DISCIPLINE_ORDER = (context, i) => {
+  if (i.responsibility === "architect") return 0;
+  if (i.responsibility === "trade") return 4;
+  const who = adbWho(context, i), people = context.consultants || [];
+  if (who === "Engineer" || people.some((c) => c.role === "engineer" && clean(c.company || c.name) === who)) return 1;
+  if (who === "Energy assessor" || ENERGY_WORDS.test(who)) return 2;
+  return 3;
+};
+
 function architectBriefFixture(input) {
   const { context, register } = input;
   const fx = baseFixture(input);
   const items = orderItems(register, register.items);
+  const rooms = register.meta.rooms || [];
+  const roomOfItem = (i) => rooms.find((r) => r.id === i.roomId);
   const area = (i) => roomLabel(register, i);
-  const roomSheet = (i) => (register.meta.rooms || []).find((r) => r.id === i.roomId)?.sheet || "";
-  const archStatus = (i) => (i.technicalStatus === "needs_verification" ? "To verify" : i.certainty === "client_approved" && approvalIsEvidenced(i) ? "Client-approved" : "Proposed");
-  const actions = items.filter((i) => !i.resolved && (i.itemKind === "action" || (i.nextAction && i.nextAction.trim())) && ["architect", "consultant", "", undefined, null].includes(i.responsibility))
-    .slice(0, 14).map((i) => ({ id: refCode(i), action: clean(i.nextAction) || said(i) || itemShort(i), owner: responsibilityLabel(i.responsibility || "architect"), status: "OPEN" }));
-  const register_ = items.filter((i) => (isWork(i) && !["na", "undecided"].includes(i.disposition)) || i.itemKind === "requirement" || i.technicalStatus === "needs_verification")
-    .filter((i) => said(i) || i.itemKind === "scope")
-    .map((i) => ({
-      itemId: refCode(i), location: area(i),
-      requirement: clean(`${isWork(i) ? `${dispositionLabel(i.disposition)}: ` : i.itemKind === "requirement" ? "Requirement: " : ""}${said(i) || itemShort(i)}${sourceTag(i)}${reviewOnly(i)}`),
-      status: archStatus(i), action: clean(i.nextAction), dwgRef: clean(i.source || roomSheet(i) || register.meta.planRev), group: ENVELOPE_CATS.has(i.category) ? "Envelope & structure" : "Internal & services",
-    }));
+  // A room's name, with its drawing sheet when it has its own (the basis is on page 1, so it isn't repeated).
+  const place = (i) => { const a = area(i); if (a === "Whole house" || a === "Site / existing") return ""; const sheet = clean(roomOfItem(i)?.sheet); return `${placeName(a)}${sheet ? ` (${sheet})` : ""}`; };
+  const where = (i) => (place(i) ? `${place(i)}: ` : "");
+  // One clause reads without a closing full stop in a table cell; two sentences keep theirs (QA RID-09).
+  const cellText = (t) => { const x = sentence(t); return /\.\s+[A-Z]/.test(x) ? x : x.replace(/\.$/, ""); };
+  const entry = (i, text) => ({ text: cellText(text), ref: refCode(i), refs: [refCode(i)] });
+  const typeLabel = PROJECT_TYPE_LABELS[context.projectType] || "Residential project";
+
+  // 1 · Requests: what the design team (architect, engineer, energy assessor, trade) must do. An open action, or a
+  // technical check they own. 2 · Decisions: open actions for the client or Blue Leaf (or no one yet). Never an owner
+  // invented: an unassigned action reads "To be agreed" (CPB-11), and goes with the decisions.
+  // A requirement or a choice with a check open is NOT a request: it stays what it is (a requirement, a design
+  // direction) and is marked "To verify" there. A request is an action, or a technical check or risk (sandbox e2e #16).
+  const designCheck = (i) => i.technicalStatus === "needs_verification" && DESIGN_TEAM.has(i.responsibility);
+  // A technical check or risk that nobody owns yet is still the design team's to answer: it is listed with them, Who
+  // "To be agreed", never dropped (QA REC-05). A client or Blue Leaf action without a separate next action is said in
+  // its own words, as the client brief does (QA REC-06). An office-only note goes only to its design-team owner.
+  const isCheck = (i) => ["technical", "risk"].includes(natureOf(i)) && i.technicalStatus === "needs_verification" && (DESIGN_TEAM.has(i.responsibility) || !i.responsibility);
+  const officeOnly = (i) => answerConfigFor(resolvePromptId(i.promptKey))?.tier === "office_only";
+  const open = (i) => !i.resolved && (clean(i.nextAction) || i.itemKind === "action" || isCheck(i)) && (!officeOnly(i) || DESIGN_TEAM.has(i.responsibility));
+  const asked = items.filter((i) => open(i) && (clean(i.nextAction) || said(i)));
+  const ASKS = /\b(confirm|check|inspect|verify|advise|detail|design|size|model|assess|investigate)\b/i;
+  // The record's own drawing or document reference, where it reads as one (a sheet and revision, a document number).
+  const ownRef = (i) => { const src = clean(i.source); return src && /\b[A-Z]{1,3}-?\d{2,4}\b|\bRev\.?\s*[A-Z0-9]\b/.test(src) && !(roomOfItem(i)?.sheet && src === clean(roomOfItem(i).sheet)) ? ` (${src})` : ""; };
+  const askText = (i) => clean(i.nextAction) || (ASKS.test(said(i)) ? said(i) : `Confirm: ${said(i)}`);
+  const toDesignTeam = (i) => DESIGN_TEAM.has(i.responsibility) || (!i.responsibility && isCheck(i) && !clean(i.nextAction));
+  const requests = asked.filter(toDesignTeam)
+    .map((i) => ({ i, who: adbWho(context, i), text: `${where(i)}${askText(i).replace(/\.$/, "")}${ownRef(i)}` }))
+    .map((r, k) => ({ ...r, k })).sort((a, b) => DISCIPLINE_ORDER(context, a.i) - DISCIPLINE_ORDER(context, b.i) || a.k - b.k);
+  const decisions = asked.filter((i) => !toDesignTeam(i) && (clean(i.nextAction) || natureOf(i) === "action"))
+    .map((i) => ({ i, who: adbWho(context, i), text: `${where(i)}${(clean(i.nextAction) || said(i)).replace(/\.$/, "")}${ownRef(i)}` }));
+  // A record whose request IS its description (a check with no separate action) is said once, in the requests.
+  const saidInRequest = new Set(requests.filter(({ i }) => !clean(i.nextAction)).map(({ i }) => i.id));
+  // A check the design team owns, with no request of its own, is marked where the record prints.
+  const inRequest = new Set(requests.map(({ i }) => i.id));
+  const checkOpen = (i) => designCheck(i) && !inRequest.has(i.id);
+
+  // 3 · Requirements: what the design must achieve. The client's priorities first, in their words. Status only where it
+  // says something: Client-approved (with evidence) or For consultant review; a plain requirement needs no label.
+  const pItem = items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-005");
+  const chosen = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
+  const priorityNote = clean(clientSafeAnswer(pItem)?.clientNote);
+  const typed = clean(pItem?.description);
+  const priorityWords = chosen.length ? andList(chosen.map((c, k) => (k ? c.charAt(0).toLowerCase() + c.slice(1) : c))) : typed.replace(/[.\s]+$/, "");
+  const priorities = pItem && (priorityWords || priorityNote) ? [{ ref: refCode(pItem), text: `${priorityWords ? `Client priorities: ${priorityWords}.` : ""}${priorityNote ? `${priorityWords ? " " : ""}In the client's words: "${priorityNote.replace(/[.\s]+$/, "")}."` : ""}`, status: "" }] : [];
+  // An office-only note (R-015 tolerances, R-012 documentation status) is never the client's requirement (CPB4-L01).
+  const verified = (i) => i.technicalStatus === "verified" && clean(i.technicalEvidence?.ref);
+  const requirements = [...priorities, ...items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005" && !saidInRequest.has(i.id) && !officeOnly(i))
+    .map((i) => {
+      const approved = i.certainty === "client_approved" && approvalIsEvidenced(i);
+      // Who must confirm the technical design is named (Tab 11:30): the owner on file, else "owner to be agreed" (QA KES-01).
+      const pending = approved && i.technicalStatus === "needs_verification" ? ` (technical check pending: ${i.responsibility ? adbWho(context, i) : "owner to be agreed"})` : "";
+      return { ref: refCode(i), text: `${where(i)}${plainShort(i)}: ${said(i)}${pending}`,
+        status: approved ? "Client-approved" : verified(i) ? "Verified" : reviewOnly(i) ? "For consultant review" : checkOpen(i) ? "To verify" : "" };
+    })];
+
+  // 4 · Changes to the building: the work, grouped as the client brief groups it (one line per kind of work over a
+  // family of rooms), then what stays, what's out and who else does what. A check still open reads "To verify".
+  const workWords = (i) => { const w = said(i) || dispositionLabel(i.disposition); return i.disposition === "remove" && !/demol|remov/i.test(w) ? `${w} (removal)` : i.disposition === "make_good" && !/make good|match/i.test(w) ? `${w} (make good)` : w; };
+  const verify = (refs) => { const its = items.filter((i) => refs.includes(refCode(i)));
+    return its.some((i) => i.technicalStatus === "needs_verification" && !saidInRequest.has(i.id)) ? "To verify" : its.length && its.every(verified) ? "Verified" : ""; };
+  const work = groupRoomScope(register, items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided") && !saidInRequest.has(i.id)),
+    (i) => entry(i, `${where(i)}${workWords(i)}`), context.projectType);
+  const physical = (i) => !NOT_WORK.has(natureOf(i)) && !saidInRequest.has(i.id);
+  const listed = (filter, text = (i) => `${where(i)}${said(i) || plainShort(i)}`) => items.filter((i) => filter(i) && physical(i)).map((i) => entry(i, text(i)));
+  const scopeGroups = [
+    { group: "Proposed work", rows: work },
+    { group: "Existing to remain or protect", rows: listed((i) => i.disposition === "retain") },
+    { group: "Not in the current scope", rows: listed((i) => ["excluded", "deferred"].includes(i.disposition), (i) => `${where(i)}${said(i) || plainShort(i)}${i.disposition === "deferred" ? " (possible later stage)" : ""}`) },
+    { group: "By others", rows: listed((i) => i.disposition === "by_others") },
+    { group: "Supplied by the client", rows: listed((i) => i.supplyBy === "client" && !["excluded", "by_others", "na"].includes(i.disposition)) },
+    { group: "Still to be decided", rows: items.filter((i) => isWork(i) && i.disposition === "undecided" && said(i) && !saidInRequest.has(i.id) && i.supplyBy !== "client").map((i) => entry(i, `${where(i)}${said(i)}`)) },
+  ].map((g) => ({ ...g, rows: g.rows.map((r) => ({ ...r, check: verify(r.refs || [r.ref]) })) })).filter((g) => g.rows.length);
+  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable")
+    .map((i) => ({ text: !SETTLED_FACT(i) ? unconfirmedFact(i) : siteAccessSentence(i) || `${plainShort(i)}: ${readableList(i)}`, ref: refCode(i) }));
+  if (facts.length) scopeGroups.push({ group: "Site and household", rows: facts.map((f) => ({ text: cellText(f.text), ref: f.ref, refs: [f.ref], check: "" })) });
+
+  // 5 · Design direction by location: what applies throughout the house once, then each room's own choices and its
+  // exceptions to the house defaults. Preferred is the norm, so only Proposed and Client-approved are marked.
+  const CERTAINTY = (i) => (i.certainty === "client_approved" && approvalIsEvidenced(i) ? "Client-approved" : i.certainty === "proposed" ? "Proposed" : "");
+  const DIRECTION_STATUS = (i) => { const c = CERTAINTY(i); return checkOpen(i) ? (c ? `${c}, to verify` : "To verify") : verified(i) ? (c ? `${c}, verified` : "Verified") : c; };
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const directionItems = items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product));
+  const dirRow = (i) => {
+    const zone = clean(i.answer?.zone?.label);
+    const over = i.overridesDefaultId ? byId.get(i.overridesDefaultId) : null;
+    return { item: `${itemShort(i)}${zone ? ` (${zone.toLowerCase()})` : ""}`, ref: refCode(i),
+      // Names what it replaces, never the system term "house default" (QA KES-07).
+      text: `${clean(i.description || i.product) || said(i)}${over && (clean(over.description || over.product) || said(over)) ? `, instead of ${(() => { const d = clean(over.description || over.product) || said(over); return `the ${d.charAt(0).toLowerCase()}${d.slice(1)}`; })()}` : ""}`, status: DIRECTION_STATUS(i) };
+  };
+  const houseWide = directionItems.filter((i) => !i.roomId);
+  // The same choice in several rooms is said once, under all of them ("Ensuite and bathroom"); each room then lists
+  // only what is its own. Rows match on what prints (item, words and status), and keep every record's reference.
+  const roomRows = rooms.map((r) => ({ room: r, rows: directionItems.filter((i) => i.roomId === r.id).map(dirRow) })).filter((g) => g.rows.length);
+  const sig = (row) => `${row.item}|${row.text}|${row.status}`;
+  const sharedBy = new Map();
+  for (const g of roomRows) for (const row of g.rows) { const k = sig(row); if (!sharedBy.has(k)) sharedBy.set(k, []); sharedBy.get(k).push({ room: g.room, row }); }
+  const roomTitle = (rs) => (rs.length === 1 ? `${placeName(clean(rs[0].name))}${clean(rs[0].sheet) ? `  ·  ${clean(rs[0].sheet)}` : ""}`
+    : andList(rs.map((r, k) => { const n = placeName(clean(r.name)); return k ? n.charAt(0).toLowerCase() + n.slice(1) : n; })));
+  const groupsByRooms = new Map();
+  for (const g of roomRows) for (const row of g.rows) {
+    const holders = sharedBy.get(sig(row));
+    if (holders[0].room.id !== g.room.id) continue;                       // said once, with the first room that has it
+    const key = holders.map((h) => h.room.id).join("+");
+    if (!groupsByRooms.has(key)) groupsByRooms.set(key, { rooms: holders.map((h) => h.room), rows: [] });
+    groupsByRooms.get(key).rows.push({ ...row, ref: holders.map((h) => h.row.ref).join(", ") });
+  }
+  const order = new Map(rooms.map((r, k) => [r.id, k]));
+  const directionGroups = [
+    ...(houseWide.length ? [{ group: "Throughout the house", rows: houseWide.map(dirRow) }] : []),
+    ...[...groupsByRooms.values()].sort((a, b) => order.get(a.rooms[0].id) - order.get(b.rooms[0].id) || b.rooms.length - a.rooms.length)
+      .map((g) => ({ group: roomTitle(g.rooms), rows: g.rows })),
+  ];
+
+  // 6 · References: the documents on file (the drawing basis is on page 1). A superseded document isn't listed.
+  // The register context maps review_status to reviewStatus (registerContext.mjs): read both (QA REC-01, a blocker:
+  // live superseded documents were listed). A revision is left out only when the name already carries it as a word.
+  const revIn = (name, rev) => new RegExp(`(^|[^A-Za-z0-9])(rev\\.?\\s*)?${String(rev).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9]|$)`, "i").test(name);
+  const references = (context.drawings || []).filter((d) => (d.reviewStatus ?? d.review_status) !== "superseded").slice(0, 12)
+    .map((d) => { const name = String(d.filename || "").replace(/\.(pdf|dwg|docx?)$/i, ""); const rev = clean(d.revision);
+      return clean([name, rev && !revIn(name, rev) ? `revision ${rev}` : "", d.issuer].filter(Boolean).join(", ")); })
+    .filter(Boolean);
+
+  // Prepared for: the person it is issued to; with their firm when they are the architect on file (QA REC-04).
+  const architect = designTeam(context).find((c) => ["architect", "designer", "interior_designer"].includes(c.role));
+  const recipient = clean(input.recipientName);
+  const firmOf = (c) => (c?.company && c.company !== c.name ? c.company : "");
+  // The cover names the brief's own pathway in sentence case, as the client brief does.
+  fx.project.projectLabel = [`${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}`, PATHWAY_PROJECT_LABEL[cpbPathway(context)] || DELIVERY_MODELS[context.deliveryModel]].filter(Boolean).join(" · ");
   fx.architectBrief = {
-    actionsIntro: "The following are the decisions most likely to delay the next coordinated drawing issue. Reference IDs match the design register below and the project register.",
-    actions,
-    // Client-approved isn't technically verified (Tab 26 DOC-02): say so while the technical check is open.
-    confirmedReqs: items.filter((i) => i.itemKind === "requirement" && i.certainty === "client_approved" && approvalIsEvidenced(i) && said(i))
-      .map((i) => `${area(i)}: ${said(i)}${i.technicalStatus === "needs_verification" ? " (technical check pending)" : ""}`),
-    clientPrefs: items.filter((i) => isClientSelection(i) && ["preference", "proposed"].includes(i.certainty) && (said(i) || i.product)).slice(0, 10).map((i) => `${area(i)} ${itemShort(i).toLowerCase()}: ${clean(i.description || i.product) || said(i)}`),
-    scheduleItems: register_,
-    references: [register.meta.planRev ? `Current drawing basis: ${register.meta.planRev}` : null,
-      ...(context.drawings || []).slice(0, 10).map((d) => clean(`${d.filename}${d.revision ? ` — ${d.revision}` : ""}${d.issuer ? ` (${d.issuer})` : ""}`))].filter(Boolean),
+    pathway: cpbPathway(context),
+    subtitle: `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
+    preparedFor: recipient ? (architect && [architect.name, architect.company].includes(recipient) ? clean([architect.name, firmOf(architect)].filter(Boolean).join(", ")) : recipient)
+      : architect ? clean([architect.name, firmOf(architect)].filter(Boolean).join(", ")) : "",
+    overview: [sentence(context.goals?.description)].filter(Boolean),
+    direction: sentence(context.goals?.vision),
+    requests: requests.map(({ i, who, text }) => ({ ref: refCode(i), text: sentence(text), who })),
+    decisions: decisions.map(({ i, who, text }) => ({ ref: refCode(i), text: sentence(text), who })),
+    requirements,
+    scope: scopeGroups,
+    directionGroups,
+    references,
   };
   return fx;
 }
@@ -703,6 +866,9 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   // document that would PRINT engineered stone (or its shorthand) can't be issued, whatever the wording; staff write the
   // line without it and keep the material in the record (review rounds 1-5). Supply selections block as before.
   const shown = printedStrings(docType, fx), printedHit = (t) => !!t && shown.some((x) => x.includes(t));
+  // The architect's brief prints the Sales description and record wording as typed; words addressed to the client read
+  // wrongly to the design team (QA REC-12).
+  if (docType === "architect_brief") { const you = shown.find((x) => /\b(you|your|you're|yours)\b/i.test(x)); if (you) warnings.push(`The Architect Design Brief would print wording addressed to the client: "${clean(you).slice(0, 90)}". Reword the Sales description or the record for the design team.`); }
   const docLabel = REGISTER_DOC_TYPES[docType]?.label || "document";
   const stop = (msg) => (mode === "issue" && clientFacing ? errors : warnings).push(msg);
   const reported = [];
