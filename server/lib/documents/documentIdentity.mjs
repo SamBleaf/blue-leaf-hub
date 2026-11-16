@@ -3,7 +3,7 @@
 //   BLB-[TYPE]-[PROJECT REF]-[REVISION]      e.g. BLB-CPB-0417-R01
 //
 // Six things are kept apart and never confused (docs/documents/DOCUMENT_SUITE.md §2):
-//   1. document type      — the code below (CPB, ADB, SFS, TSN)
+//   1. document type      — the code below (CPB, ADB, TSS, CSP, TSN)
 //   2. project reference  — the project's own reference (fixture meta.ref); never derived from an address
 //   3. draft vs issued    — a draft carries NO revision: it isn't one yet
 //   4. issue revision     — R01, R02 … from the registry's integer version (lead_documents.version)
@@ -16,8 +16,8 @@
 export const DOC_CODES = {
   client_brief: "CPB",
   architect_brief: "ADB",
-  selections_schedule: "SFS",      // one code for the document; the layout is named on the page
-  client_presentation: "SFS",
+  selections_schedule: "TSS",      // Technical Selections Schedule
+  client_presentation: "CSP",      // Client Selections Presentation: its own document and revision series (SELECTIONS_SPEC S1)
   tender_scope_notes: "TSN",
 };
 

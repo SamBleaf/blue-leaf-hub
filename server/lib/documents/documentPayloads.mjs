@@ -284,87 +284,156 @@ export function buildArchitectBriefPayload(fx) {
   };
 }
 
-// ── 03 Client Selections Presentation (editorial, client-facing) ──────────────
-// Built from the SAME fx.selections as the Technical register — grouped into client-friendly areas,
-// shown as cards, with a plain-language status key. No fabricated colours or products.
-const PRESENT_AREAS = [
-  { name: "Exterior selections", groups: ["External", "External Works"] },
-  { name: "Interior selections", groups: ["Internal Finishes"] },
-  { name: "Joinery & kitchen", groups: ["Joinery"] },
-  { name: "Bathrooms & wet areas", groups: ["Wet Areas"] },
-  { name: "Services & comfort", groups: ["Services & Fixtures"] },
-];
-const AREA_TAGLINE = "Agreed in principle for review — supplier schedules and drawings remain the technical reference.";
-const NEEDS_DECISION = new Set(["TBC", "Hold", "Design", "Undecided", "Preliminary"]);
-/** The client presentation says this once per row instead of repeating "TBC" (Tab 26 R05 retest). The technical register keeps TBC. */
-export const PRESENTATION_PENDING_LABEL = "Still to be decided";
-const known = (v) => (v && v !== "TBC" ? v : "");
+// ── Pair 2: Technical Selections Schedule and Client Selections Presentation (docs/documents/SELECTIONS_SPEC.md) ──
+// Both payloads read the fixture's selectionRecords output (registerDocuments.mjs), so the two documents can never say
+// one selection two ways. Design-system templates: author-tss.mjs (A4 landscape) and author-csp.mjs (A4 portrait).
 
-export function buildClientPresentationPayload(fx) {
-  const p = fx.project, cp = fx.clientPresentation || {};
-  const c = chrome(fx, { type: "client_presentation", breadcrumb: "Client Selections  /  Design Study",
-    sectionLabel: "Client selections  /  Design development", title: "Materials & finishes",
-    tagline: "A considered palette, with every decision traceable." });
-  const byGroup = new Map();
-  for (const r of fx.selections || []) { if (!byGroup.has(r.group)) byGroup.set(r.group, []); byGroup.get(r.group).push(r); }
-  let n = 0;
-  const AREAS = PRESENT_AREAS.map((a) => {
-    const rows = a.groups.flatMap((g) => byGroup.get(g) || []);
-    if (!rows.length) return null;
-    n += 1;
-    return {
-      AREA_NUM: String(n).padStart(2, "0"), AREA_NAME: a.name, AREA_TAGLINE,
-      ITEMS: rows.map((r) => {
-        // No product yet: the item is the heading and the room the label, so nothing reads "TBC".
-        const product = known(r.product), source = known(r.responsibility);
-        const split = !product && r.item;
-        return {
-          REF_ID: r.itemId || "", CAT: (split ? r.where : r.category) || "", NAME: product || r.item || "",
-          DESC: known(r.finish), STATUS: known(r.status) || PRESENTATION_PENDING_LABEL,
-          SOURCE: source, SEP: source ? "   /   " : "",
-        };
-      }),
-    };
-  }).filter(Boolean);
-  const DECISIONS = (fx.selections || []).filter((r) => NEEDS_DECISION.has(r.status)).map((r) => ({
-    REF_ID: r.itemId || "", ITEM: [r.category, known(r.product)].filter(Boolean).join(" — "), OWNER: known(r.responsibility) || "—", STATUS: known(r.status) || PRESENTATION_PENDING_LABEL,
-  }));
-  const palette = (cp.palette || []).slice(0, 4);
-  const tiles = {};
-  for (let i = 0; i < 4; i++) { const t = palette[i] || {}; tiles[`TILE${i + 1}_AREA`] = t.area || ""; tiles[`TILE${i + 1}_NAME`] = t.name || ""; tiles[`TILE${i + 1}_NOTE`] = t.note || ""; }
-  return {
-    ...c,
-    SUBLINE: [p.projectDescription, p.siteAddress].filter(Boolean).join("   /   "),
-    APPROACH_PARAS: paras(cp.approachParas && cp.approachParas.length ? cp.approachParas
-      : ["The intention is a warm, durable home developed from a restrained, consistent palette. These pages summarise the current selections in a format that is easy to review; supplier schedules and architectural drawings remain the technical reference."]),
-    HAS_PALETTE: palette.length ? [{}] : [],
-    ...tiles,
-    READ_LABEL: "Reading this schedule",
-    READ_BODY: "Preferred means the look is agreed in principle, not the exact product. Proposed means a specific option is being reviewed. Client-approved requires documented acceptance. Still to be decided means no choice has been made yet. Nothing in this document authorises procurement.",
-    AREAS,
-    HAS_DECISIONS: DECISIONS.length ? [{}] : [],
-    DECISIONS,
-  };
-}
+/** The selection statuses either document prints. A preference is unmarked (owner decision Q2). */
+export const SELECTION_STATE_WORDS = ["", "Client-approved", "Proposed", "To be decided", "Not yet discussed", "Existing to remain", "Client's choice, with Blue Leaf", "Change requested, with Blue Leaf"];
+/** One word for a selection not chosen yet, the same in both documents (spec critique: one label per state). */
+export const PRESENTATION_PENDING_LABEL = "To be decided";
+const supersedesNote = (meta) => (meta.status === "Issued" && meta.supersedes?.label
+  ? `This revision replaces ${meta.supersedes.label}${meta.supersedes.issuedDate ? `, issued ${fmtIdDate(meta.supersedes.issuedDate)}` : ""}. ` : "");
+const nl = (t) => (t ? `\n${t}` : "");
+/** A cell's two lines: the second only when it has text, and never under an empty first line (spec critique). */
+const twoLines = (first, second) => (first ? { a: first, b: nl(second) } : { a: second || "", b: "" });
 
-/** 04 — Technical Selection Register (reference-first, dense, grouped). */
+/** Technical Selections Schedule (BLB-TSS). Reader: the design team, estimator, suppliers and trades. */
 export function buildSelectionsSchedulePayload(fx) {
-  const p = fx.project;
-  const c = chrome(fx, { type: "selections_schedule", breadcrumb: "Technical Selections  /  Design Study",
-    sectionLabel: "Procurement  /  Technical reference", title: "Selection register",
-    tagline: "Room and element schedule · source references · decision status" });
-  const byGroup = new Map();
-  for (const r of fx.selections || []) { if (!byGroup.has(r.group)) byGroup.set(r.group, []); byGroup.get(r.group).push(r); }
-  const GROUPS = [...byGroup.keys()]
-    .sort((x, y) => (GROUP_ORDER.indexOf(x) < 0 ? 99 : GROUP_ORDER.indexOf(x)) - (GROUP_ORDER.indexOf(y) < 0 ? 99 : GROUP_ORDER.indexOf(y)))
-    .map((g) => ({ GROUP_NAME: g, ITEMS: byGroup.get(g).map((r) => ({ REF_ID: r.itemId || "", ROOM: r.category || "", SELECTION: r.product || "", FINISH: r.finish || "", QTY: r.qty || "—", STATUS: r.status || "TBC", SOURCE: r.responsibility || "" })) }));
+  const t = fx.technicalSchedule || {}, p = fx.project || {}, meta = fx.meta || {};
+  const id = documentIdentity({ type: "selections_schedule", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
+  const groups = (t.groups || []).filter((g) => g.rows && g.rows.length);
+  const reqs = t.requirements || [], actions = t.actions || [], sources = t.sources || [];
+  const present = { s1: groups.length > 0, s2: reqs.length > 0, s3: actions.length > 0, s4: sources.length > 0 };
+  const nums = {}; let n = 0;
+  for (const k of ["s1", "s2", "s3", "s4"]) if (present[k]) nums[k] = two(++n);
+  const states = new Set(t.statuses || []), tech = new Set(t.technicalShown || []);
+  const drawing = String(p.drawingBasis || "").trim();
+  const pack = t.coord ? `Coordination request: ${t.coord}` : "";
   return {
-    ...c,
-    META_ROWS: metaRows([["Project", p.projectDescription], ["Site", p.siteAddress], ["Basis", p.drawingBasis], ["Issue", c._statusValue]]),
-    GROUPS,
-    FOOTER_NOTE: "'Preferred' and 'proposed' items are not purchase instructions. Quantities marked — are preliminary. Original supplier documentation remains the technical source; updates require Blue Leaf review.",
+    HDR_DOC_TYPE: pack ? "Coordination request" : "Technical Selections Schedule",
+    HDR_PROJECT: p.siteShort || p.siteAddress || "",
+    FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
+    DOC_KICKER: [id.issued ? "" : "Draft", pack || "Selections and coordination"].filter(Boolean).join("  /  "),
+    DOC_TITLE: "Technical selections schedule",
+    HAS_SUBTITLE: !!p.projectLabel, DOC_SUBTITLE: p.projectLabel || "",
+    META_ROWS: metaRows([
+      ["Prepared for", meta.recipient || t.coord || "The project team"], ["Client", p.clientName],
+      ["Site", p.siteAddress], ["Drawing basis", drawing || "Not yet recorded"],
+      ["Stage", p.stageLabel], ["Document", id.number],
+      ["Prepared by", p.preparedBy || "Blue Leaf Building"], ["Status", id.issued ? `${id.revision} · ${id.statusText}` : id.statusText],
+    ]),
+    // The issue state, never a static "Issued" (spec critique); never a purchase order, a variation or a technical
+    // approval (Tab 15:51, Tab 17:18, Tab 22:25); a supplier's document cited here is not adopted (Tab 14:76).
+    STATUS_LABEL: id.issued ? "Issued for coordination" : "Draft for coordination — not issued",
+    STATUS_BODY: `${supersedesNote(meta)}It isn't a purchase order, a variation or a technical approval. A product is the client's choice only where it is marked Client-approved, and a technical item is settled only where it is marked Verified. A supplier's document cited here is that supplier's own information: citing it isn't acceptance of its content.`,
+    // Each printed status, defined once (owner decision Q2), and the known / provisional / unresolved split (the brief).
+    READ_INTRO: ["Grouped by trade and system. Each row is one register record, or rooms with identical records.",
+      t.hasHouse ? "A row with no location applies throughout the house." : "",
+      states.has("preferred") ? "Unmarked: the client's preferred direction; no product is chosen yet." : "",
+      states.has("proposed") ? "Proposed: an option put to the client, not yet accepted." : "",
+      states.has("with_blue_leaf") ? "Client's choice, with Blue Leaf: the client has answered on the portal and Blue Leaf is reviewing it." : "",
+      states.has("change_requested") ? "Change requested, with Blue Leaf: the client has asked for a change." : "",
+      states.has("approved") ? "Client-approved: the client has confirmed it with us; it isn't a technical approval." : "",
+      states.has("undecided") ? "To be decided: no choice has been made yet." : "",
+      states.has("not_discussed") ? "Not yet discussed: not raised with the client yet." : "",
+      states.has("existing") ? "Existing to remain: kept as it is." : "",
+      tech.has("to_verify") ? "To verify: a technical check is still open." : "",
+      tech.has("verified") ? "Verified: technically checked, with the reference on file." : "",
+      t.hasDirection ? "Where a record's own words differ from the product named, they are shown under it as the recorded direction." : "",
+      t.sources?.length ? "A source key (S1 …) is listed in the source documents at the end." : "",
+      "A blank finish or quantity hasn't been recorded; a quantity from a supplier's schedule is that supplier's count."].filter(Boolean).join(" "),
+    SUMMARY: t.total ? summaryOf(t.total, t.knowledge || {}) : "",
+
+    HAS_S1: present.s1, S1_NUM: nums.s1 || "",
+    SEL_GROUPS: groups.map((g, k) => ({ G_LAST: k === groups.length - 1, GROUP: g.group, ...boundedRows("ROWS", g.rows.map((r) => {
+      const st = twoLines(r.selection, r.technical), src = twoLines(r.source, r.sourceFlag);
+      const loc = [r.location, r.replaces ? `instead of the ${r.replaces}` : ""].filter(Boolean).join(", ");
+      return {
+        REF: r.ref, ITEM: r.item, LOC: nl(loc.charAt(0).toUpperCase() + loc.slice(1)),
+        SEL: r.product || "Not yet chosen", DETAIL: nl([r.detail, r.direction ? `Recorded direction: ${r.direction}` : ""].filter(Boolean).join("\n")),
+        FINISH: r.finish || "", QTY: r.quantity || "", STATUS: st.a, TECH: st.b, SOURCE: src.a, FLAG: src.b,
+      };
+    })) })),
+
+    HAS_S2: present.s2, S2_NUM: nums.s2 || "",
+    REQS_INTRO: "What the client has asked these selections to achieve. A requirement marked To verify is still to be confirmed by the party named.",
+    ...boundedRows("REQS", reqs.map((x) => ({ REF: x.ref || "", TEXT: x.text, APPLIES: x.applies || "", STATUS: x.status || "", WHO: nl(x.who && /To verify/.test(x.status || "") ? x.who : "") }))),
+
+    HAS_S3: present.s3, S3_NUM: nums.s3 || "",
+    ACTIONS_INTRO: "Everything still open on these selections, by reference. A row in section 01 changes only once its action is closed and the register updated.",
+    ...boundedRows("ACTIONS", actions.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
+
+    HAS_S4: present.s4, S4_NUM: nums.s4 || "",
+    SOURCES_INTRO: "The received documents this schedule cites, by key. The originals are kept as received; Blue Leaf reconciles each against the register by hand.",
+    ...boundedRows("SOURCES", sources.map((x) => ({ KEY: x.key, DOC: x.document, REV: x.revision, REVIEW: x.review }))),
+
+    _docNumber: id.number, _id: id,
   };
 }
+/** "27 selections. Known: 3. Provisional: 20. Unresolved: 4." with each class defined once (the brief). */
+function summaryOf(total, k) {
+  const part = (n, label, def) => (n ? `${label}: ${n} (${def})` : "");
+  return `${total} selection${total === 1 ? "" : "s"}. ${[part(k.known, "Known", "client-approved or existing, no check or source open"),
+    part(k.provisional, "Provisional", "proposed, preferred, or approved with a check or source still open"),
+    part(k.unresolved, "Unresolved", "still to be decided, or nothing recorded")].filter(Boolean).join("; ")}.`;
+}
+const sentenceOf = (s) => { const x = String(s || "").replace(/\s+/g, " ").trim(); return x && !/[.!?]$/.test(x) ? `${x}.` : x; };
+
+/** Client Selections Presentation (BLB-CSP). Reader: the client. No references, codes, suppliers or technical states. */
+export function buildClientPresentationPayload(fx) {
+  const c = fx.clientSelections || {}, p = fx.project || {}, meta = fx.meta || {};
+  const id = documentIdentity({ type: "client_presentation", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
+  const groups = (c.groups || []).filter((g) => g.rows && g.rows.length);
+  const needs = c.needs || [], proposals = c.proposals || 0;
+  const statuses = new Set(groups.flatMap((g) => g.rows.map((r) => r.status || "")));
+  const present = { s1: needs.length > 0 || proposals > 0, s2: groups.length > 0 };
+  const nums = {}; let n = 0;
+  for (const k of ["s1", "s2"]) if (present[k]) nums[k] = two(++n);
+  const marked = ["Proposed", "Client-approved", "To be decided", "Existing to remain", "Client's choice, with Blue Leaf", "Change requested, with Blue Leaf"].filter((st) => statuses.has(st));
+  return {
+    HDR_DOC_TYPE: "Your selections",
+    HDR_PROJECT: p.siteShort || p.siteAddress || "",
+    FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
+    DOC_KICKER: id.issued ? "Client selections" : "Draft  /  Client selections",
+    DOC_TITLE: "Your selections",
+    HAS_SUBTITLE: !!p.projectLabel, DOC_SUBTITLE: p.projectLabel || "",
+    META_ROWS: metaRows([
+      ["Prepared for", meta.recipient || p.clientName], ["Site", p.siteAddress],
+      ["Prepared by", p.preparedBy || "Blue Leaf Building"], ["Date", fmtIdDate(meta.issuedDate || meta.preparedDate)],
+      ["Document", id.number], ["Status", id.issued ? `${id.revision} · ${id.statusText}` : id.statusText],
+    ]),
+    STATUS_LABEL: id.issued ? "Your selections as recorded" : "Draft for review — not issued",
+    // Negative statements only: no process promise (spec critique; as the ADB's cover note).
+    STATUS_BODY: `${supersedesNote(meta)}This records your selections as they stand on ${fmtIdDate(meta.issuedDate || meta.preparedDate)}. It isn't a contract document, a price or a technical approval. A selection marked Client-approved records your choice; it doesn't mean the item has been checked or ordered.`,
+
+    HAS_S1: present.s1, S1_NUM: nums.s1 || "",
+    // Proposals are marked where they print; said once here, never a row each (editorial rule).
+    NEEDS_INTRO: [needs.length ? (needs.length === 1 ? "One decision we need from you before these selections can be settled." : "The decisions we need from you before these selections can be settled.") : "",
+      proposals ? `${needs.length ? "Also, please" : "Please"} let us know whether ${proposals === 1 ? "the selection" : `each of the ${proposals} selections`} marked Proposed in the next section ${proposals === 1 ? "suits" : "suit"} you.` : ""].filter(Boolean).join(" "),
+    HAS_NEEDS: needs.length > 0,
+    ...boundedRows("NEEDS", needs.map((x) => ({ ITEM: x.item, WHERE: nl(x.where), TEXT: x.text }))),
+
+    HAS_S2: present.s2, S2_NUM: nums.s2 || "",
+    // Statuses defined once, only those that print (owner decision Q2).
+    SEL_INTRO: [groups[0]?.group === "Throughout the house" ? "What applies throughout the house comes first, then each room." : "Room by room.",
+      marked.length ? `Each item is your preferred direction unless it is marked ${andWords(marked)}.` : "Each item is your preferred direction.",
+      statuses.has("Proposed") ? "Proposed: an option we've put to you, not yet accepted." : "",
+      statuses.has("Client-approved") ? "Client-approved: you've confirmed it with us." : "",
+      statuses.has("To be decided") ? "To be decided: not chosen yet." : "",
+      statuses.has("Existing to remain") ? "Existing to remain: staying as it is." : "",
+      statuses.has("Client's choice, with Blue Leaf") ? "Client's choice, with Blue Leaf: you've told us your choice and we're reviewing it." : "",
+      statuses.has("Change requested, with Blue Leaf") ? "Change requested, with Blue Leaf: you've asked for a change and we're looking at it." : "",
+      groups.some((g) => g.rows.some((r) => r.earlier)) ? "Where we've proposed something different from what you first asked for, your earlier choice is shown under it." : ""].filter(Boolean).join(" "),
+    SEL_GROUPS: groups.map((g, k) => ({ G_LAST: k === groups.length - 1, GROUP: g.group, ...boundedRows("ROWS", g.rows.map((r) => ({
+      ITEM: r.item, TEXT: `${r.text || "Not chosen yet"}${r.replaces ? `, instead of the ${r.replaces}` : ""}`,
+      FINISH: nl([r.finish, r.earlier ? `You first asked for: ${r.earlier.charAt(0).toLowerCase()}${r.earlier.slice(1)}` : ""].filter(Boolean).join("\n")), STATUS: r.status || "",
+    }))) })),
+
+    _docNumber: id.number, _id: id,
+  };
+}
+const andWords = (l) => (l.length > 1 ? `${l.slice(0, -1).join(", ")} or ${l.at(-1)}` : l[0] || "");
 
 // ── 04 Tender Scope & Pricing Notes (INTERNAL) ───────────────────────────────
 // One master copy for the Buildxact estimator. Never a client or supplier document, and it carries no amounts or quantities.
@@ -389,7 +458,7 @@ export const DOC_DEFS = {
   client_brief: { templateFile: "blb-client-brief-template.docx", build: buildClientBriefPayload, label: "Client Project Brief" },
   architect_brief: { templateFile: "blb-architect-brief-template.docx", build: buildArchitectBriefPayload, label: "Architect Design Brief" },
   client_presentation: { templateFile: "blb-client-presentation-template.docx", build: buildClientPresentationPayload, label: "Client Selections Presentation" },
-  selections_schedule: { templateFile: "blb-selections-schedule-template.docx", build: buildSelectionsSchedulePayload, label: "Technical Selection Register" },
+  selections_schedule: { templateFile: "blb-selections-schedule-template.docx", build: buildSelectionsSchedulePayload, label: "Technical Selections Schedule" },
   tender_scope_notes: { templateFile: "blb-tender-notes-template.docx", build: buildTenderNotesPayload, label: "Tender Scope & Pricing Notes" },
 };
 
@@ -417,7 +486,12 @@ export function validateFixture(fx, { mode = "issue", logoPresent = true } = {})
     if (PLACEHOLDER_RX.test(s)) errors.push(`Unresolved placeholder / TODO text at ${path}: "${s.slice(0, 48)}".`);
     if (FAKE_MONEY_RX.test(s)) errors.push(`Suspect $0 / blank money value at ${path}: "${s.slice(0, 48)}".`);
   });
-  for (const r of fx?.selections || []) if (r.status && !SELECTION_STATUSES.includes(r.status)) errors.push(`Selection ${r.itemId || "?"} has unknown status "${r.status}".`);
+  // A selection record's status (selectionRecords) must be one the documents define; the R01 JSON fixtures' rows carry
+  // the older vocabulary in .status.
+  for (const r of fx?.selections || []) {
+    if (r.selection !== undefined && !SELECTION_STATE_WORDS.includes(r.selection)) errors.push(`Selection ${r.ref || "?"} has unknown status "${r.selection}".`);
+    else if (r.selection === undefined && r.status && !SELECTION_STATUSES.includes(r.status)) errors.push(`Selection ${r.itemId || "?"} has unknown status "${r.status}".`);
+  }
   const ab = fx?.architectBrief || {};
   for (const r of [...(ab.requirements || []), ...(ab.directionGroups || []).flatMap((g) => g.rows || []), ...(ab.scope || []).flatMap((g) => (g.rows || []).map((x) => ({ ...x, status: x.check })))])
     if (r.status && !String(r.status).split(", ").every((x) => ARCHITECT_ITEM_STATUSES.some((st) => st.toLowerCase() === x.toLowerCase()))) errors.push(`Architect brief item ${r.ref || "?"} status "${r.status}" is not in the coordination vocabulary.`);

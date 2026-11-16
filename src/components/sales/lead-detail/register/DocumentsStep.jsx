@@ -17,7 +17,9 @@ import { Chip, Mini, Section, Select } from "./ui.jsx";
 const DOCS = [
   { key: "client_brief", label: "Preliminary Client Project Brief", hint: "Concept presentation — issue record only, no signature.", stages: ["winning_offer", "discovery", "fee_proposal"] },
   { key: "architect_brief", label: "Architect Design Brief", hint: "Design coordination — client intent vs technical items to verify.", stages: ["consultants", "fee_proposal", "winning_offer"] },
-  { key: "selections_schedule", label: "Selections & Finishes Schedule", hint: "Consultants / tender — choices only, never scope or prices.", stages: ["consultants", "tender", "won"] },
+  // Two documents from the same register records (docs/documents/SELECTIONS_SPEC.md), each with its own revisions.
+  { key: "selections_schedule", label: "Technical Selections Schedule", hint: "For the design team, estimator, suppliers and trades: the selections by trade, with codes, sources and open actions. No prices.", stages: ["consultants", "tender", "won"] },
+  { key: "client_presentation", label: "Client Selections Presentation", hint: "For the client: their selections room by room, and what we need from them. No codes, references or prices.", stages: ["consultants", "tender", "won"] },
   { key: "tender_scope_notes", label: "Tender Scope & Pricing Notes", hint: "Internal, for the Blue Leaf estimator. Never goes to the client, consultants or trades. No amounts.", stages: ["consultants", "tender", "won"], internal: true },
 ];
 const PACKS = [["architect", "Architect"], ["routleys", "Routleys"], ["tli", "TLI lighting"], ["windows", "Windows"], ["engineer", "Engineer"], ["joiner", "Joiner"], ["energy", "Energy"]];
@@ -37,7 +39,6 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   const [preview, setPreview] = useState(null);         // { url, checks, revision }
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [layout, setLayout] = useState("technical");
   const [recipient, setRecipient] = useState({ name: "", email: "" });
 
   const load = useCallback(async () => {
@@ -49,7 +50,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
 
   function defaultRecipient(key) {
     if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
-    if (key === "architect_brief") {
+    if (key === "architect_brief" || key === "selections_schedule") {
       const a = (context?.consultants || []).find((c) => ["architect", "designer"].includes(c.role));
       return { name: a?.name || "", email: "" };
     }
@@ -64,7 +65,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     // the preview would show stale data, so stop and tell the employee; their edits are kept for a retry.
     const saved = await flush();
     if (!saved) { setBusy(false); setMsg({ tone: "red", text: "Your latest changes haven’t saved yet, so there’s nothing new to preview. Check the save status above the register (a conflict or a failed save), then preview again — your edits are kept." }); return; }
-    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${key}/preview`, { layout: key === "selections_schedule" ? layout : undefined, recipientName: rec.name });
+    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${key}/preview`, { recipientName: rec.name });
     setBusy(false);
     if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
     if (preview?.url) URL.revokeObjectURL(preview.url);
@@ -79,7 +80,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     setBusy(true); setMsg(null);
     const saved = await flush();
     if (!saved) { setBusy(false); setMsg({ tone: "red", text: "Your latest changes haven’t saved yet — the document was NOT issued. Resolve the save status above the register (a conflict or a failed save), then preview and issue again. Your edits are kept." }); return; }
-    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/issue`, { recipientName: recipient.name, recipientEmail: recipient.email, layout: active === "selections_schedule" ? layout : undefined, expectedVersions: preview.itemVersions });
+    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/issue`, { recipientName: recipient.name, recipientEmail: recipient.email, expectedVersions: preview.itemVersions });
     setBusy(false);
     if (!r.ok) {
       const checks = r.body?.checks;
@@ -135,9 +136,11 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
 
   const roomsCount = reg.meta.rooms?.length || 0;
   function scopeSummary(key) {
-    if (key === "selections_schedule") {
+    if (key === "selections_schedule" || key === "client_presentation") {
       const n = reg.items.filter((i) => isClientSelection(i)).length;
-      return `${n} client selection${n === 1 ? "" : "s"} across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. Scope, requirements and prices are excluded.`;
+      return key === "selections_schedule"
+        ? `${n} client selection${n === 1 ? "" : "s"} by trade, with the requirements they must meet, open actions and source documents. No prices.`
+        : `${n} client selection${n === 1 ? "" : "s"} room by room, and the decisions we need from the client. No codes, references, technical states or prices.`;
     }
     if (key === "architect_brief") {
       const tech = reg.items.filter((i) => i.itemKind === "action" || i.technicalStatus === "needs_verification").length;
@@ -163,7 +166,6 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
                 <p className="text-[11px] text-muted">{d.hint} {current ? `Recorded: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · for ${current.recipient_name || "—"} · not emailed` : "Draft — not issued yet."}</p>
               </div>
               <div className="flex items-center gap-2">
-                {d.key === "selections_schedule" && <Select value={layout} onChange={setLayout} options={[["technical", "Technical register"], ["client", "Client presentation"]]} className="w-40" />}
                 <button type="button" disabled={busy} onClick={() => openPreview(d.key)} className="rounded border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40" data-testid={`preview-${d.key}`}>Preview draft</button>
               </div>
             </div>
@@ -308,7 +310,10 @@ function SourceDocuments({ lead, reg, sources, reload, openFile, updateItem }) {
                     {i.technicalStatus === "verified" && <Chip tone="green">verified</Chip>}
                     <span className="ml-auto flex gap-2">
                       <button type="button" onClick={() => updateItem(i.id, { source: ref(d), sourceDocId: d.id })} className="text-primary hover:underline">Set as source</button>
-                      {i.technicalStatus !== "verified" && <button type="button" onClick={() => updateItem(i.id, { technicalStatus: "verified", technicalEvidence: { at: new Date().toISOString(), by: "Blue Leaf review", ref: ref(d) }, source: i.source || ref(d), sourceDocId: d.id })} className="text-green-700 hover:underline">Mark verified by this document</button>}
+                      {/* Verification needs a consultant's document Blue Leaf has reviewed: a supplier's quote or selection is
+                          their own information, never technical verification (SELECTIONS_SPEC.md §6; MR Tab 15:51). */}
+                      {i.technicalStatus !== "verified" && d.document_type === "consultant_document" && d.review_status === "reconciled" && <button type="button" onClick={() => updateItem(i.id, { technicalStatus: "verified", technicalEvidence: { at: new Date().toISOString(), by: "Blue Leaf review", ref: ref(d) }, source: i.source || ref(d), sourceDocId: d.id })} className="text-green-700 hover:underline">Mark verified by this document</button>}
+                      {i.technicalStatus !== "verified" && d.document_type === "consultant_document" && d.review_status !== "reconciled" && <span className="text-muted">Mark the document reconciled to verify against it</span>}
                     </span>
                   </div>
                 ))}

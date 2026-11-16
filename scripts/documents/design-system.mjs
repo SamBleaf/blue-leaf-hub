@@ -18,7 +18,7 @@ import { fileURLToPath } from "url";
 import {
   HeightRule,
   Paragraph, TextRun, ImageRun, Table, TableRow, TableCell, Header, Footer, WidthType, BorderStyle, ShadingType,
-  AlignmentType, VerticalAlign, TabStopType, PageNumber, LevelFormat, TableLayoutType, HeadingLevel, LineRuleType,
+  AlignmentType, VerticalAlign, TabStopType, PageNumber, LevelFormat, TableLayoutType, HeadingLevel, LineRuleType, PageOrientation,
 } from "docx";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -39,6 +39,19 @@ export const S = { title: 52, subtitle: 22, h1: 32, h2: 22, kicker: 16, body: 20
 /** A4 portrait in twips. Header 10 mm from the edge, logo inside a 26 mm top margin. */
 export const PAGE = { w: 11906, h: 16838, margin: { top: 1474, bottom: 1191, left: 1077, right: 1077, header: 567, footer: 567, gutter: 0 } };
 export const CW = PAGE.w - PAGE.margin.left - PAGE.margin.right;   // 9752 twips ≈ 172 mm
+/** A4 landscape (the technical selections schedule, Tab 17:86): the same margins, so the header and footer sit alike. */
+export const CW_LANDSCAPE = PAGE.h - PAGE.margin.left - PAGE.margin.right;   // 14684 twips ≈ 259 mm
+// The width every block below is built at. Portrait unless a template calls usePage("landscape") before building, so
+// the portrait documents (CPB, ADB) are byte-for-byte what they were.
+let W = CW;
+let ORIENTATION = "portrait";
+/** Choose the page for the blocks built after this call: "portrait" (default) or "landscape". Returns the content width. */
+export function usePage(orientation = "portrait") {
+  ORIENTATION = orientation === "landscape" ? "landscape" : "portrait";
+  W = ORIENTATION === "landscape" ? CW_LANDSCAPE : CW;
+  return W;
+}
+export const contentWidth = () => W;
 
 export const LOGO = fs.readFileSync(join(REPO, "public/brand/logo-black.png"));   // original artwork, 3320 × 1512
 const LOGO_W = 112, LOGO_H = Math.round(LOGO_W * (1512 / 3320));                 // ≈ 30 × 13.5 mm
@@ -77,7 +90,7 @@ export function cell(children, width, o = {}) {
 // ── Page chrome ────────────────────────────────────────────────────────────────────────────────────
 /** Logo left; document type and project right; a hairline below. Same on every page. */
 export function pageHeader() {
-  const L = Math.round(CW * 0.42), R = CW - L;
+  const L = Math.round(W * 0.42), R = W - L;
   const left = cell(new Paragraph({ spacing: { after: 0 }, children: [new ImageRun({ type: "png", data: LOGO, transformation: { width: LOGO_W, height: LOGO_H }, altText: { name: "Blue Leaf Building", title: "Blue Leaf Building", description: "Blue Leaf Building logo" } })] }),
     L, { pt: 0, pb: 60, pr: 0, va: VerticalAlign.BOTTOM });
   const right = cell([
@@ -85,7 +98,7 @@ export function pageHeader() {
     para(run("{HDR_PROJECT}", { size: S.chrome + 1, color: C.ink }), { align: AlignmentType.RIGHT, after: 0, line: 230 }),
   ], R, { pt: 0, pb: 70, pr: 0, va: VerticalAlign.BOTTOM });
   return new Header({ children: [
-    new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [L, R], layout: TableLayoutType.FIXED, borders: { ...noBorders(), bottom: rule(C.hair, 4) }, rows: [new TableRow({ children: [left, right] })] }),
+    new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: [L, R], layout: TableLayoutType.FIXED, borders: { ...noBorders(), bottom: rule(C.hair, 4) }, rows: [new TableRow({ children: [left, right] })] }),
     new Paragraph({ spacing: { after: 0, line: 120 }, children: [run("", { size: 2 })] }),
   ] });
 }
@@ -94,7 +107,7 @@ export function pageHeader() {
 export function pageFooter() {
   const o = { size: S.chrome, color: C.grey };
   return new Footer({ children: [new Paragraph({
-    spacing: { before: 80, after: 0, line: 220 }, border: { top: rule(C.hair, 4) }, tabStops: [{ type: TabStopType.RIGHT, position: CW }],
+    spacing: { before: 80, after: 0, line: 220 }, border: { top: rule(C.hair, 4) }, tabStops: [{ type: TabStopType.RIGHT, position: W }],
     children: [
       run("{FTR_IDENTITY}", o), run("\t", o), run("Page ", o),
       new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: o.size, color: o.color }),
@@ -114,7 +127,7 @@ export function tailNoteRow(field, { cond = null, keep = false } = {}) {
   // (final inspection CONSISTENCY-09).
   return new TableRow({ cantSplit: true, children: [cell(
     para([run(cond ? `{-w:tr ${cond}}` : "", { size: 2 }), run(`{${field}}`, { size: S.small, color: C.grey }), run(cond ? `{/${cond}}` : "", { size: 2 })], { after: 0, line: 252, keepNext: keep }),
-    CW, { span: 2, pt: 140, pb: 60, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
+    W, { span: 2, pt: 140, pb: 60, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
 }
 export function tailCalloutRow(labelTag, bodyTag, span) {
   // The gap above the box is its own borderless row (tailSpacerRow), not a white top border: a heavy white border
@@ -123,16 +136,19 @@ export function tailCalloutRow(labelTag, bodyTag, span) {
   return new TableRow({ cantSplit: true, children: [cell([
     para(run(`{${labelTag}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 40, keepNext: true }),
     para(run(`{${bodyTag}}`, { size: S.small + 1 }), { after: 0, line: 252 }),
-  ], CW, { span, fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: none(), bottom: none(), right: none() } })] });
+  ], W, { span, fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: none(), bottom: none(), right: none() } })] });
 }
 /** A fixed-height empty row with no borders: the space above a closing callout. Always present, so the rule above it stays. */
 export function tailSpacerRow(span, height = 100) {
   return new TableRow({ cantSplit: true, height: { value: height, rule: HeightRule.EXACT }, children: [cell(
     para(run("", { size: 2 }), { after: 0, line: 120, keepNext: true }),
-    CW, { span, pt: 0, pb: 0, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
+    W, { span, pt: 0, pb: 0, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
 }
 
-export const sectionProps = () => ({ page: { size: { width: PAGE.w, height: PAGE.h }, margin: PAGE.margin } });
+export const sectionProps = () => (ORIENTATION === "landscape"
+  // docx swaps the two dimensions for a landscape page: pass them as portrait.
+  ? { page: { size: { width: PAGE.w, height: PAGE.h, orientation: PageOrientation.LANDSCAPE }, margin: PAGE.margin } }
+  : { page: { size: { width: PAGE.w, height: PAGE.h }, margin: PAGE.margin } });
 
 // ── Styles and lists ───────────────────────────────────────────────────────────────────────────────
 export function documentStyles() {
@@ -162,22 +178,22 @@ export function titleBlock() {
 
 /** Two-column metadata grid on a light panel (loop META_ROWS of {LA, VA, LB, VB}). */
 export function metaGrid() {
-  const half = Math.round(CW / 2);
+  const half = Math.round(W / 2);
   const mk = (l, v, open, close) => cell([
     para([run(open || "", { size: S.meta }), run(`{${l}}`, { size: S.meta, bold: true, color: C.blue, caps: true, spacing: 16 })], { after: 30, line: 220 }),
     para([run(`{${v}}`, { size: S.body }), run(close || "", { size: S.body })], { after: 0, line: 252 }),
   ], half, { fill: C.surface, pt: 90, pb: 90, pl: 160, pr: 160, borders: { top: none(), left: none(), right: none(), bottom: rule(C.white, 12) } });
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [half, CW - half], layout: TableLayoutType.FIXED, borders: noBorders(),
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: [half, W - half], layout: TableLayoutType.FIXED, borders: noBorders(),
     rows: [new TableRow({ cantSplit: true, children: [mk("LA", "VA", "{#META_ROWS}"), mk("LB", "VB", null, "{/META_ROWS}")] })] });
 }
 
 /** Shaded callout with a blue edge: a label and one paragraph. */
 export function callout(labelTag, bodyTag) {
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [CW], layout: TableLayoutType.FIXED, borders: noBorders(),
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: [W], layout: TableLayoutType.FIXED, borders: noBorders(),
     rows: [new TableRow({ cantSplit: true, children: [cell([
       para(run(`{${labelTag}}`, { size: S.kicker, bold: true, color: C.blue, caps: true, spacing: 16 }), { after: 40 }),
       para(run(`{${bodyTag}}`, { size: S.small + 1 }), { after: 0, line: 252 }),
-    ], CW, { fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: none(), bottom: none(), right: none() } })] })] });
+    ], W, { fill: C.tint, pt: 110, pb: 110, pl: 180, pr: 180, borders: { left: rule(C.blue, 18), top: none(), bottom: none(), right: none() } })] })] });
 }
 
 /** Section opening: "01  /  THE PROJECT" with a rule, then the Heading 1 title. */
@@ -239,15 +255,15 @@ function loopRow(key, cols, { keep = false, closeExtra = "" } = {}) {
  */
 export function dataTable(key, cols, o = {}) {
   const total = cols.reduce((a, c) => a + c.width, 0);
-  if (total !== CW) throw new Error(`dataTable ${key}: column widths ${total} must equal ${CW}`);
+  if (total !== W) throw new Error(`dataTable ${key}: column widths ${total} must equal ${W}`);
   const rows = [headerRow(cols)];
   if (o.bounded) {
     rows.push(loopRow(`${key}_KEEP`, cols, { keep: true }), loopRow(key, cols), loopRow(`${key}_PEN`, cols, { keep: true }), loopRow(`${key}_LAST`, cols, { keep: !!o.lastKeepNext || !!(o.tail && o.tail.length) }));
     rows.push(...(o.tail || []));
-    return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+    return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
   }
   rows.push(loopRow(key, cols));
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
 }
 
 /**
@@ -263,7 +279,7 @@ export function dataTable(key, cols, o = {}) {
  */
 export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_LAST", tail = null, lastGap = true } = {}) {
   const total = cols.reduce((a, c) => a + c.width, 0);
-  if (total !== CW) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${CW}`);
+  if (total !== W) throw new Error(`groupedTable ${groupKey}: column widths ${total} must equal ${W}`);
   if (cols.length !== 3) throw new Error(`groupedTable ${groupKey}: the group name takes the middle of three columns`);
   const head = new TableRow({ tableHeader: true, cantSplit: true, children: cols.map((c, i) => cell(
     para(run(i === 1 ? `{${bandField}}` : c.head, { size: S.th, bold: true, color: i === 1 ? C.ink : C.blue, caps: true, spacing: 14 }), { after: 0, line: 220, keepNext: true }),
@@ -273,8 +289,8 @@ export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_
   // {-w:tr …} makes the condition remove the whole row in every group but the last.
   if (tail) rows.push(new TableRow({ cantSplit: true, children: [cell(
     para([run(`{-w:tr ${lastKey}}`, { size: 2 }), run(`{${tail}}`, { size: S.small, color: C.grey }), run(`{/${lastKey}}`, { size: 2 })], { after: 0, line: 252 }),
-    CW, { span: cols.length, pt: 120, pb: 40, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] }));
-  const table = new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+    W, { span: cols.length, pt: 120, pb: 40, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] }));
+  const table = new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
   // The gap separates one group's table from the next; after the last group (the one carrying the tail) the section's
   // own spacing follows, as after any other table (final inspection KESTREL-07).
   // lastGap: false — the table ends the document, so nothing trails the last group onto an empty page.
@@ -295,11 +311,11 @@ export function groupedTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_
 function bulletRow(key, keep, bottom = 60) {
   return new TableRow({ cantSplit: true, children: [cell(
     para([run(`{-w:tr ${key}}`, { size: 2 }), run("{TEXT}"), run(`{/${key}}`, { size: 2 })], { numbering: { reference: "blb-bullet", level: 0 }, after: 0, line: 252, keepNext: keep }),
-    CW, { pt: 0, pb: bottom, pl: 0, pr: 0 })] });
+    W, { pt: 0, pb: bottom, pl: 0, pr: 0 })] });
 }
 export function titledList(key, head, { headTop = 120, headBottom = 70 } = {}) {
-  const top = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(head, CW, { pt: headTop, pb: headBottom, pl: 0, pr: 0 })] });
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: [CW], layout: TableLayoutType.FIXED, borders: noBorders(),
+  const top = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(head, W, { pt: headTop, pb: headBottom, pl: 0, pr: 0 })] });
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: [W], layout: TableLayoutType.FIXED, borders: noBorders(),
     rows: [top, bulletRow(`${key}_KEEP`, true), bulletRow(key, false), bulletRow(`${key}_PEN`, true), bulletRow(`${key}_LAST`, false, 0)] });
 }
 /** A list under a Heading 2 title (Scope: "What we propose to build"). */
@@ -317,10 +333,27 @@ export function tableGap(line = 20) { return new Paragraph({ spacing: { before: 
 
 /** A band of n numbered cards across the full width (no loop: one band per count, chosen by a condition). Fields {PREFIX1..n}. */
 export function cardBand(n, numPrefix, labelPrefix) {
-  const w = Math.floor(CW / n), widths = Array.from({ length: n }, (_, i) => (i === n - 1 ? CW - w * (n - 1) : w));
+  const w = Math.floor(W / n), widths = Array.from({ length: n }, (_, i) => (i === n - 1 ? W - w * (n - 1) : w));
   const cells = widths.map((wd, i) => cell([
     para(run(`{${numPrefix}${i + 1}}`, { size: S.kicker, bold: true, color: C.blue }), { after: 40 }),
     para(run(`{${labelPrefix}${i + 1}}`, { size: S.h2, bold: true }), { after: 0, line: 252 }),
   ], wd, { fill: C.surface, pt: 120, pb: 130, pl: 170, pr: 170, borders: { top: rule(C.blue, 12), left: none(), bottom: none(), right: i < n - 1 ? rule(C.white, 24) : none() } }));
-  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED, borders: noBorders(), rows: [new TableRow({ cantSplit: true, children: cells })] });
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED, borders: noBorders(), rows: [new TableRow({ cantSplit: true, children: cells })] });
+}
+
+/**
+ * A grouped table with any number of columns (the technical selections schedule). Each group is its own table with two
+ * repeating header rows: the group's name across the full width, then the column labels. So a group that runs onto the
+ * next page opens it with both. Rows are the payload's boundedRows split, so neither end of a group is ever a single
+ * row on a page. Separated by a 10 pt exact paragraph, as groupedTable. Returns blocks.
+ */
+export function bandTable(groupKey, bandField, rowsKey, cols, { lastKey = "G_LAST", lastGap = true } = {}) {
+  const total = cols.reduce((a, c) => a + c.width, 0);
+  if (total !== W) throw new Error(`bandTable ${groupKey}: column widths ${total} must equal ${W}`);
+  const band = new TableRow({ tableHeader: true, cantSplit: true, children: [cell(
+    para(run(`{${bandField}}`, { size: S.h2 - 2, bold: true, color: C.ink }), { after: 0, line: 240, keepNext: true }),
+    W, { span: cols.length, pt: 60, pb: 70, pl: 0, pr: 0, borders: { top: none(), left: none(), right: none(), bottom: none() } })] });
+  const rows = [band, headerRow(cols), loopRow(`${rowsKey}_KEEP`, cols, { keep: true }), loopRow(rowsKey, cols), loopRow(`${rowsKey}_PEN`, cols, { keep: true }), loopRow(`${rowsKey}_LAST`, cols)];
+  const table = new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+  return when(groupKey, !lastGap ? [table, tag(`^${lastKey}`), tableGap(200), tag(`/${lastKey}`)] : [table, tableGap(200)]);
 }

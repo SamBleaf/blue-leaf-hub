@@ -22,7 +22,7 @@ Director, project manager, office staff preparing documents for the client, the 
 ## 2. When to use it
 - After a concept meeting: issue the **Preliminary Client Project Brief** (D1) so the client can confirm what was heard.
 - Before design work: issue the **Architect Design Brief** (D2).
-- From PTSA onwards: issue the **Selections & Finishes Schedule** (D3), and re-issue it when it changes.
+- From the Consultants stage onwards: issue the **Technical Selections Schedule** to the design team, estimator, suppliers and trades, and the **Client Selections Presentation** to the client. They are two documents made from the same register records, each with its own revisions. Re-issue either when it changes.
 - When an architect, engineer or supplier sends a document (drawings, schedules, quotes): record it under **Received consultant & supplier documents**.
 
 ## 3. What this does
@@ -31,26 +31,29 @@ It makes each document from the same register rows — nothing is retyped. Befor
 ## 4. Before you start
 - The register has the content you want to issue (see 21-01 and 21-02).
 - **Current drawing set / revision (P-002)** is filled in on the Project step.
-- Database migration 213 is applied (otherwise you can preview but not issue — the screen says so).
+- Database migration 213 is applied (otherwise you can preview but not issue — the screen says so). Issuing the Client Selections Presentation also needs migration 220.
 
 ## 5. Step-by-step process
 
 1. Open the lead → **Project brief & register** → **Documents**.
-2. Find the document: **Preliminary Client Project Brief**, **Architect Design Brief** or **Selections & Finishes Schedule**.
+2. Find the document: **Preliminary Client Project Brief**, **Architect Design Brief**, **Technical Selections Schedule** or **Client Selections Presentation**.
 3. Click **Preview draft**. Read the PDF in the preview. Any warnings are listed above it.
 4. Fix anything the checks list (in the register), then **Preview draft** again.
 5. Fill **Issue to (name)** (and the email if you want it on the record — **nothing is sent**).
 6. Click **Issue revision R01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
 7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: R01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
-   - **Selections & Finishes Schedule, Client presentation:** an item with nothing chosen yet says **Still to be decided** once, with the item as its heading, instead of repeating "TBC". The **Technical register** layout keeps TBC for the trade.
+   - **Technical Selections Schedule** (A4 landscape): the selections grouped by trade (roof and walls, windows and doors, internal finishes, joinery, plumbing fixtures, lighting, services, external works). Each row shows the product, its maker, supplier and code, the finish, a quantity only where one is recorded, the status, and a source key (S1, S2 …) listed under **Source documents** at the end. It also lists the requirements the selections must meet and every open action, with who. Page 1 says what each status means and how many selections are known, provisional and unresolved.
+   - **Client Selections Presentation** (A4 portrait): what we need from the client first, then their selections room by room. No references, codes, suppliers' document numbers, technical states, quantities or prices. A preference shows the client's own words; a product shows only once it's proposed to them or chosen. An item with nothing chosen says **To be decided**, the same as in the technical schedule.
+   - Both: a record that cites a **superseded** received document, or one no longer on file, stops the issue until you link it to the current document. A record **verified** against a document nobody has reviewed also stops it. An approval recorded only on the portal board, with no who, when or how, stops it and prints as Proposed.
    - **Architect Design Brief:** a client-approved requirement that still needs a technical check is listed under **What the design must achieve**, marked Client-approved, with **(technical check pending: [who confirms it])** after it — the owner on the record, or "owner to be agreed".
    - Every document's footer reads **PAGE 1 / 2** in the same small grey type as the label.
-8. **Coordination packs:** under **Coordination requests (draft packs from the same register)** click a pack — Architect, Routleys (plumbing fixtures), TLI (lighting & electrical), Window supplier, Engineer, Energy assessor, Joiner — to get a draft list of only the items tagged for them.
+8. **Coordination packs:** under **Coordination requests (draft packs from the same register)** click a pack — Architect, Routleys (plumbing fixtures), TLI (lighting & electrical), Window supplier, Engineer, Energy assessor, Joiner — to get a draft Technical Selections Schedule of only their items: those tagged for them, those citing a document from their discipline, and their requirements and actions. The pack names who it is for. It runs the same checks as an issue, so a superseded source, a price or a prohibited product stops it.
 9. **Received documents:** click **Add received document**:
    1. Choose **Record type** (Consultant document or Supplier schedule / quote), **Discipline**, **Issuer**, **Document no.**, **Revision**, **Received** date, and attach the **File (PDF)**.
    2. Click **Review & link**. Write **Review notes (what changed, what was accepted / rejected)**.
-   3. On each register item it affects, click **Set as source**, or **Mark verified by this document** for a technical check it confirms.
-   4. Set the document's status: **Received → Under review → Reconciled** (or **Superseded** when a newer revision arrives).
+   3. On each register item it affects, click **Set as source**. For a technical check a **consultant's** document confirms, mark the document **Reconciled** first, then click **Mark verified by this document**. A supplier's selection or quote is never technical verification, so it only offers **Set as source**.
+   4. Enter each product the client chooses as its own record, with its own code and quantity (three tapware products are three records). Accessories that come with it (wastes, grates, isolation stops, flush plates, towel rails) stay in the supplier's document, which the record cites.
+   5. Set the document's status: **Received → Under review → Reconciled** (or **Superseded** when a newer revision arrives). Records citing a superseded document must be relinked before the next issue.
 
 > 💡 **Tip:** Received documents never change the register by themselves. You decide what each one changes — that is the reconciliation.
 
@@ -224,7 +227,7 @@ Next review date: 2027-05-07
 
 **TC-10 — Tab 26 R05 retest follow-ups**
 1. Issue any document. Expected: the card reads **Recorded: R0n (current) · date · for [name] · not emailed**, not "Issued … to".
-2. Preview the Selections & Finishes Schedule as **Client presentation** with one item that has nothing chosen. Expected: that item says **Still to be decided** once, with no "TBC" anywhere and no stray "/" where there's no supplier; the reading key explains the label. Switch to **Technical register**: TBC is still used.
+2. Preview the **Client Selections Presentation** with one item that has nothing chosen. Expected: that item says **To be decided** once, with no "TBC" anywhere, and the reading note explains the label. Preview the **Technical Selections Schedule**: the same item says **To be decided** (pair 2: one label in both documents).
 3. Mark a requirement client-approved (with evidence) while its technical status is **Needs verification**, then preview the Architect Design Brief. Expected: under What the design must achieve it reads "… (technical check pending: [the record's owner])", with the status Client-approved.
 4. Look at any two-page preview's footer. Expected: **PAGE 1 / 2** with the numbers the same size and grey as the word PAGE.
 - [ ] Pass  [ ] Fail
@@ -247,6 +250,15 @@ Next review date: 2027-05-07
 4. Expected: "Whole house" and "(project default)" appear nowhere. House-wide choices are listed once under **Throughout the house**. Zone a floor default to Main floor and give a bedroom its own carpet linked to it. Expected: the bedroom reads just "Wool carpet". Zone the default to Bedroom floor. Expected: "Wool carpet, instead of the …".
 5. Give two rooms the same choices. Expected: one group names both rooms ("Ensuite and bathroom") and lists both references on each row.
 6. Expected: nothing reads Preferred. Only Proposed and Client-approved are marked in the design direction.
+- [ ] Pass  [ ] Fail
+
+**TC-13 — Technical Selections Schedule and Client Selections Presentation (tss-1.0, csp-1.0)**
+1. On a lead at Consultants with client selections, add a received **Supplier schedule / quote** (Discipline Routleys), then **Set as source** on two selections and enter their product, maker, code and quantity.
+2. Preview the **Technical Selections Schedule**. Expected: A4 landscape; header TECHNICAL SELECTIONS SCHEDULE on every page; document BLB-TSS-[ref]. The two rows show the product, "maker · Routleys · code", the quantity and source **S1**, flagged **Source not yet reviewed** while the document is Received. **Source documents** lists S1 with "No revision printed" if none was entered.
+3. Set the document to **Superseded** and preview again. Expected: the rows say **Source superseded**, and the pre-issue checks list an error naming the record. Issue is refused. Link the records to a current document. Expected: the error clears.
+4. Preview the **Client Selections Presentation**. Expected: A4 portrait, BLB-CSP-[ref]; no Ref column, no code, no S1, no "To verify". Each item marked Proposed is asked about once in the intro to **What we need from you**, not once per row.
+5. Issue the presentation, then look at the technical schedule's history. Expected: the presentation is R01 of its own; the technical schedule's current revision is unchanged.
+6. Open the **Routleys** coordination pack. Expected: its kicker reads "Coordination request: Routleys (plumbing fixtures)", and it lists only Routleys items, their requirements and actions.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

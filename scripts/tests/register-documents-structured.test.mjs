@@ -50,11 +50,13 @@ const sectionOf = (name) => notes.tenderNotes.sections.find((s) => s.title === n
 
 section("Card answers print in the existing documents (Gate 6.1)");
 ok("the schedule prints what was chosen", /Render/.test(flat(sel.selections)) && /Fibre cement/i.test(flat(sel.selections)), flat(sel.selections).slice(0, 500));
-ok("two wall systems are two lines", sel.selections.filter((r) => r.category.includes("Architectural material")).length === 2);
+ok("two wall systems are two lines", sel.selections.filter((r) => r.item.includes("Architectural material")).length === 2);
 ok("gutters say which roof", sel.selections.some((r) => /Quad/.test(r.product) && /Main roof/.test(r.product)));
-ok("a project default is labelled", sel.selections.some((r) => /project default/.test(r.category)));
-ok("a room exception is labelled", sel.selections.some((r) => r.category.startsWith("Bed 1") && /room exception/.test(r.category)));
-ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.itemId)));
+// Pair 2 (SELECTIONS_SPEC.md): no system tags. A house default is said as such (house-wide, location blank in the
+// schedule); a room's own choice names its room, and what it replaces only when that default applies to the room.
+ok("a project default is a house-wide record, with no system tag", sel.selections.some((r) => r.house) && !/project default|room exception|Whole house/i.test(flat(sel.technicalSchedule)));
+ok("a room exception names its room", sel.selections.some((r) => r.location === "Bed 1" && r.roomId));
+ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.ref)));
 ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferences)));
 ok("scope lines carry the item id, beside the words rather than inside them", brief.clientBrief.scopeIn.some((l) => /Walls/.test(l.text) && /^W004-/.test(l.ref) && !/\[/.test(l.text)), flat(brief.clientBrief.scopeIn));
 const archRows = arch.architectBrief.scope.flatMap((g) => g.rows);
@@ -107,7 +109,7 @@ const plainReq = mk("W-022", { itemKind: "requirement", certainty: "client_appro
 const archCheck = buildRegisterFixture("architect_brief", { ...input(), register: { ...register, items: [...items, checkReq, plainReq] } }).architectBrief.requirements;
 ok("a client-approved requirement still needing a technical check says so (Tab 26 DOC-02)", archCheck.some((r) => /Steel beam over the new opening \(technical check pending: owner to be agreed\)$/.test(r.text) && r.status === "Client-approved"), flat(archCheck));
 ok("one with no open check reads as before", archCheck.some((r) => /Keep the existing fireplace$/.test(r.text) && r.status === "Client-approved"), flat(archCheck));
-ok("schedule rows carry the room and the item separately, for the client presentation", sel.selections.every((r) => typeof r.where === "string" && r.item && r.category.startsWith(r.where.replace(/ \((project default|room exception)\)$/, ""))), flat(sel.selections.slice(0, 2)));
+ok("selection records carry the location and the item separately, for both documents", sel.selections.every((r) => typeof r.location === "string" && r.location && r.item), flat(sel.selections.slice(0, 2)));
 // An item reference must never read as placeholder text: "W014-XXX" blocked issuing (found by sandbox-register-structured).
 {
   const { refCode } = await import("../../src/lib/register.js");

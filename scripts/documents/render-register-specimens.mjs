@@ -9,7 +9,7 @@ import fs from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { buildRegisterFixture, renderRegisterDocument, registerDocChecks } from "../../server/lib/registerDocuments.mjs";
-import { REGISTER_PROJECTS, plansSuppliedRevision, designCoordination } from "./fixtures/register-projects.mjs";
+import { REGISTER_PROJECTS, plansSuppliedRevision, designCoordination, kestrelSupplierEvidence, ridgelineTender } from "./fixtures/register-projects.mjs";
 
 const [outDir, docType = "client_brief"] = process.argv.slice(2);
 if (!outDir) { console.error("usage: render-register-specimens.mjs <outDir> [docType]"); process.exit(2); }
@@ -35,14 +35,35 @@ const ADB_VARIANTS = [
 ];
 if (docType === "architect_brief") variants.splice(0, variants.length, ...ADB_VARIANTS);
 
+// Pair 2 (SELECTIONS_SPEC.md): a renovation and extension (Kestrel Court at design coordination, with the Rylock quote
+// and the TLI legend received), a new home (Ridgeline Drive at tender, with Routleys selection 452499 reconciled), and
+// the supplier evidence itself (the Routleys coordination pack). The draft shows the superseded-source flag; the issued
+// copy has the cabinetry relinked to the current concept set, as staff would before issuing.
+const kestrelSelections = (p) => kestrelSupplierEvidence(designCoordination(p));
+const kestrelRelinked = (p) => { kestrelSelections(p); const i = p.register.items.find((x) => x.sourceDocId === "doc_kc_c01"); Object.assign(i, { sourceDocId: "doc_kc_c02", source: "Concept Set C-02" }); return p; };
+const TSS_VARIANTS = [
+  { name: "kestrel-coordination", project: "kestrel", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Mara Ellison", tweak: kestrelRelinked },
+  { name: "kestrel-coordination-draft", project: "kestrel", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer, tweak: kestrelSelections },
+  { name: "ridgeline-tender", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Brightwater Design", tweak: ridgelineTender },
+  { name: "ridgeline-routleys-pack", project: "ridgeline", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer, tweak: ridgelineTender, opts: { coord: "routleys" } },
+  { name: "ridgeline-concept", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Brightwater Design" },
+];
+const CSP_VARIANTS = [
+  { name: "kestrel-coordination", project: "kestrel", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Jordan & Mia Whitcombe", tweak: kestrelRelinked },
+  { name: "ridgeline-tender", project: "ridgeline", ...ISSUED, issuedDate: "2026-11-16", recipientName: "Alexander and Catherine Montgomery-Hargreaves", tweak: ridgelineTender },
+  { name: "ridgeline-concept", project: "ridgeline", status: "Draft", issuedDate: "2026-11-16", revision: 1, issuer: ISSUED.issuer },
+];
+if (docType === "selections_schedule") variants.splice(0, variants.length, ...TSS_VARIANTS);
+if (docType === "client_presentation") variants.splice(0, variants.length, ...CSP_VARIANTS);
+
 const tool = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: "utf8" }); } catch { return null; } };
 const summary = [];
 for (const v of variants) {
   const p = REGISTER_PROJECTS[v.project]();
   v.tweak?.(p);
   const input = { lead: p.lead, context: p.context, register: p.register, projectRef: p.projectRef, revision: v.revision, supersedes: v.supersedes, status: v.status, issuedDate: v.issuedDate, issuer: v.issuer, recipientName: v.recipientName };
-  const fx = buildRegisterFixture(docType, input);
-  const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }), { register: p.register, recipientName: v.recipientName || "Recipient", mode: "issue" });
+  const fx = buildRegisterFixture(docType, input, v.opts || {});
+  const checks = registerDocChecks(docType, buildRegisterFixture(docType, { ...input, status: "Issued" }, v.opts || {}), { register: p.register, recipientName: v.recipientName || "Recipient", mode: "issue" });
   const out = await renderRegisterDocument(docType, fx, {});
   const base = join(outDir, `${docType}--${v.name}`);
   fs.writeFileSync(`${base}.docx`, out.docx);

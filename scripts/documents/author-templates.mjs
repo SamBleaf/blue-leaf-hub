@@ -249,8 +249,10 @@ const jobs = [
   // ["blb-client-brief-template.docx", clientBrief],
   // The Architect Design Brief is authored by author-adb.mjs on the shared design system (doc suite R01).
   // ["blb-architect-brief-template.docx", architectBrief],
-  ["blb-client-presentation-template.docx", clientPresentation],
-  ["blb-selections-schedule-template.docx", technicalSchedule],
+  // The Technical Selections Schedule and the Client Selections Presentation are authored by author-tss.mjs and
+  // author-csp.mjs on the shared design system (doc suite pair 2). This script would overwrite them in place.
+  // ["blb-client-presentation-template.docx", clientPresentation],
+  // ["blb-selections-schedule-template.docx", technicalSchedule],
 ];
 // Footer page numbers are split into four runs so LibreOffice keeps their style (fix-footer-page-fields.mjs).
 for (const [name, doc] of jobs) { const { buffer: buf } = fixDocxFooterFields(await Packer.toBuffer(doc)); fs.writeFileSync(`${OUT}/${name}`, buf); console.log("wrote template", name, buf.length, "bytes"); }

@@ -9,7 +9,7 @@
 import {
   selRowToItem, rsiRowToItem, itemToSelRow, itemToRsiRow, storeFor, promoteRegisterToProject, loadRegister, saveRegister, RegisterError,
 } from "../../server/lib/registerStore.mjs";
-import { buildRegisterFixture, selectionRows } from "../../server/lib/registerDocuments.mjs";
+import { buildRegisterFixture, selectionRecords } from "../../server/lib/registerDocuments.mjs";
 import { makeItem, makeRoom, emptyMeta, writeRegister, readRegister, stableStringify } from "../../src/lib/register.js";
 import { INTERNAL_MARK, buildStructuredRegister, LEGACY_ROWS } from "./lib/registerStructuredFixture.mjs";
 
@@ -146,12 +146,12 @@ console.log("\nLead → promotion → project → reload → document input");
 
   const context = { identity: { clientName: "Test Client", siteAddress: "1 Example St", suburb: "Stirling" }, projectType: "renovation", consultants: [], goals: {}, drawings: [] };
   const input = { lead: { id: LEAD_ID, stage: "consultants" }, context, register: loaded.register, revision: 1, status: "Draft", issuedDate: "2026-11-10", issuer: "Staff" };
-  for (const docType of ["client_brief", "architect_brief", "selections_schedule"]) {
+  for (const docType of ["client_brief", "architect_brief", "selections_schedule", "client_presentation"]) {
     const s = JSON.stringify(buildRegisterFixture(docType, input));
     ok(`${docType}: document input carries nothing internal`, !s.includes(INTERNAL_MARK));
   }
-  const rows = selectionRows(loaded.register);
-  ok("the schedule doesn't list facts, excluded or N/A items", !rows.some((r) => /Site access|Living on site/.test(r.category)) && rows.length === fx.selectionKeys.length + LEGACY_ROWS.length);
+  const rows = selectionRecords(loaded.register);
+  ok("the schedule doesn't list facts, excluded or N/A items", !rows.some((r) => /Site access|Living on site/.test(`${r.item} ${r.product}`)) && rows.length === fx.selectionKeys.length + LEGACY_ROWS.length);
 
   console.log("\nProject save");
   const fresh = (id) => loaded.register.items.find((b) => b.id === id);

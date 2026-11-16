@@ -41,13 +41,16 @@ ok("T2 architect brief: identity and cover from the fixture; empty sections don'
   ab.DOC_TITLE === "Design brief" && /^BLB-ADB-0417/.test(ab.FTR_IDENTITY) && ab.META_ROWS.length === 4 && ab.HAS_S2 === false && ab.HAS_S5 === false
   && ARCHITECT_ITEM_STATUSES.includes("Client-approved") && ARCHITECT_ITEM_STATUSES.includes("To verify"));
 
-// 3. Selections payload is grouped (not a flat list), group-ordered, 22 items total.
-const ss = buildSelectionsSchedulePayload(long);
-const order = ["External", "Internal Finishes", "Joinery", "Wet Areas", "Services & Fixtures", "External Works"];
-const grpOk = ss.GROUPS.every((g, i) => i === 0 || order.indexOf(g.GROUP_NAME) >= order.indexOf(ss.GROUPS[i - 1].GROUP_NAME));
-const total = ss.GROUPS.reduce((n, g) => n + g.ITEMS.length, 0);
-ok("T3 selections: grouped + group-ordered; 22 items total; blank qty defaults to em dash",
-  ss.GROUPS.length === 6 && grpOk && total === 22 && ss.GROUPS.every((g) => g.ITEMS.every((r) => r.QTY && r.STATUS)));
+// 3. Selections (doc suite pair 2): the Technical Selections Schedule is built from register records (the R01 JSON rows
+//    are retired), grouped by trade; every row has its reference and a selection. Deep checks: documents-selections.
+const { buildRegisterFixture } = await import("../../server/lib/registerDocuments.mjs");
+const { REGISTER_PROJECTS, ridgelineTender, designCoordination, kestrelSupplierEvidence } = await import("../documents/fixtures/register-projects.mjs");
+const regInput = (p) => ({ lead: p.lead, context: p.context, register: p.register, projectRef: p.projectRef, revision: 1, status: "Issued", issuedDate: "2026-11-16", issuer: "Staff", recipientName: "Recipient" });
+const rp = ridgelineTender(REGISTER_PROJECTS.ridgeline());
+const ss = buildSelectionsSchedulePayload(buildRegisterFixture("selections_schedule", regInput(rp)));
+const ssRows = ss.SEL_GROUPS.flatMap((g) => ["ROWS_KEEP", "ROWS", "ROWS_PEN", "ROWS_LAST"].flatMap((k) => g[k] || []));
+ok("T3 selections schedule: grouped by trade from register records; every row has its reference and a selection",
+  ss.SEL_GROUPS.length >= 4 && ssRows.length > 20 && ssRows.every((r) => r.REF && r.SEL) && /^BLB-TSS-0631-R01/.test(ss.FTR_IDENTITY));
 
 // 4. A properly ISSUED document with a logo validates in issue mode.
 ok("T4 validation: an Issued fixture (logo present) passes issue mode", validateFixture(issuedReno, { mode: "issue", logoPresent: true }).ok === true);
@@ -85,15 +88,13 @@ const r1 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
 const r2 = renderDocxTemplate(tpl, buildClientBriefPayload(reno));
 ok("T10 render is deterministic (issued-snapshot reproducibility)", Buffer.compare(r1, r2) === 0 && r1.length > 5000);
 
-// 11. Client Selections Presentation (editorial): built from the SAME selections, grouped into client
-//     areas, with a decisions list; palette tiles are data-driven and gracefully absent when unprovided.
-const cp = buildClientPresentationPayload(long);
-const cpItems = cp.AREAS.flatMap((a) => a.ITEMS);
-const cpShort = buildClientPresentationPayload(short); // no clientPresentation block in fixture
-ok("T11 client presentation: same selections regrouped into client areas; decisions filtered; palette optional",
-  cp.AREAS.length >= 3 && cpItems.length === long.selections.length && cp.AREAS.every((a, i) => a.AREA_NUM === String(i + 1).padStart(2, "0")) &&
-  cp.HAS_PALETTE.length === 1 && cp.TILE1_AREA === "Exterior" && cp.DECISIONS.every((d) => d.REF_ID && d.ITEM && [PRESENTATION_PENDING_LABEL, "Hold", "Design", "Undecided", "Preliminary"].includes(d.STATUS)) &&
-  cpShort.HAS_PALETTE.length === 0 && cpShort.AREAS.length >= 1);
+// 11. Client Selections Presentation (pair 2): its own document, from the same register records, by location, with what we
+//     need from the client first; no references, codes or technical states.
+const cp = buildClientPresentationPayload(buildRegisterFixture("client_presentation", regInput(rp)));
+const cpText = JSON.stringify(cp);
+ok("T11 client presentation: same records, by location; what we need first; no references or codes",
+  cp.SEL_GROUPS.length >= 3 && cp.SEL_GROUPS[0].GROUP === "Throughout the house" && cp.HAS_S1 === true && cp.S1_NUM === "01" && cp.S2_NUM === "02" &&
+  /^BLB-CSP-0631-R01/.test(cp.FTR_IDENTITY) && !/\b[A-Z]\d{3}-[A-Z0-9]{3}\b/.test(cpText) && !/\b(57525|63633|452499)\b/.test(cpText));
 
 // 12. Deliberate pagination flags (no fabricated geometry — just content-size signals the template reads).
 const cbReno = buildClientBriefPayload(reno), cbShort = buildClientBriefPayload(short);
@@ -139,33 +140,22 @@ ok("T13 all five documents render through the existing renderDocxTemplate", rend
     good === 5 && fixed.count === 1 && (fixed.xml.match(/<w:r>/g) || []).length === 4 && splitFooterFields(fixed.xml).count === 0);
 }
 
-// 15. The client presentation never prints "TBC": an undecided row says "Still to be decided" once, its item is the
-//     heading, and an unknown supplier leaves no dangling separator. The technical register keeps TBC (Tab 27 line 21).
+// 15. One pending label, the same in both documents (pair 2; the editorial rule replaces the R04 "technical register
+//     keeps TBC"): an undecided selection reads "To be decided", once, and neither document prints TBC.
 {
-  const tbcRow = { group: "Internal Finishes", itemId: "R005-1", category: "Bed 1 — Floor finish", where: "Bed 1", item: "Floor finish", product: "TBC", finish: "TBC", qty: "—", status: "TBC", responsibility: "TBC" };
-  const prefRow = { ...tbcRow, itemId: "R006-1", item: "Wall paint", category: "Bed 1 — Wall paint", finish: "Warm white", status: "Preferred" };
-  const namedRow = { ...tbcRow, itemId: "K005-1", group: "Joinery", item: "Benchtop", category: "Kitchen — Benchtop", where: "Kitchen", product: "Engineered stone", finish: "20 mm", status: "Proposed", responsibility: "Client · Routleys" };
-  const pfx = { ...reno, selections: [tbcRow, prefRow, namedRow] };
-  const pp = buildClientPresentationPayload(pfx);
-  const its = pp.AREAS.flatMap((a) => a.ITEMS);
-  const row = (id) => its.find((x) => x.REF_ID === id);
-  const words = JSON.stringify({ AREAS: pp.AREAS, DECISIONS: pp.DECISIONS });
-  const tbc = row("R005-1"), pref = row("R006-1"), named = row("K005-1");
-  const tech = buildSelectionsSchedulePayload(pfx);
-  ok("T15 client presentation: one 'Still to be decided' per undecided row, no TBC, no dangling separator; technical register keeps TBC",
-    !/"TBC"/.test(words) &&
-    tbc.STATUS === PRESENTATION_PENDING_LABEL && tbc.NAME === "Floor finish" && tbc.CAT === "Bed 1" && tbc.DESC === "" && tbc.SOURCE === "" && tbc.SEP === "" &&
-    (JSON.stringify(tbc).match(new RegExp(PRESENTATION_PENDING_LABEL, "g")) || []).length === 1 &&
-    pref.STATUS === "Preferred" && pref.NAME === "Wall paint" && pref.DESC === "Warm white" &&
-    named.NAME === "Engineered stone" && named.CAT === "Kitchen — Benchtop" && named.SEP === "   /   " && named.SOURCE === "Client · Routleys" &&
-    pp.DECISIONS.find((d) => d.REF_ID === "R005-1")?.OWNER === "—" && pp.DECISIONS.find((d) => d.REF_ID === "R005-1")?.STATUS === PRESENTATION_PENDING_LABEL &&
-    /TBC/.test(JSON.stringify(tech)) &&
-    /Still to be decided means/.test(pp.READ_BODY));
+  const kp = kestrelSupplierEvidence(designCoordination(REGISTER_PROJECTS.kestrel()));
+  const kRel = kp.register.items.find((x) => x.sourceDocId === "doc_kc_c01"); Object.assign(kRel, { sourceDocId: "doc_kc_c02" });
+  const pp = buildClientPresentationPayload(buildRegisterFixture("client_presentation", regInput(kp)));
+  const tech = buildSelectionsSchedulePayload(buildRegisterFixture("selections_schedule", regInput(kp)));
+  const ppRows = pp.SEL_GROUPS.flatMap((g) => ["ROWS_KEEP", "ROWS", "ROWS_PEN", "ROWS_LAST"].flatMap((k) => g[k] || []));
+  ok("T15 one pending label in both documents, no TBC; each status defined once",
+    !/\bTBC\b/.test(JSON.stringify(pp)) && !/\bTBC\b/.test(JSON.stringify(tech)) && ppRows.some((r) => r.STATUS === PRESENTATION_PENDING_LABEL) &&
+    (pp.SEL_INTRO.match(new RegExp(`${PRESENTATION_PENDING_LABEL}:`, "g")) || []).length === 1 && /To be decided:/.test(tech.READ_INTRO));
   const tpl = fs.readFileSync(path.join(REPO, "public/templates", DOC_DEFS.client_presentation.templateFile));
   const PizZip = (await import("pizzip")).default;
   const out = new PizZip(renderDocxTemplate(tpl, pp)).file("word/document.xml").asText().replace(/<[^>]+>/g, "");
-  ok("T15b it renders: no TBC, no leftover tag, the separator only where there's a supplier",
-    !/\bTBC\b/.test(out) && !/\{[#/]?[A-Z_]{2,}\}/.test(out) && (out.match(/ {3}\/ {3}/g) || []).length === 1 + (pp.SUBLINE.match(/ {3}\/ {3}/g) || []).length && out.includes("Still to be decided"));
+  ok("T15b it renders: no TBC, no leftover tag, the pending label present",
+    !/\bTBC\b/.test(out) && !/\{[#/]?[A-Z_]{2,}\}/.test(out) && out.includes(PRESENTATION_PENDING_LABEL));
 }
 
 console.log(`\nR01–R04 document tests: ${pass} passed, ${fail} failed`);

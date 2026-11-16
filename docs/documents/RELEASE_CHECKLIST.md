@@ -4,7 +4,7 @@
 
 **Design status**
 - **Client Project Brief:** template cpb-2.4 is the accepted working design foundation (owner and ChatGPT, 16 Nov 2026). No further general redesign.
-- **Next, in order:** the Architect Design Brief, then the Technical Selections Schedule, then the Client Selections Presentation, then the PBSA / Tender Proposal.
+- **Next, in order:** the Architect Design Brief (frozen baseline), the Technical Selections Schedule and Client Selections Presentation (pair 2, at checkpoint), then the PBSA / Tender Proposal.
 - **No document is authorised for live client issue.**
 
 ## Release controls
@@ -21,6 +21,8 @@
 | R8 | Immutable issue on production | Sam | Built (migration 213) | `select tgname from pg_trigger where tgname = 'trg_lead_documents_issue_guard';` returns one row on production |
 | R9 | Client-portal test failure (Operations projects list) | Claude | Fixed in its own session, not merged | Merged and re-run green on the sandbox |
 | R10 | Final issue approval | Sam | Open, per document | Blue Leaf's written sign-off for each document's client issue, after R1 to R8 |
+| R12 | Migration 220 (Client Selections Presentation as its own document) | Sam | Prepared, applied to the sandbox only | Applied after 218; `select pg_get_constraintdef(oid) from pg_constraint where conname = 'lead_documents_document_type_check';` lists client_presentation |
+| R13 | Selections pair decisions | Sam | Open | `SELECTIONS_SPEC.md` §9: two documents (S1), images, option lists, codes on approved records, engineered stone on the technical schedule, one record per product |
 | R11 | Design freeze | Claude, after R10 | Not started | Pin the design tokens in `scripts/documents/design-system.mjs` with a test; later documents import it and never copy it |
 
 Not a document control, but due before 30 November 2026: the Hub's shared `CLAUDE_MODEL=claude-sonnet-4-5` retires that day. The migration is a separate task. Blueprint and Check wording already fall back to Haiku 4.5 if their model is refused. Setting `BLUEPRINT_MODEL=claude-sonnet-5-5` in Railway moves Blueprint off Sonnet 4.5 now.

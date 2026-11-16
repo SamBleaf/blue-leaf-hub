@@ -7,8 +7,9 @@
  *
  *   D1 client_brief         Preliminary Client Project Brief — issue record only, no signature (D-035)
  *   D2 architect_brief      Architect Design Brief — client intent kept distinct from technical solutions
- *   D3 selections_schedule  Selections & Finishes Schedule — technical register layout, or the client
- *                           presentation layout, from the SAME selection rows
+ *   D3 selections_schedule  Technical Selections Schedule — for the design team, estimator, suppliers and trades
+ *      client_presentation  Client Selections Presentation — for the client
+ *                           Both from the SAME records (selectionRecords), each with its own revision series
  *
  * Issue = immutable: the PDF (+ controlled DOCX export) is stored under a unique path (never overwritten),
  * the issue row is written by register_issue_document (supersedes the previous revision in one transaction),
@@ -46,7 +47,10 @@ const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingm
 export const REGISTER_DOC_TYPES = {
   client_brief: { label: "Preliminary Client Project Brief", def: "client_brief", audience: "client" },
   architect_brief: { label: "Architect Design Brief", def: "architect_brief", audience: "architect" },
-  selections_schedule: { label: "Selections & Finishes Schedule", def: "selections_schedule", audience: "client", altLayout: "client_presentation" },
+  // Two documents from one register (SELECTIONS_SPEC.md S1): each has its own revision series, so issuing one never
+  // supersedes the other. Both read selectionRecords().
+  selections_schedule: { label: "Technical Selections Schedule", def: "selections_schedule", audience: "consultant" },
+  client_presentation: { label: "Client Selections Presentation", def: "client_presentation", audience: "client" },
   tender_scope_notes: { label: "Tender Scope & Pricing Notes", def: "tender_scope_notes", audience: "internal" },
 };
 const DOC_TYPE_KEYS = new Set(Object.keys(REGISTER_DOC_TYPES));
@@ -98,25 +102,6 @@ function productWords(register, item) {
   const under = linkedParentLabel(register, item);
   const words = named && chosen ? `${named} (${chosen})` : named || chosen;
   return words && under ? `${words}, ${under}` : words;
-}
-
-export function selectionRows(register, { coord } = {}) {
-  let items = register.items.filter(isClientSelection);
-  if (coord) items = items.filter((i) => questionById(resolvePromptId(i.promptKey))?.coord === coord || (coord === "routleys" && /routleys/i.test(i.supplier || "")) || (coord === "tli" && /\btli\b/i.test(i.supplier || "")));
-  return orderItems(register, items).map((i) => {
-    const group = docGroupFor(i.category);
-    return {
-      itemId: refCode(i),
-      group: SCHEDULE_GROUPS.has(group) ? group : "Internal Finishes",
-      category: `${roomLabel(register, i)} — ${itemShort(i)}${sourceTag(i)}`,
-      where: `${roomLabel(register, i)}${sourceTag(i)}`, item: itemShort(i),   // split, for the client presentation
-      product: productWords(register, i) || "TBC",
-      finish: clean(i.colour) || "TBC",
-      qty: i.quantity != null ? clean(`${i.quantity} ${i.unit || ""}`) : "—",            // never a fake zero
-      status: selectionStatus(i),
-      responsibility: clean([i.supplyBy && supplyLabel(i.supplyBy), i.supplier, i.source, i.technicalStatus === "needs_verification" ? "Tech: to verify" : null].filter(Boolean).join(" · ")) || "TBC",   // never invent an owner
-    };
-  });
 }
 
 /**
@@ -780,10 +765,283 @@ function architectBriefFixture(input) {
   return fx;
 }
 
-function selectionsFixture(input, opts = {}) {
+// ── Selections: one model for the Technical Selections Schedule and the Client Selections Presentation ─────
+// docs/documents/SELECTIONS_SPEC.md. Every field comes from an existing register or context field: nothing here adds
+// data, and both documents read the same records, so they can never describe one selection two ways.
+
+/** The schedule's trade and system groups, in order (spec §3.2). A category not listed is "Other selections". */
+export const TRADE_GROUPS = [
+  ["Roof and walls", ["roof", "cladding", "insulation"]],
+  ["Windows and doors", ["windows", "doors"]],
+  ["Internal finishes", ["flooring", "walls_ceiling", "paint", "trim", "stairs"]],
+  ["Joinery and benchtops", ["joinery", "benchtop", "appliances"]],
+  ["Plumbing fixtures and tiling", ["sanitary", "tiling", "plumbing"]],
+  ["Lighting and electrical", ["electrical"]],
+  ["Heating, cooling and services", ["hvac", "services"]],
+  ["External works", ["external", "site"]],
+];
+const TRADE_OF = new Map(TRADE_GROUPS.flatMap(([g, cats]) => cats.map((c) => [c, g])));
+export const tradeGroupFor = (category) => TRADE_OF.get(category) || "Other selections";
+const TRADE_ORDER = [...TRADE_GROUPS.map(([g]) => g), "Other selections"];
+/** Questions whose open actions are selection decisions, whatever their category (K-012 "unresolved choices"). */
+const CHOICE_QUESTIONS = new Set(["K-012"]);
+/**
+ * A record staff add by hand has no question and the category "notes" (the register can't set another), so a TLI
+ * fitting or a window maker's opening would never reach its trade. It goes with the discipline of the document it
+ * cites (lead_documents.discipline, keyed as COORD_DISCIPLINES): no supplier name is guessed (spec critique).
+ */
+const DISCIPLINE_GROUP = { tli: "Lighting and electrical", windows: "Windows and doors", routleys: "Plumbing fixtures and tiling", joiner: "Joinery and benchtops" };
+
+/** A received document as one line: "Rylock RM-6403 Ver 1"; with no number, its file name. */
+const sourceDocLabel = (d) => clean([d.issuer, d.docNumber, d.revision].filter(Boolean).join(" ")) || clean(String(d.filename || "").replace(/\.(pdf|docx?|xlsx?)$/i, "")) || "Document on file";
+const reviewOf = (d) => d?.reviewStatus ?? d?.review_status ?? null;
+/**
+ * Approved with real evidence: who, when and how recorded on the record. An approval that exists only as the portal
+ * board's "approved" status has evidence made up when the row is read (registerStore: by "Portal board"), which can
+ * come from a promoted scratchpad item nobody approved (research A, SFS-15): the selections documents don't count it.
+ */
+const approvedWithEvidence = (i) => approvalIsEvidenced(i) && !i.sync?.approvedOnBoard;
+/**
+ * The selection state (spec §2), never more than the record holds. The portal's answers keep their own states, so the
+ * client is never asked again about something they've already answered (spec critique: in_review, changes_requested).
+ */
+function selectionState(i, hasWords) {
+  if (i.disposition === "retain") return "existing";
+  if (i.sync?.status === "changes_requested") return "change_requested";
+  if (i.sync?.status === "in_review") return "with_blue_leaf";
+  if (["client_unsure", "unresolved"].includes(i.answer?.state) || (i.answer?.selected || []).some((x) => x?.stale)) return "undecided";
+  if (i.certainty === "client_approved") return approvedWithEvidence(i) ? "approved" : "proposed";
+  if (i.certainty === "proposed") return "proposed";
+  if (i.certainty === "preference") return "preferred";
+  // Someone owns it or has an action on it (a supplier's "TBC by designer"): it is being decided, not undiscussed.
+  return hasWords || clean(i.nextAction) || i.responsibility ? "undecided" : "not_discussed";
+}
+/** One word per state, the same in both documents; the presentation leaves out what the client never discussed. */
+const STATE_WORDS = { approved: "Client-approved", proposed: "Proposed", preferred: "", undecided: "To be decided", not_discussed: "Not yet discussed",
+  existing: "Existing to remain", with_blue_leaf: "Client's choice, with Blue Leaf", change_requested: "Change requested, with Blue Leaf" };
+/** A legacy row's description carries "— Supplier: X" (readRegister): never the client's words. */
+const clientWords = (t) => clean(String(t || "").replace(/\s+—\s+Supplier:[^—]*/g, ""));
+/** A pre-register schedule row adopted as a record: "item — Supplier: X — notes". Only its item is the client's. */
+const isLegacyRow = (i) => i.updatedAt === "1970-01-01T00:00:00.000Z" && i.category === "notes";
+
+/**
+ * One record per client selection, with every field either document prints (spec §2). opts.coord narrows to one
+ * party's records (a coordination pack): the question's coordination tag, or the supplier's name.
+ */
+export function selectionRecords(register, context = {}, { coord } = {}) {
+  const rooms = register.meta.rooms || [];
+  const byId = new Map(register.items.map((i) => [i.id, i]));
+  const docs = new Map((context.drawings || []).filter((d) => d?.id).map((d) => [d.id, d]));
+  const coordOf = (i) => questionById(resolvePromptId(i.promptKey))?.coord || null;
+  const disciplineOf = (i) => clean(docs.get(i.sourceDocId)?.discipline) || null;
+  let items = register.items.filter(isClientSelection);
+  // A pack: the question's coordination tag, the discipline of the document the record cites, or (Routleys and TLI
+  // only, as before) the supplier's name.
+  if (coord) items = items.filter((i) => coordOf(i) === coord || disciplineOf(i) === coord || (coord === "routleys" && /routleys/i.test(i.supplier || "")) || (coord === "tli" && /\btli\b/i.test(i.supplier || "")));
+  return orderItems(register, items).map((i) => {
+    const room = rooms.find((r) => r.id === i.roomId);
+    const q = questionById(resolvePromptId(i.promptKey));
+    const zone = clean(i.answer?.zone?.label);
+    const areas = (i.answer?.areaIds || []).map((id) => rooms.find((r) => r.id === id)).filter(Boolean).map((r) => placeName(clean(r.name)));
+    // A room's own choice; the rooms a project-wide record names; a house-wide default (with its zone); the site; the
+    // room a portal-board row was created for; or a record tied to no room, said as such ("throughout the house" would
+    // claim more than the record does, e.g. a TLI fitting before the lighting plan arrives).
+    const location = room ? placeName(clean(room.name)) : areas.length ? roomList(areas) : i.isDefault ? (zone || "Throughout the house")
+      : i.section === "site" ? "Site" : clean(i.room) || "No room recorded";
+    const linked = i.overridesDefaultId ? byId.get(i.overridesDefaultId) : null;
+    // An exception names what it replaces only when that default applies to this room (ADB-01, roomDefaultsFor).
+    const applies = !!(room && linked && q && roomDefaultsFor(register, q, room.roomType).some((d) => d.id === linked.id));
+    const defWords = applies ? clientWords(linked.description) || clean(linked.product) || said(linked) : "";
+    const custom = !q;   // a record staff added by hand: its description names it
+    const legacy = isLegacyRow(i);
+    // Gutters say which roof (linkedParentLabel), as before (register-documents-structured "gutters say which roof").
+    const under = linkedParentLabel(register, i);
+    const withParent = (t) => (t && under ? `${t}, ${under}` : t);
+    const product = withParent(clean(i.product));
+    const typed = withParent(custom ? "" : legacy ? clean(String(i.description || "").split(" — ")[0]) : clientWords(i.description) || clean(answerSummary(i)));
+    const words = product || typed;
+    const doc = i.sourceDocId ? docs.get(i.sourceDocId) || null : null;
+    const review = reviewOf(doc);
+    // A preference with nothing recorded to say what it is, is still to be decided: blank only ever means a recorded
+    // preferred direction (spec critique).
+    const raw = selectionState(i, !!words);
+    const state = raw === "preferred" && !words ? "undecided" : raw;
+    const technical = i.technicalStatus === "needs_verification" ? "to_verify" : i.technicalStatus === "verified" && clean(i.technicalEvidence?.ref) ? "verified" : "";
+    const sourceFlag = i.sourceDocId && !doc ? "missing" : review === "superseded" ? "superseded" : ["received", "under_review"].includes(review) ? "unreviewed" : "";
+    const qty = Number(i.quantity);
+    return {
+      id: i.id, ref: refCode(i), category: i.category, coord: coordOf(i), promptId: q?.id || null,
+      group: TRADE_OF.has(i.category) ? tradeGroupFor(i.category) : DISCIPLINE_GROUP[disciplineOf(i)] || "Other selections",
+      item: custom ? (legacy ? clean(String(i.description || "").split(" — ")[0]) : clientWords(i.description)) || categoryLabel(i.category) : clean(itemShort(i).replace(/\s*—\s*who\?$/i, "")),
+      roomId: room?.id || null, location, sheet: clean(room?.sheet), level: clean(room?.level),
+      house: !room && !areas.length && !!i.isDefault, zoneKey: clean(i.answer?.zone?.key), elementKey: clean(i.answer?.element?.key), replaces: defWords ? `${defWords.charAt(0).toLowerCase()}${defWords.slice(1)}` : "",
+      product: words, named: !!product,
+      // The client's own words beside a product put to them, when they differ: the selected-vs-proposed pair (spec §4).
+      direction: product && typed && !i.sync?.boardCreated && typed.toLowerCase() !== product.toLowerCase() ? typed : "",
+      // A preference shows the client's words, never a product someone else wrote on it (spec critique).
+      preferenceWords: typed || "",
+      manufacturer: clean(i.manufacturer), model: clean(i.model), supplier: clean(i.supplier),
+      finish: clean(i.colour),
+      // Never a zero (Tab 22:25): 0 or blank is not recorded.
+      quantity: Number.isFinite(qty) && qty > 0 ? clean(`${i.quantity} ${i.unit || ""}`) : "", zeroQuantity: i.quantity !== null && i.quantity !== undefined && i.quantity !== "" && Number(i.quantity) === 0,
+      supplyBy: i.supplyBy ? supplyLabel(i.supplyBy) : "",
+      state, selection: STATE_WORDS[state], technical, technicalRef: technical === "verified" ? clean(i.technicalEvidence.ref) : "",
+      boardOnlyApproval: i.certainty === "client_approved" && approvalIsEvidenced(i) && !!i.sync?.approvedOnBoard,
+      // Known: the client's evidenced choice (or kept as it is), said in words, with no technical check open and a
+      // reviewed source. Unresolved: nothing to say what it is, or still to be decided. Everything else is provisional.
+      knowledge: !words && state !== "existing" ? "unresolved" : ["undecided", "not_discussed", "change_requested"].includes(state) ? "unresolved"
+        : ["approved", "existing"].includes(state) && technical !== "to_verify" && !sourceFlag ? "known" : "provisional",
+      responsibility: i.responsibility || null, next: !i.resolved ? clean(i.nextAction) : "",
+      clientVisible: i.sync?.clientVisible !== false,
+      source: doc ? sourceDocLabel(doc) : clean(i.source),
+      sourceDocId: doc ? doc.id : null, sourceDocNumber: clean(doc?.docNumber),
+      sourceFlag,
+    };
+  });
+}
+const SOURCE_FLAG_WORDS = { superseded: "Source superseded", unreviewed: "Source not yet reviewed", missing: "Source not on file" };
+
+/** Records whose printed content matches, except the room, are said once with every room (editorial rule). */
+function mergeByRoom(rows, sig) {
+  const out = [], seen = new Map();
+  for (const r of rows) {
+    if (!r.roomId) { out.push({ ...r, rooms: [], refs: [r.ref] }); continue; }
+    const k = sig(r);
+    if (seen.has(k)) { const g = seen.get(k); g.rooms.push(r.location); g.refs.push(r.ref); continue; }
+    const g = { ...r, rooms: [r.location], refs: [r.ref] };
+    seen.set(k, g); out.push(g);
+  }
+  return out;
+}
+const roomList = (names) => andList(names.map((n, k) => (k ? n.charAt(0).toLowerCase() + n.slice(1) : n)));
+const byIdOf = (register, id) => register.items.find((i) => i.id === id);
+const REVIEW_WORDS = { received: "Received, not yet reviewed", under_review: "Under review", reconciled: "Reconciled", superseded: "Superseded" };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const longDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || "")); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : clean(d); };
+const KNOWLEDGE = ["known", "provisional", "unresolved"];
+
+/** Technical Selections Schedule (BLB-TSS). For the design team, estimator, suppliers and trades (spec §3). */
+function technicalScheduleFixture(input, opts = {}) {
+  const { context, register } = input;
   const fx = baseFixture(input);
-  fx.selections = selectionRows(input.register, opts);
-  fx.clientPresentation = {};
+  const records = selectionRecords(register, context, opts);
+  const coordLabel = opts.coord ? COORD_DISCIPLINES[opts.coord] || opts.coord : "";
+  // 04 · Source documents, keyed once (S1, S2 …): a row prints the key, not the document again (editorial rule).
+  const cited = [...new Set(records.map((r) => r.sourceDocId).filter(Boolean))];
+  const docOf = new Map((context.drawings || []).filter((d) => d?.id).map((d) => [d.id, d]));
+  const keyOf = new Map(cited.map((id, k) => [id, `S${k + 1}`]));
+  const sources = cited.map((id) => { const d = docOf.get(id); return { key: keyOf.get(id), document: sourceDocLabel(d),
+    revision: [clean(d.revision) || "No revision printed", d.receivedAt ? `received ${longDate(d.receivedAt)}` : ""].filter(Boolean).join(", "),
+    review: REVIEW_WORDS[reviewOf(d)] || "On file" }; });
+  const sig = (r) => [r.group, r.item, r.product, r.direction, r.manufacturer, r.model, r.supplier, r.supplyBy, r.finish, r.quantity, r.selection, r.technical, r.sourceDocId || r.source, r.sourceFlag, r.replaces].join("|");
+  const merged = mergeByRoom(records, sig);
+  const groups = TRADE_ORDER.map((g) => ({ group: g, rows: merged.filter((r) => r.group === g) })).filter((g) => g.rows.length)
+    .map((g) => ({ group: g.group, rows: g.rows.map((r) => ({
+      ref: r.refs.join(", "), item: r.item,
+      // A house-wide row's location is blank: "throughout the house" is said once, in the reading note.
+      location: r.house && r.location === "Throughout the house" ? "" : r.rooms.length > 1 ? roomList(r.rooms) : r.location, replaces: r.replaces,
+      product: r.product, direction: r.direction,
+      detail: [r.manufacturer, r.supplier, r.model, r.supplyBy ? `supply: ${r.supplyBy.toLowerCase()}` : ""].filter(Boolean).join(" · "),
+      finish: r.finish, quantity: r.quantity, selection: r.selection,
+      technical: r.technical === "to_verify" ? "To verify" : r.technical === "verified" ? "Verified" : "",
+      source: r.sourceDocId ? keyOf.get(r.sourceDocId) : r.source, sourceFlag: SOURCE_FLAG_WORDS[r.sourceFlag] || "",
+    })) }));
+  // 02 · Requirements these selections must meet: requirement records in the schedule's trades (or tagged for the pack's party).
+  const verified = (i) => i.technicalStatus === "verified" && clean(i.technicalEvidence?.ref);
+  const reqItems = orderItems(register, register.items.filter((i) => i.itemKind === "requirement" && said(i)
+    && (opts.coord ? questionById(resolvePromptId(i.promptKey))?.coord === opts.coord : TRADE_OF.has(i.category))
+    && answerConfigFor(resolvePromptId(i.promptKey))?.tier !== "office_only"));
+  const requirements = reqItems.map((i) => {
+    const approved = i.certainty === "client_approved" && approvedWithEvidence(i);
+    const tech = i.technicalStatus === "needs_verification" ? "To verify" : verified(i) ? "Verified" : reviewOnly(i) ? "For consultant review" : "";
+    return { ref: refCode(i), text: sentence(`${plainShort(i)}: ${said(i)}`).replace(/\.$/, ""), applies: tradeGroupFor(i.category),
+      status: [approved ? "Client-approved" : "", tech].filter(Boolean).join(", "), who: i.technicalStatus === "needs_verification" ? adbWho(context, i) : "" };
+  });
+  // 03 · Open actions and checks: every open next action on a schedule record, and the open actions recorded against
+  // the schedule's trades (in a pack, that party's). Linked by reference; nothing repeats a product. Source problems
+  // are the preview's pre-issue checks, never instructions printed for outside readers (spec critique).
+  const actions = records.filter((r) => r.next).map((r) => ({ ref: r.ref, text: r.next, who: adbWho(context, byIdOf(register, r.id)) }));
+  const recordIds = new Set(records.map((r) => r.id));
+  const forPack = (x) => questionById(resolvePromptId(x.promptKey))?.coord === opts.coord || (opts.coord === "routleys" && /routleys/i.test(`${x.supplier || ""}`)) || (opts.coord === "tli" && /\btli\b/i.test(`${x.supplier || ""}`))
+    || (x.sourceDocId && records.some((r) => r.sourceDocId === x.sourceDocId));
+  for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && x.itemKind === "action" && !x.resolved && clean(x.nextAction)
+    && (opts.coord ? forPack(x) : TRADE_OF.has(x.category))))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i) });
+  const tally = Object.fromEntries(KNOWLEDGE.map((k) => [k, records.filter((r) => r.knowledge === k).length]));
+  fx.selections = records;
+  if (context.sourcesUnchecked) fx.__sourcesUnchecked = true;
+  fx.technicalSchedule = {
+    coord: coordLabel, groups, requirements, actions, sources,
+    knowledge: tally, total: records.length,
+    statuses: [...new Set(records.map((r) => r.state))],
+    technicalShown: [...new Set(records.map((r) => r.technical).filter(Boolean))],
+    hasQuantities: records.some((r) => r.quantity), hasHouse: groups.some((g) => g.rows.some((r) => r.location === "")),
+    hasDirection: records.some((r) => r.direction), hasFlags: records.some((r) => r.sourceFlag),
+  };
+  return fx;
+}
+
+/**
+ * Client Selections Presentation (BLB-CSP). For the client: what they have chosen, what is proposed, what is still open,
+ * and what Blue Leaf needs from them (spec §4). The client-safe projection: no references, codes, suppliers' document
+ * numbers, owners other than the client, technical states or quantities; never a selection they haven't discussed.
+ */
+function clientSelectionsFixture(input) {
+  const { context, register } = input;
+  const fx = baseFixture(input);
+  const all = selectionRecords(register, context);
+  const records = all.filter((r) => r.state !== "not_discussed");
+  const rooms = register.meta.rooms || [];
+  const named = (r) => clean([r.manufacturer && !r.product.toLowerCase().startsWith(r.manufacturer.toLowerCase()) ? r.manufacturer : "", r.product].filter(Boolean).join(" "));
+  // A preference is the client's own direction; a product shows only once it has been put to them (proposed), chosen
+  // or approved. A preference that has only a product typed on it says so at issue (pre-issue warning).
+  const yours = (r) => (r.state === "preferred" ? r.preferenceWords || (r.named ? named(r) : "") : r.named ? named(r) : r.product);
+  // The client's earlier words show beside a proposal only when staff have raised the difference with them (an open
+  // action the client owns): a description can also be a staff label ("Ensuite window"), never shown as the client's.
+  const row = (r) => ({ item: r.item, text: yours(r), finish: r.finish, status: r.selection, replaces: r.replaces,
+    earlier: ["proposed", "with_blue_leaf"].includes(r.state) && r.next && r.responsibility === "client" ? r.direction : "", roomId: r.roomId });
+  const sig = (x) => `${x.item}|${x.text}|${x.finish}|${x.status}|${x.replaces}|${x.earlier}`;
+  // By location: throughout the house first, then each room in order; rooms with identical selections share a group.
+  const house = records.filter((r) => r.house).map(row);
+  const loose = records.filter((r) => !r.house && !r.roomId).map(row);
+  const perRoom = rooms.map((rm) => ({ room: rm, rows: records.filter((r) => r.roomId === rm.id).map(row) })).filter((g) => g.rows.length);
+  const holders = new Map();
+  for (const g of perRoom) for (const x of g.rows) { const k = sig(x); if (!holders.has(k)) holders.set(k, []); holders.get(k).push(g.room); }
+  const byRooms = new Map();
+  for (const g of perRoom) for (const x of g.rows) {
+    const hs = holders.get(sig(x));
+    if (hs[0].id !== g.room.id) continue;
+    const key = hs.map((h) => h.id).join("+");
+    if (!byRooms.has(key)) byRooms.set(key, { rooms: hs, rows: [] });
+    byRooms.get(key).rows.push(x);
+  }
+  const order = new Map(rooms.map((r, k) => [r.id, k]));
+  const groups = [
+    ...(house.length ? [{ group: "Throughout the house", rows: house }] : []),
+    ...[...byRooms.values()].sort((a, b) => order.get(a.rooms[0].id) - order.get(b.rooms[0].id) || b.rooms.length - a.rooms.length)
+      .map((g) => ({ group: roomList(g.rooms.map((r) => placeName(clean(r.name)))), rows: g.rows })),
+    ...(loose.length ? [{ group: "Not yet placed in a room", rows: loose }] : []),
+  ];
+  // What we need from you: each open action the client owns on a selection (in its own words) and each selection the
+  // client is to decide. A proposal awaiting their answer is marked Proposed where it prints, and the section says so
+  // once, never a row per proposal (editorial rule). Never something they've already answered (with Blue Leaf, change
+  // requested), and never an item not yet released to them on the portal.
+  const needs = [];
+  for (const r of all) {
+    if (!r.clientVisible || ["with_blue_leaf", "change_requested", "approved", "existing"].includes(r.state)) continue;
+    const where = r.roomId ? r.location : r.house ? "Throughout the house" : "";
+    if (r.next && r.responsibility === "client") needs.push({ item: r.item, where, text: sentence(r.next) });
+    else if (["undecided", "not_discussed"].includes(r.state) && r.responsibility === "client") needs.push({ item: r.item, where, text: `Choose the ${r.item.toLowerCase()}.` });
+  }
+  const proposals = records.filter((r) => r.state === "proposed" && r.clientVisible && !(r.next && r.responsibility === "client")).length;
+  const recordIds = new Set(all.map((r) => r.id));
+  for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && !x.resolved && x.responsibility === "client" && clean(x.nextAction)
+    && (TRADE_OF.has(x.category) || CHOICE_QUESTIONS.has(resolvePromptId(x.promptKey))) && answerConfigFor(resolvePromptId(x.promptKey))?.tier !== "office_only"))) {
+    const room = rooms.find((r) => r.id === i.roomId);
+    needs.push({ item: clientWords(i.description) || plainShort(i), where: room ? placeName(clean(room.name)) : "", text: sentence(i.nextAction) });
+  }
+  fx.selections = all;
+  if (context.sourcesUnchecked) fx.__sourcesUnchecked = true;
+  fx.clientSelections = { groups, needs, proposals };
   return fx;
 }
 
@@ -826,7 +1084,8 @@ function tenderNotesFixture(input) {
 export function buildRegisterFixture(docType, input, opts = {}) {
   if (docType === "client_brief") return clientBriefFixture(input);
   if (docType === "architect_brief") return architectBriefFixture(input);
-  if (docType === "selections_schedule") return selectionsFixture(input, opts);
+  if (docType === "selections_schedule") return technicalScheduleFixture(input, opts);
+  if (docType === "client_presentation") return clientSelectionsFixture(input);
   if (docType === "tender_scope_notes") return tenderNotesFixture(input);
   throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
 }
@@ -905,11 +1164,51 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   const unprintable = [...new Set((strings.match(/[\u0590-\u0FFF\u1100-\u11FF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]|[\uD800-\uDBFF][\uDC00-\uDFFF]/g) || []))];
   if (unprintable.length) warnings.push(`Some characters may not print in the Blue Leaf font: ${unprintable.slice(0, 8).join(" ")}. Check names and descriptions.`);
   if (docType === "selections_schedule" && !fx.selections.length) errors.push("There are no client selections to schedule yet.");
+  if (docType === "client_presentation" && !(fx.clientSelections?.groups || []).length) errors.push("There are no client selections to present yet.");
+  if (SELECTION_DOCS.has(docType)) selectionChecks(docType, fx, { register, errors, warnings, shown });
   if (docType === "tender_scope_notes" && !fx.tenderNotes.sections.some((sec) => sec.title !== "Drawing references")) errors.push("There is nothing in the register for the estimator yet.");
   if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferences.length) warnings.push("The brief has no recorded scope or preferences yet.");
   const v = validateFixture(fx, { mode: mode === "issue" ? "issue" : "draft" });
   if (mode === "issue") errors.push(...v.errors); else warnings.push(...v.warnings);
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
+}
+
+// ── Selections documents: source, approval and client-safety checks (SELECTIONS_SPEC.md §5) ──
+const SELECTION_DOCS = new Set(["selections_schedule", "client_presentation"]);
+function selectionChecks(docType, fx, { register, errors, warnings, shown }) {
+  const recs = fx.selections || [];
+  const name = (r) => `"${r.item}"${r.location && r.location !== "No room recorded" ? ` (${r.location.toLowerCase() === "throughout the house" ? "throughout the house" : r.location})` : ""}`;
+  // A superseded source can't be issued in either document: the schedule would cite it and the presentation would show
+  // its product (Tab 22:28, "correct supplier version"). Relink the record to the current document first.
+  for (const r of recs.filter((x) => x.sourceFlag === "superseded")) errors.push(`${name(r)} cites ${r.source}, which has been superseded. Link the record to the current document, and check its product, finish and quantity against it.`);
+  for (const r of recs.filter((x) => x.sourceFlag === "missing")) errors.push(`${name(r)} cites a document that is no longer on file. Link it to a document on file, or clear its source.`);
+  if (fx.selections && register.items.some((i) => i.sourceDocId) && fx.__sourcesUnchecked) errors.push("The source documents the selections cite couldn't be read, so they can't be checked. Try again.");
+  // Verified against a document nobody has reviewed: a supplier's quote is not technical verification (spec critique).
+  for (const r of recs.filter((x) => x.technical === "verified" && x.sourceFlag === "unreviewed")) errors.push(`${name(r)} is marked verified against ${r.source}, which hasn't been reviewed. Review the document (mark it reconciled) or step the record back to "needs verification".`);
+  const unreviewed = recs.filter((x) => x.sourceFlag === "unreviewed" && x.technical !== "verified");
+  if (unreviewed.length) warnings.push(`${unreviewed.length} selection(s) cite a document still marked received or under review (${[...new Set(unreviewed.map((r) => r.source))].join(", ")}). They print as cited, flagged "Source not yet reviewed".`);
+  // An approval held only as the portal board's status, with no who, when or how (research A, SFS-15).
+  for (const r of recs.filter((x) => x.boardOnlyApproval)) errors.push(`${name(r)} is approved on the portal board with no recorded evidence of who approved it, when and how. Record the approval, or step it back; until then it prints as Proposed.`);
+  // Two approved records for one element in one place: identified by question, room, zone and element (spec critique).
+  const seen = new Map();
+  for (const r of recs.filter((x) => x.state === "approved" && x.promptId)) {
+    const k = [r.promptId, r.roomId || r.location, r.zoneKey, r.elementKey].join("|");
+    if (!seen.has(k)) seen.set(k, []);
+    seen.get(k).push(r);
+  }
+  // Records with their own product codes are separate products (one record per product, spec §6); two approved records
+  // with no code, or the same code, for one element are more likely one choice recorded twice.
+  for (const list of seen.values()) if (list.length > 1 && new Set(list.map((r) => r.product.toLowerCase())).size > 1
+    && (list.every((r) => !r.model) || new Set(list.map((r) => r.model)).size < list.length)) warnings.push(`${list.length} client-approved records for ${name(list[0])} name different products (${list.map((r) => `"${r.product}"`).join(", ")}). Check they are separate items, not one changed choice.`);
+  for (const r of recs.filter((x) => x.zeroQuantity)) warnings.push(`${name(r)} has a quantity of 0. A quantity that isn't known is left blank; it prints blank.`);
+  if (docType === "client_presentation") {
+    // A preference shows the client's words; one with only a product typed on it shows the product as theirs.
+    for (const r of recs.filter((x) => x.state === "preferred" && !x.preferenceWords && x.named)) warnings.push(`${name(r)} is a preference with only a product recorded ("${r.product}"). The presentation shows it as the client's preferred direction: record the client's own words, or mark it Proposed if it was put to them.`);
+    // The client never sees a register reference, a product code or a supplier's document number.
+    const codes = [...new Set(recs.flatMap((r) => [r.ref, r.model, r.sourceDocNumber].filter((c) => c && c.length >= 3)))];
+    const leaked = codes.filter((c) => shown.some((t) => t.includes(c)));
+    if (leaked.length) errors.push(`The presentation would print a reference, code or document number the client shouldn't see (${leaked.slice(0, 5).join(", ")}). Reword the record's description or next action without it.`);
+  }
 }
 
 /** Scan the RENDERED document for leaked placeholders / empty values (belt and braces after render). */
@@ -950,8 +1249,8 @@ export function fontVerdict(fonts, env = process.env) {
 }
 
 export async function renderRegisterDocument(docType, fx, { layout } = {}) {
-  const spec = REGISTER_DOC_TYPES[docType];
-  const defKey = layout === "client" && spec.altLayout ? spec.altLayout : spec.def;
+  const spec = REGISTER_DOC_TYPES[asDocType(docType, layout)];
+  const defKey = spec.def;
   const t = templateFor(defKey);
   const payload = t.def.build(fx);
   const docx = renderDocxTemplate(t.bytes, payload);
@@ -972,7 +1271,26 @@ async function loadInputs(sb, leadId, actor) {
   if (!lead) throw new DocumentError(404, "Lead not found", "NOT_FOUND");
   const loaded = await loadRegister(sb, leadId, { actor });
   const context = await loadRegisterContext(sb, leadId);
+  await resolveCitedDocuments(sb, leadId, loaded.register, context);
   return { lead, loaded, register: loaded.register, context };
+}
+
+/**
+ * The documents register records cite (sourceDocId), read by id: the context lists only the 30 most recent, so an older
+ * (likely superseded) source would otherwise read as missing, and its flag would never fire. If they can't be read, the
+ * selections documents say so at issue (sourcesUnchecked) rather than passing silently.
+ */
+async function resolveCitedDocuments(sb, leadId, register, context) {
+  const have = new Set((context.drawings || []).map((d) => d.id));
+  const want = [...new Set((register.items || []).map((i) => i.sourceDocId).filter((id) => id && !have.has(id)))];
+  if (!want.length) return;
+  try {
+    const { data, error } = await sb.from("lead_documents").select("id, filename, document_type, created_at, revision_label, discipline, issuer, doc_number, received_at, review_status")
+      .eq("lead_id", leadId).in("id", want);
+    if (error) throw error;
+    context.drawings = [...(context.drawings || []), ...(data || []).map((d) => ({ id: d.id, filename: d.filename, type: d.document_type, at: d.created_at, revision: d.revision_label || null,
+      discipline: d.discipline || null, issuer: d.issuer || null, docNumber: d.doc_number || null, receivedAt: d.received_at || null, reviewStatus: d.review_status || null, cited: true }))];
+  } catch { context.sourcesUnchecked = true; }
 }
 
 /** The next revision number, and the issued revision it will replace (printed on the new one: final inspection R02-01). */
@@ -1008,7 +1326,11 @@ function versionsDiffer(expected, current) {
 // ── public API ───────────────────────────────────────────────────────────────────────────────────
 
 /** Render a DRAFT (not stored). Returns the PDF, the pre-issue check result, and the content fingerprint. */
-export async function previewDocument(sb, leadId, docType, { layout, recipientName, actor } = {}) {
+/** The old "client layout" of the selections document is now the Client Selections Presentation (spec S1). */
+const asDocType = (docType, layout) => (docType === "selections_schedule" && layout === "client" ? "client_presentation" : docType);
+
+export async function previewDocument(sb, leadId, requestedType, { layout, recipientName, actor } = {}) {
+  const docType = asDocType(requestedType, layout);
   if (!DOC_TYPE_KEYS.has(docType)) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
   let revision = 1, supersedes = null;
@@ -1027,7 +1349,8 @@ export async function previewDocument(sb, leadId, docType, { layout, recipientNa
  * Issue an immutable revision. Blocks on any pre-issue error (nothing stored). Retries once if someone
  * else issued the same document at the same moment (the PDF carries its revision number).
  */
-export async function issueDocument(sb, leadId, docType, { recipientName, recipientEmail, layout, actor, expectedVersions } = {}) {
+export async function issueDocument(sb, leadId, requestedType, { recipientName, recipientEmail, layout, actor, expectedVersions } = {}) {
+  const docType = asDocType(requestedType, layout);
   if (!DOC_TYPE_KEYS.has(docType)) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   for (let attempt = 0; attempt < 2; attempt++) {
     const { lead, loaded, register, context } = await loadInputs(sb, leadId, actor);
@@ -1089,7 +1412,9 @@ export async function issueDocument(sb, leadId, docType, { recipientName, recipi
       // literally true (no unreferenced PDF/DOCX left behind). Tab 25 issue 5.
       await sb.storage.from(BUCKET).remove([pdfPath, docxPath]).catch(() => {});
       if (error.code === "42883" || error.code === "PGRST202") throw new DocumentError(503, "Apply migration 213 first (document issue registry).", "SCHEMA");
-      if (/is not a register document type/.test(error.message || "") || error.code === "23514") throw new DocumentError(503, "Apply migration 218 first (Tender Scope & Pricing Notes). Nothing was issued.", "SCHEMA");
+      if (/is not a register document type/.test(error.message || "") || error.code === "23514") throw new DocumentError(503, docType === "client_presentation"
+        ? "Apply migration 220 first (the Client Selections Presentation as its own document). Nothing was issued."
+        : "Apply migration 218 first (Tender Scope & Pricing Notes). Nothing was issued.", "SCHEMA");
       throw new DocumentError(400, "Could not record the issue — nothing was issued.", "ISSUE", { detail: error.message });
     }
     if (data?.ok === false) {
@@ -1141,9 +1466,13 @@ export async function documentUrl(sb, leadId, docId, { export: exportDocx } = {}
 export async function supplierPack(sb, leadId, discipline, { actor } = {}) {
   if (!COORD_DISCIPLINES[discipline]) throw new DocumentError(400, "Unknown discipline.", "BAD_DISCIPLINE");
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
-  const fx = buildRegisterFixture("selections_schedule", { lead, context, register, revision: 1, status: "Draft", issuedDate: isoDate(), issuer: actor?.name }, { coord: discipline });
-  fx.project.sectionLabel = `Coordination request  ·  ${COORD_DISCIPLINES[discipline]}`;
-  if (!fx.selections.length) throw new DocumentError(422, `No register items are tagged for ${COORD_DISCIPLINES[discipline]} yet.`, "EMPTY");
+  const input = { lead, context, register, revision: 1, issuedDate: isoDate(), issuer: actor?.name };
+  const fx = buildRegisterFixture("selections_schedule", { ...input, status: "Draft" }, { coord: discipline });
+  if (!fx.selections.length && !fx.technicalSchedule.requirements.length && !fx.technicalSchedule.actions.length) throw new DocumentError(422, `No register items are tagged for ${COORD_DISCIPLINES[discipline]} yet.`, "EMPTY");
+  // A pack goes outside Blue Leaf: what would block an issue blocks the pack (superseded source, a price, engineered stone).
+  const checks = registerDocChecks("selections_schedule", buildRegisterFixture("selections_schedule", { ...input, status: "Issued" }, { coord: discipline }), { register, recipientName: COORD_DISCIPLINES[discipline], mode: "issue" });
+  const blocking = checks.errors.filter((e) => !/no client selections to schedule/.test(e));
+  if (blocking.length) throw new DocumentError(422, "This coordination request can't be produced yet.", "PREFLIGHT", { checks: { errors: blocking, warnings: checks.warnings } });
   const out = await renderRegisterDocument("selections_schedule", fx, {});
   return { pdf: out.pdf, count: fx.selections.length };
 }
