@@ -70,9 +70,10 @@ function shouldExclude(relPath) {
 const ENV_SAFE_KEYS = new Set([
   "PORT_API",
   "PORT",
-  "CLAUDE_MODEL",
   "BLUEPRINT_BODY_LIMIT",
+  "BLUEPRINT_MODEL",
   "BLUEPRINT_REVIEW_MODEL",
+  "AI_FALLBACK_MODEL",
   "REMINDER_CRON_ENABLED",
   "REMINDER_DAYS_BEFORE",
   "IMAP_POLL_ENABLED",
@@ -115,7 +116,8 @@ function redactEnvContent(raw) {
       out.push(line);
       continue;
     }
-    if (ENV_SAFE_KEYS.has(key)) {
+    // AI model / effort per task (server/lib/aiModels.mjs): config, not secrets.
+    if (ENV_SAFE_KEYS.has(key) || /^AI_(MODEL|EFFORT)_[A-Z_]+$/.test(key)) {
       out.push(line);
       continue;
     }

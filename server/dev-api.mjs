@@ -4,8 +4,7 @@ import express from "express";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./lib/aiGateway.mjs";
+import { aiClient, createForTask, aiModelSummary, replyText } from "./lib/aiModels.mjs";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { smtpReady } from "./lib/smtpSend.mjs";
@@ -119,8 +118,7 @@ console.log("[blue-leaf-api] booting…");
 
 /** Railway/cloud pass PORT; local dev uses PORT_API or 8787. */
 const PORT = Number(process.env.PORT ?? process.env.PORT_API ?? 8787);
-const MODEL       = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
-const MODEL_FAST  = "claude-haiku-4-5-20251001"; // simple structured extractions
+// AI models: one task per call, set in server/lib/aiModels.mjs (env AI_MODEL_<TASK>). CLAUDE_MODEL is no longer read.
 
 function requireEnv(keys) {
   const missing = keys.filter((k) => !process.env[k]?.trim?.());
@@ -271,12 +269,11 @@ async function extractQuoteFromPdf(pdfBuffer, label = "") {
     return null;
   }
   try {
-    const client = new Anthropic({ apiKey: key, maxRetries: 0 });
+    const client = aiClient({ maxRetries: 0 });
     const b64 = pdfBuffer.toString("base64");
-    const completion = await callAI(client, {
-      model: MODEL_FAST, // simple structured extraction — haiku is sufficient
-      max_tokens: 1024,
-      temperature: 0,
+    const completion = await createForTask(client, "quote_pdf_extract", {
+      max_tokens: 2048, // room for a short think plus the JSON
+      temperature: 0, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
       messages: [{
         role: "user",
         content: [
@@ -285,7 +282,7 @@ async function extractQuoteFromPdf(pdfBuffer, label = "") {
         ]
       }]
     }, { module: "devApi" });
-    const raw = completion.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    const raw = replyText(completion);
     console.log(`[quote-extraction] ${label} raw response:`, raw.slice(0, 300));
     const clean = raw.replace(/```(?:json)?\s*([\s\S]*?)```/, "$1").trim();
     const s = clean.indexOf("{");
@@ -1057,7 +1054,7 @@ registerGeoRoutes(app);
 registerSalesLeadsMapRoutes(app);
 
 app.get("/api/health",(_req, res) => {
-  res.json({ ok: true, model: MODEL, time: new Date().toISOString() });
+  res.json({ ok: true, models: aiModelSummary(), time: new Date().toISOString() });
 });
 
 app.get("/api/health/ffmpeg", async (_req, res) => {
@@ -1281,11 +1278,10 @@ Rules:
 - Keep could_not_find to only: contact, mobile, abn, address, suburb, postcode, state.
 `;
 
-    const client = new Anthropic({ apiKey: key });
-    const completion = await callAI(client, {
-      model: MODEL,
-      max_tokens: 1400,
-      temperature: 0.1,
+    const client = aiClient();
+    const completion = await createForTask(client, "subcontractor_lookup", {
+      max_tokens: 4096, // thinking, searches and the JSON share this
+      temperature: 0.1, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [
         {
@@ -1307,11 +1303,7 @@ Rules:
       ]
     }, { module: "devApi" });
 
-    const textOut = completion.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("")
-      .trim();
+    const textOut = replyText(completion);
 
     let jsonSlice = textOut;
     const fence = textOut.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -1352,7 +1344,7 @@ Rules:
       ok: true,
       ...normalized,
       could_not_find,
-      model: MODEL
+      model: completion.model
     });
   } catch (err) {
     console.error("[subcontractor/lookup]", err);
@@ -1441,7 +1433,7 @@ app.post("/api/rfq/extract", requireAuth, async (req, res) => {
       }
     ];
 
-    const client = new Anthropic({ apiKey: key, maxRetries: 0 });
+    const client = aiClient({ maxRetries: 0 });
 
     const userContent = [
       ...docs,
@@ -1465,12 +1457,12 @@ app.post("/api/rfq/extract", requireAuth, async (req, res) => {
     let rateLimitRetriesUsed = 0;
     while (true) {
       try {
-        completion = await callAI(
+        completion = await createForTask(
           client,
+          "rfq_tender_extract",
           {
-            model: MODEL,
-            max_tokens: 16000,
-            temperature: 0.2,
+            max_tokens: 20000, // room to think on a long tender (the SDK's non-streaming ceiling is ~21,300)
+            temperature: 0.2, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
             messages: [{ role: "user", content: userContent }]
           },
           { module: "devApi" },
@@ -1507,7 +1499,7 @@ app.post("/api/rfq/extract", requireAuth, async (req, res) => {
 
     try {
       const extraction = parseExtractionFromCompletion(completion);
-      res.write(`${JSON.stringify({ event: "result", ok: true, extraction, model: MODEL })}\n`);
+      res.write(`${JSON.stringify({ event: "result", ok: true, extraction, model: completion.model })}\n`);
       res.end();
     } catch (parseErr) {
       console.error("[rfq/extract] parse", parseErr);
@@ -2168,14 +2160,13 @@ app.post("/api/cron/cost-insights", requireCronSecretOrAdmin, async (req, res) =
 
       let batchInsights = [];
       try {
-        const client = new Anthropic({ apiKey, maxRetries: 1 });
-        const resp = await callAI(client, {
-          model: process.env.CLAUDE_MODEL || "claude-haiku-4-5",
-          max_tokens: 1024,
+        const client = aiClient({ maxRetries: 1, apiKey });
+        const resp = await createForTask(client, "cost_insights", {
+          max_tokens: 4096, // up to 2 insights per job, plus thinking at medium effort
           messages: [{ role: "user", content: prompt }],
         }, { module: "cronCostInsights" });
 
-        const raw = resp.content.find(b => b.type === "text")?.text?.trim() || "[]";
+        const raw = replyText(resp) || "[]";
         const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
         const parsed = JSON.parse(jsonStr);
         if (Array.isArray(parsed)) batchInsights = parsed;

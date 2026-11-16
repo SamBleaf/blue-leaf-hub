@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -93,7 +93,7 @@ After generation:
 - Soft-deletes existing tasks: sets `schedule_tasks.deleted_at = now()`
 - Sources (in priority order): 1) Buildexact schedule hints if job is linked, 2) accepted trades from `projects.accepted_trades`, 3) default schedule template, 4) hardcoded legacy template
 - `schedule_version` increments on every generation (allows history if needed)
-- AI generation via `scheduleClaudePlan.mjs` — uses `claude-sonnet-4-6` model
+- **AI model (Nov 2026):** task `schedule_generate` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_SCHEDULE_GENERATE`; effort with `AI_EFFORT_SCHEDULE_GENERATE`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `scheduleClaudePlan`). Generation lives in `scheduleClaudePlan.mjs`. Was `CLAUDE_MODEL` (claude-sonnet-4-5). The schedule analysis and task-advice buttons are tasks `schedule_analysis` (Sonnet 5.5) and `schedule_task_advice` (Haiku 5.5).
 
 ## 12. Edge cases and limits
 - The `startDate` field is required — submitting without it returns a 400 validation error

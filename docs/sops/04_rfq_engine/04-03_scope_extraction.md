@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -106,6 +106,7 @@ The extracted scopes are **not sent to subcontractors yet** — they are drafts 
 - Results stored in wizard state (`extraction.trade_notes`); persisted to `localStorage` (`blhub_rfq_session`)
 - PDFs are stored in IndexedDB (`rfq-engine-pdfs` scope) so the session can be restored after page reload
 - Extraction supports rate-limit back-off: if the API returns `event: rate_limit`, the UI shows a countdown and retries
+- **AI model (Nov 2026):** task `rfq_tender_extract` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_RFQ_TENDER_EXTRACT`; effort with `AI_EFFORT_RFQ_TENDER_EXTRACT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `devApi`). Was `CLAUDE_MODEL` (claude-sonnet-4-5). The result's `model` field names the model that answered.
 
 ## 13. Owner of the process
 

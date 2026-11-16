@@ -5,8 +5,8 @@
 import { extractPdfTextFromBase64 } from './extractPdfText.js';
 import { getRelevantContext } from '../agent/knowledgeBase.js';
 
-const DEFAULT_REVIEW_MODEL =
-  process.env.BLUEPRINT_REVIEW_MODEL?.trim() || 'claude-haiku-4-5-20251001';
+// The model is chosen by the caller's callModel: task "blueprint_document_review" in server/lib/aiModels.mjs
+// (env AI_MODEL_BLUEPRINT_DOCUMENT_REVIEW, or the older BLUEPRINT_REVIEW_MODEL).
 
 const SLIM_QC_SYSTEM = `You are Blueprint — document QC for Blue Leaf Building (Adelaide residential builder).
 
@@ -41,16 +41,18 @@ function capRag(rag, max = 3500) {
 }
 
 /**
- * @param {import('@anthropic-ai/sdk').Anthropic} anthropic
+ * @param {object} opts
+ * @param {(params: object) => Promise<object>} opts.callModel — sends the request (required): the server passes
+ *   createForTask for task "blueprint_document_review", which picks the model, logs the call and falls back.
  */
 export async function runAttachmentDocumentReview({
-  anthropic,
+  callModel,
   attachments,
   messages,
   jobContext,
-  model = DEFAULT_REVIEW_MODEL,
   maxTokens = 4096,
 }) {
+  if (typeof callModel !== 'function') throw new Error('runAttachmentDocumentReview: callModel is required (createForTask from server/lib/aiModels.mjs)');
   const docs = [];
   for (const att of attachments || []) {
     if (att?.kind === 'pdf') {
@@ -89,10 +91,9 @@ export async function runAttachmentDocumentReview({
     ? `${SLIM_QC_SYSTEM}\n\n---\nRelevant APB knowledge:\n${ragContext}`
     : SLIM_QC_SYSTEM;
 
-  const response = await anthropicWithRetry(anthropic, {
-    model,
+  const response = await anthropicWithRetry(callModel, {
     max_tokens: maxTokens,
-    temperature: 0.2,
+    temperature: 0.2, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     system,
     messages: [{ role: 'user', content: userBody }],
   });
@@ -107,11 +108,11 @@ export async function runAttachmentDocumentReview({
   return text;
 }
 
-async function anthropicWithRetry(anthropic, params, maxRetries = 3) {
+async function anthropicWithRetry(callModel, params, maxRetries = 3) {
   let lastErr;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      return await anthropic.messages.create(params);
+      return await callModel(params);
     } catch (err) {
       lastErr = err;
       const msg = err?.message || '';
@@ -124,4 +125,4 @@ async function anthropicWithRetry(anthropic, params, maxRetries = 3) {
   throw lastErr;
 }
 
-export { DEFAULT_REVIEW_MODEL, SLIM_QC_SYSTEM };
+export { SLIM_QC_SYSTEM };

@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-11-16
 app_version: 1.0 — built 2026-05-29
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -114,6 +114,7 @@ Real questions from real people — "How long does it actually take?" / "What's 
 - Duplicate detection: questions with > 80% text similarity to an existing `website_questions` row are skipped
 - `website_questions.status` transitions: `queued` → `in_progress` (when Create tab opened from it) → `published` (when content item is published)
 - Dashboard "Create Next": shows top 3 from `website_questions WHERE status = 'queued' ORDER BY seo_potential DESC, created_at ASC LIMIT 3`
+- **AI model (Nov 2026):** task `marketing_insights` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_MARKETING_INSIGHTS`; effort with `AI_EFFORT_MARKETING_INSIGHTS`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingIntelligence`). Was hard-coded to claude-haiku-4-5.
 
 ## 12. Edge cases and limits
 - The Haiku batch job runs nightly — new notes logged today won't appear in the queue until tomorrow morning

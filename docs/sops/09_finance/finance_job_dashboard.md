@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -148,6 +148,7 @@ After reviewing the Command Centre, take action on any items in Requires Action,
 - Underclaim check: `buildPct - claimsPct > 10` → `underclaim_alert` in payload
 - Margin health computed: `working_margin - target_margin_pct` → green/amber/red/critical
 - `POST /api/finance/jobs/:id/wipaa/review` — logs WIPAA review and resets overdue timer
+- **AI model (Nov 2026):** task `project_insight` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_PROJECT_INSIGHT`; effort with `AI_EFFORT_PROJECT_INSIGHT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `projectInsights`). Writes the title and body of each insight; the thresholds that trigger one are not AI. The nightly cost-insights cron (`/api/cron/cost-insights`) is task `cost_insights` (Haiku 5.5 at effort "medium", module `cronCostInsights`).
 
 ## 12. Edge cases and limits
 - Target margin below 33% (the floor) requires Director confirmation and a documented reason before the edit is saved

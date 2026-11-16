@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 
 const { parsed: _env = {} } = (await import("dotenv")).config();
@@ -13,7 +12,7 @@ export function registerSupervisorRoutes(app) {
     if (!transcript?.trim()) return res.json({ ok: false, error: "No transcript" });
     if (!apiKey) return res.json({ ok: false, error: "ANTHROPIC_API_KEY not set" });
 
-    const client = new Anthropic({ apiKey });
+    const client = aiClient();
     const today = new Date().toISOString().slice(0, 10);
     const taskList = tasks.slice(0, 20).map((t) => `- ${t.name} (${t.trade || "—"}, ${t.phase || "—"})`).join("\n");
 
@@ -48,13 +47,13 @@ Rules:
 - Return valid JSON only`;
 
     try {
-      const msg = await callAI(client, {
-        model: "claude-haiku-4-5-20251001", // small structured JSON parse — haiku is sufficient
-        max_tokens: 512,
+      // Small structured JSON parse: task "supervisor_voice" (Haiku) in aiModels.mjs.
+      const msg = await createForTask(client, "supervisor_voice", {
+        max_tokens: 2048,
         messages: [{ role: "user", content: prompt }]
       }, { module: "supervisorRoutes" });
-      const raw = msg.content[0]?.text?.trim() || "{}";
-      const parsed = JSON.parse(raw);
+      const raw = replyText(msg) || "{}";
+      const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim());
       res.json({ ok: true, result: parsed });
     } catch (e) {
       res.json({ ok: false, error: e.message });

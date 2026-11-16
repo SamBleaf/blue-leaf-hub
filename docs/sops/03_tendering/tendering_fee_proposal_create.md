@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-06-20
+sop_version: 2.1
+last_reviewed: 2026-11-16
 app_version: 1.1 — auto-fill + dual-output
 screenshot_status: placeholders_only
 owner: Admin
@@ -94,6 +94,8 @@ Turns a Buildxact estimate into a branded fee proposal, auto-filling as much as 
 - Template upload: `POST /api/settings/fee-proposal-template` `{ dataBase64, style? }`.
 - Transform: `server/lib/feeProposalTransform.mjs` — `extractPcSumsFromParse` (Allowance only), `buildSummaryRowsFromParse` ($0 drop), `buildInclusionSectionsFromParse` + `mergeRfqScopeIntoInclusions`, `buildRelativeSchedule`, `proposalToApbDocxData`, `findApbPlaceholders`.
 - Parser: `server/lib/buildexactParser.mjs` — `parseXLSX` auto-detects estimateitems vs report; `parseSchedItems`, `parseCostMetrics`.
+- PDF parse: `POST /api/fee-proposal/parse-pdf` `{ dataBase64 }` — Claude reads the Buildxact estimate PDF into categories (cached by file hash).
+- **AI model (Nov 2026):** task `fee_proposal_parse` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_FEE_PROPOSAL_PARSE`; effort with `AI_EFFORT_FEE_PROPOSAL_PARSE`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `module5Routes`). Was `CLAUDE_MODEL` (claude-sonnet-4-5).
 
 ## 12. Edge cases and limits
 - estimateitems export = full features (PC/PS, exact inc-GST, schedule). Report/PDF = no PC/PS (auto-detected, parses the rest).

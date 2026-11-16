@@ -16,14 +16,13 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import { extractMeaningfulFrames, downloadFramesForAnalysis } from "./videoIntelligence.mjs";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey        = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 const _openaiKey     = process.env.OPENAI_API_KEY?.trim()    || _env.OPENAI_API_KEY?.trim();
-const VISION_MODEL   = "claude-sonnet-4-5";
+// Drone-frame analysis model: task "marketing_vision" in aiModels.mjs.
 
 const execP       = promisify(exec);
 const __dirname   = dirname(fileURLToPath(import.meta.url));
@@ -119,7 +118,7 @@ export async function extractFrames(filePath, intervalSeconds = 5) {
 export async function analyseFramesWithClaude(framePaths, projectContext = {}) {
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1 });
   // Sample frames evenly — max 8
   const maxFrames = 8;
   const step   = Math.max(1, Math.floor(framePaths.length / maxFrames));
@@ -141,9 +140,8 @@ export async function analyseFramesWithClaude(framePaths, projectContext = {}) {
     projectContext.build_stage   && `Build stage: ${projectContext.build_stage}`,
   ].filter(Boolean).join("\n");
 
-  const response = await callAI(client, {
-    model: VISION_MODEL,
-    max_tokens: 2048,
+  const response = await createForTask(client, "marketing_vision", {
+    max_tokens: 4096,
     messages: [{
       role: "user",
       content: [
@@ -173,7 +171,7 @@ Analyse the construction progress and identify content opportunities. Return ONL
     }],
   }, { module: "marketingMedia" });
 
-  const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
+  const raw = replyText(response);
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
     return JSON.parse(jsonStr);

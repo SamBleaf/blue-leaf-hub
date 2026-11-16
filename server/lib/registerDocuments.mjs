@@ -62,7 +62,7 @@ const ENVELOPE_CATS = new Set(["roof", "cladding", "windows", "insulation", "str
 // The calendar date in Adelaide, where documents are issued: a UTC date printed the day before for anything issued
 // before 10:30 am (found in the final inspection). YYYY-MM-DD.
 const ADELAIDE_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Adelaide", year: "numeric", month: "2-digit", day: "2-digit" });
-const isoDate = (d = new Date()) => ADELAIDE_DAY.format(new Date(d));
+export const isoDate = (d = new Date()) => ADELAIDE_DAY.format(new Date(d));
 export const adelaideDay = isoDate;
 const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 const sentence = (s) => { const t = clean(s); return t && !/[.!?]$/.test(t) ? `${t}.` : t; };
@@ -1317,6 +1317,13 @@ export function fontVerdict(fonts, env = process.env) {
   return { error: null, warnings: foreign.length ? [`Some characters printed in a fallback font (${foreign.join(", ")}). Check the text for symbols or characters from other scripts.`] : [] };
 }
 
+/** The filled DOCX for a document, without the PDF step (the wording check reads and marks it: documentProofread.mjs). */
+export function fillRegisterDocx(docType, fx, { layout } = {}) {
+  const defKey = REGISTER_DOC_TYPES[asDocType(docType, layout)].def;
+  const t = templateFor(defKey);
+  return renderDocxTemplate(t.bytes, t.def.build(fx));
+}
+
 export async function renderRegisterDocument(docType, fx, { layout } = {}) {
   const spec = REGISTER_DOC_TYPES[asDocType(docType, layout)];
   const defKey = spec.def;
@@ -1335,7 +1342,7 @@ export async function renderRegisterDocument(docType, fx, { layout } = {}) {
 
 // ── load inputs ──────────────────────────────────────────────────────────────────────────────────
 
-async function loadInputs(sb, leadId, actor) {
+export async function loadInputs(sb, leadId, actor) {
   const { data: lead } = await sb.from("leads").select("id, name, stage, job_id, project_type").eq("id", leadId).maybeSingle();
   if (!lead) throw new DocumentError(404, "Lead not found", "NOT_FOUND");
   const loaded = await loadRegister(sb, leadId, { actor });
@@ -1377,13 +1384,16 @@ async function issueHistory(sb, leadId, docType) {
   return { revision: (last?.version || 0) + 1, supersedes };
 }
 
+/** The next revision number alone (the wording check prints it on its draft: documentProofread.mjs). */
+export async function nextVersion(sb, leadId, docType) { return (await issueHistory(sb, leadId, docType)).revision; }
+
 // A stable fingerprint of the register content a document is rendered from: item id → version (updatedAt as
 // the fallback for an unversioned row). Round-tripped from preview to issue so that if the brief changed
 // between the two, the issue is refused and no stale controlled document is recorded (Tab 27 R04 review §1).
 export function registerItemVersions(register) {
   return Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
 }
-function versionsDiffer(expected, current) {
+export function versionsDiffer(expected, current) {
   if (!expected || typeof expected !== "object") return false;        // no expectation sent → guard is inert
   const ek = Object.keys(expected), ck = Object.keys(current);
   if (ek.length !== ck.length) return true;

@@ -1,6 +1,6 @@
 ---
-sop_version: 2.2
-last_reviewed: 2026-10-09
+sop_version: 2.3
+last_reviewed: 2026-11-16
 app_version: main — built 2026-10-04 (migration 204): scan/upload a supplier invoice or misc receipt straight onto ANY carpentry job (the internal houses + real client jobs) from the Hub (Carpentry job → Costs tab, or the Internal house glance view) or the Worker PWA (gated to leading hands / admins / supervisors). Haiku-only OCR prefills supplier + ex-GST amount + the invoice date; the operator confirms; it saves as a carpentry_job_cost (source 'manual') and drops into the job's material tally. The receipt file is filed to Dropbox at /BLUE LEAF BUILDING/RECIEPTS named "<invoice date D.M.YYYY> <supplier>". An amber guard warns when the job also has Finance invoices (don't enter the same invoice twice). Requires migration 204 applied.
 screenshot_status: placeholders_only
 owner: Admin
@@ -107,7 +107,7 @@ Lets you photograph or upload a supplier invoice straight onto a carpentry job. 
 [insert screenshot: Worker PWA home with the admin-only "Scan supplier invoice" tile + the job picker listing all carpentry jobs]
 
 ## 11. Automation notes
-- **AI OCR:** the uploaded file is read by **Claude Haiku** (`claude-haiku-4-5`, token-conservative — no Sonnet escalation) via `extractInvoiceHaiku()` → `extractReceipt()` in `server/lib/jobCostReceipts.mjs`; returns supplier + amount + invoice date (best-effort, never auto-saves). The **scan** endpoint does OCR only and stores nothing.
+- **AI OCR:** the uploaded file is read by **Claude Haiku** (task `invoice_extract`: `claude-haiku-5-5` at low effort, `AI_MODEL_INVOICE_EXTRACT`; fallback `claude-haiku-4-5-20251001`; token-conservative — no Sonnet escalation) via `extractInvoiceHaiku()` → `extractReceipt()` in `server/lib/jobCostReceipts.mjs`; returns supplier + amount + invoice date (best-effort, never auto-saves). The **scan** endpoint does OCR only and stores nothing.
 - **Save order (no orphan files):** on **Add to job** the server inserts the cost row FIRST (validates the job + fields), THEN uploads the file to Dropbox and links the path onto the row. A failed save never leaves an orphan file; a failed upload never loses the money (the cost stands with a warning).
 - **File filed to:** Dropbox **`/BLUE LEAF BUILDING/RECIEPTS`** (note the live folder spelling is "RECIEPTS") as **`<invoice date D.M.YYYY> <supplier>.<ext>`**, e.g. `4.10.2026 bunnings.jpg` (`autorename:true`, so a same-name file becomes `… (1).jpg`). The date is the **invoice date** confirmed by the operator, not the photo date. The Supabase `job-cost-receipts` bucket from migration 204 is now **vestigial** — only the one legacy row uses it.
 - **Record created in:** `carpentry_job_costs` — `source='manual'`, `cost_type='material'`, `amount` (ex-GST), `supplier_name`, `receipt_path` (the Dropbox path), optional `carpentry_job_budget_id`.

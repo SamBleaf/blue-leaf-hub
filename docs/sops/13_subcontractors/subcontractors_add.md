@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -87,6 +87,7 @@ Creates a new subcontractor record in the directory. The subcontractor can then 
 - MX check: `POST /api/subcontractors/:id/mx-check` — body `{ email }` — runs DNS MX lookup; updates `email_mx_valid` and `email_mx_checked_at` on the row
 - DB effects: inserts row into `subcontractors` table; `email_mx_valid` updated asynchronously after save (never blocks save)
 - No email or notification is sent on create
+- **AI model (Nov 2026):** task `subcontractor_lookup` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_SUBCONTRACTOR_LOOKUP`; effort with `AI_EFFORT_SUBCONTRACTOR_LOOKUP`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `devApi`). The reply's `model` field names the model that answered.
 
 ## 12. Edge cases and limits
 - If the AI cannot find any optional details, the "could not find" amber badges appear — the record can still be saved with only the three required fields

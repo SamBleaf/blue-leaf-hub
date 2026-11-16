@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { config as dotenvConfig } from "dotenv";
@@ -15,10 +14,7 @@ import { pullBuildexactEstimate } from "./buildexactDeepIntegration.mjs";
 import { buildexactConfigured, createPurchaseOrder, completePurchaseOrder, buildexactCompleteOrdersEnabled, beFetch } from "./buildexactClient.mjs";
 import { sendPlainMail } from "./notifyMail.mjs";
 
-const { parsed: _dotenv = {} } = dotenvConfig();
-function anthropicApiKey() {
-  return process.env.ANTHROPIC_API_KEY?.trim() || _dotenv.ANTHROPIC_API_KEY?.trim();
-}
+dotenvConfig();   // .env into process.env for this module's IMAP / Dropbox settings (the AI key: aiModels.mjs)
 import {
   dropboxConfigured,
   getDropboxAccessToken,
@@ -28,7 +24,10 @@ import {
   DROPBOX_PRIVATE_INTERNAL_BASE
 } from "./dropboxClient.mjs";
 
-const MODEL_FAST = "claude-haiku-4-5-20251001";   // Tier 2: OCR + gaps
+// AI: tasks invoice_extract (Tier 2 OCR + gaps) and invoice_classify (trade category, job match) in aiModels.mjs.
+/** The AI job-match tier runs only with FINANCE_AI_JOB_MATCH=1 (see matchDocument). */
+const aiJobMatchEnabled = () => /^(1|true|yes|on)$/i.test(String(process.env.FINANCE_AI_JOB_MATCH || "").trim());
+const AI_MATCH_MAX_CONFIDENCE = 90;
 // Guardrail #4: skip vision-OCR on PDFs bigger than this — invoices are small; large PDFs are
 // catalogs/brochures/bundled scans that just burn tokens.
 const MAX_OCR_BYTES = 12 * 1024 * 1024;
@@ -55,7 +54,7 @@ const AUTO_APPROVE_THRESHOLD = Number(process.env.FINANCE_AUTO_APPROVE_BELOW ?? 
  * 2. Otherwise, ask Claude to classify based on supplier name + description
  * Returns { trade_category_id, ai_trade_confidence, source }
  */
-async function inferTradeCategory(sb, { supplierAbn, supplierName, description }, tradeCategories) {
+export async function inferTradeCategory(sb, { supplierAbn, supplierName, description }, tradeCategories) {
   // Step 1: Check supplier defaults (auto-tag path)
   if (supplierAbn) {
     const { data: def } = await sb.from("supplier_trade_defaults")
@@ -74,10 +73,9 @@ async function inferTradeCategory(sb, { supplierAbn, supplierName, description }
       .filter(c => c.is_active !== false)
       .map(c => `${c.id}: ${c.name}`)
       .join("\n");
-    const client = new Anthropic({ apiKey: anthropicApiKey() });
-    const msg = await callAI(client, {
-      model: MODEL_FAST,
-      max_tokens: 128,
+    const client = aiClient();
+    const msg = await createForTask(client, "invoice_classify", {
+      max_tokens: 1024, // a one-line JSON answer; the rest is room for a short think
       messages: [{
         role: "user",
         content: `You are classifying a construction invoice into a trade category for a residential builder.
@@ -92,7 +90,7 @@ Return JSON only: {"trade_category_id": "<uuid from the list above>", "confidenc
 Pick the single best matching category. If genuinely unclear, return confidence below 50.`
       }]
     }, { module: "financeRoutes" });
-    const text = msg.content[0]?.text || "";
+    const text = replyText(msg);
     const m = text.match(/\{[\s\S]*?\}/);
     if (m) {
       const p = JSON.parse(m[0]);
@@ -189,7 +187,7 @@ function normRef(s) {
 
 // ── 4-tier matching cascade ────────────────────────────────────────────────────
 
-async function matchDocument(extracted, { jobs, subcontractors, subjectHint } = {}) {
+export async function matchDocument(extracted, { jobs, subcontractors, subjectHint } = {}) {
   const { extracted_job_ref, extracted_po_number, extracted_address, supplier_name } = extracted;
 
   // Tier 1 — Exact deterministic matches (free, instant, auditable)
@@ -270,14 +268,16 @@ async function matchDocument(extracted, { jobs, subcontractors, subjectHint } = 
     }
   }
 
-  // Tier 3 — AI (only when fuzzy can't decide; costs money, use sparingly)
-  if ((extracted_address || supplier_name) && jobs.length) {
+  // Tier 3 — AI (only when fuzzy can't decide; costs money, use sparingly). OFF unless FINANCE_AI_JOB_MATCH=1: it never
+  // ran before the Nov 2026 model migration (it named an undefined MODEL constant and the ReferenceError was swallowed
+  // by the catch below), so switching it on is the owner's decision. Its confidence is capped below 100, so an AI
+  // guess is never auto-approved (auto-approval needs an exact match: confidence 100).
+  if (aiJobMatchEnabled() && (extracted_address || supplier_name) && jobs.length) {
     try {
-      const client = new Anthropic({ apiKey: anthropicApiKey() });
+      const client = aiClient();
       const jobList = jobs.slice(0, 30).map(j => `ID:${j.id} | ${j.address} | ref:${j.arch_ref || ""}`).join("\n");
-      const msg = await callAI(client, {
-        model: MODEL,
-        max_tokens: 256,
+      const msg = await createForTask(client, "invoice_classify", {
+        max_tokens: 1024,
         messages: [{
           role: "user",
           content: `Match this financial document to the most likely construction job.
@@ -294,13 +294,13 @@ Return JSON only: {"job_id": "<uuid or null>", "confidence": <0-100>, "reasoning
 If no reasonable match exists, return job_id: null.`
         }]
       }, { module: "financeRoutes" });
-      const text = msg.content[0]?.text || "";
+      const text = replyText(msg);
       const m = text.match(/\{[\s\S]*\}/);
       if (m) {
         const parsed = JSON.parse(m[0]);
         if (parsed.job_id && parsed.confidence >= 65) {
           const found = jobs.find(j => j.id === parsed.job_id);
-          if (found) return { job_id: found.id, match_method: "ai", match_confidence: parsed.confidence };
+          if (found) return { job_id: found.id, match_method: "ai", match_confidence: Math.min(Number(parsed.confidence) || 0, AI_MATCH_MAX_CONFIDENCE) };
         }
       }
     } catch {
@@ -421,20 +421,19 @@ const EXTRACT_PROMPT = `Extract structured data from this document. Return ONLY 
   "description": "one sentence: what was invoiced"
 }`;
 
-async function claudeExtract(base64, mime, model) {
-  const client = new Anthropic({ apiKey: anthropicApiKey() });
+async function claudeExtract(base64, mime) {
+  const client = aiClient();
   const isImage = mime?.startsWith("image/");
   const contentBlock = isImage
     ? { type: "image", source: { type: "base64", media_type: mime, data: base64 } }
     : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
 
-  const msg = await callAI(client, {
-    model,
-    max_tokens: 1024,
+  const msg = await createForTask(client, "invoice_extract", {
+    max_tokens: 2048,
     messages: [{ role: "user", content: [contentBlock, { type: "text", text: EXTRACT_PROMPT }] }]
   }, { module: "financeRoutes" });
 
-  const text = msg.content[0]?.text || "";
+  const text = replyText(msg);
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
@@ -463,7 +462,7 @@ async function extractDocument(fileBase64, mimeType) {
   // Tier 2 — Haiku (primary for all documents)
   let extracted = null;
   try {
-    extracted = await claudeExtract(base64, mime, MODEL_FAST);
+    extracted = await claudeExtract(base64, mime);
   } catch (e) {
     console.error("[finance] Haiku extraction error", e?.message);
   }
@@ -495,7 +494,7 @@ export async function extractInvoiceHaiku(fileBase64, mimeType) {
   const isImage = typeof mimeType === "string" && mimeType.startsWith("image/");
   if (!isImage && !isPdf) return { supplier_name: null, error: "Unsupported file type" };
   try {
-    return (await claudeExtract(fileBase64, mimeType, MODEL_FAST)) || { supplier_name: null };
+    return (await claudeExtract(fileBase64, mimeType)) || { supplier_name: null };
   } catch (e) {
     console.error("[finance] Haiku-only extraction error", e?.message);
     return { supplier_name: null, error: "extraction_failed" };

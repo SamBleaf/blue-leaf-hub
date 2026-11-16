@@ -14,16 +14,14 @@ import { randomUUID } from "crypto";
 import { readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { config as dotenvConfig } from "dotenv";
 import { BLUE_LEAF_IDENTITY, CONTENT_MODE_MODIFIERS } from "./marketingPrompts.mjs";
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
 
-const HAIKU_MODEL  = "claude-haiku-4-5";
-const SONNET_MODEL = "claude-sonnet-4-6";
+// Models: tasks marketing_frame_score (Haiku, frame scoring) and marketing_content (Sonnet, captions) in aiModels.mjs.
 
 const execP = promisify(exec);
 
@@ -236,7 +234,7 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
   const key = apiKey || _apiKey;
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const client = new Anthropic({ apiKey: key, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1, apiKey: key });
   const scored = [];
 
   for (const fr of frameRecords) {
@@ -257,9 +255,8 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
     // Score with Claude Haiku
     let scoreData;
     try {
-      const resp = await callAI(client, {
-        model: HAIKU_MODEL,
-        max_tokens: 512,
+      const resp = await createForTask(client, "marketing_frame_score", {
+        max_tokens: 1024,
         messages: [{
           role: "user",
           content: [
@@ -269,7 +266,7 @@ export async function scoreVideoClips(assetId, frameRecords, sb, apiKey) {
         }],
       }, { module: "videoIntelligence" });
 
-      const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
+      const raw     = replyText(resp);
       const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
       scoreData = JSON.parse(jsonStr);
     } catch (e) {
@@ -389,14 +386,13 @@ async function _generateSequenceCaption(orderedClips, objective, projectContext,
   const userMessage = `Generate a caption and clip overlay texts for this ${objective} video sequence.\n\nClip sequence:\n${clipDescriptions}\n${contextBlock ? `\nContext:\n${contextBlock}` : ""}\n\nReturn ONLY valid JSON:\n{\n  "caption": "<Instagram caption, 2–4 sentences, no hashtags, follows Blue Leaf voice>",\n  "clip_overlays": ["<3–5 word overlay for clip 1>", "<overlay for clip 2>"],\n  "confidence_pct": 0-100\n}\nclip_overlays must have exactly ${orderedClips.length} entries, one per clip, in order.`;
 
   try {
-    const resp = await callAI(client, {
-      model:      SONNET_MODEL,
-      max_tokens: 600,
+    const resp = await createForTask(client, "marketing_content", {
+      max_tokens: 2048,
       system:     systemPrompt,
       messages:   [{ role: "user", content: userMessage }],
     }, { module: "videoIntelligence" });
 
-    const raw     = resp.content.find(b => b.type === "text")?.text?.trim() || "";
+    const raw     = replyText(resp);
     const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     const parsed  = JSON.parse(jsonStr);
 
@@ -427,7 +423,7 @@ export async function generateStorySequence(assetId, campaignObjective, projectC
   const key = apiKey || _apiKey;
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const client = new Anthropic({ apiKey: key, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1, apiKey: key });
 
   // 1. Load all scored clips for this asset
   const { data: clips, error: clipErr } = await sb

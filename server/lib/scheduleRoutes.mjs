@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { checkProjectInsights } from "./projectInsights.mjs";
 import { getServiceSupabase } from "./supabaseService.mjs";
 import {
@@ -24,7 +23,7 @@ import { toYmd, addDaysYmd } from "./dateYmd.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 import { handleMilestoneComplete, handleScheduleChange } from "./scheduleReminders.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
+// Models: tasks schedule_analysis (Sonnet) and schedule_task_advice (Haiku) in aiModels.mjs.
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -302,21 +301,16 @@ function templateTaskRow(templateTask, projectId, startDate, templateId) {
   };
 }
 
-async function claudeText(prompt, maxTokens = 8192) {
+async function claudeText(task, prompt, maxTokens = 8192) {
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
-  const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await callAI(client, {
-    model: MODEL,
+  const client = aiClient({ maxRetries: 0 });
+  const completion = await createForTask(client, task, {
     max_tokens: maxTokens,
-    temperature: 0.2,
+    temperature: 0.2, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
   }, { module: "scheduleRoutes" });
-  return completion.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  return replyText(completion);
 }
 
 async function cascadeScheduleForward(sb, projectId, rootTaskId) {
@@ -1188,7 +1182,7 @@ export function registerScheduleRoutes(app) {
       const prompt =
         "You are a residential construction scheduler. Analyse this build programme for Blue Leaf Building (Adelaide) and identify: (1) critical path — which tasks determine the end date, (2) sequencing problems, (3) procurement deadlines at risk within the next 4 weeks, (4) any trades scheduled concurrently that will conflict. Write in plain English for a builder, not a project manager. Be specific about task names and dates.\nSchedule: " +
         scheduleJson;
-      const analysis = await claudeText(prompt);
+      const analysis = await claudeText("schedule_analysis", prompt);
       return res.json({ ok: true, analysis });
     } catch (e) {
       console.error("[schedule/analyse]", e);
@@ -1269,7 +1263,7 @@ export function registerScheduleRoutes(app) {
       const context = String(req.body?.context || "").trim();
       if (!taskName) return res.status(400).json({ ok: false, error: "taskName required." });
       const prompt = `What should I consider when scheduling "${taskName}" for a residential renovation or new build in South Australia?${context ? `\n\nContext:\n${context}` : ""}\n\nAnswer in short bullet points for a builder (plain English).`;
-      const advice = await claudeText(prompt, 1024);
+      const advice = await claudeText("schedule_task_advice", prompt, 2048);
       return res.json({ ok: true, advice });
     } catch (e) {
       console.error("[schedule/task-advice]", e);

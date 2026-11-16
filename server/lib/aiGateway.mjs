@@ -14,12 +14,21 @@
 import { getServiceSupabase } from "./supabaseService.mjs";
 
 // ── Cost table (USD per million tokens) ──────────────────────────────────────
-// Keys are model-name prefixes (longest match wins).
+// Keys are model-name prefixes (longest match wins). Anthropic list prices, Nov 2026.
 const COST_TABLE = [
-  { prefix: "claude-opus",   input: 15.00, output: 75.00 },
-  { prefix: "claude-sonnet", input:  3.00, output: 15.00 },
-  { prefix: "claude-haiku",  input:  0.80, output:  4.00 },
-];
+  { prefix: "claude-opus-5-5",   input:  4.00, output: 20.00 },
+  { prefix: "claude-opus-5",     input:  5.00, output: 25.00 },
+  { prefix: "claude-opus-4-8",   input:  5.00, output: 25.00 },
+  { prefix: "claude-opus-4-7",   input:  5.00, output: 25.00 },
+  { prefix: "claude-opus-4-6",   input:  5.00, output: 25.00 },
+  { prefix: "claude-opus-4-5",   input:  5.00, output: 25.00 },
+  { prefix: "claude-opus",       input: 15.00, output: 75.00 },
+  { prefix: "claude-sonnet-5",   input:  2.00, output: 10.00 },
+  { prefix: "claude-sonnet",     input:  3.00, output: 15.00 },
+  { prefix: "claude-haiku-5-5",  input:  0.10, output:  0.50 },
+  { prefix: "claude-haiku-4-5",  input:  1.00, output:  5.00 },
+  { prefix: "claude-haiku",      input:  0.80, output:  4.00 },
+].sort((a, b) => b.prefix.length - a.prefix.length);
 
 /**
  * Estimate cost in USD given a model name and token counts.
@@ -33,6 +42,7 @@ export function estimateCost(model, inputTokens, outputTokens) {
 
 // ── Internal log insert (fire-and-forget) ─────────────────────────────────────
 async function _log({ model, usage, is_streaming, module: mod }) {
+  if (process.env.AI_CALL_LOG_DISABLED === "1") return;   // tests: a fake client's calls never reach the log
   const sb = getServiceSupabase();
   if (!sb) return;
   const input_tokens  = usage?.input_tokens  ?? null;

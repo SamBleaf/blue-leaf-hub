@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { buildPurchaseOrderPdfBuffer, defaultStandardConditions } from "./poPdfKit.mjs";
 import { DEFAULT_PO_TERMS } from "./poDefaultTerms.mjs";
 import { gstAmount } from "./constants.mjs";
@@ -39,7 +38,7 @@ import {
 } from "./poProjectResolve.mjs";
 import { resolveRfqQuotePdfForPo } from "./poQuoteAttachment.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
+// Email draft model: task "tender_email_draft" in aiModels.mjs (env AI_MODEL_TENDER_EMAIL_DRAFT).
 
 function safeFilePart(s, max = 48) {
   return (
@@ -153,11 +152,10 @@ export function registerModule4Routes(app) {
       return res.status(400).json({ ok: false, error: "address and trade required." });
     }
     try {
-      const client = new Anthropic({ apiKey: key });
-      const completion = await callAI(client, {
-        model: MODEL,
-        max_tokens: 1200,
-        temperature: 0.4,
+      const client = aiClient();
+      const completion = await createForTask(client, "tender_email_draft", {
+        max_tokens: 2048,
+        temperature: 0.4, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
         messages: [
           {
             role: "user",
@@ -165,12 +163,8 @@ export function registerModule4Routes(app) {
           }
         ]
       }, { module: "module4Routes" });
-      const text = completion.content
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("")
-        .trim();
-      return res.json({ ok: true, body: text, model: MODEL });
+      const text = replyText(completion);
+      return res.json({ ok: true, body: text, model: completion.model });
     } catch (e) {
       console.error("[tender/query-draft]", e);
       return res.status(500).json({ ok: false, error: e?.message || String(e) });

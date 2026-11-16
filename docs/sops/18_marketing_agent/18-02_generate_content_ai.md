@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-11-16
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Staff
@@ -101,6 +101,8 @@ Uses the AI (Claude) to generate branded Blue Leaf content based on your topic, 
 - Photo upload triggers a vision analysis call (Claude) — extracts `visible_facts`, `probable_assumptions`, `unknowns`, `design_principles`, `content_opportunities`. This populates the photo analysis context block that the generator reads.
 - Saving creates a `marketing_content_items` row with `status = 'draft'`, linked to `channel`, `pillar`, `campaign_id` (if set), `project_id` (if project selected), `media_source_id` (if photo used).
 - Review scores are computed on save: `brand_voice_score`, `specificity_score`, `apb_detection_flag`, `overpromise_flag`. These are deterministic checks — not AI.
+- **AI model (Nov 2026):** task `marketing_content` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_MARKETING_CONTENT`; effort with `AI_EFFORT_MARKETING_CONTENT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingRoutes / marketingAgent`). Covers Generate, the streamed generate and the calendar autofill previews. Was claude-sonnet-4-5 (retired 2026-11-30). The 0.7 temperature is sent only to the fallback model: Sonnet 5.5 doesn't take one, so its variety comes from the prompt.
+- **AI model (Nov 2026):** task `marketing_vision` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_MARKETING_VISION`; effort with `AI_EFFORT_MARKETING_VISION`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingRoutes`). Used for the photo analysis.
 
 ## 12. Edge cases and limits
 - Topic field max: no hard limit but very long topics produce worse output — aim for 2–4 sentences

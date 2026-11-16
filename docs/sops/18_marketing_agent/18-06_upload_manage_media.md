@@ -1,6 +1,6 @@
 ---
-sop_version: 1.0
-last_reviewed: 2026-05-29
+sop_version: 1.1
+last_reviewed: 2026-11-16
 app_version: main
 screenshot_status: placeholders_only
 owner: Admin / Staff
@@ -114,6 +114,8 @@ Stores media files in the `marketing-media` Supabase Storage bucket with full pr
 - `thumbnail_path` auto-generated on upload
 - Video pipeline: thumbnail extraction → duration calculation → D-Log M detection → writes to `marketing_media_assets`
 - Video exports: `marketing_media_exports` row created with `status = 'processing'` → updates to `'ready'` when done
+- **AI model (Nov 2026):** task `marketing_vision` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_MARKETING_VISION`; effort with `AI_EFFORT_MARKETING_VISION`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingRoutes / marketingMedia`). Used for photo analysis and drone-frame analysis.
+- **AI model (Nov 2026):** task `marketing_frame_score` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_MARKETING_FRAME_SCORE`; effort with `AI_EFFORT_MARKETING_FRAME_SCORE`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `videoIntelligence`). Scores video frames for clip selection; story captions are task `marketing_content` (Sonnet 5.5). Photos sorted from the library inbox are task `marketing_photo_sort` (Haiku 5.5).
 
 ## 12. Edge cases and limits
 - Batch uploads: each file gets its own `marketing_media_assets` row

@@ -1,13 +1,11 @@
 // Turn a site walk-through transcript (Plaud paste OR in-app recording → Whisper)
-// into a DRAFT list of site tasks. The model is pinned to Haiku regardless of
-// CLAUDE_MODEL — this is high-volume, low-complexity extraction where the cheap
+// into a DRAFT list of site tasks. The model is Haiku (task "voice_tasks" in
+// aiModels.mjs) — this is high-volume, low-complexity extraction where the cheap
 // model is the right call, and the output is reviewed by a human before any task
 // is created, so we never auto-commit model output.
 
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 
-const SPLIT_MODEL = "claude-haiku-4-5-20251001"; // pinned — do NOT read CLAUDE_MODEL here
 const VALID_PRIORITY = ["urgent", "normal", "when_time_permits"];
 const VALID_CATEGORY = ["general", "defect", "safety", "materials", "inspection"];
 
@@ -123,17 +121,17 @@ export async function splitTranscriptToTasks(transcript, opts = {}) {
   if (!text) return [];
   const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new Error("ANTHROPIC_API_KEY not configured.");
-  const client = new Anthropic({ apiKey: key, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1 });
   const workStreams = Array.isArray(opts.workStreams) ? opts.workStreams : [];
   const allowedCategories = workStreams.map((s) => s.value).filter(Boolean);
-  // max_tokens scales with transcript length (more tasks possible), capped.
-  const maxTokens = Math.min(4096, 512 + Math.ceil(text.length / 4));
-  const completion = await callAI(client, {
-    model: SPLIT_MODEL,
+  // max_tokens scales with transcript length (more tasks possible), capped; +1024 leaves room for a short think.
+  const maxTokens = Math.min(8192, 1536 + Math.ceil(text.length / 3));   // PR #5 review B3
+  const completion = await createForTask(client, "voice_tasks", {
     max_tokens: maxTokens,
-    temperature: 0,
+    temperature: 0, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [{ role: "user", content: [{ type: "text", text: buildSplitPrompt(text, opts.jobLabel, workStreams) }] }],
   }, { module: "voiceTasks" });
-  const out = completion.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
+  if (completion?.stop_reason === "max_tokens") console.warn(`[voiceTasks] reply cut short at ${maxTokens} tokens (transcript ${text.length} chars): the task list may be incomplete`);
+  const out = replyText(completion);
   return parseTasksFromModelText(out, allowedCategories);
 }

@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import Docxtemplater from "docxtemplater";
 import PizZip from "pizzip";
 import expressions from "angular-expressions";
@@ -119,7 +118,7 @@ const KNOWLEDGE_DIR = join(__dirname, "../../../blueprint-agent/src/blueprint/kn
 
 const { parsed: _env = {} } = dotenvConfig();
 const _apiKey = process.env.ANTHROPIC_API_KEY?.trim() || _env.ANTHROPIC_API_KEY?.trim();
-const CLAUDE_MODEL = _env.CLAUDE_MODEL || process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+// Transcript analysis model: task "sales_transcript" in aiModels.mjs (env AI_MODEL_SALES_TRANSCRIPT).
 
 const TRANSCRIPT_ANALYSIS_PROMPT = `You are an expert builder sales consultant trained in the APB (Association of Professional Builders) framework. You have been given a transcript of a client meeting for a residential building company.
 
@@ -175,9 +174,9 @@ Rules:
 - next_action_date must be ISO date YYYY-MM-DD — or null
 - preconstruction_fee must be a number — or null`;
 
-async function analyseTranscriptWithBlueprint(transcript, lead) {
+export async function analyseTranscriptWithBlueprint(transcript, lead) {
   if (!_apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-  const client = new Anthropic({ apiKey: _apiKey, maxRetries: 1 });
+  const client = aiClient({ maxRetries: 1 });
 
   const contextBlock = lead
     ? `\nExisting lead context:\n- Name: ${lead.first_name || ""} ${lead.last_name || ""}`.trim() +
@@ -186,10 +185,9 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
       `\n- Suburb: ${lead.suburb || "unknown"}\n`
     : "";
 
-  const response = await callAI(client, {
-    model: CLAUDE_MODEL,
-    max_tokens: 2048,
-    temperature: 0.1,
+  const response = await createForTask(client, "sales_transcript", {
+    max_tokens: 4096, // the JSON plus room for a short think
+    temperature: 0.1, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [
       {
         role: "user",
@@ -198,7 +196,7 @@ async function analyseTranscriptWithBlueprint(transcript, lead) {
     ]
   }, { module: "salesRoutes" });
 
-  const raw = response.content.find(b => b.type === "text")?.text?.trim() || "";
+  const raw = replyText(response);
   // Strip markdown code fences if present
   const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {

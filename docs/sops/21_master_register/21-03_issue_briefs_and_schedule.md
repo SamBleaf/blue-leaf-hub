@@ -1,6 +1,6 @@
 ---
 sop_version: 1.3
-last_reviewed: 2026-11-15
+last_reviewed: 2026-11-16
 app_version: master-register-r02 (R03, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Project manager
@@ -39,6 +39,7 @@ It makes each document from the same register rows — nothing is retyped. Befor
 2. Find the document: **Preliminary Client Project Brief**, **Architect Design Brief**, **Technical Selections Schedule** or **Client Selections Presentation**.
 3. Click **Preview draft**. Read the PDF in the preview. Any warnings are listed above it.
 4. Fix anything the checks list (in the register), then **Preview draft** again.
+   - **Check wording (optional):** click **Check wording** under the preview. Blueprint reads the draft's words for spelling, grammar and wording a client would stumble on. Its suggestions are listed under the preview, numbered, and each one is highlighted in yellow with its number on a **Highlighted copy** of the draft (switch back with **Clean draft**). Nothing is changed for you: fix the wording in the register (or tell the office if it is fixed template wording), then **Preview draft** again. It reads every word the document prints, including the template's fixed wording and the page header and footer. A suggestion that says "(not marked on the page)" runs across two pieces of text, sits in the header or footer, or its words print in more than one place (so it can't say which), so it is only listed. The check doesn't stop or change an issue, and the issued document is never marked.
 5. Fill **Issue to (name)** (and the email if you want it on the record — **nothing is sent**).
 6. Click **Issue revision R01** (or the next number). If a check fails, the issue stops and the reasons are listed — nothing is created.
 7. The history row shows **Current**, the date, the recipient and the **Checksum**. The card's summary line reads **Recorded: R01 (current) · date · for [name] · not emailed** — an issue is a record, not a delivery. Use **PDF** to download and send it yourself; **DOCX** is the controlled editable export.
@@ -139,6 +140,9 @@ It goes to the architect and the design team, and reads coordination first. It l
 | "Document issuing needs migration 213 — drafts still preview." | Database not updated | Ask the director; the migration needs approval to apply |
 | "No register items are tagged for … yet." | No items with that supplier/discipline | Tag items (supplier or category) in the register |
 | Someone else issued at the same moment | Two people clicked Issue | One issue wins; the other is retried with the next number automatically |
+| "The register changed since this preview. Preview the draft again, then check the wording." | The register was edited after the preview | **Preview draft**, then **Check wording** |
+| "The AI model isn't available to this API key …" or "… rate limit …" | Blueprint can't reach its model right now | Try again in a minute; admin: see SOP 02-05 §8 (`/api/blueprint/health`) |
+| A wording suggestion is wrong (for example it flags Australian spelling or a product name) | The check is a proofreader, not the record | Ignore it. Nothing changes unless you change the register |
 
 ## 9. Related modules
 - [21-02 Review the register](21-02_register_review_approvals_portal.md)
@@ -262,6 +266,14 @@ Next review date: 2027-05-07
 5. Issue the presentation, then look at the technical schedule's history. Expected: the presentation is R01 of its own; the technical schedule's current revision is unchanged.
 6. Open the **Routleys** coordination pack. Expected: its kicker reads "Coordination request: Routleys (plumbing fixtures)", and it lists only Routleys items. Section 03 reads **What we need from Routleys** and holds only actions owned by Trade / supplier; the client's and Blue Leaf's open items are under **Waiting on others**, for information.
 7. Give a kitchen sink and mixer client labels, and a Rylock record a client description. Preview the presentation. Expected: "Kitchen sink" and "Kitchen mixer"; the client description in place of the supplier's line; no room named twice in a group heading. Set the Rylock document to **Under review**. Expected: its products read **Being confirmed**, with the client's own words.
+
+**TC-11a — Check wording (Blueprint proofread)**
+1. Preview a Client Project Brief. Click **Check wording**.
+2. Expected: the button reads "Checking the wording…", then a list headed "Blueprint's wording check: N suggestions" (or "found nothing to fix") with the note "Suggestions only — nothing has been changed".
+3. Expected (if there are suggestions): the preview switches to **Highlighted copy** with each suggestion's words highlighted and its number in red after them; **Clean draft** shows the original draft.
+4. Add a typo to a scope line in the register (for example "teh kitchen"), save, **Preview draft**, **Check wording**. Expected: a spelling suggestion for it, highlighted on the page.
+5. Edit the register again without previewing, then click **Check wording**. Expected: "The register changed since this preview…"; nothing else happens.
+6. Issue the document. Expected: the issued PDF has no highlights; `ai_call_log` has a `documentProofread` row with the model and cost (about a tenth of a cent on Haiku 5.5).
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

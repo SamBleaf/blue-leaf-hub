@@ -194,13 +194,15 @@ Registers all route modules + contains core direct routes:
 
 | Task | Model | Location |
 |------|-------|---------|
-| RFQ scope extraction | claude-sonnet-4-6 (or CLAUDE_MODEL env) | `rfq/extract` in dev-api.mjs |
-| Schedule generation | claude-sonnet-4-6 | `scheduleGenerate.mjs` / `scheduleClaudePlan.mjs` |
-| Transcript analysis | claude-opus-4-5 | `salesRoutes.mjs` |
-| Blueprint chat | claude-sonnet-4-6 | `blueprintRoutes.mjs` |
-| Site diary structuring | claude-sonnet-4-6 | `module6Routes.mjs` |
-| Document review | claude-sonnet-4-6 | `blueprintRoutes.mjs` |
-| Cost intelligence | claude-sonnet-4-6 | `costIntelligenceRoutes.mjs` |
+| RFQ scope extraction | Sonnet 5.5 (task `rfq_tender_extract`) | `rfq/extract` in dev-api.mjs |
+| Schedule generation | Sonnet 5.5 (task `schedule_generate`) | `scheduleClaudePlan.mjs` |
+| Transcript analysis | Sonnet 5.5 (task `sales_transcript`) | `salesRoutes.mjs` |
+| Blueprint chat | Sonnet 5.5 (task `blueprint_chat`) | `blueprintRoutes.mjs` |
+| Site diary structuring | Haiku 5.5 (task `site_diary_structure`) | `siteDiaryRoutes.mjs` |
+| Document review | Sonnet 5.5 (task `blueprint_document_review`) | `blueprintRoutes.mjs` → `src/blueprint/lib/documentReview.js` |
+| Cost intelligence (plan PDF) | Sonnet 5.5 (task `cost_plan_metrics`) | `costIntelligenceRoutes.mjs` |
+
+Every call goes through a task in `server/lib/aiModels.mjs` (model and effort per task from `AI_MODEL_<TASK>` / `AI_EFFORT_<TASK>`, fallback `AI_FALLBACK_MODEL`); the full table of 29 tasks is in `docs/deployment/AI_MODELS_ON_RAILWAY.md`.
 
 **Blueprint response field**: Always `j.reply` — not `j.response` or `j.message`.
 
@@ -258,7 +260,7 @@ Started in `server/dev-api.mjs` on boot:
 
 **Server:**
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
-- `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` (optional)
+- `ANTHROPIC_API_KEY`; optional `AI_MODEL_<TASK>` / `AI_EFFORT_<TASK>` / `AI_FALLBACK_MODEL` (`CLAUDE_MODEL` is no longer read)
 - `SMTP_HOST/PORT/SECURE/USER/PASS/FROM`
 - `GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN/SENDER_EMAIL`
 - `IMAP_HOST/PORT/SECURE/USER/PASS`

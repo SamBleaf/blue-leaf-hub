@@ -1,6 +1,5 @@
 import { createHash } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 import { renderDocxTemplate } from "./docTemplates.mjs";
 import { convertDocxToPdfBuffer } from "./docxToPdf.mjs";
 import { exec } from "child_process";
@@ -27,7 +26,7 @@ import {
 } from "./brandingAssets.mjs";
 import { requireAuth, requireRole } from "./requireAuth.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+// Estimate PDF parsing model: task "fee_proposal_parse" in aiModels.mjs (env AI_MODEL_FEE_PROPOSAL_PARSE).
 
 // DOCX→PDF conversion lives in docxToPdf.mjs (shared with the Master Register documents).
 
@@ -212,12 +211,11 @@ export function registerModule5Routes(app) {
         }
       }
 
-      const client = new Anthropic({ apiKey: key, maxRetries: 0 });
+      const client = aiClient({ maxRetries: 0 });
       const runClaudeJson = async (prompt, pdfBase64) => {
-        const completion = await callAI(client, {
-          model: MODEL,
-          max_tokens: 8192,
-          temperature: 0.1,
+        const completion = await createForTask(client, "fee_proposal_parse", {
+          max_tokens: 12000, // the categories JSON plus room for a short think
+          temperature: 0.1, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
           messages: [
             {
               role: "user",
@@ -232,11 +230,7 @@ export function registerModule5Routes(app) {
             }
           ]
         }, { module: "module5Routes" });
-        return completion.content
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("")
-          .trim();
+        return replyText(completion);
       };
       const parsed = await parsePDF(buf, runClaudeJson);
       const scheduleHintsPdf = parseSchedItems(parsed.categories);

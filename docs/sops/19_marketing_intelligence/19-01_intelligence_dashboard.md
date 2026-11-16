@@ -1,6 +1,6 @@
 ---
-sop_version: 1.2
-last_reviewed: 2026-07-02
+sop_version: 1.3
+last_reviewed: 2026-11-16
 app_version: 1.1 — updated 2026-05-30
 screenshot_status: not_applicable
 owner: Admin / Director
@@ -176,7 +176,8 @@ Four sync buttons:
 - Follow Up Now scores (when CRM is built): `email_opens × 3 + website_visits × 5 + case_study_views × 4 + days_since_last_contact × 0.5 + relationship_score × 0.2`
 - Create Next suggestions: Haiku AI, cached 14 days, recomputed when new attribution data arrives
 - Website Pages: fetched live from `GET /api/intelligence/pages` (separate from dashboard endpoint)
-- SEO briefs: `POST /api/intelligence/pages/:id/brief` — Haiku, cached 90 days in `seo_content_briefs` table
+- SEO briefs: `POST /api/intelligence/pages/:id/brief` — Sonnet (task `marketing_seo_brief`), cached 90 days in `seo_content_briefs` table; `model_used` records the model that answered
+- **AI model (Nov 2026):** task `marketing_insights` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_MARKETING_INSIGHTS`; effort with `AI_EFFORT_MARKETING_INSIGHTS`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `marketingIntelligence`). Covers the weekly AI summary and the Create Next suggestions. The weekly summary named an invalid model id until the Nov 2026 migration, so it never appeared: the banner is new.
 
 ## 12. Edge cases and limits
 - If it is the 1st of the month, "This Month" KPIs will show 0 until the first enquiry of the new month arrives

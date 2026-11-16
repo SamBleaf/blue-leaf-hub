@@ -1,7 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { callAI } from "./aiGateway.mjs";
+import { aiClient, createForTask, replyText } from "./aiModels.mjs";
 
-const MODEL = process.env.CLAUDE_MODEL || process.env.MODEL || "claude-sonnet-4-5";
+// Model: task "schedule_generate" in aiModels.mjs (env AI_MODEL_SCHEDULE_GENERATE). CLAUDE_MODEL / MODEL are no longer read.
 
 const CANONICAL_REF = `
 ## Canonical SA residential build reference
@@ -186,19 +185,14 @@ ${factsSection}
 Categories and items:
 ${JSON.stringify(categoriesPayload, null, 2)}`;
 
-  const client = new Anthropic({ apiKey: key, maxRetries: 0 });
-  const completion = await callAI(client, {
-    model: MODEL,
-    max_tokens: 8192,
-    temperature: 0.2,
+  const client = aiClient({ maxRetries: 0 });
+  const completion = await createForTask(client, "schedule_generate", {
+    max_tokens: 16000, // a full programme as JSON, plus room for a short think
+    temperature: 0.2, // fallback model only: dropped for models that refuse it (aiModels.adaptParams)
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }]
   }, { module: "scheduleClaudePlan" });
 
-  const text = completion.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  const text = replyText(completion);
 
   let jsonSlice = text;
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);

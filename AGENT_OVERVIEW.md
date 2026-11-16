@@ -292,7 +292,7 @@ Supabase Storage:
 **Server (never VITE_ prefix):**
 - `APP_URL` — production URL e.g. `https://blueleafhub.com.au`
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
-- `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` (default: `claude-sonnet-4-5`)
+- `ANTHROPIC_API_KEY`; optional `AI_MODEL_<TASK>` / `AI_EFFORT_<TASK>` / `AI_FALLBACK_MODEL` (see `server/lib/aiModels.mjs`; `CLAUDE_MODEL` is no longer read)
 - `SMTP_HOST/PORT/SECURE/USER/PASS/FROM`
 - `GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN/SENDER_EMAIL`
 - `IMAP_HOST/PORT/SECURE/USER/PASS` (+ `IMAP2_*` for second inbox)

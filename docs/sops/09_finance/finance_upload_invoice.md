@@ -1,6 +1,6 @@
 ---
-sop_version: 1.1
-last_reviewed: 2026-07-02
+sop_version: 1.2
+last_reviewed: 2026-11-16
 app_version: 1.0 — built
 screenshot_status: not_applicable
 owner: Admin
@@ -82,8 +82,9 @@ The invoice moves to the AI extraction step automatically. Continue to SOP 09-02
 
 ## 11. Automation notes
 - IMAP polling runs on the API server; interval is configured in `server/dev-api.mjs`
-- AI extraction cascade: regex first → Claude Haiku → Claude Sonnet (escalates on failure)
+- AI extraction: one Claude call per document, then regex fills any gaps it missed — no Sonnet escalation (removed Oct 2026, token-conservative).
 - Supplier ABN match against `supplier_trade_defaults` for auto-trade tagging
+- **AI model (Nov 2026):** task `invoice_extract` in `server/lib/aiModels.mjs` — default `claude-haiku-5-5` at effort "low" (override with `AI_MODEL_INVOICE_EXTRACT`; effort with `AI_EFFORT_INVOICE_EXTRACT`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `financeRoutes`). Trade tagging and the AI job match are task `invoice_classify` (Haiku 5.5).
 
 ## 12. Edge cases and limits
 - Only PDF files are accepted via drag-drop — JPG/PNG require the photo upload button

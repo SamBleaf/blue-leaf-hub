@@ -1,6 +1,6 @@
 ---
-sop_version: 2.0
-last_reviewed: 2026-07-02
+sop_version: 2.2
+last_reviewed: 2026-11-16
 app_version: Pass 3A — Lead command centre
 screenshot_status: not_applicable
 owner: Admin / Staff
@@ -97,6 +97,9 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 | Problem | Solution |
 |---------|----------|
 | Blueprint panel shows "Blueprint unavailable — check API configuration" | The `ANTHROPIC_API_KEY` is not set in Railway. Contact your admin to configure it. |
+| "The AI model isn't available to this API key" | The key in Railway can't use the model Blueprint asked for, **and** the fallback model was refused too. Admin: open `/api/blueprint/health` — `ai.tasks.blueprint_chat` shows the model and fallback, `ai.skipped` and `ai.recentFallbacks` show what was refused and why. Fix the key's model access in the Anthropic console, or set `BLUEPRINT_MODEL` (or `AI_FALLBACK_MODEL`) in Railway to a model the key can use, then redeploy. |
+| Every chat says "Blueprint hit an unexpected error", and `/api/blueprint/health` shows no refused model | Not the model or the key. Something failed before the AI call. Admin: read the Railway log line starting `[blueprint/chat/stream]` or `[blueprint/chat]`. Example: in Nov 2026 it read "Node.js 20 detected without native WebSocket support". The knowledge-base lookup created its database client without a WebSocket transport, which Node 20 requires, so it failed. Fixed: every Blueprint database client passes one, and a knowledge-base failure now only drops the extra context. |
+| Blueprint answers, but less well than usual | It may be running on the fallback model: `/api/blueprint/health` shows `ai.tasks.blueprint_chat.using`. A refused model is skipped for 10 minutes, then tried again. Restore the key's access to the main model (above). |
 | No text appears after loading (blank response) | Check network connection. Try clicking ↺ Refresh. |
 | Response is generic and does not reference the lead | The lead may have very few fields filled in — the more context on the lead record, the more specific the advice. Add project type, budget, and qualifying scores. |
 | Very slow response | The AI model takes a few seconds. Responses stream progressively — text appears word by word. Wait for the stream to complete before refreshing. |
@@ -117,10 +120,14 @@ Blueprint responses are not saved to the lead record. The auto-generated note ex
 - Auto-fetch: `POST /api/blueprint/chat` called on mount (and after stage change) with a structured message: `"I have a sales lead named [name] in the [stage] stage... Based on the APB sales framework, what should I do next with this lead? Give specific, actionable advice in 3-4 sentences."`
 - `hubContext` passed: `{ page: "lead_detail", stage, leadId }`
 - Response field: `j.reply` (not `j.response` or `j.message`) — always use `j.reply`
-- Model: `claude-sonnet-4-6` (streams)
+- Model: set per task in `server/lib/aiModels.mjs`, read from the environment. Blueprint chat: `AI_MODEL_BLUEPRINT_CHAT`, then `BLUEPRINT_MODEL` (the shared `CLAUDE_MODEL` is no longer read), default `claude-sonnet-5-5` at effort "low" (a coaching chat; low effort keeps thinking, and the token bill, small). If that model is refused for the key (not found, no permission, or a request it can't accept), the same request is retried once on the fallback (`BLUEPRINT_FALLBACK_MODEL`, then `AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`) and the refused model is skipped for 10 minutes. Rate limits, billing and key errors never fall back. The request is adapted to each model (no `temperature` or forced tool choice where a model refuses them; `effort` only where accepted). Every call is logged in `ai_call_log` with its cost.
+- History: only the last 16 messages of a chat are resent each turn (`BLUEPRINT_MAX_HISTORY`), to bound the tokens per reply.
+- Nov 2026 outage, first cause: a whitelist here pinned `claude-sonnet-4-6` and ignored the environment; the production key couldn't use that model, so every chat failed with "Blueprint hit an unexpected error". The whitelist is gone and the error now says the model isn't available.
+- Nov 2026 outage, second cause (found after the first fix was deployed): Railway builds on Node 20 (`nixpacks.toml`), which has no native WebSocket, and supabase-js refuses to create a client there without a `realtime.transport`. The knowledge-base lookup (`src/blueprint/agent/knowledgeBase.js`) created its client without one, outside its own error guard, so every chat failed before the model was called. Now every Blueprint client passes the `ws` transport, and the lookup's failure only drops the knowledge-base context. Test: `node scripts/tests/blueprint-supabase-transport.test.mjs`.
 - Cache: `bpFetchedFor.current` stores `leadId:stage` — prevents double-fetch on re-render; cleared on stage advance
 - Conversations are not persisted to the database — session memory only
 - Blueprint panel in AppShell: separate from this auto-insight; uses `useBlueprintContext` — a global context provider that shares screen context with the Blueprint sidebar
+- **AI model (Nov 2026):** task `blueprint_document_review` in `server/lib/aiModels.mjs` — default `claude-sonnet-5-5` at effort "low" (override with `AI_MODEL_BLUEPRINT_DOCUMENT_REVIEW`; effort with `AI_EFFORT_BLUEPRINT_DOCUMENT_REVIEW`). If the model is refused for the key, or declines the request, the same request goes once to the fallback model (`AI_FALLBACK_MODEL`, default `claude-haiku-4-5-20251001`). Each call is logged in `ai_call_log` (module `blueprintDocumentReview`). Used when a PDF or text file is attached to a Blueprint chat (QC against the APB proposal standard); the older `BLUEPRINT_REVIEW_MODEL` still works. Was Haiku 4.5, sent directly and not logged.
 
 ## 12. Edge cases and limits
 - Blueprint responses exist only in the browser session — they are not saved to the lead record. Paste valuable insights into a Note activity if you want to preserve them.
@@ -181,6 +188,20 @@ Next review: 2027-01-02
 1. Create a lead with first name only — no project type, no qualifying scores, no suburb
 2. Open the lead detail
 3. Expected: Blueprint Insight still loads (no crash, no blank panel), may produce a more generic note prompting the user to fill in more information
+- [ ] Pass  [ ] Fail
+
+**TC-07 — Feature case: a refused model falls back and the cause is visible**
+1. On a test environment, set `BLUEPRINT_MODEL` to a model id the key can't use (for example `claude-sonnet-0-0`) and restart the API.
+2. Open a lead and let Blueprint Insight load, or send a message in the Blueprint panel.
+3. Expected: Blueprint still answers (on the fallback model). The API log shows `[ai] blueprint_chat: model claude-sonnet-0-0 refused (404 …)`.
+4. Open `/api/blueprint/health`. Expected: `ai.tasks.blueprint_chat.using` is the fallback model; `ai.skipped` lists the refused model with reason `model`.
+5. Set `AI_FALLBACK_MODEL` to an unusable id as well and restart. Expected: the panel shows "The AI model isn't available to this API key…", not "unexpected error".
+6. Remove both settings and restart.
+- [ ] Pass  [ ] Fail  [ ] Skip (environment restriction)
+
+**TC-08 — Feature case: the chat works when the knowledge base can't be reached**
+1. Run `node scripts/tests/blueprint-supabase-transport.test.mjs`. Expected: all checks pass, including "the chat system prompt builds" with no native WebSocket (the Node 20 condition).
+2. On production, after a deploy, send one message in the Blueprint panel. Expected: a reply. If it says "unexpected error", read the Railway log line `[blueprint/chat/stream] …` for the cause.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
