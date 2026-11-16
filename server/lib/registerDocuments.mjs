@@ -37,6 +37,8 @@ import {
   QUESTION_LIBRARY_VERSION, answerSummary, natureOf, answerConfigFor, linkedParentLabel, baselineAssumptions, performanceSuggestions, technicalLabel, pricingLabel,
   roomDefaultsFor,
 } from "../../src/lib/register.js";
+import { architectBriefModel, architectBriefLines, budgetLine, BUDGET_BAND_RX, whoOf } from "../../src/lib/briefModel.js";
+import { contentChecks, roomBriefBlocker } from "../../src/lib/registerQuality.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = join(__dirname, "../../public/templates");
@@ -571,196 +573,31 @@ function clientBriefFixture(input) {
 // vs technical solution to verify), Tab 27:20 (an action and its requirement are linked by reference, never repeated).
 // Owner's editorial rule (16 Nov 2026): common information once, then the meaningful exceptions; statuses only where
 // they say something; no system wording repeated row after row.
-const DESIGN_TEAM = new Set(["architect", "consultant", "trade"]);
-// "Energy" by its own words, never a bare "rating" (a BAL, wind or fire rating isn't the energy assessor's: QA REC-03).
-const ENERGY_WORDS = /\benergy\b|\bthermal\b|\bnathers\b/i;
-/** The design team on file: current roles only (job_contact_roles status active or unset), architects before designers. */
-function designTeam(context) {
-  const ROLE_ORDER = { architect: 0, designer: 1, interior_designer: 2, engineer: 3, consultant: 4, other: 5 };
-  return (context.consultants || []).filter((c) => !["completed", "inactive"].includes(c.status)).slice().sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9));
-}
 /** Who acts on a record, in an architect's words: the named consultant where one is recorded, else the discipline. */
 function adbWho(context, i) {
-  const r = i.responsibility;
-  if (!r) return "To be agreed";
-  if (r === "client") return "Client";
-  if (r === "blue_leaf") return "Blue Leaf";
-  if (r === "trade") return "Trade / supplier";
-  const people = designTeam(context);
-  const named = (roles, test) => { const c = people.find((x) => roles.includes(x.role) && (!test || test(x))); return c ? clean(c.company || c.name) : ""; };
-  if (r === "architect") return named(["architect", "designer", "interior_designer"]) || "Architect";
+  const w = whoOf(context, i);
+  if (w.key !== "consultant") return w.label;
   const coord = questionById(resolvePromptId(i.promptKey))?.coord;
-  // The engineer's by its question or its category first; then the energy assessor's; any other discipline by its name.
-  if (coord === "engineer" || ["structure", "existing", "site"].includes(i.category)) return named(["engineer"]) || "Engineer";
-  if (coord === "energy" || ENERGY_WORDS.test(`${i.description || ""} ${i.nextAction || ""}`)) return named(["consultant", "other"], (x) => ENERGY_WORDS.test(`${x.company || ""} ${x.name || ""}`)) || "Energy assessor";
-  if (coord && COORD_DISCIPLINES[coord]) return COORD_DISCIPLINES[coord];
-  return "Consultant";
+  return !i.actionRole && coord && COORD_DISCIPLINES[coord] ? COORD_DISCIPLINES[coord] : w.label;
 }
-/** Requests in discipline order: the architect's first, then the engineer's, the energy assessor's, everyone else's. */
-const DISCIPLINE_ORDER = (context, i) => {
-  if (i.responsibility === "architect") return 0;
-  if (i.responsibility === "trade") return 4;
-  const who = adbWho(context, i), people = context.consultants || [];
-  if (who === "Engineer" || people.some((c) => c.role === "engineer" && clean(c.company || c.name) === who)) return 1;
-  if (who === "Energy assessor" || ENERGY_WORDS.test(who)) return 2;
-  return 3;
-};
-
+/**
+ * The Architect Design Brief (adb-2.0): the brief model (src/lib/briefModel.js) is the fixture, so the PDF, the
+ * Documents step's "What will print" list and the issued snapshot all hold the same lines, each with its record ids.
+ */
 function architectBriefFixture(input) {
   const { context, register } = input;
   const fx = baseFixture(input);
-  const items = orderItems(register, register.items);
-  const rooms = register.meta.rooms || [];
-  const roomOfItem = (i) => rooms.find((r) => r.id === i.roomId);
-  const area = (i) => roomLabel(register, i);
-  // A room's name, with its drawing sheet when it has its own (the basis is on page 1, so it isn't repeated).
-  const place = (i) => { const a = area(i); if (a === "Whole house" || a === "Site / existing") return ""; const sheet = clean(roomOfItem(i)?.sheet); return `${placeName(a)}${sheet ? ` (${sheet})` : ""}`; };
-  const where = (i) => (place(i) ? `${place(i)}: ` : "");
-  // One clause reads without a closing full stop in a table cell; two sentences keep theirs (QA RID-09).
-  const cellText = (t) => { const x = sentence(t); return /\.\s+[A-Z]/.test(x) ? x : x.replace(/\.$/, ""); };
-  const entry = (i, text) => ({ text: cellText(text), ref: refCode(i), refs: [refCode(i)] });
-  const typeLabel = PROJECT_TYPE_LABELS[context.projectType] || "Residential project";
-
-  // 1 · Requests: what the design team (architect, engineer, energy assessor, trade) must do. An open action, or a
-  // technical check they own. 2 · Decisions: open actions for the client or Blue Leaf (or no one yet). Never an owner
-  // invented: an unassigned action reads "To be agreed" (CPB-11), and goes with the decisions.
-  // A requirement or a choice with a check open is NOT a request: it stays what it is (a requirement, a design
-  // direction) and is marked "To verify" there. A request is an action, or a technical check or risk (sandbox e2e #16).
-  const designCheck = (i) => i.technicalStatus === "needs_verification" && DESIGN_TEAM.has(i.responsibility);
-  // A technical check or risk that nobody owns yet is still the design team's to answer: it is listed with them, Who
-  // "To be agreed", never dropped (QA REC-05). A client or Blue Leaf action without a separate next action is said in
-  // its own words, as the client brief does (QA REC-06). An office-only note goes only to its design-team owner.
-  const isCheck = (i) => ["technical", "risk"].includes(natureOf(i)) && i.technicalStatus === "needs_verification" && (DESIGN_TEAM.has(i.responsibility) || !i.responsibility);
-  const officeOnly = (i) => answerConfigFor(resolvePromptId(i.promptKey))?.tier === "office_only";
-  const open = (i) => !i.resolved && (clean(i.nextAction) || i.itemKind === "action" || isCheck(i)) && (!officeOnly(i) || DESIGN_TEAM.has(i.responsibility));
-  const asked = items.filter((i) => open(i) && (clean(i.nextAction) || said(i)));
-  const ASKS = /\b(confirm|check|inspect|verify|advise|detail|design|size|model|assess|investigate)\b/i;
-  // The record's own drawing or document reference, where it reads as one (a sheet and revision, a document number).
-  const ownRef = (i) => { const src = clean(i.source); return src && /\b[A-Z]{1,3}-?\d{2,4}\b|\bRev\.?\s*[A-Z0-9]\b/.test(src) && !(roomOfItem(i)?.sheet && src === clean(roomOfItem(i).sheet)) ? ` (${src})` : ""; };
-  const askText = (i) => clean(i.nextAction) || (ASKS.test(said(i)) ? said(i) : `Confirm: ${said(i)}`);
-  const toDesignTeam = (i) => DESIGN_TEAM.has(i.responsibility) || (!i.responsibility && isCheck(i) && !clean(i.nextAction));
-  const requests = asked.filter(toDesignTeam)
-    .map((i) => ({ i, who: adbWho(context, i), text: `${where(i)}${askText(i).replace(/\.$/, "")}${ownRef(i)}` }))
-    .map((r, k) => ({ ...r, k })).sort((a, b) => DISCIPLINE_ORDER(context, a.i) - DISCIPLINE_ORDER(context, b.i) || a.k - b.k);
-  const decisions = asked.filter((i) => !toDesignTeam(i) && (clean(i.nextAction) || natureOf(i) === "action"))
-    .map((i) => ({ i, who: adbWho(context, i), text: `${where(i)}${(clean(i.nextAction) || said(i)).replace(/\.$/, "")}${ownRef(i)}` }));
-  // A record whose request IS its description (a check with no separate action) is said once, in the requests.
-  const saidInRequest = new Set(requests.filter(({ i }) => !clean(i.nextAction)).map(({ i }) => i.id));
-  // A check the design team owns, with no request of its own, is marked where the record prints.
-  const inRequest = new Set(requests.map(({ i }) => i.id));
-  const checkOpen = (i) => designCheck(i) && !inRequest.has(i.id);
-
-  // 3 · Requirements: what the design must achieve. The client's priorities first, in their words. Status only where it
-  // says something: Client-approved (with evidence) or For consultant review; a plain requirement needs no label.
-  const pItem = items.find((i) => !i.roomId && resolvePromptId(i.promptKey) === "P-005");
-  const chosen = (clientSafeAnswer(pItem)?.selected || []).map((c) => c.label);
-  const priorityNote = clean(clientSafeAnswer(pItem)?.clientNote);
-  const typed = clean(pItem?.description);
-  const priorityWords = chosen.length ? andList(chosen.map((c, k) => (k ? c.charAt(0).toLowerCase() + c.slice(1) : c))) : typed.replace(/[.\s]+$/, "");
-  const priorities = pItem && (priorityWords || priorityNote) ? [{ ref: refCode(pItem), text: `${priorityWords ? `Client priorities: ${priorityWords}.` : ""}${priorityNote ? `${priorityWords ? " " : ""}In the client's words: "${priorityNote.replace(/[.\s]+$/, "")}."` : ""}`, status: "" }] : [];
-  // An office-only note (R-015 tolerances, R-012 documentation status) is never the client's requirement (CPB4-L01).
-  const verified = (i) => i.technicalStatus === "verified" && clean(i.technicalEvidence?.ref);
-  const requirements = [...priorities, ...items.filter((i) => i.itemKind === "requirement" && said(i) && resolvePromptId(i.promptKey) !== "P-005" && !saidInRequest.has(i.id) && !officeOnly(i))
-    .map((i) => {
-      const approved = i.certainty === "client_approved" && approvalIsEvidenced(i);
-      // Who must confirm the technical design is named (Tab 11:30): the owner on file, else "owner to be agreed" (QA KES-01).
-      const pending = approved && i.technicalStatus === "needs_verification" ? ` (technical check pending: ${i.responsibility ? adbWho(context, i) : "owner to be agreed"})` : "";
-      return { ref: refCode(i), text: `${where(i)}${plainShort(i)}: ${said(i)}${pending}`,
-        status: approved ? "Client-approved" : verified(i) ? "Verified" : reviewOnly(i) ? "For consultant review" : checkOpen(i) ? "To verify" : "" };
-    })];
-
-  // 4 · Changes to the building: the work, grouped as the client brief groups it (one line per kind of work over a
-  // family of rooms), then what stays, what's out and who else does what. A check still open reads "To verify".
-  const workWords = (i) => { const w = said(i) || dispositionLabel(i.disposition); return i.disposition === "remove" && !/demol|remov/i.test(w) ? `${w} (removal)` : i.disposition === "make_good" && !/make good|match/i.test(w) ? `${w} (make good)` : w; };
-  const verify = (refs) => { const its = items.filter((i) => refs.includes(refCode(i)));
-    return its.some((i) => i.technicalStatus === "needs_verification" && !saidInRequest.has(i.id)) ? "To verify" : its.length && its.every(verified) ? "Verified" : ""; };
-  const work = groupRoomScope(register, items.filter((i) => isWork(i) && INCLUDED_DISPOSITIONS.has(i.disposition) && (said(i) || i.disposition !== "undecided") && !saidInRequest.has(i.id)),
-    (i) => entry(i, `${where(i)}${workWords(i)}`), context.projectType);
-  const physical = (i) => !NOT_WORK.has(natureOf(i)) && !saidInRequest.has(i.id);
-  const listed = (filter, text = (i) => `${where(i)}${said(i) || plainShort(i)}`) => items.filter((i) => filter(i) && physical(i)).map((i) => entry(i, text(i)));
-  const scopeGroups = [
-    { group: "Proposed work", rows: work },
-    { group: "Existing to remain or protect", rows: listed((i) => i.disposition === "retain") },
-    { group: "Not in the current scope", rows: listed((i) => ["excluded", "deferred"].includes(i.disposition), (i) => `${where(i)}${said(i) || plainShort(i)}${i.disposition === "deferred" ? " (possible later stage)" : ""}`) },
-    { group: "By others", rows: listed((i) => i.disposition === "by_others") },
-    { group: "Supplied by the client", rows: listed((i) => i.supplyBy === "client" && !["excluded", "by_others", "na"].includes(i.disposition)) },
-    { group: "Still to be decided", rows: items.filter((i) => isWork(i) && i.disposition === "undecided" && said(i) && !saidInRequest.has(i.id) && i.supplyBy !== "client").map((i) => entry(i, `${where(i)}${said(i)}`)) },
-  ].map((g) => ({ ...g, rows: g.rows.map((r) => ({ ...r, check: verify(r.refs || [r.ref]) })) })).filter((g) => g.rows.length);
-  const facts = items.filter((i) => natureOf(i) === "fact" && clean(answerSummary(i)) && i.answer?.state !== "not_applicable")
-    .map((i) => ({ text: !SETTLED_FACT(i) ? unconfirmedFact(i) : siteAccessSentence(i) || `${plainShort(i)}: ${readableList(i)}`, ref: refCode(i) }));
-  if (facts.length) scopeGroups.push({ group: "Site and household", rows: facts.map((f) => ({ text: cellText(f.text), ref: f.ref, refs: [f.ref], check: "" })) });
-
-  // 5 · Design direction by location: what applies throughout the house once, then each room's own choices and its
-  // exceptions to the house defaults. Preferred is the norm, so only Proposed and Client-approved are marked.
-  const CERTAINTY = (i) => (i.certainty === "client_approved" && approvalIsEvidenced(i) ? "Client-approved" : i.certainty === "proposed" ? "Proposed" : "");
-  const DIRECTION_STATUS = (i) => { const c = CERTAINTY(i); return checkOpen(i) ? (c ? `${c}, to verify` : "To verify") : verified(i) ? (c ? `${c}, verified` : "Verified") : c; };
-  const byId = new Map(items.map((i) => [i.id, i]));
-  const directionItems = items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product));
-  // An exception is described only when the default it names really applies to this room, by the register's own rule
-  // (roomDefaultsFor: the floor default for a bedroom is the bedroom-floor zone's, else an unzoned one). A link to a
-  // default that doesn't reach the room is not an exception: the room's choice is simply stated (owner, ADB-01).
-  const appliesHere = (i, def) => { const room = roomOfItem(i); const q = questionById(resolvePromptId(i.promptKey));
-    return !!(room && def && q && roomDefaultsFor(register, q, room.roomType).some((d) => d.id === def.id)); };
-  const dirRow = (i) => {
-    const zone = clean(i.answer?.zone?.label);
-    const linked = i.overridesDefaultId ? byId.get(i.overridesDefaultId) : null;
-    const over = appliesHere(i, linked) ? linked : null;
-    return { item: `${itemShort(i).replace(/\s*—\s*who\?$/i, "")}${zone ? ` (${zone.toLowerCase()})` : ""}`, ref: refCode(i),
-      // Names what it replaces, never the system term "house default" (QA KES-07).
-      text: `${clean(i.description || i.product) || said(i)}${over && (clean(over.description || over.product) || said(over)) ? `, instead of ${(() => { const d = clean(over.description || over.product) || said(over); return `the ${d.charAt(0).toLowerCase()}${d.slice(1)}`; })()}` : ""}`, status: DIRECTION_STATUS(i) };
-  };
-  const houseWide = directionItems.filter((i) => !i.roomId);
-  // The same choice in several rooms is said once, under all of them ("Ensuite and bathroom"); each room then lists
-  // only what is its own. Rows match on what prints (item, words and status), and keep every record's reference.
-  const roomRows = rooms.map((r) => ({ room: r, rows: directionItems.filter((i) => i.roomId === r.id).map(dirRow) })).filter((g) => g.rows.length);
-  const sig = (row) => `${row.item}|${row.text}|${row.status}`;
-  const sharedBy = new Map();
-  for (const g of roomRows) for (const row of g.rows) { const k = sig(row); if (!sharedBy.has(k)) sharedBy.set(k, []); sharedBy.get(k).push({ room: g.room, row }); }
-  const roomTitle = (rs) => (rs.length === 1 ? `${placeName(clean(rs[0].name))}${clean(rs[0].sheet) ? `  ·  ${clean(rs[0].sheet)}` : ""}`
-    : andList(rs.map((r, k) => { const n = placeName(clean(r.name)); return k ? n.charAt(0).toLowerCase() + n.slice(1) : n; })));
-  const groupsByRooms = new Map();
-  for (const g of roomRows) for (const row of g.rows) {
-    const holders = sharedBy.get(sig(row));
-    if (holders[0].room.id !== g.room.id) continue;                       // said once, with the first room that has it
-    const key = holders.map((h) => h.room.id).join("+");
-    if (!groupsByRooms.has(key)) groupsByRooms.set(key, { rooms: holders.map((h) => h.room), rows: [] });
-    groupsByRooms.get(key).rows.push({ ...row, ref: holders.map((h) => h.row.ref).join(", ") });
-  }
-  const order = new Map(rooms.map((r, k) => [r.id, k]));
-  const directionGroups = [
-    ...(houseWide.length ? [{ group: "Throughout the house", rows: houseWide.map(dirRow) }] : []),
-    ...[...groupsByRooms.values()].sort((a, b) => order.get(a.rooms[0].id) - order.get(b.rooms[0].id) || b.rooms.length - a.rooms.length)
-      .map((g) => ({ group: roomTitle(g.rooms), rows: g.rows })),
-  ];
-
-  // 6 · References: the documents on file (the drawing basis is on page 1). A superseded document isn't listed.
-  // The register context maps review_status to reviewStatus (registerContext.mjs): read both (QA REC-01, a blocker:
-  // live superseded documents were listed). A revision is left out only when the name already carries it as a word.
-  const revIn = (name, rev) => new RegExp(`(^|[^A-Za-z0-9])(rev\\.?\\s*)?${String(rev).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9]|$)`, "i").test(name);
-  const references = (context.drawings || []).filter((d) => (d.reviewStatus ?? d.review_status) !== "superseded").slice(0, 12)
-    .map((d) => { const name = String(d.filename || "").replace(/\.(pdf|dwg|docx?)$/i, ""); const rev = clean(d.revision);
-      return clean([name, rev && !revIn(name, rev) ? `revision ${rev}` : "", d.issuer].filter(Boolean).join(", ")); })
-    .filter(Boolean);
-
-  // Prepared for: the person it is issued to; with their firm when they are the architect on file (QA REC-04).
-  const architect = designTeam(context).find((c) => ["architect", "designer", "interior_designer"].includes(c.role));
-  const recipient = clean(input.recipientName);
-  const firmOf = (c) => (c?.company && c.company !== c.name ? c.company : "");
-  // The cover names the brief's own pathway in sentence case, as the client brief does.
-  fx.project.projectLabel = [`${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}`, PATHWAY_PROJECT_LABEL[cpbPathway(context)] || DELIVERY_MODELS[context.deliveryModel]].filter(Boolean).join(" · ");
+  const model = architectBriefModel(register, context, { recipientName: input.recipientName });
+  fx.project.projectLabel = model.projectLabel;
   fx.architectBrief = {
-    pathway: cpbPathway(context),
-    subtitle: `${typeLabel.charAt(0)}${typeLabel.slice(1).toLowerCase()}${context.identity.suburb ? `, ${context.identity.suburb}` : ""}`,
-    preparedFor: recipient ? (architect && [architect.name, architect.company].includes(recipient) ? clean([architect.name, firmOf(architect)].filter(Boolean).join(", ")) : recipient)
-      : architect ? clean([architect.name, firmOf(architect)].filter(Boolean).join(", ")) : "",
-    overview: [sentence(context.goals?.description)].filter(Boolean),
-    direction: sentence(context.goals?.vision),
-    requests: requests.map(({ i, who, text }) => ({ ref: refCode(i), text: sentence(text), who })),
-    decisions: decisions.map(({ i, who, text }) => ({ ref: refCode(i), text: sentence(text), who })),
-    requirements,
-    scope: scopeGroups,
-    directionGroups,
-    references,
+    model: "adb-2.0",
+    subtitle: model.subtitle, preparedFor: model.preparedFor, projectLabel: model.projectLabel,
+    project: model.project, site: model.site, points: model.points, hasBy: model.hasBy,
+    roomGroups: model.roomGroups, floorBands: model.floorBands, selections: model.selections, selectionsTitle: model.selectionsTitle, outside: model.outside,
+    // The single line allowed to hold dollars (owner decision 1), so the money check can tell it apart.
+    budgetBand: budgetLine(context) || undefined,
+    lines: architectBriefLines(model, { siteAddress: fx.project.siteAddress, clientName: fx.project.clientName, drawingBasis: fx.project.drawingBasis }),
+    notPrinted: model.notPrinted, counts: model.counts,
   };
   return fx;
 }
@@ -1170,15 +1007,27 @@ function printedStrings(docType, fx) {
   return out;
 }
 const STONE_HOW = "A client document never names it, whatever the wording. Write new work as only what will be supplied (for example \"New porcelain island benchtop\"). Write work on stone already installed without the material (for example \"Remove the existing kitchen benchtops\"), mark the record Retain, Remove, Make good or Alter, and put the material in its Product field, which the document doesn't print: the register keeps it and the WHS notice still applies. The original wording stays in the register's history.";
+/** The fixture without the architect's brief's one budget line, which may hold the client's confirmed band (owner decision 1). */
+function withoutBudgetBand(docType, fx) {
+  const band = fx?.architectBrief?.budgetBand;
+  if (docType !== "architect_brief" || !band || !BUDGET_BAND_RX.test(band)) return fx;
+  const ab = fx.architectBrief;
+  return { ...fx, architectBrief: { ...ab, budgetBand: undefined, project: (ab.project || []).map((r) => (r.key === "budget" && r.text === band ? { ...r, text: "" } : r)),
+    lines: (ab.lines || []).map((l) => (l.source?.key === "budget" && l.text === band ? { ...l, text: "" } : l)) } };
+}
 export function registerDocChecks(docType, fx, { register, recipientName, mode }) {
-  const errors = [], warnings = [];
-  if (!clean(fx.project.drawingBasis)) (mode === "issue" ? errors : warnings).push("Record the current drawing set / revision (Project step) before issuing.");
-  if (mode === "issue" && !clean(recipientName)) errors.push("Enter who the document is being issued to.");
+  const errors = [], warnings = [], errorTargets = [];
+  // Each red entry can carry what fixes it (REGISTER_SCREENS_SPEC.md S5: a Fix on every entry).
+  const block = (list, msg, targets) => { list.push(msg); if (list === errors && targets?.length) errorTargets.push({ text: msg, targets }); };
+  if (!clean(fx.project.drawingBasis)) block(mode === "issue" ? errors : warnings, "Record the current drawing set / revision (Project step) before issuing.", [{ kind: "meta", key: "planRev" }]);
+  if (mode === "issue" && !clean(recipientName)) block(errors, docType === "architect_brief" ? "Say who it's going to: name the architect, or type a name under “Issue to”." : "Enter who the document is being issued to.", [{ kind: docType === "architect_brief" ? "architect" : "recipient" }]);
   const falseApprovals = register.items.filter((i) => i.certainty === "client_approved" && !approvalIsEvidenced(i));
-  if (falseApprovals.length) (mode === "issue" ? errors : warnings).push(`${falseApprovals.length} item(s) are marked client-approved without evidence — record the approval or step them back.`);
+  if (falseApprovals.length) block(mode === "issue" ? errors : warnings, `${falseApprovals.length} item(s) are marked client-approved without evidence — record the approval or step them back.`, falseApprovals.map((i) => ({ kind: "record", id: i.id })));
   const unverified = register.items.filter((i) => i.technicalStatus === "verified" && !i.technicalEvidence?.ref);
-  if (unverified.length) (mode === "issue" ? errors : warnings).push(`${unverified.length} item(s) are marked verified without a technical reference.`);
-  const strings = JSON.stringify(fx);
+  if (unverified.length) block(mode === "issue" ? errors : warnings, `${unverified.length} item(s) are marked verified without a technical reference.`, unverified.map((i) => ({ kind: "record", id: i.id })));
+  // The agreed C2 rule: the architect's brief can't issue while a New, Renovated or Altered room has no room brief.
+  if (docType === "architect_brief") { const b = roomBriefBlocker(register); if (b) block(mode === "issue" ? errors : warnings, b.text, b.targets); }
+  const strings = JSON.stringify(withoutBudgetBand(docType, fx));
   if (MONEY_RX.test(strings)) errors.push("The document would contain a dollar figure — register documents never show prices or allowances.");
   // Prohibited products (CPB-02; src/lib/restrictedProducts.js). A selection that will be supplied and names one stops a
   // client-facing document, whatever the wording around it; anything else that names one (a "no engineered stone"
@@ -1192,7 +1041,8 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   const shown = printedStrings(docType, fx), printedHit = (t) => !!t && shown.some((x) => x.includes(t));
   // The architect's brief prints the Sales description and record wording as typed; words addressed to the client read
   // wrongly to the design team (QA REC-12).
-  if (docType === "architect_brief") { const you = shown.find((x) => /\b(you|your|you're|yours)\b/i.test(x)); if (you) warnings.push(`The Architect Design Brief would print wording addressed to the client: "${clean(you).slice(0, 90)}". Reword the Sales description or the record for the design team.`); }
+  // Read from the brief's own rows, not the template's standard wording (which speaks to the design team).
+  if (docType === "architect_brief") { const you = (fx.architectBrief?.lines || []).map((l) => l.text).find((x) => /\b(you|your|you're|yours)\b/i.test(x || "")); if (you) warnings.push(`The Architect Design Brief would print wording addressed to the client: "${clean(you).slice(0, 90)}". Reword the Sales description or the record for the design team.`); }
   const docLabel = REGISTER_DOC_TYPES[docType]?.label || "document";
   const stop = (msg) => (mode === "issue" && clientFacing ? errors : warnings).push(msg);
   const reported = [];
@@ -1200,11 +1050,13 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
     const room = roomLabel(register, item);
     const what = `"${clean(item.description || item.product) || itemShort(item)}"${room ? ` (${room})` : ""}`;
     const words = clean(said(item));
-    if (blocking) { stop(`${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`); reported.push(clean(item.description || item.product)); continue; }
+    if (blocking) { const msg = `${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`;
+      stop(msg); if (mode === "issue" && clientFacing) errorTargets.push({ text: msg, targets: [{ kind: "record", id: item.id }] }); reported.push(clean(item.description || item.product)); continue; }
     // Any of the record's own fields that names it and that this document prints (its description, card answer,
     // product, supplier …; review STONE4F-02).
     const shownField = restrictedFieldsOf(item).find((h) => printedHit(clean(h.text))) || (product.level === "error" && ["description", "option"].includes(field) && printedHit(words) ? { text: words } : null);
-    if (shownField) { stop(`${what} names engineered stone in words the ${docLabel} prints. ${product.level === "error" ? product.rule : "Engineered stone is prohibited in Australia from 1 July 2024: it can't be manufactured, supplied, processed or installed."} ${STONE_HOW}`); reported.push(words, clean(shownField.text)); continue; }
+    if (shownField) { const msg = `${what} names engineered stone in words the ${docLabel} prints. ${product.level === "error" ? product.rule : "Engineered stone is prohibited in Australia from 1 July 2024: it can't be manufactured, supplied, processed or installed."} ${STONE_HOW}`;
+      stop(msg); if (mode === "issue" && clientFacing) errorTargets.push({ text: msg, targets: [{ kind: "record", id: item.id }] }); reported.push(words, clean(shownField.text)); continue; }
     // Not printed. A record kept, removed, made good or altered may be stone already installed: say what that needs,
     // without claiming it is (checkpoint 3 review, Q5): it is never WHS clearance.
     const label = LEGACY_DISPOSITION[item.disposition];
@@ -1228,7 +1080,7 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
   if (docType === "client_brief" && !fx.clientBrief.scopeIn.length && !fx.clientBrief.preferences.length) warnings.push("The brief has no recorded scope or preferences yet.");
   const v = validateFixture(fx, { mode: mode === "issue" ? "issue" : "draft" });
   if (mode === "issue") errors.push(...v.errors); else warnings.push(...v.warnings);
-  return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
+  return { errors: [...new Set(errors)], warnings: [...new Set(warnings)], errorTargets };
 }
 
 // ── Selections documents: source, approval and client-safety checks (SELECTIONS_SPEC.md §5) ──
@@ -1390,8 +1242,20 @@ export async function nextVersion(sb, leadId, docType) { return (await issueHist
 // A stable fingerprint of the register content a document is rendered from: item id → version (updatedAt as
 // the fallback for an unversioned row). Round-tripped from preview to issue so that if the brief changed
 // between the two, the issue is refused and no stale controlled document is recorded (Tab 27 R04 review §1).
-export function registerItemVersions(register) {
-  return Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
+// The rooms (name, floor, Work, sheet), the drawing basis and occupancy, and the Sales facts a brief prints are part of it
+// too (REGISTER_SCREENS_SPEC.md S5): a change to any of them after the preview must not issue unseen. Not meta.rev, which
+// moves on every room navigation.
+const digest = (v) => createHash("sha256").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 16);
+export function registerItemVersions(register, context = null) {
+  const v = Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
+  const m = register?.meta || {};
+  v.__rooms = digest([(m.rooms || []).map((r) => [r.id, r.name, r.level, r.scope, r.sheet, r.order]), m.planRev || "", m.occupancy || ""]);
+  if (context) {
+    const g = context.goals || {}, b = context.budget || {};
+    v.__facts = digest([g.vision, g.keyRequirements, g.concern, b.min, b.max, b.confirmed, b.financeStatus, b.desiredStart, context.projectType, context.deliveryModel,
+      (context.consultants || []).map((c) => [c.role, c.name, c.company, c.status]), context.site || null, context.identity || null]);
+  }
+  return v;
 }
 export function versionsDiffer(expected, current) {
   if (!expected || typeof expected !== "object") return false;        // no expectation sent → guard is inert
@@ -1421,7 +1285,9 @@ export async function previewDocument(sb, leadId, requestedType, { layout, recip
   const out = await renderRegisterDocument(docType, fx, { layout });
   if (out.leaks.length) checks.errors.push(`Rendering problem: ${out.leaks.join(", ")}.`);
   checks.warnings.push(...(out.fontWarnings || []));
-  return { pdf: out.pdf, checks, revision, itemVersions: registerItemVersions(register) };
+  // What will print, line by line with record ids (click-a-line), and the content checks (never block an issue).
+  checks.content = contentChecks(docType, register, context, fx.architectBrief?.model ? fx.architectBrief : null);
+  return { pdf: out.pdf, checks, revision, itemVersions: registerItemVersions(register, context), lines: fx.architectBrief?.lines || null, notPrinted: fx.architectBrief?.notPrinted || null };
 }
 
 /**
@@ -1436,7 +1302,7 @@ export async function issueDocument(sb, leadId, requestedType, { recipientName, 
     // R04 review §1: refuse to issue a controlled document from data that changed since it was previewed.
     // `expectedVersions` is the fingerprint the preview returned (round-tripped by the client). If the
     // register moved on — a concurrent edit, or the client's own edits never persisted — nothing is issued.
-    if (versionsDiffer(expectedVersions, registerItemVersions(register))) {
+    if (versionsDiffer(expectedVersions, registerItemVersions(register, context))) {
       throw new DocumentError(409, "The brief changed since you previewed it — nothing was issued. Re-open the preview to see the current version, then issue again.", "ISSUE_STALE");
     }
     const { revision, supersedes } = await issueHistory(sb, leadId, docType);
@@ -1472,7 +1338,7 @@ export async function issueDocument(sb, leadId, requestedType, { recipientName, 
 
     const label = REGISTER_DOC_TYPES[docType].label;
     const filename = `${label} — ${fx.project.clientName} — ${revLabel}.pdf`.replace(/[\\/]/g, "-");
-    const versions = registerItemVersions(register);
+    const versions = registerItemVersions(register, context);
     let data, error;
     try { ({ data, error } = await sb.rpc("register_issue_document", {
       p_lead_id: leadId, p_document_type: docType, p_expected_version: revision,

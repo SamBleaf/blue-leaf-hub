@@ -136,7 +136,7 @@ export function registerRegisterRoutes(app) {
     try {
       const actor = await actorFor(sb, req.caller);
       const out = await previewDocument(sb, req.params.leadId, req.params.docType, { layout: req.body?.layout, recipientName: req.body?.recipientName, actor });
-      ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision, itemVersions: out.itemVersions });
+      ok(res, { pdf: out.pdf.toString("base64"), checks: out.checks, revision: out.revision, itemVersions: out.itemVersions, lines: out.lines, notPrinted: out.notPrinted });
     } catch (e) { sendRegisterError(res, e, "Could not render the draft."); }
   });
 

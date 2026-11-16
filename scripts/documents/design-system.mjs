@@ -236,6 +236,8 @@ function loopRow(key, cols, { keep = false, closeExtra = "" } = {}) {
   return new TableRow({ cantSplit: true, children: cols.map((c, i) => {
     const kids = [];
     if (i === 0) kids.push(run(`{#${key}}`, { size: 2 }));
+    // c.pre: words printed first in grey italic, for a gap Blue Leaf still has to fill ("Brief to follow."; drafts only).
+    if (c.pre) kids.push(run(`{${c.pre}}`, { size: c.size || S.table, color: C.grey, italics: true }));
     kids.push(run(`{${c.field}}`, { size: c.size || S.table, bold: !!c.bold, color: c.color || C.ink }));
     // c.again: the same value printed quietly (the payload fills one of field / again, never both).
     if (c.again) kids.push(run(`{${c.again}}`, { size: c.size || S.table, color: C.grey }));
@@ -264,6 +266,23 @@ export function dataTable(key, cols, o = {}) {
   }
   rows.push(loopRow(key, cols));
   return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(), rows });
+}
+
+/**
+ * A definition list: label on the left (grey, bold), words on the right, a hairline between rows, no header. Bounded like
+ * a data table (KEY_KEEP / KEY / KEY_PEN / KEY_LAST), so neither end is ever a single row on a page. Rows: { LABEL, TEXT }.
+ */
+export function defTable(key, labelWidth = 1930) {
+  const cols = [{ field: "LABEL", width: labelWidth, bold: true, color: C.grey, size: S.table }, { field: "TEXT", width: W - labelWidth }];
+  const row = (k, keep) => new TableRow({ cantSplit: true, children: cols.map((c, i) => {
+    const kids = [];
+    if (i === 0) kids.push(run(`{#${k}}`, { size: 2 }));
+    kids.push(run(`{${c.field}}`, { size: c.size || S.table, bold: !!c.bold, color: c.color || C.ink }));
+    if (i === cols.length - 1) kids.push(run(`{/${k}}`, { size: 2 }));
+    return cell(para(kids, { after: 0, line: 252, keepNext: keep }), c.width, { pt: 60, pb: 60, pl: 0, pr: 160, borders: { top: none(), left: none(), right: none(), bottom: rule(C.hair, 4) } });
+  }) });
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: cols.map((c) => c.width), layout: TableLayoutType.FIXED, borders: noBorders(),
+    rows: [row(`${key}_KEEP`, true), row(key, false), row(`${key}_PEN`, true), row(`${key}_LAST`, false)] });
 }
 
 /**

@@ -96,6 +96,7 @@ export function selRowToItem(row, { isPreconstruction } = {}) {
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
     clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
+    actionRole: d.actionRole || "", actionDue: d.actionDue || "",
     evidence: row.approval_evidence || (approved && row.approved_at ? { at: row.approved_at, by: "Portal board", method: "board" } : null),
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -150,6 +151,7 @@ export function rsiRowToItem(row) {
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
     clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
+    actionRole: d.actionRole || "", actionDue: d.actionDue || "",
     evidence: row.approval_evidence || null,
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -164,6 +166,8 @@ function detailOf(item) {
     isDefault: !!item.isDefault, overridesDefaultId: item.overridesDefaultId || null, resolved: !!item.resolved,
     description: item.description || "",
     clientLabel: item.clientLabel || "", clientDescription: item.clientDescription || "",
+    // Needs action from… (spec S4): stored only once set, so older rows read back unchanged.
+    ...(item.actionRole ? { actionRole: item.actionRole } : {}), ...(item.actionDue ? { actionDue: item.actionDue } : {}),
     ...(item.answer ? { answer: item.answer } : {}),                // internal: register_detail is never in a client projection
   };
 }
@@ -388,7 +392,13 @@ export async function saveRegister(sb, leadId, payload = {}, { actor } = {}) {
 
 // A screen loaded before these fields existed sends items and rooms without them. Absent means "not
 // touched", so keep what is stored. An explicit answer: null still clears it.
-const carryAnswer = (raw, before) => (raw && !("answer" in raw) && before?.answer ? { ...raw, answer: before.answer } : raw);
+// The same for the "Needs action from…" fields (actionRole, actionDue): a screen from before them can't wipe them.
+const CARRIED_FIELDS = ["answer", "actionRole", "actionDue"];
+const carryAnswer = (raw, before) => {
+  if (!raw || !before) return raw;
+  const missing = CARRIED_FIELDS.filter((f) => !(f in raw) && before[f]);
+  return missing.length ? { ...raw, ...Object.fromEntries(missing.map((f) => [f, before[f]])) } : raw;
+};
 function carryRoomConfirmations(meta, stored) {
   if (!meta || !Array.isArray(meta.rooms)) return meta;
   const byId = new Map((stored?.rooms || []).map((r) => [r.id, r]));

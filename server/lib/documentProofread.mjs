@@ -248,7 +248,7 @@ export async function proofreadFixture({ client, docType, fx, layout }) {
 export async function proofreadDocument(sb, leadId, docType, { layout, recipientName, actor, expectedVersions, client } = {}) {
   if (!REGISTER_DOC_TYPES[docType]) throw new DocumentError(400, "Unknown document type.", "BAD_DOC");
   const { lead, register, context } = await loadInputs(sb, leadId, actor);
-  if (expectedVersions && versionsDiffer(expectedVersions, registerItemVersions(register))) {
+  if (expectedVersions && versionsDiffer(expectedVersions, registerItemVersions(register, context))) {
     throw new DocumentError(409, "The register changed since this preview. Preview the draft again, then check the wording.", "PROOF_STALE");
   }
   let revision = 1;

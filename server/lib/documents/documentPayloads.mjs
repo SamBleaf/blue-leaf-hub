@@ -191,95 +191,57 @@ export function buildClientBriefPayload(fx) {
 }
 
 /**
- * 02 — Architect Design Brief (BLB-ADB, template adb-1.0 on the CPB design system). Reader: the architect and the design
- * team. Coordination first (Master Register Tab 17:36): what we need from them, then the decisions that affect the
- * drawings, then what the design must achieve, the changes to the building, the design direction by location and the
- * documents on file. Statuses print only where they say something (owner's editorial rule, 16 Nov 2026).
+ * 02 — Architect Design Brief (BLB-ADB, template adb-2.0 on the CPB design system), from the brief model
+ * (src/lib/briefModel.js; REGISTER_SCREENS_SPEC.md S6). Reader: the architect and the design team. The project, the site
+ * and its constraints, a numbered list of what the next drawing issue needs and from whom, one row per room, and only
+ * the selections that change the drawings. Each section prints only when it has something in it.
  */
 export function buildArchitectBriefPayload(fx) {
   const a = fx.architectBrief || {}, p = fx.project || {}, meta = fx.meta || {};
   const id = documentIdentity({ type: "architect_brief", projectRef: meta.ref, status: meta.status, revision: meta.revision, revisionLabel: meta.revisionLabel, issuedDate: meta.issuedDate });
-  const overview = (a.overview || []).filter(Boolean);
-  const requests = (a.requests || []).filter((x) => x && x.text);
-  const decisions = (a.decisions || []).filter((x) => x && x.text);
-  const reqs = (a.requirements || []).filter((x) => x && x.text);
-  const scope = (a.scope || []).map((g) => ({ ...g, rows: (g.rows || []).filter((r) => r && r.text) })).filter((g) => g.rows.length);
-  const direction = (a.directionGroups || []).map((g) => ({ ...g, rows: (g.rows || []).filter((r) => r && r.text) })).filter((g) => g.rows.length);
-  const refs = (a.references || []).filter(Boolean);
-  // The documents on file sit with the project and its design basis (Tab 11:28, section 1), not at the end.
-  const present = { s1: overview.length > 0 || refs.length > 0, s2: requests.length > 0, s3: decisions.length > 0, s4: reqs.length > 0, s5: scope.length > 0, s6: direction.length > 0 };
+  const issued = id.issued;
+  const rowsOf = (list) => (list || []).filter((r) => r && r.text).map((r) => ({ LABEL: r.label || "", TEXT: r.text }));
+  const projectRows = rowsOf(a.project), siteRows = rowsOf(a.site), selRows = rowsOf(a.selections), outRows = rowsOf(a.outside);
+  const points = (a.points || []).filter((x) => x && x.text);
+  const hasBy = points.some((x) => x.by);
+  // "Brief to follow" prints in grey only in a draft: an issued brief can't hold one (the room-brief rule blocks issue).
+  const floors = (a.roomGroups || []).map((g) => ({ ...g, rows: (g.rows || []).filter((r) => r && (r.text || r.placeholder || r.work)) })).filter((g) => g.rows.length);
+  const present = { s1: projectRows.length > 0, s2: siteRows.length > 0, s3: points.length > 0, s4: floors.length > 0, s5: selRows.length > 0, s6: outRows.length > 0 };
   const nums = {}; let n = 0;
   for (const k of ["s1", "s2", "s3", "s4", "s5", "s6"]) if (present[k]) nums[k] = two(++n);
-  const refsOf = (r) => (r.refs && r.refs.length ? r.refs.join(", ") : r.ref || "");
-  // Grouped tables (design-system groupedTable): one repeating header row per group, rows bounded.
-  const groups = (list, bandKey, rowsKey, lastKey, rowOf) => list.map((g, k) => ({ [lastKey]: k === list.length - 1, [bandKey]: g.group, ...boundedRows(rowsKey, g.rows.map(rowOf)) }));
-  const reqStatuses = new Set(reqs.map((r) => r.status).filter(Boolean));
-  const dirStatuses = new Set(direction.flatMap((g) => g.rows.flatMap((r) => String(r.status || "").split(", ").map((x) => x.charAt(0).toUpperCase() + x.slice(1)))).filter(Boolean));
-  const anyCheck = scope.some((g) => g.rows.some((r) => r.check));
   const drawing = String(p.drawingBasis || "").trim();
   return {
     HDR_DOC_TYPE: "Architect Design Brief",
     HDR_PROJECT: p.siteShort || p.siteAddress || "",
     FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
-    DOC_KICKER: id.issued ? "Design coordination" : "Draft  /  Design coordination",
+    DOC_KICKER: issued ? "Design coordination" : "Draft  /  Design coordination",
     DOC_TITLE: "Design brief",
     HAS_SUBTITLE: !!a.subtitle, DOC_SUBTITLE: a.subtitle || "",
     META_ROWS: metaRows([
       ["Prepared for", a.preparedFor || meta.recipient || "The design team"], ["Site", p.siteAddress],
       ["Client", p.clientName], ["Drawing basis", drawing || "Not yet recorded"],
-      ["Project", p.projectLabel || p.projectDescription], ["Document", id.number],
-      ["Prepared by", p.preparedBy || "Blue Leaf Building"], ["Status", id.issued ? `${id.revision} · ${id.statusText}` : id.statusText],
+      ["Project", a.projectLabel || p.projectLabel || p.projectDescription], ["Document", id.number],
+      ["Prepared by", p.preparedBy || "Blue Leaf Building"], ["Status", issued ? `${id.revision} · ${id.statusText}` : id.statusText],
     ]),
-    STATUS_LABEL: id.issued ? "Coordination brief" : "Draft for review — not issued",
+    STATUS_LABEL: issued ? "Design brief" : "Draft for review — not issued",
     // Tab 11:30, Tab 17:20/:86: never imply approval of a technical solution or consultant sign-off.
-    STATUS_BODY: (id.issued && meta.supersedes?.label ? `This revision replaces ${meta.supersedes.label}${meta.supersedes.issuedDate ? `, issued ${fmtIdDate(meta.supersedes.issuedDate)}` : ""}. ` : "")
-      + "This brief sets out what we need from the design team, what the client needs the design to achieve and the design direction so far. It isn't a construction instruction, and it doesn't approve a technical solution or stand in for consultant sign-off: technical design stays with the architect and the relevant consultants.",
+    STATUS_BODY: (issued && meta.supersedes?.label ? `This revision replaces ${meta.supersedes.label}${meta.supersedes.issuedDate ? `, issued ${fmtIdDate(meta.supersedes.issuedDate)}` : ""}. ` : "")
+      + "What the client needs the design to achieve, and what we need from the design team for the next drawing issue. Finishes are in the Technical Selections Schedule. This isn't a construction instruction and doesn't approve a technical solution: technical design stays with the architect and the consultants."
+      + (issued ? "" : " Grey text marks what Blue Leaf still has to provide; an issued brief has none."),
 
-    HAS_S1: present.s1, S1_NUM: nums.s1 || "",
-    OVERVIEW: overview.map((t) => ({ PARA: t })),
-    HAS_REFS: refs.length > 0, REFS_LABEL: "Drawings and documents on file",
-    ...boundedRows("REFS", refs.map((t) => ({ TEXT: t }))),
-
-    HAS_S2: present.s2, S2_NUM: nums.s2 || "",
-    // Said once, here (the brief's only response protocol): no closing box repeating it.
-    REQUESTS_INTRO: "Please reply against these references, quoting the drawing number and revision. A request stays open until we've checked your revised drawings against it; nothing you send changes the client's choices until they confirm it.",
-    ...boundedRows("REQUESTS", requests.map((x) => ({ REF: x.ref || "", TEXT: x.text, WHO: x.who || "To be agreed" }))),
-
-    HAS_S3: present.s3, S3_NUM: nums.s3 || "",
-    DECISIONS_INTRO: `${decisions.length === 1 ? "This is" : "These are"} being settled with the client or by Blue Leaf. We'll confirm each outcome in writing before you rely on it.`,
-    ...boundedRows("DECISIONS", decisions.map((x) => ({ REF: x.ref || "", TEXT: x.text, WHO: x.who || "To be agreed" }))),
-
+    HAS_S1: present.s1, S1_NUM: nums.s1 || "", ...boundedRows("PROJECT_ROWS", projectRows),
+    HAS_S2: present.s2, S2_NUM: nums.s2 || "", SITE_INTRO: "From public mapping and what the client told us: a guide only. Confirm against the title and a planning search.",
+    ...boundedRows("SITE_ROWS", siteRows),
+    HAS_S3: present.s3, S3_NUM: nums.s3 || "", HAS_BY: hasBy, NO_BY: !hasBy,
+    POINTS_INTRO: "Please reply against these numbers, quoting the drawing number and revision. A point stays open until we've checked the revised drawings against it.",
+    ...boundedRows("POINTS", points.map((x, k) => ({ N: String(k + 1), TEXT: x.text, WHO: x.who || "To be agreed", BY: x.by || "" }))),
     HAS_S4: present.s4, S4_NUM: nums.s4 || "",
-    // The statuses printed are explained here, once, and only those (as the client brief's key, CPB3-06).
-    REQS_INTRO: ["What the client needs the design to achieve.",
-      reqs.some((r) => !r.status) ? "Unmarked: the client's stated requirement, not yet confirmed in writing." : "",
-      reqStatuses.has("Client-approved") ? "Client-approved: the client has confirmed it with us; it isn't a technical approval." : "",
-      reqStatuses.has("For consultant review") ? "For consultant review: a performance direction for the relevant consultant to assess, not a specified product." : "",
-      reqStatuses.has("To verify") ? "To verify: the design team still needs to confirm how it is met." : "",
-      reqStatuses.has("Verified") ? "Verified: confirmed by the design team, with its reference on file." : ""].filter(Boolean).join(" "),
-    ...boundedRows("REQS", reqs.map((x) => ({ REF: x.ref || "", TEXT: x.text, STATUS: x.status || "" }))),
-
-    HAS_S5: present.s5, S5_NUM: nums.s5 || "",
-    // Says only what the groups below hold (QA RID-11: a new build has nothing that stays).
-    SCOPE_INTRO: `${(() => { const has = (g) => scope.some((x) => x.group === g); const parts = [has("Existing to remain or protect") && "what stays",
-      ["Not in the current scope", "By others", "Supplied by the client", "Still to be decided"].some(has) && "what sits outside it"].filter(Boolean);
-      return parts.length ? `The work as recorded now, with ${parts.join(" and ")}.` : "The work as recorded now."; })()}${anyCheck ? " To verify marks an item whose technical check is still open." : ""}`,
-    // The Check column is labelled only when a row has a check open; otherwise it stays quiet (owner's editorial rule).
-    SCOPE_CHECK_HEAD: anyCheck ? "Check" : "",
-    SCOPE_GROUPS: groups(scope, "SG", "SROWS", "S_LAST", (r) => ({ REF: refsOf(r), TEXT: r.text, CHECK: r.check || "" })),
-
-    HAS_S6: present.s6, S6_NUM: nums.s6 || "",
-    HAS_DIRECTION: !!a.direction, DIRECTION: a.direction ? `The design direction: ${a.direction}` : "",
-    DIR_INTRO: ["What applies throughout the house is listed once; each room then shows its own choices and where it differs from the house.",
-      ["Proposed", "Client-approved"].some((st) => dirStatuses.has(st)) ? `Each item is the client's preferred direction unless marked ${["Proposed", "Client-approved"].filter((st) => dirStatuses.has(st)).join(" or ")}; none is a product or technical approval.` : "Each item is the client's preferred direction; none is a product or technical approval.",
-      // Each printed status defined once (QA REC-10: Proposed means put to the client, not a proposed technical solution).
-      dirStatuses.has("Proposed") ? "Proposed: a specific option put to the client, not yet decided." : "",
-      dirStatuses.has("Client-approved") ? "Client-approved: the client has confirmed it with us." : "",
-      dirStatuses.has("To verify") ? "To verify: the design team still needs to confirm it." : "",
-      dirStatuses.has("Verified") ? "Verified: confirmed by the design team, with its reference on file." : ""].filter(Boolean).join(" "),
-    DIR_GROUPS: groups(direction, "DG", "DROWS", "D_LAST", (r) => ({ ITEM: r.item || "", ITEM_REF: r.ref ? `\n${r.ref}` : "", TEXT: r.text, STATUS: r.status || "" })),
-
-
+    ROOMS_INTRO: "One row per room: the work, then what the room must do and contain.",
+    FLOORS: floors.map((g) => ({ HAS_FLOOR: !!a.floorBands, FLOOR: g.floor || "",
+      ...boundedRows("RROWS", g.rows.map((r) => ({ ROOM: r.room, WORK: r.work || "", PRE: r.placeholder && !issued ? `Brief to follow.${r.text ? " " : ""}` : "", TEXT: r.text || "" }))) })),
+    HAS_S5: present.s5, S5_NUM: nums.s5 || "", S5_TITLE: a.selectionsTitle || "Selections that affect the drawings", ...boundedRows("SEL_ROWS", selRows),
+    SEL_CLOSE: "Paint, floor finishes, cabinetry, benchtops, splashbacks and tapware are in the Technical Selections Schedule.",
+    HAS_S6: present.s6, S6_NUM: nums.s6 || "", ...boundedRows("OUT_ROWS", outRows),
     _docNumber: id.number, _id: id,
   };
 }
