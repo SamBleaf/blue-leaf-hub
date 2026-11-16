@@ -34,6 +34,7 @@ import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
   QUESTION_LIBRARY_VERSION, answerSummary, natureOf, answerConfigFor, linkedParentLabel, baselineAssumptions, performanceSuggestions, technicalLabel, pricingLabel,
+  roomDefaultsFor,
 } from "../../src/lib/register.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -710,10 +711,16 @@ function architectBriefFixture(input) {
   const DIRECTION_STATUS = (i) => { const c = CERTAINTY(i); return checkOpen(i) ? (c ? `${c}, to verify` : "To verify") : verified(i) ? (c ? `${c}, verified` : "Verified") : c; };
   const byId = new Map(items.map((i) => [i.id, i]));
   const directionItems = items.filter((x) => isClientSelection(x) && DESIGN_DIRECTION.has(x.certainty) && (said(x) || x.product));
+  // An exception is described only when the default it names really applies to this room, by the register's own rule
+  // (roomDefaultsFor: the floor default for a bedroom is the bedroom-floor zone's, else an unzoned one). A link to a
+  // default that doesn't reach the room is not an exception: the room's choice is simply stated (owner, ADB-01).
+  const appliesHere = (i, def) => { const room = roomOfItem(i); const q = questionById(resolvePromptId(i.promptKey));
+    return !!(room && def && q && roomDefaultsFor(register, q, room.roomType).some((d) => d.id === def.id)); };
   const dirRow = (i) => {
     const zone = clean(i.answer?.zone?.label);
-    const over = i.overridesDefaultId ? byId.get(i.overridesDefaultId) : null;
-    return { item: `${itemShort(i)}${zone ? ` (${zone.toLowerCase()})` : ""}`, ref: refCode(i),
+    const linked = i.overridesDefaultId ? byId.get(i.overridesDefaultId) : null;
+    const over = appliesHere(i, linked) ? linked : null;
+    return { item: `${itemShort(i).replace(/\s*—\s*who\?$/i, "")}${zone ? ` (${zone.toLowerCase()})` : ""}`, ref: refCode(i),
       // Names what it replaces, never the system term "house default" (QA KES-07).
       text: `${clean(i.description || i.product) || said(i)}${over && (clean(over.description || over.product) || said(over)) ? `, instead of ${(() => { const d = clean(over.description || over.product) || said(over); return `the ${d.charAt(0).toLowerCase()}${d.slice(1)}`; })()}` : ""}`, status: DIRECTION_STATUS(i) };
   };

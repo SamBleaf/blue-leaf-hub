@@ -5,7 +5,7 @@
 // Needs the docx-js authoring library (`npm i --no-save docx@9`); the Hub never loads it at runtime.
 // Every {TAG} is filled by buildArchitectBriefPayload (server/lib/documents/documentPayloads.mjs).
 // Coordination first (Master Register Tab 17:36, Tab 22:19): the project and its design basis → what we need from the design team
-// → decisions that affect the drawings → what the design must achieve → changes to the building → design direction by
+// → decisions that affect the drawings → what the design must achieve → scope and boundaries → design direction by
 // location. The documents on file sit with the project; how to respond is said once, in the requests. Every section is optional and vanishes when empty; the numbers count
 // only what prints. Built on the client brief's accepted design (cpb-2.4): same tokens, header, footer, tables.
 import fs from "fs";
@@ -54,7 +54,8 @@ const sectionRequirements = when("HAS_S4", [
 // Grouped as the client brief groups its preferences: one table per group, its header row "REF · <GROUP> · CHECK"
 // repeating when the group runs onto the next page.
 const sectionScope = when("HAS_S5", [
-  ...sectionHead("S5_NUM", "Scope", "Changes to the building"),
+  // One heading for every pathway: a new home has no "changes to the building" (owner, ADB-02).
+  ...sectionHead("S5_NUM", "Scope", "Scope and boundaries"),
   body("{SCOPE_INTRO}", { keepNext: true, after: 120 }),
   ...groupedTable("SCOPE_GROUPS", "SG", "SROWS", [
     REF,

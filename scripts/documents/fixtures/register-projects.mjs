@@ -36,7 +36,8 @@ function kestrel() {
     bed2: makeRoom({ id: "k_bed2", name: "Bedroom 2", roomType: "bedroom", level: "Ground", order: 6, scope: "existing" }),
   };
   const priorities = rec("P-005", { answer: { ...pick("P-005", ["natural_light"], ["entertaining"], ["storage"]), clientNote: "We want the kitchen, living and garden to feel like one space, and we need far better storage for two growing kids." } });
-  const floorDefault = rec("W-017", { isDefault: true, certainty: "preference", description: "Engineered timber-look flooring through the main living areas" });
+  // The floor default covers the main living areas: the main-floor zone, as its words say, so a bedroom doesn't read it.
+  const floorDefault = rec("W-017", { isDefault: true, certainty: "preference", description: "Engineered timber-look flooring through the main living areas", answer: { zone: { key: "main_floor", label: "Main floor" } } });
   const items = [
     priorities,
     // Scope of works
@@ -150,7 +151,7 @@ function ridgeline() {
     rec("W-013", { isDefault: true, certainty: "preference", description: "Vertical timber-look feature cladding at the entry" }),
     rec("W-014", { isDefault: true, certainty: "proposed", description: "Dark metal roof with concealed gutters" }),
     rec("W-017", { isDefault: true, certainty: "preference", description: "Engineered oak flooring to the living areas, carpet to the bedrooms" }),
-    rec("W-019", { isDefault: true, certainty: "preference", description: "Warm white walls with a soft feature colour in the study" }),
+    rec("W-019", { isDefault: true, certainty: "preference", description: "Warm white walls throughout" }),
     inRoom(by.Kitchen, "K-004", { certainty: "preference", description: "Two-tone cabinetry with timber-look uppers and painted lowers" }),
     inRoom(by.Kitchen, "K-005", { certainty: "client_approved", evidence: EVIDENCE, description: "Granite benchtops with a 40 mm edge" }),
     inRoom(by.Kitchen, "K-006", { certainty: "preference", description: "Handmade-look tile splashback" }),
@@ -165,7 +166,10 @@ function ridgeline() {
     ]),
     inRoom(by.Ensuite, "B-007", { certainty: "preference", description: "Freestanding bath under the window" }),
     inRoom(by.Laundry, "R-009", { certainty: "preference", description: "Full-height laundry cabinetry with a hanging space" }),
-    inRoom(by.Study, "R-006", { certainty: "preference", description: "Built-in desk and shelving along one wall" }),
+    // The study's built-ins are joinery work in the study (R-009 is scope, not a finish); its feature colour is the
+    // study's own wall finish (owner, ADB-03).
+    inRoom(by.Study, "R-009", { disposition: "new", description: "Built-in desk and shelving along one wall" }),
+    inRoom(by.Study, "R-006", { certainty: "preference", description: "Soft feature colour to one wall" }),
     inRoom(by.Family, "R-007", { certainty: "proposed", description: "Stacking doors to the outdoor living area" }),
     inRoom(by.Garage, "R-007", { certainty: "preference", description: "Sectional garage door in a colour to match the roof" }),
     rec("W-015", { description: "Double glazing throughout, with larger openings facing north" }),

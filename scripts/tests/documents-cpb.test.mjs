@@ -42,7 +42,7 @@ ok("a site fact is never work", !flat(cb.scopeIn).includes("Steep"));
 section("Room-by-room scope, said once per group of rooms (CPB2-02)");
 const { p: rp, fx: rfxScope } = build("ridgeline", { recipientName: "X" });
 const rScope = rfxScope.clientBrief.scopeIn.map((x) => x.text);
-ok("the long home no longer repeats 'as shown on the concept plans' room by room", !rScope.some((t) => /as shown on the concept plans/.test(t)) && rScope.length === 5, flat(rScope));
+ok("the long home no longer repeats 'as shown on the concept plans' room by room", !rScope.some((t) => /as shown on the concept plans/.test(t)) && rScope.length === 6, flat(rScope));
 ok("a group names its rooms only: no category label to get wrong or repeat (CPB3-01/02)", rScope.includes("New kitchen, scullery, living room, dining room and family room")
   && rScope.includes("New main bedroom, bedrooms 2 to 4, walk-in robe and study") && rScope.includes("New bathroom, ensuite and laundry")
   && !/living areas|bedrooms and study|: /.test(flat(rScope.filter((t) => t.startsWith("New") && !/home/.test(t)))), flat(rScope));

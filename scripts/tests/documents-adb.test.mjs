@@ -68,7 +68,7 @@ ok("a performance direction reads 'For consultant review'; a plain requirement c
 ok("the key explains only the statuses printed", /Client-approved: the client has confirmed it/.test(kpay.REQS_INTRO) && /For consultant review:/.test(kpay.REQS_INTRO)
   && !/Client-approved/.test(rpay.REQS_INTRO), rpay.REQS_INTRO);
 
-section("Changes to the building");
+section("Scope and boundaries");
 ok("grouped by kind: the work, then what stays, what's out, by others, client supplied, undecided, the site and household", kab.scope.map((g) => g.group).join("|")
   === "Proposed work|Existing to remain or protect|Not in the current scope|By others|Supplied by the client|Still to be decided|Site and household", kab.scope.map((g) => g.group).join("|"));
 ok("the room work is said once per family of rooms, with every record's reference (Ridgeline)", rab.scope[0].rows.some((r) => r.text === "New kitchen, scullery, living room, dining room and family room" && r.refs.length === 5));
@@ -83,7 +83,24 @@ ok("the Check column is labelled only when a check is open", kpay.SCOPE_CHECK_HE
 
 section("Design direction by location (common information once, then the exceptions)");
 ok("what applies throughout the house comes first, once", kab.directionGroups[0].group === "Throughout the house" && kab.directionGroups[0].rows.length === 4);
-ok("a room's exception names what it replaces, once, on its row (never 'house default')", kab.directionGroups.find((g) => /Main bedroom/.test(g.group)).rows[0].text === "Wool carpet, instead of the engineered timber-look flooring through the main living areas");
+// ADB-01 (owner, 16 Nov): an exception is described only when the default it names applies to the room. Kestrel's floor
+// default covers the main floor zone, so the main bedroom's carpet is simply its own choice, even though the record
+// still carries a link to that default.
+ok("ADB-01: a bedroom's carpet isn't 'instead of' a main-floor default that never applied to it", kab.directionGroups.find((g) => /Main bedroom/.test(g.group)).rows[0].text === "Wool carpet");
+{
+  const { fx } = build("kestrel", {}, (p) => { designCoordination(p); const d = p.register.items.find((i) => i.description === "Engineered timber-look flooring through the main living areas"); d.answer = { zone: { key: "bedroom_floor", label: "Bedroom floor" } }; d.description = "Engineered timber-look flooring to the bedrooms"; });
+  ok("ADB-01: …and when the default does apply (the bedroom-floor zone), the exception names what it replaces", fx.architectBrief.directionGroups.find((g) => /Main bedroom/.test(g.group)).rows[0].text === "Wool carpet, instead of the engineered timber-look flooring to the bedrooms");
+  const { fx: fx2 } = build("kestrel", {}, (p) => { designCoordination(p); const d = p.register.items.find((i) => i.description === "Engineered timber-look flooring through the main living areas"); delete d.answer; });
+  ok("ADB-01: …an unzoned default applies to every room, so it is named there too (the register's rule, not a guess)", /^Wool carpet, instead of the engineered/.test(fx2.architectBrief.directionGroups.find((g) => /Main bedroom/.test(g.group)).rows[0].text));
+}
+ok("ADB-02: the scope section reads 'Scope and boundaries' on every pathway", /sectionHead|Scope and boundaries/.test(fs.readFileSync(join(REPO, "scripts/documents/author-adb.mjs"), "utf8")) && new PizZip(fs.readFileSync(join(REPO, "public/templates/blb-architect-brief-template.docx"))).file("word/document.xml").asText().includes("Scope and boundaries"));
+{
+  const study = rab.directionGroups.find((g) => g.group === "Study").rows;
+  ok("ADB-03: the study's desk and shelving are joinery work in the study (scope), its feature colour is the study's own wall finish, and the house walls say nothing about the study",
+    rab.scope.find((g) => g.group === "Proposed work").rows.some((r) => r.text === "Study: Built-in desk and shelving along one wall") && !study.some((r) => /desk/.test(r.text))
+    && study.length === 1 && study[0].item === "Wall, ceiling & feature finish" && /feature colour/.test(study[0].text)
+    && rab.directionGroups[0].rows.some((r) => r.text === "Warm white walls throughout") && !flat(rab.directionGroups[0]).includes("study"), flat([study, rab.scope[0].rows.map((r) => r.text)]));
+}
 ok("Preferred is the norm, so it isn't printed; Proposed and Client-approved are", kab.directionGroups.flatMap((g) => g.rows).every((r) => ["", "Proposed", "Client-approved"].includes(r.status))
   && kab.directionGroups.flatMap((g) => g.rows).some((r) => r.status === "Client-approved") && /unless marked Proposed or Client-approved/.test(kpay.DIR_INTRO));
 ok("rooms with the same choices share one group, each record's reference kept; a room's own extra stays its own (Ridgeline)",

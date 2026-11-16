@@ -69,8 +69,10 @@ It goes to the architect and the design team, and reads coordination first. It l
 2. **What we need from the design team.** Each open next action, or technical check, whose Who is Architect / designer, Engineer / consultant or Trade. It names the firm from the Consultants step (for example "Ellison Architecture"), or the discipline if none is recorded ("Engineer").
 3. **Decisions that affect the drawings.** Open next actions for the client or Blue Leaf. An action with no Who reads "To be agreed": it is never handed to the architect.
 4. **What the design must achieve.** The client's priorities in their own words, then the requirements. Only Client-approved (with evidence) and For consultant review are labelled.
-5. **Changes to the building.** The work, then what stays, what's out, by others, what the client supplies, what's still to be decided, and the site and household facts. "To verify" marks an open technical check.
-6. **Design direction by location.** What applies throughout the house is listed once. Each room then lists its own choices, including where it differs from the house default. Rooms with identical choices share one group. Proposed and Client-approved are marked; preferred is the unmarked norm.
+5. **Scope and boundaries.** The work, then what stays, what's out, by others, what the client supplies, what's still to be decided, and the site and household facts. "To verify" marks an open technical check.
+6. **Design direction by location.** What applies throughout the house is listed once. Each room then lists its own choices. A room's choice says what it replaces only when the house default really applies to that room (for example a bedroom only reads a bedroom-floor default). Rooms with identical choices share one group. Proposed and Client-approved are marked; preferred is the unmarked norm.
+
+> 💡 **Tip:** Give a house-wide floor default its zone (Main floor, Bedroom floor, Wet-area floor). Then each room reads the right one, and a bedroom's carpet isn't shown as replacing the living-area timber.
 
 > 💡 **Tip:** To put a request to the architect, engineer or energy assessor, give the record a next action and set **Who** to Architect / designer or Engineer / consultant. Record the firm on the Consultants step so the brief names it.
 
@@ -242,7 +244,7 @@ Next review date: 2027-05-07
 1. On a lead at Consultants with an architect, an engineer and an energy assessor on the Consultants step, preview the Architect Design Brief.
 2. Expected: the cover reads **Prepared for** the architect (name, firm) and shows the client, drawing basis, document number BLB-ADB-[ref] and status. Every page has the header ARCHITECT DESIGN BRIEF with the address, and the footer with the identity and Page X of Y.
 3. Give a record a next action with Who = Architect / designer. Expected: it appears under **What we need from the design team** with the architect's firm. Give one Who = Client. Expected: it appears under **Decisions that affect the drawings** as Client. Leave Who blank. Expected: "To be agreed", under decisions.
-4. Expected: "Whole house" and "(project default)" appear nowhere. House-wide choices are listed once under **Throughout the house**, and a room exception reads "…, in place of the house default".
+4. Expected: "Whole house" and "(project default)" appear nowhere. House-wide choices are listed once under **Throughout the house**. Zone a floor default to Main floor and give a bedroom its own carpet linked to it. Expected: the bedroom reads just "Wool carpet". Zone the default to Bedroom floor. Expected: "Wool carpet, instead of the …".
 5. Give two rooms the same choices. Expected: one group names both rooms ("Ensuite and bathroom") and lists both references on each row.
 6. Expected: nothing reads Preferred. Only Proposed and Client-approved are marked in the design direction.
 - [ ] Pass  [ ] Fail
