@@ -416,7 +416,7 @@ function draw(doc, snap, opts) {
   // longest first, total LM (P/M per metre) or EA (precut studs). Snapshots from before @5 have no supplierGroups.
   if ((snap.supplierGroups || []).length) {
     need(60);
-    doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T((snap.supplierGroups.some((g) => g.rows.some((r) => !r.manual && r.unit !== "STRAP")) ? "TIMBER" : "ORDER")), M, y, { width: CW });
+    doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T((snap.supplierGroups.some((g) => g.rows.some((r) => !r.manual && !r.supplierEa)) ? "TIMBER" : "ORDER")), M, y, { width: CW });
     y = doc.y + 4;
     doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each."), M, y, { width: CW });
     y = doc.y + 6;
@@ -429,7 +429,7 @@ function draw(doc, snap, opts) {
       for (const r of g.rows) {
         const prodW = CW * 0.36, cutX = M + prodW + 8, cutW = CW - prodW - 8 - (r.totalText ? 134 : 70);
         doc.font(fonts.regular).fontSize(9);
-        const cutText = r.unit === "EA" ? "" : r.cutText || "";
+        const cutText = r.unit === "EA" && !r.cutText ? "" : r.cutText || "";
         const totalText = r.totalText || (r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`);
         const prodText = r.manual ? `${r.product} (added by hand)` : r.product;
         const h = Math.max(15, doc.heightOfString(T(prodText), { width: prodW }) + 5, doc.heightOfString(T(cutText || " "), { width: cutW }) + 5);

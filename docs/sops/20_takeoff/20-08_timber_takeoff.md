@@ -635,9 +635,16 @@ Next review date: 2027-04-14
 - [ ] Pass  [ ] Fail
 
 **TC-25 — Hoop iron on a wall, and short MGP10 pieces (HUB 033)**
-1. Walls card > **Hoop iron**: the product (default 30 x 0.8 galvanised, to confirm) and an optional **Roll length**. Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm). In **Select**, tap a wall and **Hoop iron on this wall: Off** to leave it out; **On** puts it back (one Undo each).
-2. Expected on a 9,000 wall: 16 straps, 11.2 m. Node: scripts/tests/takeoff-tc-hub033.test.mjs.
+1. Walls card > **Hoop iron**: the product (HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL), as the supplier prints it) and the **Roll length** (30 m). Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm). In **Select**, tap a wall and **Hoop iron on this wall: Off** to leave it out; **On** puts it back (one Undo each).
+2. Expected on a 9,000 wall: 16 straps, 11.2 m, which orders as 1 roll (30 m rolls, counted EA, printed under BRACING). Node: scripts/tests/takeoff-tc-hub033.test.mjs.
 3. Short MGP10 pieces (noggins, cripples, short trimmers under 1.2 m) are cut from the same product's stud/plate lengths: first from what is left over on the lengths bought for the longer pieces, then shared between themselves. Studs and plates stay one length each. An MGP10 product with no longest length set uses 6,000 mm and the card still asks you to confirm it.
+- [ ] Pass  [ ] Fail
+
+**TC-26 — Add bracing: ply sheets and hoop iron cross braces (HUB 034)**
+1. Select a Walls item, **Select** with nothing picked, tap **Add bracing**. **Ply sheet**: tap along a wall where each 1,200 mm sheet goes (the sheet is centred on your tap and kept inside the wall; a sheet that would overlap another is refused). Its length follows the wall height: the smallest stocked sheet that covers it, 2,745 or 3,050 (BRACE OS H2 6X1200X2745MM / 6X1200X3050MM, seeds flagged to confirm). A wall taller than 3,050 or with no height says so and is not counted: add those sheets by hand. **Hoop iron cross**: set the span (default 2,700) and tap where each goes.
+2. Hoop iron per cross brace is two diagonals: each = square root of (span squared + wall height squared), so a 2,700 span on a 2,700 wall is 2 x 3.818 = 7.64 m; on 2,400 it is 7.23 m. Tensioners: 2 per cross (one per diagonal), "TENSIONER SET HEX HEAD (PCE)". Sam's rule of thumb (2.7 x 1.6 x 2 = 8.64 m) is higher than the geometry, so the geometry is what is ordered (no allowance for laps or fixing ends); AS 1684.2 Section 8 is the reference for strap (tension) bracing, but the bracing design (how many, where, what angle) stays with the bracing plan. A cross brace flatter than 30 or steeper than 60 degrees is flagged. The cross braces' hoop iron and the walls' own straps are added together and ordered as one rolls line.
+3. The same on the wall's elevation: in the wall page **Bracing** card tap **Add ply sheet** or **Add cross brace**, then tap the elevation (stays on until **Done**). Marks show on the elevation (green panel = ply, purple X = cross brace). **Remove** is on each row (and in Select, tap a wall, **Bracing on this wall**); every add and remove is one Undo.
+4. Temporary bracing and screws are **not** calculated: use **+ Add bracing** on the order and pick **TEMP BR** (PINE 90x35 MGP10 P/M, `10/4.8`) or **SB SCREW** (COACHSCREW 10X75 GALV (PK 10), `1 EA`). Node: scripts/tests/takeoff-tc-hub034.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

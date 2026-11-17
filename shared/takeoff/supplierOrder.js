@@ -25,7 +25,7 @@ export const PRECUT_STUD_MM = Object.freeze([2400, 2700, 3000, 3300, 3600, 4200]
 /** Groups in the order Blue Leaf's supplier take-off lists them; anything else follows, alphabetically. */
 const GROUPS = Object.freeze([
   ["plates", "T&B PLATES"], ["studs", "STUDS"], ["jambs", "JAMB STUDS"], ["junction", "JUNCT. BLK"],
-  ["trimmers", "HD & SILL TR"], ["lintels", "LINTELS"], ["noggins", "NOGGINS"], ["bracing", "BRACING"], ["hoop", "HOOP IRON"],
+  ["trimmers", "HD & SILL TR"], ["lintels", "LINTELS"], ["noggins", "NOGGINS"], ["bracing", "BRACING"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"],
 ]);
 const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", trim: "TRIM", other: "OTHER TIMBER" };
 
@@ -39,8 +39,9 @@ const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", t
 export function memberGroup(role) {
   const r = String(role || "other").toLowerCase().trim();
   const pick = (key) => ({ key, heading: GROUPS.find(([k]) => k === key)[1], rank: GROUPS.findIndex(([k]) => k === key) });
-  if (/hoop/.test(r)) return pick("hoop");
-  if (/brac|strap|tension/.test(r)) return pick("bracing");
+  if (r === "tempbr") return pick("tempbr");
+  if (r === "sbscrew") return pick("sbscrew");
+  if (/hoop|brac|strap|tension/.test(r)) return pick("bracing");
   if (/plate/.test(r) || /^(bottom|top)\b/.test(r)) return pick("plates");
   if (/^(below-sill|above-head|cripple)/.test(r)) return pick("studs");
   if (/king|jack|jamb/.test(r)) return pick("jambs");
@@ -121,13 +122,14 @@ export function buildSupplierGroups(items, manualLines = []) {
       : splitByRole(l.roles, l.quantity);
     for (const [role, n] of roleParts) {
       const g = memberGroup(role);
-      // hoop iron (Sam, 18 Nov 2026): straps of 0.7 m, shown as straps AND metres, and as rolls when the product has a roll length
-      if (l.hoop) {
+      // hoop iron rolls, brace sheets and tensioners (Sam, 18 Nov 2026): the supplier's own wording, counted EA under BRACING
+      if (l.hoop || l.bracing) {
+        const name = (l.hoop || l.bracing).name;
         const grp = groups.get(g.key) || { key: g.key, heading: g.heading, rank: g.rank, rows: new Map() };
         groups.set(g.key, grp);
-        const row = grp.rows.get(`hoop|${l.hoop.name}`) || { product: l.hoop.name, unit: "STRAP", straps: 0, strapMm: Number(l.stockLengthMm) || 700, rollM: l.hoop.rollM || null, problem: false };
-        grp.rows.set(`hoop|${l.hoop.name}`, row);
-        row.straps += n; row.problem = row.problem || !!l.problem;
+        const row = grp.rows.get(`ea|${name}`) || { product: name, unit: "EA", supplierEa: true, order: l.hoop ? 0 : /^TENSIONER/.test(name) ? 1 : 2, quantity: 0, problem: false, lvl: false, stock: null, cutsByLength: new Map(), lmDirect: 0 };
+        grp.rows.set(`ea|${name}`, row);
+        row.quantity += n; row.problem = row.problem || !!l.problem;
         continue;
       }
       const stud = g.key === "studs" && /^(stud|end stud|side stud|centre stud)/i.test(role);
@@ -155,19 +157,14 @@ export function buildSupplierGroups(items, manualLines = []) {
     grp.rows.set(`manual|${x.id}`, { manual: true, id: x.id, product: x.product, unit: x.unit === "EA" ? "EA" : "LM", quantity: x.quantity, cuts: x.cuts || [], problem: false, lvl: false, stock: null, cutsByLength: new Map(), lmDirect: 0 });
   }
   return [...groups.values()].sort((a, b) => a.rank - b.rank || (a.heading < b.heading ? -1 : a.heading > b.heading ? 1 : 0)).map((g) => {
-    const rows = [...g.rows.values()].sort((a, b) => Number(!!a.manual) - Number(!!b.manual) || Number(a.lvl) - Number(b.lvl) || Number(a.unit === "EA") - Number(b.unit === "EA") || (a.product < b.product ? -1 : a.product > b.product ? 1 : 0)).map((r) => {
+    const rows = [...g.rows.values()].sort((a, b) => Number(!!a.manual) - Number(!!b.manual) || (a.order ?? 5) - (b.order ?? 5) || Number(a.lvl) - Number(b.lvl) || Number(a.unit === "EA") - Number(b.unit === "EA") || (a.product < b.product ? -1 : a.product > b.product ? 1 : 0)).map((r) => {
       if (r.manual) {
         if (r.unit === "EA") return { product: r.product, unit: "EA", quantity: r.quantity, lengthMm: null, problem: false, manual: true, id: r.id };
         const mm = r.cuts.reduce((a, c) => a + c.count * c.lengthMm, 0);
         return { product: r.product, unit: "LM", cuts: r.cuts, cutText: formatCuts(r.cuts), totalLm: Number((mm / 1000).toFixed(2)), problem: false, manual: true, id: r.id };
       }
-      if (r.unit === "STRAP") {
-        const metresTotal = Number(((r.straps * r.strapMm) / 1000).toFixed(2));
-        const rolls = Number(r.rollM) > 0 ? Math.ceil(metresTotal / Number(r.rollM) - 1e-9) : null;
-        return { product: r.product, unit: "STRAP", straps: r.straps, strapMm: r.strapMm, metres: metresTotal, rolls, rollM: r.rollM || null, problem: r.problem,
-          cutText: `${r.straps} straps × ${metres(r.strapMm)} m`, totalText: `${metresTotal} m${rolls ? ` · ${rolls} ${rolls === 1 ? "roll" : "rolls"} of ${r.rollM} m` : ""}` };
-      }
-      if (r.unit === "EA") return { product: r.product, unit: "EA", quantity: r.quantity, lengthMm: r.stock, problem: r.problem };
+      // the supplier's own layout for bracing: count, then the same as EA with two decimals ("5 ... 5.00 EA")
+      if (r.unit === "EA") return { product: r.product, unit: "EA", quantity: r.quantity, lengthMm: r.stock, problem: r.problem, ...(r.supplierEa ? { cutText: String(r.quantity), totalText: `${r.quantity.toFixed(2)} EA` } : {}) };
       const cuts = [...r.cutsByLength.entries()].map(([lengthMm, count]) => ({ count, lengthMm })).sort((a, b) => b.lengthMm - a.lengthMm);
       const mm = cuts.reduce((a, c) => a + c.count * c.lengthMm, 0);
       const totalLm = Number((mm / 1000 + r.lmDirect).toFixed(2));

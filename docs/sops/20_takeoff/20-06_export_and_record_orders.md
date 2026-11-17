@@ -543,15 +543,15 @@ Next review date: 2027-04-14
 3. Edge: mark 2,700 not stocked on an MGP10 product, a 2,650 cut now buys 3,000; mark 3,600 not stocked and a 3,100 cut buys 4,200. A 3,300 "not stocked" mark left from the old grid is ignored.
 - [ ] Pass  [ ] Fail
 
-**TC-31 — Hoop iron on the order (HUB 033, API + PDF)**
-1. Unit test `node scripts/tests/takeoff-tc-hub033.test.mjs`, or open a Walls takeoff with a 9 m wall and a 1.2 m wall and **Review order**.
-2. Expected: a **HOOP IRON** heading in the Timber part (screen and PDF) with the product ("Hoop iron strap 30 x 0.8 galvanised"), the straps and the metres: 9 m = 2 x 8 = 16 straps, 1.2 m = 2 straps, 18 straps x 0.7 m = 12.6 m. If the Walls card has a **Roll length**, the row also says the rolls (12.6 m on a 10 m roll = 2 rolls). The line's note says the product is a default to confirm. A wall with its hoop iron switched off adds nothing.
+**TC-31 — Hoop iron and bracing on the order (HUB 033 + 034, API + PDF)**
+1. Unit tests `node scripts/tests/takeoff-tc-hub033.test.mjs` and `takeoff-tc-hub034.test.mjs`, or open a Walls takeoff with a 9 m wall, a 1.2 m wall and some **Add bracing** marks and **Review order**.
+2. Expected: one **BRACING** heading in the Timber part (screen and PDF), in the supplier's wording, each row a count then "N.00 EA": `HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL) — 5 — 5.00 EA`, `TENSIONER SET HEX HEAD (PCE) — 30 — 30.00 EA`, `BRACE OS H2 6X1200X2745MM — 10 — 10.00 EA`, `BRACE OS H2 6X1200X3050MM — 18 — 18.00 EA`. Hoop iron is one rolls row: the walls' straps (9 m = 16 straps, 1.2 m = 2 straps, 18 x 0.7 m = 12.6 m) plus the cross braces' metres, rounded up to whole 30 m rolls. The line's note gives the metres. A wall with its hoop iron switched off adds no straps. There is no separate HOOP IRON heading.
 - [ ] Pass  [ ] Fail
 
 **TC-32 — + Add member and + Add bracing (HUB 033, UI Review + API)**
-1. On a Timber and cladding order tap **+ Add member**. Pick the heading (T&B plates, Studs, Jamb studs, Junction blocks, Head & sill trimmers, Lintels, Noggins, Bracing, Hoop iron, Other), pick the product (job products and hoop iron, or type one) and enter `4/3.6` (4 pieces at 3.6 m) or `10 EA`. Tap **Add line**, then **Save order details**.
+1. On a Timber and cladding order tap **+ Add member**. Pick the heading (T&B plates, Studs, Jamb studs, Junction blocks, Head & sill trimmers, Lintels, Noggins, Bracing, TEMP BR, SB SCREW, Other), pick the product (job products and hoop iron, or type one) and enter `4/3.6` (4 pieces at 3.6 m) or `10 EA`. Tap **Add line**, then **Save order details**.
 2. Expected: the line shows in its heading marked **added by hand**, with **Edit** and **Remove**. Entering `abc` or `4/` says why and does not save. Reload: it is still there. Change the takeoff: the line does not change or disappear. Export: it prints in its group (marked "(added by hand)") and an order with only hand-added lines can be exported.
-3. Tap **+ Add bracing**: the heading is Bracing; tap a quick pick (Sheet bracing, Strap bracing, Tension straps) or type a product. Same entry rules.
+3. Tap **+ Add bracing**: choose **Bracing**, **TEMP BR** or **SB SCREW**; tap a quick pick (TEMP BR: `PINE 90x35 MGP10 P/M` with `10/4.8` = 48.00 LM; SB SCREW: `COACHSCREW 10X75 GALV (PK 10)` with `1 EA`) or type a product. Same entry rules. Temporary bracing and screws are never calculated.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

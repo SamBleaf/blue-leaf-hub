@@ -19,7 +19,7 @@
 // =============================================================================
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { BRACING_SUGGESTIONS, GROUP_LABEL, HOOP_IRON_PRODUCTS, ITEM_STALE_TEXT, MANUAL_HEADINGS, buildSupplierGroups, normaliseManualLines, parseManualEntry, productText, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
+import { BRACING_SUGGESTIONS, MANUAL_HEADING_PRODUCTS, GROUP_LABEL, HOOP_IRON_PRODUCTS, ITEM_STALE_TEXT, MANUAL_HEADINGS, buildSupplierGroups, normaliseManualLines, parseManualEntry, productText, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { AccessoryScopeReview, StatusChips } from "./ScheduleScreen.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -64,7 +64,7 @@ export function TimberTakeoff({ groups, onEditManual = null, onRemoveManual = nu
   const totalEa = groups.reduce((a, g) => a + g.totalEa, 0);
   return (
     <div className="mb-2 rounded-lg border border-hairline" data-testid="timber-takeoff">
-      <p className="border-b border-hairline px-2 py-1.5 text-[11px] text-muted">Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each. Hoop iron is counted in straps and metres.</p>
+      <p className="border-b border-hairline px-2 py-1.5 text-[11px] text-muted">Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each. Bracing (hoop iron rolls, tensioners, brace sheets) is counted EA.</p>
       {groups.map((g) => (
         <section key={g.key} data-takeoff-group={g.key} aria-label={g.heading}>
           <h4 className="bg-sky-50 px-2 py-1 text-xs font-bold tracking-wide text-ink">{g.heading}</h4>
@@ -73,7 +73,7 @@ export function TimberTakeoff({ groups, onEditManual = null, onRemoveManual = nu
               <li key={r.manual ? `manual|${r.id}` : `${r.product}|${r.unit}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-2 py-1.5 text-sm" data-takeoff-row={r.unit} data-manual-row={r.manual ? r.id : undefined}>
                 <span className={`min-w-0 basis-full break-words sm:basis-2/5 ${r.problem ? "text-amber-800" : "text-ink"}`}>{r.product}
                   {r.manual && <span className="ml-1 inline-block rounded bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800">added by hand</span>}</span>
-                <span className="min-w-0 flex-1 break-words text-xs text-muted" data-takeoff-cuts="">{r.unit === "EA" ? "" : r.cutText}</span>
+                <span className="min-w-0 flex-1 break-words text-xs text-muted" data-takeoff-cuts="">{r.unit === "EA" && !r.cutText ? "" : r.cutText}</span>
                 <span className="font-semibold text-ink">{r.totalText || (r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`)}</span>
                 {r.manual && onEditManual && <span className="flex basis-full justify-end gap-2">
                   <Btn kind="ghost" onClick={() => onEditManual(r.id)}>Edit</Btn><Btn kind="ghost" onClick={() => onRemoveManual(r.id)}>Remove</Btn></span>}
@@ -111,13 +111,19 @@ function ManualLineForm({ initial, bracing, choices, onSave, onCancel }) {
       {!bracing && <label className="block text-sm text-ink">Heading
         <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={heading} onChange={(e) => setHeading(e.target.value)} data-manual-heading="">
           {MANUAL_HEADINGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>}
+      {bracing && (
+        <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Heading" data-manual-heading-chips="">
+          {[["bracing", "Bracing"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"]].map(([k, t]) => (
+            <button key={k} type="button" role="radio" aria-checked={heading === k} onClick={() => setHeading(k)}
+              className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${heading === k ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{t}</button>))}
+        </div>)}
       <label className="block text-sm text-ink">Product
         <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={pick} onChange={(e) => setPick(e.target.value)} data-manual-product="">
           <option value="">Choose…</option>
           {choices.map((c) => <option key={c} value={c}>{c}</option>)}
           <option value="__typed">{bracing ? "Other (type it)" : "Not in the list (type it)"}</option></select></label>
-      {pick === "__typed" && <TextField label="Product name" value={typed} onChange={setTyped} placeholder={bracing ? "e.g. Strap bracing 30 x 0.8" : "e.g. 90 x 45 MGP10 H2"} />}
-      {bracing && <div className="flex flex-wrap gap-1">{BRACING_SUGGESTIONS.map((x) => <Btn key={x} kind="ghost" onClick={() => { setPick("__typed"); setTyped(x); }}>{x}</Btn>)}</div>}
+      {pick === "__typed" && <TextField label="Product name" value={typed} onChange={setTyped} placeholder={bracing ? "e.g. Let-in bracing" : "e.g. 90 x 45 MGP10 H2"} />}
+      {bracing && <div className="flex flex-wrap gap-1">{(heading === "bracing" ? BRACING_SUGGESTIONS.filter((x) => !(MANUAL_HEADING_PRODUCTS.tempbr.includes(x) || MANUAL_HEADING_PRODUCTS.sbscrew.includes(x))) : MANUAL_HEADING_PRODUCTS[heading] || []).map((x) => <Btn key={x} kind="ghost" onClick={() => { setPick("__typed"); setTyped(x); }}>{x}</Btn>)}</div>}
       <TextField label="Counts and lengths (metres) or EA" value={entry} onChange={setEntry} placeholder="4/3.6, 2/2.4   or   10 EA" />
       {error && <p className="text-xs text-amber-800" role="alert">{error}</p>}
       <div className="flex gap-2"><Btn onClick={save}>{initial ? "Update line" : "Add line"}</Btn><Btn kind="ghost" onClick={onCancel}>Cancel</Btn></div>
@@ -463,7 +469,7 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     if (!(ls.length && ls.every((l) => l.roles)) && !manual.length) return [];
     const useLines = ls.length > 0 && ls.every((l) => l.roles);
     return buildSupplierGroups(useLines ? tg.map((g) => ({ lines: g.lines.filter((l) => (qty[l.bucketKey] ?? 0) > 0).map((l) => ({ unit: l.unit, quantity: qty[l.bucketKey], stockLengthMm: l.item?.stockLengthMm ?? null,
-      roles: l.roles, product: l.product || null, hoop: l.hoop || null, description: l.item?.description, problem: l.problems.length > 0 })) })) : [], manual);
+      roles: l.roles, product: l.product || null, hoop: l.hoop || null, bracing: l.bracing || null, description: l.item?.description, problem: l.problems.length > 0 })) })) : [], manual);
   }, [genericGroups, qty, manualLines]);
   // what is on this order, per unit — flashing pieces/LM and every other unit kept apart
   const orderTotals = useMemo(() => {

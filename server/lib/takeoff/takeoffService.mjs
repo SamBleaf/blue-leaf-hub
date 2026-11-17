@@ -17,7 +17,7 @@ import {
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
   normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm, ITEM_STALE_TEXT,
   SECTION_VALUES, SECTION_LABEL, GROUP_LABEL, materialGroup, materialSection, accessorySupplierConflict,
-  SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, manualLinesOf, normaliseManualLines, DEFAULT_SUPPLIER_NAME_HINT, buildSupplierGroups, SUPPLIER_ORDER_FORMAT,
+  SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, manualLinesOf, normaliseManualLines, cleanBracing, DEFAULT_SUPPLIER_NAME_HINT, buildSupplierGroups, SUPPLIER_ORDER_FORMAT,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
@@ -243,7 +243,9 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       // HUB 031: does this wall carry the roof (true / false); absent = the Walls item's answer
       ...(i.loadBearing === true || i.loadBearing === false ? { loadBearing: i.loadBearing } : {}),
       // Sam, 18 Nov 2026: hoop iron is on for every wall; true = this wall's switch is off
-      ...(i.noHoopIron === true ? { noHoopIron: true } : {}) };
+      ...(i.noHoopIron === true ? { noHoopIron: true } : {}),
+      // Sam, 18 Nov 2026: the bracing marks on this wall (ply sheets, hoop iron cross braces); re-checked here with the client's own function
+      ...(Array.isArray(i.bracing) && i.bracing.length ? { bracing: (() => { const b = cleanBracing(i.bracing); must(b.ok, b.error); return b.marks; })() } : {}) };
     // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
     // incomplete; values that ARE present must be coherent
     if (wk === "gable") { const gp = gableInputProblem(out, out.widthMm); must(!gp, gp?.message); }   // HUB 017: present values only
@@ -1155,7 +1157,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
       }
       g.lines.push({ bucketKey: sl.bucketKey, unit: sl.unit, quantity: l.quantity, required: sl.quantity, description: sl.item?.description || sl.unit,
         finishedLengthMm: sl.finishedLengthMm ?? null, stockLengthMm: sl.item?.stockLengthMm ?? null, note: sl.item?.note || null, stale: st.stale, problem: sl.problems.length > 0,
-        ...(sl.roles ? { roles: sl.roles, product: sl.product || null } : {}), ...(sl.hoop ? { hoop: sl.hoop } : {}) });
+        ...(sl.roles ? { roles: sl.roles, product: sl.product || null } : {}), ...(sl.hoop ? { hoop: sl.hoop } : {}), ...(sl.bracing ? { bracing: sl.bracing } : {}) });
       continue;
     }
     // Print exactly what the bucket is: a material whose CURRENT spec key equals the bucket's.

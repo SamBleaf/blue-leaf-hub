@@ -470,7 +470,7 @@ t("grid: one owner timber grid, 1,200 then 300 mm steps (Sam, 25 Oct 2026), in f
   assert.equal(TIMBER_GRID_SOURCE, "OWNER-2026-10-25");
   assert.deepEqual([TIMBER_ORDERING_POLICY.minLengthMm, TIMBER_ORDERING_POLICY.incrementMm, TIMBER_ORDERING_POLICY.scope], [1200, 300, "all-suppliers-timber"]);
   assert.deepEqual(TIMBER_ORDERING_POLICY.sourceRefs, ["OWNER-2026-10-14", "OWNER-2026-10-25"]);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@6$/, "a behaviour change is stamped into exports");
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@7$/, "a behaviour change is stamped into exports");
   const p = timberStockPolicy({});
   assert.deepEqual([p.kind, p.minMm, p.incrementMm], ["grid", 1200, 300]);
   for (const [need, buy] of [[2700, 2700], [4000, 4200], [1000, 1200], [6000, 6000], [1200.1, 1500], [4180, 4200], [5196.2, 5400], [2701, 3000]]) {

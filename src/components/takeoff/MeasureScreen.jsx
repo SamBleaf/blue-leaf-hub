@@ -72,6 +72,7 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
 import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
@@ -211,6 +212,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // first end tapped. Handlers read sizes + first end through refs: a tap straight after typing commits the field first.
   const [wetMat, setWetMat] = useState(null);              // HUB 031: the Walls item whose "Wet-area walls at 450" mode is on (Select only)
   const wetLast = useRef(null);
+  const [braceMat, setBraceMat] = useState(null);          // Sam, 18 Nov 2026: the Walls item whose "Add bracing" mode is on (Select only)
+  const [braceType, setBraceType] = useState("ply");       // "ply" (1,200 mm sheet) | "cross" (hoop iron cross brace)
+  const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
+  const [braceNote, setBraceNote] = useState(null);
+  const braceLast = useRef(null);
   const [wetNote, setWetNote] = useState(null);
   const [openMode, setOpenMode] = useState(null);            // { matId, kind: "window" | "door" }
   const openKind = OPENING_TOOLS.has(mode) && canEdit && openMode && openMode.matId === material?.id ? openMode.kind : null;
@@ -1033,6 +1039,30 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const on = wallOwnCentresMm({ inputs: next });
     setWetNote(on ? `${m.inputs?.name || "Wall"} now at ${WET_WALL_CENTRES_MM}` : `${m.inputs?.name || "Wall"} back to ${itemCentresMm(material)}`);
   }
+  /** A tap in Add bracing mode: a 1,200 mm ply sheet or a hoop iron cross brace is clicked out on that wall. One tap, one Undo. */
+  function braceTap(p) {
+    const walls = materialWalls();
+    const opts = { pxPerUnit: pxPerUnit() };
+    const hit = nearestWall(walls.filter((w) => w.shown), p, opts);
+    if (!hit) {
+      setMsg({ tone: "warn", text: nearestWall(walls.filter((w) => !w.shown), p, opts) ? "That wall is hidden on this plan. Tap Show all to change it." : `No ${material.name} wall here. Tap on a wall you traced.` });
+      return;
+    }
+    const now = performance.now();
+    if (braceLast.current && now - braceLast.current < BURST_MS) return;   // a double-tap adds one mark
+    braceLast.current = now;
+    const m = measNow(hit.wall.id);
+    if (!m) return;
+    const name = m.inputs?.name || "Wall";
+    const r = addBracingMark(m.inputs, { type: braceType, atMm: hit.station.stationMm, lengthMm: hit.station.lengthMm, spanMm: braceSpan });
+    if (!r.ok) { setMsg({ tone: "warn", text: `${name}: ${r.error}` }); return; }
+    record({ redo: partial({ measurements: [{ ...m, inputs: r.inputs }] }), undo: partial({ measurements: [m] }) });
+    setBraceNote(`${name}: ${bracingMarkText(r.mark, bracingHeightMm(r.inputs))}`);
+  }
+  /** Select → a wall → Remove one bracing mark. One Undo puts it back. */
+  function removeBrace(m, id) {
+    record({ redo: partial({ measurements: [{ ...m, inputs: removeBracingMark(m.inputs, id) }] }), undo: partial({ measurements: [m] }) });
+  }
   function insertPoint(m, k, p) {
     const r = geometryEdit(m, [...m.points.slice(0, k), p, ...m.points.slice(k)]);
     if (r.error) { warn(r.error); return; }
@@ -1165,6 +1195,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     setMsg(null);
     if (hl.ids.length) setHl((h) => ({ ...h, ids: [] }));
     if (mode === "select" && wetOn) { wetTap(p); return; }
+    if (mode === "select" && braceOn) { braceTap(p); return; }
     if (mode === "select") { selectTap(sp); return; }
     if (openKind) { openingTap(p, sp); return; }
     if (PATH_TOOLS.has(mode)) { pathTap(p, sp); return; }
@@ -1210,6 +1241,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // Wet-area walls mode (HUB 031): Select with nothing picked, on a Walls item, until Done / another tool / another item
   const wetOn = mode === "select" && canEdit && wallsItem && wetMat === material?.id;
   useEffect(() => { if (wetMat && (mode !== "select" || wetMat !== material?.id)) setWetMat(null); }, [mode, material?.id, wetMat]);
+  // Add bracing mode (Sam, 18 Nov 2026): Select with nothing picked, on a Walls item, until Done / another tool / another item
+  const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn;
+  useEffect(() => { if (braceMat && (mode !== "select" || braceMat !== material?.id)) setBraceMat(null); }, [mode, material?.id, braceMat]);
+  const braceTotals = braceOn ? (() => {
+    let ply = 0, cross = 0, walls = 0;
+    for (const w of materialWalls()) { const m = measNow(w.id); const marks = bracingOf(m?.inputs); if (marks.length) walls += 1; ply += marks.filter((x) => x.type === "ply").length; cross += marks.filter((x) => x.type === "cross").length; }
+    return { ply, cross, walls };
+  })() : null;
   const wetWalls = wallsItem ? wetWallsOf(view.measurements, view.contributions, material.id) : [];
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
   // a wall the calculation blocked is named on the line ("· Wall 1 not counted"), its reason straight under it
@@ -1896,11 +1935,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             </div>
           )}
 
-          {mode === "select" && !sel && !wetOn && (
+          {mode === "select" && !sel && !wetOn && !braceOn && (
             <div className="space-y-2">
               <p className="text-sm text-muted">Tap a run, line, wall or count mark to select it.{ticksBy.size ? " Tap a tick to change one member." : ""}</p>
               {wallsItem && canEdit && itemCentresMm(material) !== WET_WALL_CENTRES_MM && (
                 <Btn onClick={() => { setWetMat(material.id); setWetNote(null); wetLast.current = null; setMsg(null); }} data-wet-start="">Wet-area walls at {WET_WALL_CENTRES_MM}</Btn>
+              )}
+              {wallsItem && canEdit && (
+                <Btn onClick={() => { setBraceMat(material.id); setBraceNote(null); braceLast.current = null; setMsg(null); }} data-brace-start="">Add bracing</Btn>
               )}
             </div>
           )}
@@ -1911,6 +1953,22 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               <p data-wet-count="">{wetWalls.length ? `${wetWalls.length} wall${wetWalls.length === 1 ? "" : "s"} at ${WET_WALL_CENTRES_MM}: ${wetWalls.slice(0, 6).map((w) => w.name).join(", ")}${wetWalls.length > 6 ? ` … and ${wetWalls.length - 6} more` : ""}` : `No walls at ${WET_WALL_CENTRES_MM} yet.`}</p>
               {wetNote && <p className="text-[12px] text-muted" data-wet-last="">{wetNote}. Undo puts it back.</p>}
               <Btn kind="primary" onClick={() => { setWetMat(null); setWetNote(null); }}>Done</Btn>
+            </div>
+          )}
+
+          {braceOn && !sel && (
+            <div className="space-y-2 text-sm" data-brace-panel="">
+              <p className="font-medium text-ink">Add bracing · {material.name}</p>
+              <div className="flex gap-2" role="radiogroup" aria-label="Bracing type">
+                {[["ply", "Ply sheet"], ["cross", "Hoop iron cross"]].map(([k, text]) => (
+                  <button key={k} type="button" role="radio" aria-checked={braceType === k} onClick={() => setBraceType(k)} data-brace-type={k}
+                    className={`min-h-[44px] flex-1 rounded-lg border px-3 text-sm font-medium focus-ring ${braceType === k ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>))}
+              </div>
+              {braceType === "cross" && <div className="w-48" data-brace-span=""><NumberField label="Cross brace span" unit="mm" value={braceSpan} min={BRACING_RULE.crossSpanMinMm} max={20000} onCommit={(n) => setBraceSpan(n ?? BRACING_RULE.crossSpanDefaultMm)} /></div>}
+              <p className="text-muted">{braceType === "ply" ? "Tap along a wall where each 1,200 mm sheet goes. Its length follows the wall height." : `Tap a wall where each cross brace goes (${braceSpan} mm span, two hoop iron diagonals, 2 tensioners).`} Tap again for the next one.</p>
+              <p data-brace-count="">{braceTotals.ply + braceTotals.cross ? `${braceTotals.ply ? `${braceTotals.ply} ply sheet${braceTotals.ply === 1 ? "" : "s"}` : ""}${braceTotals.ply && braceTotals.cross ? ", " : ""}${braceTotals.cross ? `${braceTotals.cross} cross brace${braceTotals.cross === 1 ? "" : "s"}` : ""} on ${braceTotals.walls} wall${braceTotals.walls === 1 ? "" : "s"}.` : "No bracing yet."}</p>
+              {braceNote && <p className="text-[12px] text-muted" data-brace-last="">{braceNote}. Undo takes it off.</p>}
+              <Btn kind="primary" onClick={() => { setBraceMat(null); setBraceNote(null); }}>Done</Btn>
             </div>
           )}
 
@@ -2043,6 +2101,19 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                   </div>
                 </div>
               )}
+              {isWallsItem(selMat) && bracingOf(sel.inputs).length > 0 && (() => {
+                const h = bracingHeightMm(sel.inputs);
+                const b = bracingForWall(bracingOf(sel.inputs), h, pathLengthMm(sel.points, calsById.get(sel.calibrationId)));
+                return (
+                  <div className="space-y-1" data-wall-bracing="">
+                    <p className="text-[11px] text-muted">Bracing on this wall</p>
+                    <ul className="space-y-1">{bracingOf(sel.inputs).map((x) => (
+                      <li key={x.id} className="flex items-center gap-2 text-sm text-ink"><span className="min-w-0 flex-1">{bracingMarkText(x, h)}</span>
+                        {canEdit && <Btn kind="ghost" onClick={() => removeBrace(sel, x.id)} aria-label={`Remove ${bracingMarkText(x, h)}`}>Remove</Btn>}</li>))}</ul>
+                    {b.notes.map((t) => <p key={t} className="text-[11px] text-amber-800">{t}</p>)}
+                  </div>
+                );
+              })()}
               {rect && canEdit ? (
                 <div className="w-48" data-wall-height=""><NumberField key={sel.id} label="Wall height" value={sel.inputs?.heightMm ?? null} min={1} max={MAX_WALL_MM} onCommit={(n) => setWallHeight(sel, n)} help="This wall only." /></div>
               ) : (

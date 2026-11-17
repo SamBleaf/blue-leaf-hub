@@ -74,7 +74,7 @@ function heightMarks(polygon, bb) {
 }
 
 export default function WallElevation({
-  polygon, openings = [], items = [], guides = [], selectedId = null, selectedOpeningId = null, placing = false, draft = null,
+  polygon, openings = [], items = [], guides = [], bracing = [], bracingHit = false, selectedBracingId = null, selectedId = null, selectedOpeningId = null, placing = false, draft = null,
   editable = false, maxHeightPx = 320, onTap, onDragOpening, ariaLabel = "Wall elevation",
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
@@ -176,6 +176,12 @@ export default function WallElevation({
         if (p.x >= r.x - 6 && p.x <= r.x + r.w + 6 && p.y >= r.y - 6 && p.y <= r.y + r.h + 6 && (!best || r.w * r.h < best.area)) best = { kind: "opening", id: o.id, area: r.w * r.h };
       }
       if (best) return { kind: best.kind, id: best.id };
+    }
+    if (bracingHit && !placing) {
+      for (const m of bracing) {
+        const x0 = frame.X(m.xMm), x1 = frame.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+        if (p.x >= Math.min(x0, x1) - 4 && p.x <= Math.max(x0, x1) + 4 && p.y >= frame.Y(frame.bb.y1) - 4 && p.y <= frame.Y(frame.bb.y0) + 4) return { kind: "bracing", id: m.id };
+      }
     }
     let rect = null;
     for (const it of items) {
@@ -386,6 +392,22 @@ export default function WallElevation({
                   // the selected opening is the ONLY element that captures one-finger touch (for dragging)
                   <rect x={r.x - 6} y={r.y - 6} width={r.w + 12} height={r.h + 12} fill="transparent" stroke="#f59e0b" strokeDasharray="3 3" strokeWidth="1" style={{ touchAction: "none", cursor: "move" }} data-drag-handle="" />
                 )}
+              </g>
+            );
+          })}
+          {/* Sam, 18 Nov 2026: bracing marks: a ply sheet is a green panel the wall's height, a cross brace is two hoop iron diagonals */}
+          {bracing.map((m) => {
+            const x0 = F.X(m.xMm), x1 = F.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+            const yTop = F.Y(F.bb.y1), yBot = F.Y(F.bb.y0);
+            const sel = m.id === selectedBracingId;
+            return (
+              <g key={m.id} data-bracing-id={m.id} data-bracing-type={m.type} data-x-mm={m.xMm} clipPath={`url(#${clipId})`}>
+                {m.type === "ply"
+                  ? <><rect x={x0} y={yTop} width={Math.max(x1 - x0, 1)} height={Math.max(yBot - yTop, 1)} fill="#16a34a" fillOpacity="0.16" stroke={sel ? "#f59e0b" : "#15803d"} strokeWidth={sel ? 3 : 1.5} />
+                    {x1 - x0 >= 16 && <text x={(x0 + x1) / 2} y={yTop + 16} textAnchor="middle" fontSize="12" fontWeight="700" fill="#15803d">ply</text>}</>
+                  : <><rect x={x0} y={yTop} width={Math.max(x1 - x0, 1)} height={Math.max(yBot - yTop, 1)} fill="none" stroke={sel ? "#f59e0b" : "#7c3aed"} strokeWidth={sel ? 3 : 1} strokeDasharray="4 3" />
+                    <line x1={x0} y1={yBot} x2={x1} y2={yTop} stroke={sel ? "#f59e0b" : "#7c3aed"} strokeWidth="2" />
+                    <line x1={x0} y1={yTop} x2={x1} y2={yBot} stroke={sel ? "#f59e0b" : "#7c3aed"} strokeWidth="2" /></>}
               </g>
             );
           })}

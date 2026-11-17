@@ -17,7 +17,8 @@
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { demandId, identityKey } from "./contract.js";
-import { HOOP_IRON_RULE, hoopIronForWall, hoopIronProduct, hoopIronRolls } from "../hoopIron.js";
+import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js";
+import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
@@ -179,7 +180,9 @@ function resolveWall(m, ctx) {
     // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
     loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null,
     // Sam, 18 Nov 2026: hoop iron is on for every wall; this wall's switch turns it off
-    noHoopIron: inp.noHoopIron === true };
+    noHoopIron: inp.noHoopIron === true,
+    // Sam, 18 Nov 2026: the bracing marks (ply sheets, hoop iron cross braces) clicked out on this wall
+    bracing: bracingOf(inp) };
   return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", missing, problems };
 }
 
@@ -529,14 +532,30 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // the cut lists name each piece's wall ("Wall 2 stud @ 1,177.5 (beside W1)", "Wall 1 second top plate 0–6,000")
       d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Bottom plate|Top plate|Second top plate|Noggin)\b/, (x) => x.toLowerCase())}`;
     }
-    // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off
+    // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off. Counted in
+    // ROLLS (a fraction of a roll per wall; the item adds the walls up and rounds once), the cross braces' hoop iron joins the same line.
     const hoop = w.wall.noHoopIron ? null : hoopIronForWall(L);
     const hoopProduct = hoopIronProduct(rules.hoopIronProductId);
+    const rollM = hoopIronRollM(rules, hoopProduct);
+    const hoopIdentity = { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM };
     if (hoop && hoop.straps > 0) {
-      demands.push({ id: demandId(mat.id, "hoop-iron", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "piece", quantity: hoop.straps, lengthMm: hoop.strapMm,
-        identity: { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM: Number(rules.hoopIronRollM) > 0 ? Number(rules.hoopIronRollM) : null },
-        label: `${tag} hoop iron: ${hoop.straps} straps of ${fmt(hoop.strapMm)} mm = ${hoop.metres} m`, itemDescription: `${hoopProduct.name}, ${fmt(hoop.strapMm)} mm straps`,
+      demands.push({ id: demandId(mat.id, "hoop-iron", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "roll", quantity: hoop.metres / rollM, hoopMetres: hoop.metres, hoopPart: "straps",
+        identity: hoopIdentity, label: `${tag} hoop iron: ${hoop.straps} straps of ${fmt(hoop.strapMm)} mm = ${hoop.metres} m`, itemDescription: hoopProduct.name,
         sourceRefs: [{ measurementId: m.id, wallId: m.id, role: "hoop iron" }], provenance: "calculated" });
+    }
+    // Sam, 18 Nov 2026: bracing marks. Ply sheets follow the wall height; each cross brace = 2 diagonals of hoop iron + 2 tensioners.
+    if (w.wall.bracing?.length) {
+      const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), L);
+      const ref = [{ measurementId: m.id, wallId: m.id, role: "bracing" }];
+      if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm,
+        identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
+      if (b.cross) {
+        demands.push({ id: demandId(mat.id, "brace-cross-hoop", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "roll", quantity: b.cross.metres / rollM, hoopMetres: b.cross.metres, hoopPart: "cross",
+          identity: hoopIdentity, label: `${tag} cross braces: ${b.cross.count} × 2 diagonals = ${b.cross.metres} m of hoop iron`, itemDescription: hoopProduct.name, sourceRefs: ref, provenance: "calculated" });
+        demands.push({ id: demandId(mat.id, "brace-tensioners", m.id), materialId: mat.id, role: "bracing tensioner", kind: "count", unit: "piece", quantity: b.cross.tensioners, lengthMm: null,
+          identity: { family: "bracing", id: TENSIONER_PRODUCT.id, name: TENSIONER_PRODUCT.name }, label: `${tag} tensioners: 2 per cross brace`, itemDescription: TENSIONER_PRODUCT.name, sourceRefs: ref, provenance: "calculated" });
+      }
+      for (const text of b.notes) problems.push({ code: "bracing_note", message: `${tag}: ${text}`, blocking: false, refs: [{ measurementId: m.id }] });
     }
     const layers = plates.layout?.layers || [];
     const layerMm = (t) => (layers.find((l) => l.tag === t)?.piecesMm || []).reduce((a, b) => a + b, 0);
@@ -899,6 +918,8 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // is the line's own timber identity (section, grade, treatment, species).
       // Sam, 18 Nov 2026: hoop iron (straps) keeps its product and roll length so the HOOP IRON group can show straps, metres and rolls
       if (identity?.family === "hoopIron") l.hoop = { name: identity.name, id: identity.id, rollM: identity.rollM ?? null };
+      // bracing sheets and tensioners (Sam, 18 Nov 2026): printed under BRACING in the supplier's wording, counted EA
+      if (identity?.family === "bracing") l.bracing = { name: identity.name, id: identity.id };
       if (n.family === "timber") {
         l.roles = {};
         if (identity?.family === "timber") l.product = { section: identity.section ?? null, grade: identity.grade ?? null, treatment: identity.treatment ?? null, species: identity.species ?? null };
@@ -1027,11 +1048,13 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       if (Math.abs(l.quantity - l.exact) > 1e-9) l.item = { ...l.item, note: `${l.exact.toFixed(2)} LM calculated${inc ? ` → ${byInc.toFixed(2)} LM in ${inc} m steps` : ""}, ordered as ${l.quantity} LM` };
     } else l.quantity = Math.max(UNIT_INTEGER.has(l.unit) ? 1 : 0, Math.ceil(l.exact - 1e-9));
     if (l.hoop) {
-      const metres = Number(((l.quantity * HOOP_IRON_RULE.strapMm) / 1000).toFixed(2));
-      const rolls = hoopIronRolls(metres, l.hoop.rollM);
-      l.item = { ...l.item, hoopMetres: metres, note: `${l.quantity} straps of ${fmt(HOOP_IRON_RULE.strapMm)} mm = ${metres} m (2 straps per ${fmt(HOOP_IRON_RULE.spanMm)} mm of wall)${rolls ? ` → ${rolls} ${rolls === 1 ? "roll" : "rolls"} of ${l.hoop.rollM} m` : ""} · default product, confirm with the supplier` };
+      // metres from the demands (wall straps + cross braces), rolls = the rounded-up total, as ONE line
+      const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);
+      const part = (k) => Number(ds.filter((d) => d.hoopPart === k).reduce((a, d) => a + (d.hoopMetres || 0), 0).toFixed(2));
+      const straps = part("straps"), cross = part("cross"), total = Number((straps + cross).toFixed(2));
+      l.item = { ...l.item, hoopMetres: total, note: `${total} m of hoop iron${cross ? ` (${straps} m wall straps + ${cross} m cross braces)` : " (wall straps, 2 straps of 0.7 m per 1,200 mm of wall)"} → ${l.quantity} ${l.quantity === 1 ? "roll" : "rolls"} of ${l.hoop.rollM} m` };
     }
-    if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null) l.problems.push("A timber line has no stock length.");
+    if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null && !l.bracing) l.problems.push("A timber line has no stock length.");
     if (l.follower === "battens" || l.follower === "hflashing") {
       const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);
       const fitted = ds.reduce((t, d) => t + (d.lengthMm || 0) * (d.quantity || 1), 0) / 1000;
@@ -1046,7 +1069,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
   // battens and H-flashing (step 4) each get their OWN spare count at the material's rate; foam tape takes its spare
   // on the metres before they are rounded into rolls.
   const spareRate = n.spareRate > 0 ? n.spareRate / 100 : 0;
-  const spareable = all.filter((l) => UNIT_INTEGER.has(l.unit) && l.follower !== "tape");
+  const spareable = all.filter((l) => UNIT_INTEGER.has(l.unit) && l.follower !== "tape" && !l.hoop && !l.bracing);   // hoop iron and bracing take no share of the timber spare
   for (const l of all.filter((x) => x.follower === "tape")) {
     const exactM = (l.exact * FOAM_TAPE.rollMm) / 1000;
     const rolls = Math.max(1, Math.ceil(l.exact * (1 + spareRate) - 1e-9));

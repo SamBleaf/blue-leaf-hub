@@ -2,7 +2,7 @@
 //   node scripts/tests/takeoff-tc-hub033.test.mjs
 import assert from "node:assert/strict";
 import { computeWorkspace, wallFramingDefaults, methodFor, WALL_FRAMING_RULES, buildSupplierGroups, hoopIronForWall, hoopIronRolls, parseManualEntry, normaliseManualLines,
-  HOOP_IRON_PRODUCTS, memberGroup } from "../../shared/takeoff/index.js";
+  HOOP_IRON_PRODUCTS, DEFAULT_HOOP_ROLL_M, memberGroup } from "../../shared/takeoff/index.js";
 import { timberStockPolicy } from "../../shared/takeoff/engine/timber.js";
 import { buildExportSnapshot } from "../../server/lib/takeoff/takeoffService.mjs";
 import { renderSupplierOrderPdf, RENDERER_VERSION } from "../../server/lib/takeoff/takeoffPdf.mjs";
@@ -61,37 +61,42 @@ await t("allocator still never packs a short piece with no stock to take it", ()
 });
 
 // ── 2. hoop iron ───────────────────────────────────────────────────────────────────────────────────────────────────
-await t("hoop iron rule: straps = 2 × ceil(length / 1200), metres = straps × 0.7", () => {
+await t("hoop iron rule: straps = 2 × ceil(length / 1200), metres = straps × 0.7; 30 m rolls, the supplier's wording", () => {
   const rows = [[600, 2, 1.4], [1200, 2, 1.4], [1201, 4, 2.8], [2400, 4, 2.8], [9000, 16, 11.2], [0, 0, 0]];
   for (const [mm, straps, m] of rows) { const h = hoopIronForWall(mm); assert.equal(h.straps, straps, `${mm}`); assert.equal(h.metres, m, `${mm}`); }
-  assert.equal(hoopIronRolls(11.2, 10), 2);
+  assert.equal(hoopIronRolls(31, 30), 2);
   assert.equal(hoopIronRolls(11.2, null), null);
-  assert.ok(HOOP_IRON_PRODUCTS[0].defaultToConfirm);
+  assert.equal(HOOP_IRON_PRODUCTS[0].name, "HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL)");
+  assert.equal(HOOP_IRON_PRODUCTS[0].rollM, 30);
+  assert.equal(DEFAULT_HOOP_ROLL_M, 30);
 });
 
-await t("a Walls item orders hoop iron for every wall, with a per-wall off switch; own HOOP IRON heading; straps and metres", () => {
+await t("a Walls item orders hoop iron for every wall (per-wall off switch) as ONE line in rolls, printed under BRACING", () => {
   const c = computeWorkspace(ws([rect("w1", 9000, 2700, "Wall 1"), rect("w2", 4000, 2700, "Wall 2", { noHoopIron: true }), rect("w3", 1200, 2700, "Wall 3")]));
   const hoop = c.scheduleLines.filter((l) => l.hoop);
   assert.equal(hoop.length, 1);
-  assert.equal(hoop[0].unit, "piece", "counted as pieces (the order-line unit check has no strap); the line says straps");
-  assert.equal(hoop[0].quantity, 18, "16 + 0 (off) + 2");
+  assert.equal(hoop[0].unit, "roll");
+  assert.equal(hoop[0].quantity, 1, "11.2 m + 0 (off) + 1.4 m = 12.6 m, one 30 m roll");
   assert.equal(hoop[0].item.hoopMetres, 12.6);
-  assert.match(hoop[0].item.note, /confirm/);
+  assert.match(hoop[0].item.note, /12\.6 m of hoop iron/);
+  assert.equal(hoop[0].hoop.rollM, 30);
   const g = buildSupplierGroups([{ lines: c.scheduleLines.filter((l) => l.roles).map((l) => ({ unit: l.unit, quantity: l.quantity, stockLengthMm: l.item.stockLengthMm, roles: l.roles, product: l.product || null, hoop: l.hoop || null })) }]);
-  const h = g.find((x) => x.key === "hoop");
-  assert.equal(h.heading, "HOOP IRON");
-  assert.equal(h.rows[0].straps, 18);
-  assert.equal(h.rows[0].metres, 12.6);
-  assert.match(h.rows[0].totalText, /12\.6 m/);
-  assert.equal(h.totalLm, 0, "hoop iron is not counted in the timber LM total");
+  const b = g.find((x) => x.key === "bracing");
+  assert.equal(b.heading, "BRACING");
+  assert.equal(b.rows[0].product, "HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL)");
+  assert.equal(b.rows[0].unit, "EA");
+  assert.equal(b.rows[0].quantity, 1);
+  assert.equal(b.rows[0].cutText, "1");
+  assert.equal(b.rows[0].totalText, "1.00 EA");
+  assert.ok(!g.some((x) => x.heading === "HOOP IRON"), "no separate hoop iron heading");
 });
 
-await t("hoop iron roll length (optional): rolls = ceil(metres / roll)", () => {
-  const c = computeWorkspace(ws([rect("w1", 9000, 2700, "Wall 1")], { rules: { hoopIronRollM: 10 } }));
+await t("hoop iron roll length: rolls = ceil(metres / roll), no spare share", () => {
+  const c = computeWorkspace(ws([rect("w1", 9000, 2700, "Wall 1")], { rules: { hoopIronRollM: 10, spareRate: 10 } }));
   const l = c.scheduleLines.find((x) => x.hoop);
+  assert.equal(l.quantity, 2);
   assert.match(l.item.note, /2 rolls of 10 m/);
-  const g = buildSupplierGroups([{ lines: [{ unit: "piece", quantity: 16, stockLengthMm: 700, roles: { "hoop iron": 16 }, hoop: l.hoop }] }]);
-  assert.equal(g[0].rows[0].rolls, 2);
+  assert.equal(l.spareQuantity, undefined);
 });
 
 await t("no hoop iron when every wall's switch is off; a wall with no length has none", () => {
@@ -131,11 +136,11 @@ await t("a manual line prints in its own group, marked added by hand, and is nev
   assert.equal(studs.rows[1].manual, true);
   assert.equal(studs.rows[1].cutText, "4/3.6, 2/2.4");
   assert.equal(studs.rows[1].totalLm, 19.2);
-  assert.deepEqual(g.map((x) => x.heading), ["STUDS", "BRACING", "HOOP IRON", "OTHER"]);
-  assert.equal(g.find((x) => x.key === "bracing").rows[0].quantity, 6);
+  assert.deepEqual(g.map((x) => x.heading), ["STUDS", "BRACING", "OTHER"], "a hand-added hoop iron line goes under BRACING");
+  assert.equal(g.find((x) => x.key === "bracing").rows.find((r) => r.product === "Tension straps").quantity, 6);
   // manual-only order (no calculated timber)
-  assert.equal(buildSupplierGroups([], manual).length, 4);
-  assert.equal(memberGroup("hoop iron").heading, "HOOP IRON");
+  assert.equal(buildSupplierGroups([], manual).length, 3);
+  assert.equal(memberGroup("hoop iron").heading, "BRACING");
   assert.equal(memberGroup("tension strap").heading, "BRACING");
 });
 
@@ -146,8 +151,8 @@ await t("export snapshot + PDF: hoop iron and a hand-added line print under thei
   const manualLines = normaliseManualLines([{ id: "m1", heading: "bracing", product: "Strap bracing", entry: "4/3.6" }]).lines;
   const order = { id: "o", orderRef: "TO-33", revision: 1, category: "timber_cladding", delivery: { method: "pickup", pickupBranch: "Wingfield", asap: true, contactPhone: "0400" }, manualLines };
   const { snapshot, problems } = buildExportSnapshot({ wsSnapshot: w, order, lines, supplier: { id: "s1", name: "Sample", email: "a@example.test" }, company: { name: "Blue Leaf Building", phone: "1" }, jobLabel: "1 Sample St", rendererVersion: RENDERER_VERSION });
-  assert.ok(snapshot.supplierGroups.some((g) => g.heading === "HOOP IRON" && g.rows[0].straps === 16));
-  assert.ok(snapshot.supplierGroups.some((g) => g.heading === "BRACING" && g.rows[0].manual && g.rows[0].cutText === "4/3.6"));
+  assert.ok(snapshot.supplierGroups.some((g) => g.heading === "BRACING" && g.rows.some((r) => !r.manual && /^HOOP IRON/.test(r.product) && r.quantity === 1 && r.totalText === "1.00 EA")));
+  assert.ok(snapshot.supplierGroups.some((g) => g.heading === "BRACING" && g.rows.some((r) => r.manual && r.cutText === "4/3.6")));
   assert.equal(snapshot.manualLines.length, 1);
   assert.equal(snapshot.delivery.manualLines, undefined, "hand-added lines are not delivery");
   assert.ok(!problems.includes("Add at least one length to the order."));

@@ -45,6 +45,7 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
 import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
@@ -1676,6 +1677,10 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const [pick, setPick] = useState(null);
   const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
   const [placing, setPlacing] = useState(false);
+  const [braceAdd, setBraceAdd] = useState(null);     // Sam, 18 Nov 2026: "ply" | "cross" while Add bracing is armed on this wall's elevation
+  const [braceSel, setBraceSel] = useState(null);     // the bracing mark picked on the drawing
+  const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
+  const [braceNote, setBraceNote] = useState(null);
   const [draft, setDraft] = useState(null);       // new opening before it is valid
   const [opNote, setOpNote] = useState(null);        // HUB 031: a plain word about the last Full height / Cavity slider change
   const [drag, setDrag] = useState(null);         // { id, xMm, sillMm } live preview while dragging
@@ -1856,6 +1861,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     return { label: d.label, type: d.type, widthMm: w, heightMm: h, xMm, sillMm };
   };
   function startAddOpening() {
+    setBraceAdd(null);
     setDraft({ label: nextLabel("window"), labelAuto: true, type: "window" });
     setSel({ kind: "newOpening" });
     if (polygon) { setPlacing(true); showDrawing(); } else setFocusToken((n) => n + 1);
@@ -1921,7 +1927,26 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       if (r.wide) setOpNote(`${o.label || "This door"} is ${fmtMm(cur.widthMm)} wide, so it's taken as the whole opening: a ${fmtMm(r.inputs.cavityLeafMm)} door and its pocket. Change Door width if that's wrong.`);
     }
   }
+  const wallsMat = !!material && isWallsItem(material);
+  const braceMarks = wallsMat ? bracingOf(inputs) : [];
+  const braceHeight = bracingHeightMm(inputs);
+  const braceCheck = braceMarks.length ? bracingForWall(braceMarks, braceHeight, lengthMm) : null;
+  function braceTap(xMm) {
+    const r = addBracingMark(inputs, { type: braceAdd, atMm: xMm, lengthMm, spanMm: braceSpan });
+    if (!r.ok) { setBraceNote(r.error); return; }
+    act.updateWall(wall, { bracing: r.inputs.bracing });
+    setBraceSel(r.mark.id);
+    setBraceNote(`${bracingMarkText(r.mark, braceHeight)}. Undo takes it off.`);
+  }
+  function braceRemove(id) {
+    const next = removeBracingMark(inputs, id);
+    act.updateWall(wall, { bracing: next.bracing });
+    setBraceSel(null);
+    setBraceNote("Removed. Undo puts it back.");
+  }
   function onTap({ xMm, yMm, hit }) {
+    if (braceAdd && !placing) { braceTap(xMm); return; }
+    if (hit?.kind === "bracing") { setBraceSel(hit.id); return; }
     if (placing) {
       setDraft((d) => ({ ...(d || { label: nextLabel("window"), labelAuto: true, type: "window" }), tapX: snap(xMm), tapY: snap(yMm) }));
       setSel({ kind: "newOpening" });
@@ -2025,7 +2050,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             )}
             {polygon ? (
               <div ref={drawingRef} className="scroll-mt-1">
-              <WallElevation polygon={polygon} openings={drawnOpenings} items={elements.items} guides={elements.guides} selectedId={selItem?.id || null}
+              <WallElevation polygon={polygon} openings={drawnOpenings} bracing={braceMarks} bracingHit={tab !== "cladding"} selectedBracingId={braceSel} items={elements.items} guides={elements.guides} selectedId={selItem?.id || null}
                 selectedOpeningId={selOpening?.id || null} placing={placing} draft={shownDraft} editable={canEdit} maxHeightPx={maxH}
                 onTap={onTap} onDragOpening={onDragOpening}
                 ariaLabel={`${wallName(wall)} elevation, ${tab} view — ${openings.length} opening(s). Tap an element for details.`} />
@@ -2181,6 +2206,33 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
           )}
 
           {dims}
+
+          {wallsMat && (canEdit || braceMarks.length > 0) && (
+            <section aria-label="Bracing" className="space-y-2 rounded-card border border-hairline bg-white p-3" data-wall-bracing-section="">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="flex-1 text-sm font-semibold text-ink">Bracing <span className="font-normal text-muted">({braceMarks.length})</span></h3>
+                {canEdit && !braceAdd && <>
+                  <Btn kind="primary" onClick={() => { setBraceAdd("ply"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="ply">Add ply sheet</Btn>
+                  <Btn kind="primary" onClick={() => { setBraceAdd("cross"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="cross">Add cross brace</Btn></>}
+              </div>
+              {braceAdd && (
+                <Banner tone="info" action={<Btn onClick={() => setBraceAdd(null)}>Done</Btn>}>
+                  {braceAdd === "ply" ? "Tap the elevation where each 1,200 mm ply sheet goes. Its length follows the wall height." : `Tap the elevation where each cross brace goes (two hoop iron diagonals, 2 tensioners).`}
+                </Banner>
+              )}
+              {braceAdd === "cross" && <div className="w-48" data-brace-span=""><NumberField label="Cross brace span" unit="mm" value={braceSpan} min={BRACING_RULE.crossSpanMinMm} max={20000} onCommit={(n) => setBraceSpan(n ?? BRACING_RULE.crossSpanDefaultMm)} /></div>}
+              {braceNote && <p className="text-xs text-muted" data-brace-note="">{braceNote}</p>}
+              {!braceMarks.length && <p className="text-sm text-muted">No bracing on this wall. Temporary bracing and screws are added by hand on the order.</p>}
+              <ul className="divide-y divide-hairline">
+                {braceMarks.map((x) => (
+                  <li key={x.id} data-bracing-row={x.id} className={`flex min-h-[48px] items-center gap-2 px-1 text-sm ${braceSel === x.id ? "bg-amber-50" : ""}`}>
+                    <button type="button" className="min-w-0 flex-1 text-left text-ink" onClick={() => setBraceSel(x.id)}>{bracingMarkText(x, braceHeight)}</button>
+                    {canEdit && <Btn kind="ghost" onClick={() => braceRemove(x.id)} aria-label={`Remove ${bracingMarkText(x, braceHeight)}`}>Remove</Btn>}
+                  </li>))}
+              </ul>
+              {(braceCheck?.notes || []).map((t) => <p key={t} className="text-xs text-amber-800">{t}</p>)}
+            </section>
+          )}
 
           <section aria-label="Openings" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div className="flex items-center gap-2">

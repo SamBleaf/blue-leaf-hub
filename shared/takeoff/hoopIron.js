@@ -19,8 +19,12 @@ export const HOOP_IRON_RULE = Object.freeze({ spanMm: 1200, strapsPerSpan: 2, st
  * common 30 x 0.8 galvanised strap is offered and the order says it still needs confirming.
  */
 export const HOOP_IRON_PRODUCTS = Object.freeze([
-  Object.freeze({ id: "hoop-iron-30x0.8-galv", name: "Hoop iron strap 30 x 0.8 galvanised", widthMm: 30, thicknessMm: 0.8, finish: "galvanised", defaultToConfirm: true, source: "OWNER-2026-11-18 (default: confirm size with supplier)" }),
+  Object.freeze({ id: "hoop-iron-punched-0.8x30-30m", name: "HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL)", widthMm: 30, thicknessMm: 0.8, rollM: 30, defaultToConfirm: false, source: "OWNER-2026-11-18 (the supplier's own wording, from the Bianco order)" }),
 ]);
+/** Sam, 18 Nov 2026: hoop iron is sold in 30 m rolls, counted in rolls (EA). */
+export const DEFAULT_HOOP_ROLL_M = 30;
+/** The roll length in use: the Walls item's own setting, else the product's, else 30 m. */
+export const hoopIronRollM = (rules, product) => (Number(rules?.hoopIronRollM) > 0 ? Number(rules.hoopIronRollM) : Number(product?.rollM) > 0 ? Number(product.rollM) : DEFAULT_HOOP_ROLL_M);
 export const DEFAULT_HOOP_IRON_PRODUCT_ID = HOOP_IRON_PRODUCTS[0].id;
 export const hoopIronProduct = (id) => HOOP_IRON_PRODUCTS.find((p) => p.id === id) || HOOP_IRON_PRODUCTS[0];
 
@@ -40,10 +44,12 @@ export const hoopIronRolls = (metres, rollM) => (Number(rollM) > 0 && Number(met
 /** The headings a hand-added line can go under (key matches supplierOrder's groups); "bracing" is the one "+ Add bracing" uses. */
 export const MANUAL_HEADINGS = Object.freeze([
   ["plates", "T&B plates"], ["studs", "Studs"], ["jambs", "Jamb studs"], ["junction", "Junction blocks"], ["trimmers", "Head & sill trimmers"],
-  ["lintels", "Lintels"], ["noggins", "Noggins"], ["bracing", "Bracing"], ["hoop", "Hoop iron"], ["other", "Other"],
+  ["lintels", "Lintels"], ["noggins", "Noggins"], ["bracing", "Bracing"], ["tempbr", "TEMP BR (temporary bracing)"], ["sbscrew", "SB SCREW (bracing screws)"], ["other", "Other"],
 ]);
 /** What "+ Add bracing" offers as a quick pick for the product (any other name can be typed). */
-export const BRACING_SUGGESTIONS = Object.freeze(["Sheet bracing", "Strap bracing", "Tension straps", "Let-in bracing", "Cross bracing"]);
+export const BRACING_SUGGESTIONS = Object.freeze(["PINE 90x35 MGP10 P/M", "COACHSCREW 10X75 GALV (PK 10)", "Let-in bracing"]);
+/** The usual product for each hand-added bracing heading (a quick pick; anything else can be typed). */
+export const MANUAL_HEADING_PRODUCTS = Object.freeze({ tempbr: ["PINE 90x35 MGP10 P/M"], sbscrew: ["COACHSCREW 10X75 GALV (PK 10)"] });
 export const MAX_MANUAL_LINES = 100;
 
 /**
@@ -93,13 +99,14 @@ export function normaliseManualLines(list) {
     const id = clean(x.id, 60);
     if (!id || ids.has(id)) return { ok: false, error: "An added line has no id, or two share one." };
     ids.add(id);
-    if (!keys.has(x.heading)) return { ok: false, error: "Choose which heading the added line goes under." };
+    const heading = x.heading === "hoop" ? "bracing" : x.heading;   // hoop iron prints under BRACING now
+    if (!keys.has(heading)) return { ok: false, error: "Choose which heading the added line goes under." };
     const product = clean(x.product, 120);
     if (!product) return { ok: false, error: "Choose or type the product for the added line." };
     const entry = clean(x.entry, 300);
     const p = parseManualEntry(entry);
     if (!p.ok) return { ok: false, error: `${product}: ${p.error}` };
-    lines.push({ id, heading: x.heading, product, entry, manual: true, unit: p.unit, ...(p.unit === "LM" ? { cuts: p.cuts } : { quantity: p.quantity }) });
+    lines.push({ id, heading, product, entry, manual: true, unit: p.unit, ...(p.unit === "LM" ? { cuts: p.cuts } : { quantity: p.quantity }) });
   }
   return { ok: true, lines };
 }
