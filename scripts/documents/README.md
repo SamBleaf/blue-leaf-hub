@@ -14,9 +14,13 @@ text-only — no image/style module). No second document engine.
   (docx-js is an authoring tool, NOT a runtime dependency). Not used by the Hub at runtime.
 
 ## Font runtime requirement (Tab 17)
-Templates use **Lato**. The rendering runtime (LibreOffice on the server, and Google Docs export) MUST have
-Lato installed or the PDF silently substitutes a serif (verified failure: LinuxLibertineG). After rendering a
-PDF, verify with `pdffonts out.pdf` that only Lato (+ DejaVu for the ▪ glyph) appears — no serif substitution.
+Templates use **Lato**. Without it the PDF silently substitutes a serif (verified failure: LinuxLibertineG).
+The server no longer needs Lato installed: the app ships the official Lato 2.015 Regular, Bold and Italic in
+`server/fonts/lato` (SIL OFL 1.1, source and sha256 in its README), and `docxToPdf.mjs` copies them into each
+conversion's private LibreOffice profile, where Linux LibreOffice loads them. Google Docs export still needs Lato
+from Google Fonts. Check a machine with `node scripts/documents/check-lato.mjs`. The API logs the same check once
+per boot on Railway as a `[document-fonts]` line. After rendering a PDF, `pdffonts out.pdf` should show only Lato
+(+ DejaVu for the ▪ glyph): no serif substitution.
 
 ## Design language (matches the approved mock-up kit 00–04)
 Embedded approved logo + breadcrumb + blue rule, blue section label, large sentence-case title + tagline,
