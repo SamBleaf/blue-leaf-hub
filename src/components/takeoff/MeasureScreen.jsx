@@ -711,17 +711,17 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       return;
     }
     const s0 = toScreen(st.p);
-    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn(cavity ? "Tap further along the wall, towards the pocket." : "Tap the other end further away. Zoom in for a narrow opening."); return; }
+    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn(cavity ? "Tap further along the wall, towards the other end." : "Tap the other end further away. Zoom in for a narrow opening."); return; }
     let r;
     if (cavity) {
       const W = cavityOpeningWidth(size.leafMm);
       const others = new Map([[st.wallId, (openingsByWall.get(st.wallId) || []).map((o) => ({ x0: o.inputs?.xMm, x1: o.inputs?.xMm + o.inputs?.widthMm, label: o.inputs?.label }))]]);
       const c = planCavityOpening(walls.filter((w) => w.id === st.wallId), st.p, p, W, others, opts);
       if (!c.ok) {
-        // the first end stays: tap again towards the pocket (or Undo to start over)
+        // the first end stays: tap again towards the other end (or Undo to start over)
         warn(c.reason === "past_end" ? `From there, the ${fmtMm(W)} opening runs ${fmtMm(c.overMm)} past the end of ${wallName(st.wallId)}. Tap towards the other end, or Undo this end.`
           : c.reason === "overlap" ? `From there, the ${fmtMm(W)} opening runs into ${c.label}. Tap towards the other end, or Undo this end.`
-            : c.reason === "too_long" ? `A ${fmtMm(W)} opening doesn't fit on ${wallName(st.wallId)}. Tap a longer wall.` : "Tap further along the wall, towards the pocket.");
+            : c.reason === "too_long" ? `A ${fmtMm(W)} opening doesn't fit on ${wallName(st.wallId)}. Tap a longer wall.` : "Tap further along the wall, towards the other end.");
         return;
       }
       r = { ok: true, wallId: c.wallId, xMm: c.xMm, widthMm: c.widthMm, tappedWidthMm: c.widthMm, clipped: null, pocket: c.pocket, movedMm: c.movedMm };
@@ -1352,7 +1352,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       const len = pathLengthMm(pts, wc);
       // HUB 031: on a Walls item a wall with its own centres is drawn cyan and says so ("450 ctrs"): colour is never the only cue
       const own = isWallsItem(matOf(m)) ? wallOwnCentresMm(m) : null;
-      const wallLabel = `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}${own ? ` · ${fmtMm(own)} ctrs` : ""}`;
+      // a short wall on a phone can't fit "Wall 2 · 4,000 · 450 ctrs": short on screen keeps the name and the centres, the length drops
+      const s0 = toScr(pts[0]), s1 = toScr(pts[pts.length - 1]);
+      const tight = Math.hypot(s1.x - s0.x, s1.y - s0.y) < 150;
+      const wallLabel = tight
+        ? `${m.inputs?.name || "Wall"}${own ? ` · ${fmtMm(own)}` : len ? ` · ${fmtMm(Math.round(len))}` : ""}`
+        : `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}${own ? ` · ${fmtMm(own)} ctrs` : ""}`;
       const shape = <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={own ? COLORS.wetWall : COLORS.wall} selected={isSel} label={wallLabel} />;
       // its windows and doors (HUB 022 step 2), where they are along the wall from its start, labelled clear of its name
       const ops = pts.length === 2 && m.inputs?.kind !== "polygon" ? openingsByWall.get(m.id) || [] : [];
@@ -1641,14 +1646,27 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             const noLeaf = cavityOn && !(s.leafMm >= 300);
             const needSize = straight && (noHeight || noSill || noLeaf);
             const slotW = cavityOn && s.leafMm >= 300 ? cavityOpeningWidth(s.leafMm) : null;
-            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : cavityOn ? "Now tap towards the pocket." : "Now tap the other end.")
+            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : cavityOn ? "Now tap towards the other end." : "Now tap the other end.")
               : !straight ? `Tap one corner of the ${what} on the wall, then the opposite corner.`
-                : noLeaf ? "Type the door width, then tap the doorway end of the slider."
-                : cavityOn ? `Tap the doorway end on the wall, then tap towards the pocket. It's always ${fmtMm(slotW)} long.`
+                : noLeaf ? "Type the door width, then tap one end of the slider."
+                : cavityOn ? `Tap one end on the wall, then tap towards the other end. It's always ${fmtMm(slotW)} long.`
                 : needSize ? (win ? `Type the ${noHeight && noSill ? "height and sill" : noHeight ? "height" : "sill height"}, then tap one end of the window.` : "Type the door height, then tap one end.")
                   : lo && (lx.type || "window") === openKind ? `Tap both ends of the next ${what}.` : `Tap one end of the ${what} on a wall, then the other end.`;
+            const lastCardEl = lo && (
+                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-last-opening={lo.id}>
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate"><b className="text-ink" data-last-opening-label="">{lx.label} in {wallName(lo.parentId)}</b>
+                        <span className="text-muted" data-last-opening-size="">{loOutline ? ` · ${fmtMm(lx.widthMm)} × ${fmtMm(lx.heightMm)}${(lx.type || "window") === "window" ? `, sill ${fmtMm(lx.sillMm)}` : ""}` : lx.cavityLeafMm ? ` · cavity slider · ${fmtMm(lx.widthMm)} opening (${fmtMm(lx.cavityLeafMm)} door)` : ` · ${fmtMm(lx.widthMm)} wide`}</span></p>
+                      {/* the same as ↶: a first end tapped comes off first, then this opening */}
+                      <Btn onClick={undo} aria-label={openStart ? "Undo this end" : `Undo ${lx.label}`}>Undo</Btn>
+                    </div>
+                    {lastOpening.note && <p className="text-[11px] text-amber-800" data-last-opening-note="">{lastOpening.note}</p>}
+                  </div>
+                            );
+            const noteFirst = !!(lo && lastOpening.note);
             return (
               <div className="space-y-2 text-sm" data-opening-panel={openKind}>
+                {noteFirst && lastCardEl}
                 {straight && (
                   <div className="flex flex-wrap gap-2" data-opening-flags="">
                     {!win && timberWalls && (
@@ -1676,17 +1694,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 <p className={needSize ? "text-amber-800" : "text-muted"} data-opening-hint="">{hint}</p>
                 {straight && drawn && !openStart && <p className="text-[11px] text-muted" data-opening-outline-hint="">On a wall you drew on an elevation, tap two opposite corners instead. Nothing to type.</p>}
                 {!win && <p className="text-[11px] text-muted">A door sits on the floor.</p>}
-                {lo && (
-                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-last-opening={lo.id}>
-                    <div className="flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate"><b className="text-ink" data-last-opening-label="">{lx.label} in {wallName(lo.parentId)}</b>
-                        <span className="text-muted" data-last-opening-size="">{loOutline ? ` · ${fmtMm(lx.widthMm)} × ${fmtMm(lx.heightMm)}${(lx.type || "window") === "window" ? `, sill ${fmtMm(lx.sillMm)}` : ""}` : ` · ${fmtMm(lx.widthMm)} wide`}</span></p>
-                      {/* the same as ↶: a first end tapped comes off first, then this opening */}
-                      <Btn onClick={undo} aria-label={openStart ? "Undo this end" : `Undo ${lx.label}`}>Undo</Btn>
-                    </div>
-                    {lastOpening.note && <p className="text-[11px] text-amber-800" data-last-opening-note="">{lastOpening.note}</p>}
-                  </div>
-                )}
+                {!noteFirst && lastCardEl}
                 <div className="flex flex-wrap gap-2">
                   <Btn onClick={stopOpening}>{mode === "line" ? "Trace more walls" : "Draw more walls"}</Btn>
                   <Btn kind="ghost" onClick={() => startOpening(win ? "door" : "window")}>{win ? "+ Door" : "+ Window"}</Btn>

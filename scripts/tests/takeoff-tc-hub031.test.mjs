@@ -551,5 +551,14 @@ t("a lintel that can't be sized leaves the quantity 'incomplete' (not blocking);
   assert.equal(WR(none).status.quantity, "calculated", "a wall that doesn't carry the roof has no lintel to size");
 });
 
+import { readFileSync } from "node:fs";
+t("MeasureScreen wording (browser check): slider card names the opening and door, hints say one end / other end, a note shows above the fold, short walls drop the length", () => {
+  const src = readFileSync(new URL("../../src/components/takeoff/MeasureScreen.jsx", import.meta.url), "utf8");
+  assert.ok(src.includes("cavity slider · ${fmtMm(lx.widthMm)} opening (${fmtMm(lx.cavityLeafMm)} door)"));
+  assert.ok(!/doorway end|towards the pocket/.test(src), "no 'doorway end' / 'pocket' wording");
+  assert.ok(src.includes("noteFirst && lastCardEl") && src.includes("!noteFirst && lastCardEl"));
+  assert.ok(src.includes("const tight = Math.hypot("));
+});
+
 console.log(`takeoff-tc-hub031: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
