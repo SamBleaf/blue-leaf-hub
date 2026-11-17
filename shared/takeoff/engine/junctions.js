@@ -9,7 +9,12 @@
 //   T  the END of a wall B lies on the RUN of another wall A (within the tolerance), not at A's ends. A is the
 //      continuous wall: it gets two junction studs, one each side of B (against B's two faces). Also found when A is
 //      traced as two collinear legs that meet at B's end (the T sits on the join of the two legs).
-//   L  ends meet ends (a corner). Reported, never given extra studs (the existing rule: each wall keeps its own end stud).
+//      Owner rule A (Sam, 18 Nov 2026): plus junction BLOCKS, 300 mm long, laminated in pairs at 900 centres up the wall, in the
+//      90 mm space between the two junction studs (2 x ceil(wall height / 900) of them: 6 for 2.4 to 2.7 m, 8 for 3.0 m).
+//   L  ends meet ends at an angle (a corner). DIRECTION-BASED (owner rule B): a wall that STARTS at the corner gets a second stud
+//      for the internal-corner plasterboard fixing (3 studs a corner in all); a wall that ENDS there has its normal end stud only.
+//      Both start or both end: the LONGER wall gets the second stud. A per-corner override swaps which wall. Collinear joins
+//      (under the angle test) are not corners and are not reported.
 //   X  two walls cross each other's runs. Reported only; never counted.
 // =============================================================================
 
@@ -20,6 +25,24 @@ export const JUNCTION_DEFAULTS = Object.freeze({
   /** Two legs that leave a node within this of opposite directions are one continuous wall. */
   collinearDeg: 10,
 });
+
+/** Owner rule A: junction blocks (300 mm long, laminated in pairs, at 900 centres up the continuous wall). */
+export const JUNCTION_BLOCK = Object.freeze({ lengthMm: 300, centresMm: 900 });
+/** Pairs of blocks up a wall of this height: ceil(height / 900). */
+export const blockPairsFor = (heightMm) => (Number(heightMm) > 0 ? Math.max(1, Math.ceil(Number(heightMm) / JUNCTION_BLOCK.centresMm - 1e-9)) : 0);
+/** Height of the middle of each pair above the stud base: the wall split into equal bands of at most 900, a pair in the middle of each. */
+export const blockCentresFor = (heightMm) => { const n = blockPairsFor(heightMm); return Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) * Number(heightMm)) / n * 10) / 10); };
+/** Blocks (not pairs) at one junction: 2 x ceil(height / 900). */
+export const blockCountFor = (heightMm) => 2 * blockPairsFor(heightMm);
+
+/** The wall ids named inside an override key (junctionsOff / cornersSwapped), so a key for a deleted wall can be dropped. */
+export function overrideKeyWallIds(key) {
+  const k = String(key || "");
+  const t = /^(.+):[01]@(.+)$/.exec(k);
+  if (t) return [t[1], ...t[2].split("+")];
+  if (k.startsWith("corner:")) return k.slice(7).split("|").map((e) => e.slice(0, e.lastIndexOf(":")));
+  return [];
+}
 
 const EPS = 1e-6;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -36,13 +59,16 @@ function prep(w) {
 /**
  * Find the junctions among the straight walls of ONE frame (one page, one scale).
  * @param {Array<{ id:string, a:{x:number,y:number}, b:{x:number,y:number} }>} walls  endpoints in mm, a = first traced point
- * @param {{ thicknessMm:number, studWidthMm:number, toleranceMm?:number, minAngleDeg?:number, collinearDeg?:number }} o
+ * @param {{ thicknessMm:number, studWidthMm:number, toleranceMm?:number, minAngleDeg?:number, collinearDeg?:number, cornersSwapped?:string[] }} o
  *   thicknessMm: the wall thickness (the stud's depth, 90); studWidthMm: the stud's width along the wall (45).
  *   toleranceMm: how far a wall's end may sit off another wall's centreline and still meet it (default: the thickness,
  *   so an end traced to either face of the plan's wall counts).
  * @returns {{ junctions: object[], corners: object[], crossings: object[] }}
- *   junction: { id, nodeId, kind:"T", continuousId, buttingId, end:0|1, stationMm, angleDeg, halfSpanMm, split, studsAtMm:[left,right] }
- *   (stations run along the continuous wall from its first point; id = `${buttingId}:${end}@${continuousId}`, nodeId = `${buttingId}:${end}`)
+ *   junction: { id, nodeId, kind:"T", continuousId, buttingId, end:0|1, stationMm, angleDeg, halfSpanMm, split, dropEnd, studsAtMm:[left,right] }
+ *   (stations run along the continuous wall from its first point; id = `${buttingId}:${end}@${continuousId}` and is the override key;
+ *   a wall traced in two legs gives one junction per leg with the SAME id `${buttingId}:${end}@${leg1}+${leg2}`; dropEnd = which end of
+ *   THIS leg sits on the join, whose end stud the T replaces)
+ *   corner: { id, kind:"L", wallIds, pointMm, angleDeg, studWallId|null, studEnd, offsetMm, why, swapped, multi }  (id = override key)
  */
 export function findJunctions(walls, o = {}) {
   const thick = Number(o.thicknessMm) > 0 ? Number(o.thicknessMm) : 90;
@@ -56,20 +82,24 @@ export function findJunctions(walls, o = {}) {
 
   const junctions = [];
   const seenJ = new Set();
-  const addT = (A, B, e, p, split) => {
+  const addT = (A, B, e, p, split, legs = null, dropEnd = null) => {
     const sinT = Math.abs(cross(A.u, B.u));
     if (sinT < minSin) return;
     // where B's centreline meets A's centreline (B's end may sit off A's centreline by up to the tolerance)
     const dB = awayDir(B, e);
     const k = -cross(A.u, sub(p, A.a)) / cross(A.u, dB);
     const q = { x: p.x + dB.x * k, y: p.y + dB.y * k };
-    const s = split ? Math.min(A.L, Math.max(0, dot(sub(p, A.a), A.u))) : dot(sub(q, A.a), A.u);
+    // a wall traced in two legs is ONE continuous wall: the station is not clamped to the leg, so the studs of the two legs
+    // line up either side of the butting wall (a stud beyond a leg's end belongs to the other leg)
+    const s = split ? dot(sub(p, A.a), A.u) : dot(sub(q, A.a), A.u);
     const halfSpan = thick / 2 / sinT;
     const d = halfSpan + studW / 2;
-    const id = `${B.id}:${e}@${A.id}`;
-    if (seenJ.has(id)) return;
-    seenJ.add(id);
-    junctions.push({ id, nodeId: `${B.id}:${e}`, kind: "T", continuousId: A.id, buttingId: B.id, end: e, stationMm: r1(s),
+    // one override key per junction: butting wall + its end + the continuous wall (a two-leg wall: both legs, so they switch together)
+    const id = `${B.id}:${e}@${legs ? legs.join("+") : A.id}`;
+    const seenKey = `${id}|${A.id}`;
+    if (seenJ.has(seenKey)) return;
+    seenJ.add(seenKey);
+    junctions.push({ id, nodeId: `${B.id}:${e}`, kind: "T", continuousId: A.id, buttingId: B.id, end: e, dropEnd, stationMm: r1(s),
       angleDeg: r1((Math.asin(Math.min(1, sinT)) * 180) / Math.PI), halfSpanMm: r1(halfSpan), split: !!split, studsAtMm: [r1(s - d), r1(s + d)] });
   };
 
@@ -96,12 +126,16 @@ export function findJunctions(walls, o = {}) {
       if (W1 === W2) continue;
       if (dot(awayDir(W1, f1), awayDir(W2, f2)) > -colCos) continue;      // not one straight line through the node
       if (Math.abs(cross(W1.u, dB)) < minSin) continue;                   // B runs along that line: a longer wall, not a T
-      addT(W1, B, e, p, true); addT(W2, B, e, p, true);
+      const legs = [W1.id, W2.id].sort();
+      addT(W1, B, e, p, true, legs, f1); addT(W2, B, e, p, true, legs, f2);
       inT.add(`${B.id}:${e}`); inT.add(`${W1.id}:${f1}`); inT.add(`${W2.id}:${f2}`);
     }
   }
 
-  // L corners: ends within the tolerance of each other that are not part of a T; one entry per set of walls
+  // L corners: ends within the tolerance of each other that are not part of a T; one entry per set of walls. A collinear join
+  // (the walls under the angle test) is not a corner and is not reported. Direction-based second stud (owner rule B).
+  const swapped = new Set(Array.isArray(o.cornersSwapped) ? o.cornersSwapped : []);
+  const cornerOffset = thick + studW / 2;           // near face one wall thickness from the wall's first point: just past the butting wall
   const corners = [];
   const seenC = new Set();
   for (const [B, e] of ends) {
@@ -112,7 +146,22 @@ export function findJunctions(walls, o = {}) {
     const key = group.map(([W, f]) => `${W.id}:${f}`).sort().join("|");
     if (seenC.has(key)) continue;
     seenC.add(key);
-    corners.push({ id: `corner:${key}`, kind: "L", wallIds: [...new Set(group.map(([W]) => W.id))], pointMm: { x: r1(p.x), y: r1(p.y) } });
+    const wallIds = [...new Set(group.map(([W]) => W.id))];
+    if (wallIds.length < 2) continue;
+    const id = `corner:${key}`;
+    const base = { id, kind: "L", wallIds, pointMm: { x: r1(p.x), y: r1(p.y) }, offsetMm: r1(cornerOffset) };
+    if (group.length > 2) { corners.push({ ...base, angleDeg: null, studWallId: null, studEnd: null, why: null, swapped: false, multi: true }); continue; }
+    const [[W1, f1], [W2, f2]] = group;
+    const sinC = Math.abs(cross(W1.u, W2.u));
+    if (sinC < minSin) continue;                                  // a collinear join: one wall traced in two pieces, not a corner
+    // the wall that STARTS here (its first traced point) gets the 2 studs; both start or both end: the longer wall (a tie: the lower id)
+    let pick, why;
+    if (f1 === 0 && f2 === 1) { pick = [W1, f1]; why = "starts"; }
+    else if (f1 === 1 && f2 === 0) { pick = [W2, f2]; why = "starts"; }
+    else { pick = W1.L > W2.L + EPS ? [W1, f1] : W2.L > W1.L + EPS ? [W2, f2] : (W1.id < W2.id ? [W1, f1] : [W2, f2]); why = "longer"; }
+    const isSwapped = swapped.has(id);
+    if (isSwapped) pick = pick[0] === W1 ? [W2, f2] : [W1, f1];
+    corners.push({ ...base, angleDeg: r1((Math.asin(Math.min(1, sinC)) * 180) / Math.PI), studWallId: pick[0].id, studEnd: pick[1], why, swapped: isSwapped, multi: false });
   }
 
   // X crossings: the runs cross well inside both walls (neither end on the other)
@@ -126,6 +175,14 @@ export function findJunctions(walls, o = {}) {
     if (sA > tol && sA < A.L - tol && sB > tol && sB < B.L - tol) {
       crossings.push({ id: `cross:${A.id}+${B.id}`, kind: "X", wallIds: [A.id, B.id], stationMm: r1(sA) });
     }
+  }
+  // blocks: a T on a two-leg wall is ONE junction, so its blocks are counted once, on the leg the butting wall actually lands on
+  const byId = new Map();
+  for (const j of junctions) byId.set(j.id, [...(byId.get(j.id) || []), j]);
+  for (const list of byId.values()) {
+    const onLeg = (j) => { const L = ws.find((w) => w.id === j.continuousId)?.L ?? 0; return j.stationMm >= -EPS && j.stationMm <= L + EPS; };
+    const owner = [...list].sort((p, q) => Number(onLeg(q)) - Number(onLeg(p)) || (p.continuousId < q.continuousId ? -1 : 1))[0];
+    for (const j of list) j.ownsBlocks = j === owner;
   }
   return { junctions, corners, crossings };
 }

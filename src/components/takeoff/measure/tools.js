@@ -432,6 +432,7 @@ export function wallFramingTotals(result, wallId = null) {
   for (const { totals: x } of lays) {
     t.studs += x.studs || 0;
     if (x.junctionStuds) t.junctionStuds = (t.junctionStuds || 0) + x.junctionStuds;
+    if (x.junctionBlocks) t.junctionBlocks = (t.junctionBlocks || 0) + x.junctionBlocks;
     if (x.studs) byH.set(x.studLengthMm, (byH.get(x.studLengthMm) || 0) + x.studs);
     t.bottomPlateMm += x.bottomPlateMm || 0;
     t.topPlateMm += x.topPlateMm || 0;
@@ -475,7 +476,8 @@ export function wallFramingText(t, label = null, notCounted = []) {
   const hs = t.studsByHeight || [];
   const studs = `${n(t.studs)} stud${t.studs === 1 ? "" : "s"}${hs.length === 1 ? ` at ${n(hs[0][0])}` : hs.length > 1 ? ` (${hs.map(([h, q]) => `${n(q)} at ${n(h)}`).join(", ")})` : ""}`;
   // wall junctions: the studs added either side of a wall butting into another, said apart from the counted studs
-  const jn = (t.junctionStuds || 0) > 0 ? ` + ${n(t.junctionStuds)} junction stud${t.junctionStuds === 1 ? "" : "s"}` : "";
+  const jn = ((t.junctionStuds || 0) > 0 ? ` + ${n(t.junctionStuds)} junction stud${t.junctionStuds === 1 ? "" : "s"}` : "")
+    + ((t.junctionBlocks || 0) > 0 ? ` + ${n(t.junctionBlocks)} junction block${t.junctionBlocks === 1 ? "" : "s"}` : "");
   const two = t.secondTopPlateMm;
   const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
   const rows = t.rows || [];
@@ -544,8 +546,19 @@ export function junctionText(j) {
   const n = (v) => Math.round(v * 10) / 10 === Math.round(v) ? Math.round(v).toLocaleString("en-AU") : (Math.round(v * 10) / 10).toLocaleString("en-AU");
   const head = `${j.buttingLabel} butts in at ${n(j.stationMm)}`;
   if (j.off) return `${head}: junction studs removed by hand.`;
+  const blk = j.blocks?.counted ? ` ${n(j.blocks.count)} blocks (${n(j.blocks.pairs)} pairs of ${n(j.blocks.lengthMm)} mm) go between the studs.` : "";
   const bits = j.studs.map((s) => (s.state === "added" ? `stud at ${n(s.positionMm)}` : s.state === "merged" ? `${n(s.positionMm)} served by the stud at ${n(s.mergedWithMm)}` : s.state === "inOpening" ? `${n(s.positionMm)} falls in an opening, not counted` : `${n(s.positionMm)} is past the wall's end, not counted`));
-  return `${head}: ${bits.join("; ")}.`;
+  return `${head}: ${bits.join("; ")}.${blk}`;
+}
+
+/** A corner on this wall (owner rule B): who takes the second stud, and why. "Wall 1 corner: Wall 2 takes the second stud (it starts here)." */
+export function cornerText(c, thisLabel = "This wall") {
+  const n = (v) => (Math.round(v * 10) / 10).toLocaleString("en-AU");
+  if (c.multi) return `${c.otherLabel} all end at one point with ${thisLabel}: no corner stud is added there. Check it on the plan.`;
+  const why = c.swapped ? "swapped by hand" : c.why === "starts" ? "that wall starts at the corner" : "the longer wall";
+  if (!c.hasStud) return `Corner with ${c.otherLabel}: ${c.otherLabel} takes the second corner stud (${why}).`;
+  const where = c.state === "merged" ? `served by the stud at ${n(c.mergedWithMm)}` : c.state === "added" ? `second stud at ${n(c.positionMm)}` : c.state === "inOpening" ? "falls in an opening, not counted" : "is past the wall's end, not counted";
+  return `Corner with ${c.otherLabel}: ${thisLabel} takes the second corner stud (${why}): ${where}.`;
 }
 
 /**
@@ -561,8 +574,7 @@ export function wallFramingNotes(result, wallId, spec) {
     const over = wallLongPlateOverText(spec);
     out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
   }
-  // wall junctions (each butting wall's own line is shown by the wall page, with its Remove button)
-  if (lay?.junctionCorners) out.push(`${lay.junctionCorners} corner${lay.junctionCorners === 1 ? "" : "s"} on this wall: each wall keeps its own end stud, no extra studs.`);
+  // wall junctions and corners: each has its own line on the wall page (Remove / Count, Swap), not repeated here
   // HUB 031: each ruled opening's framing in one plain line ("W1: kings 1, jacks 1 each side · lintel 190 x 45 · sill trimmer 1")
   for (const o of lay?.openings || []) if (o.rule) out.push(openingRuleText(o));
   const names = [...new Set((result?.problems || []).filter((p) => p.code === "opening_framing_not_counted")
