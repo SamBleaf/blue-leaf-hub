@@ -136,6 +136,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const approvedCopy = useRef(new Map());   // id → { item, notice }: what the client approved, for a record an edit stepped back (B3)
   const deletesSent = useRef(new Set());    // ids whose delete is in the save on its way now
   const deletedAt = useRef(new Map());      // id → the ids that were before a deleted record (deletedPlaces), so Undo puts it back there
+  const sendingNew = useRef(new Set());     // ids of records this save creates (no stored copy yet): see lateDeleted
+  const lateDeleted = useRef(new Set());    // of those, the ones deleted here while that save travels (K1)
+  const deletedBase = useRef(new Map());    // id → the stored copy a pending delete started from, so Undo can merge a newer server copy (K3)
   const placeBack = useRef(new Set());      // ids Undo put back after (or while) their delete reached the server: saved with a position hint (U1)
   const loadedFor = useRef(null);           // the lead the register on screen belongs to
   const onScreen = useRef(enabled);         // this copy is on screen (the enabled flag, as the last effect saw it)
@@ -188,7 +191,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       return null;
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); refused.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); deletedBase.current.clear(); lateDeleted.current.clear(); refused.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
     loadedFor.current = leadId;
     regRef.current = next; setReg(next);
     setStatus({ loading: false, error: null });
@@ -285,7 +288,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const cur = regRef.current; if (!cur) return;
     const there = cur.items.some((i) => i.id === id);
     if (there) rememberPlaces(cur.items, [id]);
-    if (there && baseRef.current.items.has(id)) deleted.current.set(id, baseRef.current.items.get(id));
+    if (there && baseRef.current.items.has(id)) { deleted.current.set(id, baseRef.current.items.get(id)); if (!deletedBase.current.has(id)) deletedBase.current.set(id, baseRef.current.items.get(id)); }
+    // Not stored yet, but the save on its way creates it: it is stored when that answer lands, so its delete follows then (K1).
+    else if (there && sendingNew.current.has(id)) lateDeleted.current.add(id);
     dirty.current.delete(id);
     placeBack.current.delete(id);
     commit({ ...cur, items: cur.items.filter((i) => i.id !== id) }, []);
@@ -299,9 +304,12 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const cur = regRef.current; if (!cur || !item?.id) return null;
     const flying = deletesSent.current.has(item.id);
     const plan = planUndelete(item, { current: cur, pending: deleted.current.get(item.id) || null, flying,
-      before: deletedAt.current.get(item.id) ?? null });
+      before: deletedAt.current.get(item.id) ?? null, base: deletedBase.current.get(item.id) || null });
     if (!plan) return null;
+    // Deleted while its creating save travelled, then put back: it is stored now and nothing deletes it (K1).
+    lateDeleted.current.delete(item.id);
     deleted.current.delete(item.id);
+    deletedBase.current.delete(item.id);
     deletedAt.current.delete(item.id);
     // Back as new (its delete reached the server, or may as it travels): its save says where it goes (U1).
     if (!plan.item.sync || flying) placeBack.current.add(item.id); else placeBack.current.delete(item.id);
@@ -316,7 +324,11 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const kept = new Set(next.items.map((n) => n.id));
     const gone = cur.items.filter((i) => !kept.has(i.id));
     if (gone.length) rememberPlaces(cur.items, gone.map((i) => i.id));
-    for (const i of gone) { placeBack.current.delete(i.id); if (baseRef.current.items.has(i.id)) deleted.current.set(i.id, baseRef.current.items.get(i.id)); }
+    for (const i of gone) {
+      placeBack.current.delete(i.id);
+      if (baseRef.current.items.has(i.id)) { deleted.current.set(i.id, baseRef.current.items.get(i.id)); if (!deletedBase.current.has(i.id)) deletedBase.current.set(i.id, baseRef.current.items.get(i.id)); }
+      else if (sendingNew.current.has(i.id)) lateDeleted.current.add(i.id);
+    }
     commit(next, touched, !same(cur.meta, next.meta));
   }, [commit, rememberPlaces]);
   const mutateMeta = useCallback((partial) => {
@@ -352,6 +364,8 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
         .map((i) => (placeBack.current.has(i.id) && !i.sync ? { ...i, __afterId: placeHint(cur.items, i.id) } : i));
       const deletes = [...deleted.current.values()].map((i) => ({ id: i.id, sync: i.sync }));
       deletesSent.current = new Set(deletes.map((d) => d.id));
+      sendingNew.current = new Set(changes.filter((c) => !c.sync).map((c) => c.id));
+      lateDeleted.current = new Set();
       metaSent.current = metaSeq.current;
       const body = { changes, deletes };
       if (metaDirty) body.meta = { ...cur.meta, rev: baseRef.current.meta?.rev ?? cur.meta.rev };
@@ -360,6 +374,8 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       const r = await apiPut(`/api/register/leads/${leadId}`, body, keepalive && JSON.stringify(body).length < 60000 ? { keepalive: true } : undefined);
       saving.current = false;
       deletesSent.current = new Set();
+      const sentNew = sendingNew.current, late = lateDeleted.current;
+      sendingNew.current = new Set(); lateDeleted.current = new Set();
       if (!mounted.current) return false;
 
       if (r.ok) {
@@ -377,6 +393,8 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
         const removedNow = new Set(deletes.map((d) => d.id));
         // A record deleted here while this save travelled stays off the screen, though the server still holds it (the
         // save may have carried an edit of it): Undo then puts it back, and its delete goes with its version now (U2).
+        // K1: a record deleted here while the save that CREATES it travelled is stored now: its delete goes with that copy.
+        if (r.ok) for (const s of server.items) if (late.has(s.id) && sentNew.has(s.id) && !local.items.some((i) => i.id === s.id)) { deleted.current.set(s.id, s); deletedBase.current.set(s.id, s); }
         const { items: answered, stillDeleting } = withoutPendingDeletes(server.items, deleted.current, removedNow);
         let items = answered.map((s) => {
           const mine = local.items.find((i) => i.id === s.id);
@@ -392,7 +410,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
           if (items.some((x) => x.id === i.id) || !dirty.current.has(i.id) || sentSeq.has(i.id)) continue;
           items = removedNow.has(i.id) ? insertInPlace(items, makeItem({ ...i, sync: null }), localIds) : [...items, i];
         }
-        for (const d of deletes) deleted.current.delete(d.id);
+        for (const d of deletes) { deleted.current.delete(d.id); deletedBase.current.delete(d.id); }
         for (const [id, s] of stillDeleting) deleted.current.set(id, s);
         for (const id of placeBack.current) if (answered.some((s) => s.id === id)) placeBack.current.delete(id);
         // A sent id that neither the server nor this screen holds any more is finished with. Left here it repeats an empty save forever.
@@ -548,6 +566,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const notes = [...plan.conflicts, ...plan.removed.map((t) => `“${t}” was removed elsewhere, so it wasn't restored.`)];
     if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
     if (plan.nothingToRestore) { persistDraft(); return; }
+    // A record restored as new goes where the draft says (planRegisterRestore), and is saved with that place (K5): the load
+    // before this cleared placeBack, so without this the server would add it at the end.
+    for (const id of plan.addedIds || []) placeBack.current.add(id);
     commit(plan.reg, plan.touchedIds, plan.metaTouched);
   }, [commit, persistDraft]);
   const discardDraft = useCallback(() => {
@@ -564,7 +585,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       return { ok: false, error: r.error };
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); deletedBase.current.clear(); lateDeleted.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
     persistDraft();
     return { ok: true, held: r.data?.held || [] };

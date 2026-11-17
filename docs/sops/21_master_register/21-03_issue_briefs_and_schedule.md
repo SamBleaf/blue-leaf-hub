@@ -1,6 +1,6 @@
 ---
 sop_version: 2.0
-last_reviewed: 2026-11-17
+last_reviewed: 2026-11-18
 app_version: register-brief-r01 (not deployed; ships after the Lato-on-Railway check)
 screenshot_status: placeholders_only
 owner: Director / Project manager
@@ -133,7 +133,7 @@ These never stop the issue. Fix the ones that matter to the architect.
 2. Read the groups:
    - **In the Technical Selections Schedule instead**: finishes such as floors, paint, cabinetry, benchtops, splashbacks and tapware;
    - **The client's choices (in the client's brief)**;
-   - **Still open, with no one named (in the Actions list)**: name who in the Actions list and it prints in 03;
+   - **Still open, with no one named (in the Actions list)**: name who in the Actions list and it prints in 03 (or in its room's row in 04, when it belongs to one room);
    - **Held back until fixed**, each with a short reason: unfinished, disagrees with the room, contradicts its status, or doesn't say what's needed;
    - **Empty**;
    - **Kept for the office**, including Blue Leaf's own follow-ups, which never print in the architect's brief.
@@ -215,9 +215,12 @@ It goes to the architect and the design team. It is short (about a page and a ha
   - Things still in or out of the job in one place are asked once, for example "Retaining and pool: are they part of this job?"
   - A benchtop held open by the engineered stone rule says why it is open ("material still to be chosen; designer to confirm"), never the product.
   - Blue Leaf's own follow-ups never print here. They stay in the Actions list.
+  - **Whole house and site only.** A point that belongs to one room does not print here: it prints in that room's row in 04 (see below).
 - **04 Rooms.** One row per room: **Room**, **Work** (from the room's own Work setting) and **What it must do and contain**.
   - The room brief comes first, then what it connects to, who uses it, its rough size, its must-haves and what the drawings depend on.
-  - Rooms with nothing recorded and the same Work share one row at the end.
+  - **The room's own open points print last in its row**, each as "Open: [what's needed] Who: [who], by [when]." (for example "Open: Washer / dryer layout: still to be decided. Who: To be agreed."). So everything for a room is in one place: its brief, what it must do, what the drawings depend on and what is still needed from whom. A point on a room that is not in the job stays in 03.
+  - Selections that affect the drawings and belong to one room only (the laundry's cabinetry, a fireplace and TV wall in the living room) print in that room's row too. 05 keeps the whole-house and site ones.
+  - Rooms with nothing recorded and the same Work share one row at the end. A room with an open point is never in that shared row.
   - With two or more floors the rows sit under floor headings such as **Ground floor** and **Upper floor**.
   - In a draft, a room with work but no brief starts with **Brief to follow.** in grey italic. The room-brief rule stops the issue, so an issued brief never has one.
 - **05 Selections that affect the drawings** (titled **Work and selections that affect the drawings** when house-wide work prints there): door height, ceilings, cladding and main walls, roof and gutters, windows and sliders, fireplace and TV wall, wet-area set-out, laundry and kitchen joinery layout, driveway, fencing, retaining and pool. It closes with "Paint, floor finishes, cabinetry, benchtops, splashbacks and tapware are in the Technical Selections Schedule."
@@ -228,7 +231,7 @@ It goes to the architect and the design team. It is short (about a page and a ha
   - Finishes (they are in the Technical Selections Schedule).
   - Typed words print as typed, with a light tidy only (spaces, a leading capital, " - " read as a comma). Spelling isn't corrected, so fix it in the drawer.
 
-> 💡 **Tip:** To ask the architect, engineer or energy assessor for something, tap the record's ⚑ (Needs action), choose **Who** and **By when**. It prints in 03 with that who and by-when. Record the firm on **The project** step's design team so the brief names it.
+> 💡 **Tip:** To ask the architect, engineer or energy assessor for something, tap the record's ⚑ (Needs action), choose **Who** and **By when**. It prints in 03 with that who and by-when, or in the room's row in 04 when the record belongs to a room. Record the firm on **The project** step's design team so the brief names it.
 
 > 💡 **Tip:** "Nothing special — standard room" is a proper room brief for a WC or a store. A room marked **No change** or **Not in this job** needs no brief.
 
@@ -374,6 +377,8 @@ The brief reads in this order and leaves out any section with nothing in it:
   - `checks.warnings` (amber, server-side) and `checks.content` (amber content checks, `contentChecks`, never block);
   - for `architect_brief` only, `lines` (`architectBriefLines`, each with `ids` and `source: { kind: record | room | fact | meta | consultant | site, key }`) and `notPrinted` (groups `schedule`, `client`, `held`, `empty`, `office`, `waiting`).
 - The browser recomputes `architectBriefModel`, `architectBriefLines`, `contentChecks`, `releaseBlockers` and `roomsNeedingBrief` (src/lib/briefModel.js, registerQuality.js) on every change, so the amber box, the line list and the red line marks are live. The red box keeps the server's list until the next preview. The preview is stale when `printKey` (items, rooms, `planRev`, `occupancy`, goals, budget, consultants, site, identity, project type, delivery model) differs.
+- Group by room (17 Nov): `openPoints` gives each point a `roomText` (label + ask, without the room's name). `architectBriefModel` sends a point whose `place.kind` is `room` (the room prints) into that room's row (`roomRow(…, { roomPoints })`), as "Open: [text] Who: [who][, by [by]].", with `row.open` carrying `{ text, who, by, ids }`. 03 keeps whole-house and site points, numbered again from 1; `hasBy` counts 03 only. A point on a room that is not in the job stays in 03.
+- Architect changed elsewhere: `POST /api/jobs/:id/architect-name-check` (the wizard) and `PATCH /api/jobs/:id` (the RFQ Engine) return `architectNameFlag` `{ current, proposed, leadId, roleId, contactId, role }` when the design team has an architect and the typed name is a different one (`server/lib/architectNameSync.mjs`). The PATCH then does not write `jobs.architect_name`. The browser asks (`src/lib/architectNameAsk.js`) and on yes calls `POST /api/sales/leads/:id/design-team` with `replaces`, which also sets the job's name.
 - Room-brief rule: a room whose `scope` is `new`, `renovated` or `altered` needs an R-004 record whose `description` is non-empty and doesn't end in `-`, `:` or `—` (`hasRoomBrief`). The room's `scope` is the only room scope that prints. Hidden whole-room scope answers (K-001, R-003, L-001 …) that disagree are held back.
 - Budget band (owner decision 1): `budgetLine(context)` prints only with `construction_budget_min`/`max` set and `wo_budget_confirmed` reading as yes. It must match `BUDGET_BAND_RX`. `withoutBudgetBand` takes that one line out before the dollar-figure check (`MONEY_RX`).
 - Who and by-when: `responsibility` is the one who. `actionRole` (engineer, energy …) applies only to `consultant`. `actionDue` is `next_issue` | `next_meeting` | `YYYY-MM-DD`. The architect's brief prints `dueLabel` ("Next issue"). The client brief decisions and the TSS actions print `byWords` ("By our next meeting" for the client, "By the next meeting" otherwise, "By the next drawing issue", "By 28 Nov") on the line under the who. Blue Leaf's own points (`responsibility = blue_leaf`) never print in 03 (D3).
@@ -567,7 +572,7 @@ Next review date: 2027-05-17
    8. "… says “Retain” but is marked New. It won't print until they agree." [**Fix**];
    9. "“Curved micro cement feature rangehood”: a client action that doesn't say what's needed. It won't print." [**Fix**];
    10. "3 empty answers in the Laundry print nothing: …" [**Delete all 3**] [**Review**].
-5. Expected list "What will print · 37 lines" under Cover (5), 01 The project (4), 02 Site and constraints (5), 03 Needed for the next drawing issue (8), 04 Rooms (8) and 05 Selections that affect the drawings (7). There is no 06 heading.
+5. Expected list "What will print · 36 lines" under Cover (5), 01 The project (4), 02 Site and constraints (5), 03 Needed for the next drawing issue (7), 04 Rooms (8) and 05 Selections that affect the drawings (7). There is no 06 heading.
    - Source tags: "Prepared for" is grey with a hollow dot. "Budget" is tagged **Sales** and marked amber, not grey. "Drawing basis" is tagged **The project** and "Council and zone" **Public mapping**.
    - The Living line greys only "Brief to follow.".
 6. PDF page 1. Expected:
@@ -579,7 +584,7 @@ Next review date: 2027-05-17
    - 02 opens with the italic "From public mapping and what the client told us: a guide only. Confirm against the title and a planning search." Then Council and zone "City of Seaview. Hills Neighbourhood zone.", Bushfire "In a mapped bushfire area. BAL to be assessed.", Site complexity "High.", Access, and During the works "Part of the home stays lived in."
 8. Expected 03:
    - columns **No. | What's needed | Who**, with no By column;
-   - the Who column reads, top to bottom: Architect, Architect, Energy assessor, Client, To be agreed ×4;
+   - the Who column reads, top to bottom: Architect, Architect, Energy assessor, Client, To be agreed ×3;
    - point 2 is "Kitchen benchtop: material still to be chosen; designer to confirm.";
    - point 3 ends "6.0 (agreed with the client; for consultant review).";
    - the last point is "Retaining and pool: are they part of this job?"
@@ -587,6 +592,7 @@ Next review date: 2027-05-17
    - "One row per room: the work, then what the room must do and contain.", with no floor bands;
    - rows Living, Kitchen, Pantry, Laundry, Bathroom, Bedroom, then "Entry, Bathroom 2, Ensuite, Bedroom 2" (Renovated) and "Dining, Bedroom 3, Bedroom 4, WC, WC 2, Lounge" (New);
    - every row but the Kitchen starts with grey italic "Brief to follow.";
+   - the Laundry's row ends "Open: Washer / dryer layout: still to be decided. Who: To be agreed." (its open point is in the room, not in 03);
    - the Kitchen reads "Feature range hood, meditrean curved micro cement, love the curves. Layout & family use: island. Storage: full-height, walk-in, drawers. Cooking & exhaust: induction."
 10. Expected 05: Internal doors, Ceilings ("Square set, flat."), Upper level, Main roof (ending "By others."), Driveway, All bathrooms, Fencing, then "Paint, floor finishes, cabinetry, benchtops, splashbacks and tapware are in the Technical Selections Schedule."
 11. Expected nowhere in the PDF or the list: "engineered stone", a reference code (for example `K005-…`), "New kitchen", "Retain", "stairs -", "curtain", "shouldn't", "Preferred", "Whole house", "(project default)", or a ⚠ symbol.
@@ -648,19 +654,19 @@ Next review date: 2027-05-17
 - [ ] Pass  [ ] Fail
 
 **TC-15 — A fix in the drawer clears its warning live, then Preview again**
-1. Lead A → Architect Design Brief → **Preview**. Note **Before you send (10)**, "What will print · 37 lines" and "Not in this brief (24)".
+1. Lead A → Architect Design Brief → **Preview**. Note **Before you send (10)**, "What will print · 36 lines" and "Not in this brief (24)".
 2. Click **Show 5 more** → **Fix** on "“Curved micro cement feature rangehood”: a client action that doesn't say what's needed. It won't print."
 3. In the drawer, change what the action says to "Confirm the curved micro cement rangehood design with the client" and click outside the box.
 4. Expected without a preview:
    - **Before you send (9)**, with that entry gone;
-   - "What will print · 38 lines", with a new point in 03 ending "confirm the curved micro cement rangehood design with the client. · Client" and a **changed** tag;
+   - "What will print · 37 lines", with a new point in 03 ending "confirm the curved micro cement rangehood design with the client. · Client" and a **changed** tag;
    - **Not in this brief (23)**, with "Held back until fixed (7)";
    - **Download draft PDF** now reads "Preview again to download"; **Check wording** is turned off; **Issue R01** reads "Preview again to issue what you see.";
    - the red box still shows (3).
 5. Click **Next warning ›** in the drawer's footer. Expected: the drawer moves to the next marked line without closing.
 6. Click **Preview again** in the drawer's footer. Expected:
    - the drawer stays open;
-   - the PDF's 03 has nine points, with the new one in the Client group;
+   - the PDF's 03 has eight points, with the new one in the Client group;
    - the stale band is gone and **Download draft PDF** is back;
    - the time on the title line updates;
    - the red box is re-checked and still shows (3).
@@ -739,6 +745,29 @@ Next review date: 2027-05-17
    - the issue box at the end of the list.
 4. Tap a line. Expected: the drawer opens from the bottom at about 90% of the screen. The text boxes are 16 px (no zoom on iOS). Make a change. Expected: the bar's button reads "Preview again to download".
 5. Reset the window to desktop.
+- [ ] Pass  [ ] Fail
+
+**TC-20 — Group by room: a room's open points print in its row (17 Nov owner answer)**
+1. Lead A → Documents → Architect Design Brief → **Preview**. Note "What will print · 36 lines" and 03 (7 points).
+2. Open the Laundry (Rooms). On **Washer / dryer layout**, tap ⚑ and set **Who** to **Architect** and **By when** to **Next issue**.
+3. **Preview again**. Expected:
+   - the Laundry's row in 04 ends "Open: Washer / dryer layout: still to be decided. Who: Architect, by next issue.";
+   - it is not a numbered point in 03 (03 still has 7 points); the line count stays 36;
+   - the ⚑ footnote on the sheet reads "Prints in the architect's brief, in this room's row, with who and by when."
+4. Set a **whole-house** record (for example Gutters) to Who **Architect**. Expected: it is a numbered point in 03 and is not in any room row.
+5. Mark the Laundry **Not in this job** (Work). Expected: the Laundry's open point returns to 03 (a room that does not print has no row), and 06 lists the room.
+6. Click the Laundry line in "What will print". Expected: the drawer opens the Laundry (its ids include the open point).
+7. Expected DB: none (previews store nothing).
+- [ ] Pass  [ ] Fail
+
+**TC-21 — A different architect typed outside the register: "Change it everywhere?" (17 Nov owner answer)**
+1. Lead A has an architect on its design team ("BLH TEST Studio") and a job. Open the Fee Proposal wizard for the job and type "BLH TEST Other Studio" in **Architect**. Click **Save**.
+2. Expected: "Saved.", then a question: "The architect on this project's design team is “BLH TEST Studio”. You've entered “BLH TEST Other Studio”. Change it everywhere?". Click **Cancel**. Expected: the design team still names BLH TEST Studio; the proposal keeps its own wording; Save again with the same name does not ask again.
+3. Type another name and Save; click **OK**. Expected: the design team now names that architect (the old one is replaced), the architect's brief is addressed to them, and the job's architect name matches.
+4. Type the architect's firm or name exactly as the design team has it (any capitals, "Pty Ltd" or not). Expected: no question.
+5. On a lead with no architect on the design team, type any name. Expected: no question (the name stays "Noted in Sales").
+6. In the RFQ Engine, extract a document whose architect differs from the design team's. Expected: the job's other fields update, the job's architect name is not overwritten, and the same question is asked.
+7. Expected DB: after **OK**, `job_contact_roles` has the new architect active and the old one inactive; `jobs.architect_name` equals the new name. After **Cancel**, nothing changed.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

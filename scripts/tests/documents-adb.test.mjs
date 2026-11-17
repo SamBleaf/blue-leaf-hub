@@ -41,7 +41,7 @@ const job = real();
 const draft = fxOf(job), pay = buildArchitectBriefPayload(draft);
 
 section("The real job: payload (adb-2.0)");
-ok("the fixture is the brief model, with its printed lines and the records that don't print", draft.architectBrief.model === "adb-2.0" && draft.architectBrief.lines.length === 37 && draft.architectBrief.notPrinted.length === 24);
+ok("the fixture is the brief model, with its printed lines and the records that don't print", draft.architectBrief.model === "adb-2.0" && draft.architectBrief.lines.length === 36 && draft.architectBrief.notPrinted.length === 24);
 ok("six sections possible; this job prints five, numbered 01–05", [pay.S1_NUM, pay.S2_NUM, pay.S3_NUM, pay.S4_NUM, pay.S5_NUM].join() === "01,02,03,04,05" && pay.HAS_S6 === false);
 ok("the cover: prepared for the design team (no architect yet), the client, the basis, the project", pay.META_ROWS.some((r) => r.VA === "The design team") && pay.META_ROWS.some((r) => r.VB === "DA rev 3")
   && pay.META_ROWS.some((r) => r.VA === "Extension · Construction management"), flat(pay.META_ROWS));
@@ -49,7 +49,8 @@ ok("S6: the header band names the suburb; 'Prepared by' is the business, whoever
   && !flat(pay.META_ROWS).includes("Sam Morris"), flat({ hdr: pay.HDR_PROJECT, meta: pay.META_ROWS }));
 ok("S6 line 2 and D4: 'material still to be chosen', and one parenthesis", rows(pay, "POINTS")[1].TEXT === "Kitchen benchtop: material still to be chosen; designer to confirm."
   && /\(agreed with the client; for consultant review\)\.$/.test(rows(pay, "POINTS")[2].TEXT), rows(pay, "POINTS")[2].TEXT);
-ok("03 prints No. | What's needed | Who (no By column yet)", pay.NO_BY && !pay.HAS_BY && rows(pay, "POINTS").length === 8 && rows(pay, "POINTS")[0].N === "1" && rows(pay, "POINTS")[7].WHO === "To be agreed");
+ok("03 prints No. | What's needed | Who (no By column yet)", pay.NO_BY && !pay.HAS_BY && rows(pay, "POINTS").length === 7 && rows(pay, "POINTS")[0].N === "1" && rows(pay, "POINTS")[6].WHO === "To be agreed");
+ok("04: the Laundry's open point prints in its room row with Who", rows(pay.FLOORS[0], "RROWS").some((r) => r.ROOM === "Laundry" && /Open: Washer \/ dryer layout: still to be decided\. Who: To be agreed\./.test(r.TEXT)));
 ok("04: 'Brief to follow.' only in a draft, in its own grey run", rows({ ...pay.FLOORS[0] }, "RROWS")[0].PRE === "Brief to follow. " && rows(buildArchitectBriefPayload(fxOf(job, ISSUED)).FLOORS[0], "RROWS").every((r) => r.PRE === ""));
 ok("04: no floor label while every room is on one floor", pay.FLOORS.length === 1 && pay.FLOORS[0].HAS_FLOOR === false);
 ok("the status box says what the brief is and isn't, and what grey means in a draft", /doesn't approve a technical solution/.test(pay.STATUS_BODY) && /Grey text marks what Blue Leaf still has to provide/.test(pay.STATUS_BODY)

@@ -74,8 +74,15 @@ export function distinctRoomOrder(rooms) {
 /** What is still unsaved, with the copy each edit started from. Deletes are deliberately not kept. */
 export function registerDraftOf({ reg, baseMeta, baseItems, dirtyIds, metaDirty }) {
   if (!reg) return { meta: null, items: [] };
+  // A record never saved (created here, or put back by Undo after its delete reached the server) keeps the id of the record
+  // before it, so a restore after a reload puts it back in its place, not at the end (round 5, K5).
   const items = [...dirtyIds].map((id) => reg.items.find((i) => i.id === id)).filter(Boolean)
-    .map((mine) => ({ base: baseItems.get(mine.id) || null, mine }));
+    .map((mine) => {
+      const base = baseItems.get(mine.id) || null;
+      if (base) return { base, mine };
+      const k = reg.items.findIndex((i) => i.id === mine.id);
+      return { base, mine, after: k > 0 ? reg.items[k - 1].id : null };
+    });
   return { meta: metaDirty && baseMeta ? { base: baseMeta, mine: reg.meta } : null, items };
 }
 export const draftIsEmpty = (d) => !d || (!d.meta && !(d.items || []).length && draftIsEmpty(d.earlier));
@@ -87,7 +94,7 @@ export const draftIsEmpty = (d) => !d || (!d.meta && !(d.items || []).length && 
  * Returns { reg, touchedIds, metaTouched, conflicts: [text], removed: [title], nothingToRestore }.
  */
 export function planRegisterRestore(draft, current, titleOf = (i) => i.description || i.id) {
-  const empty = { reg: current, touchedIds: [], metaTouched: false, conflicts: [], removed: [], nothingToRestore: true };
+  const empty = { reg: current, touchedIds: [], metaTouched: false, conflicts: [], removed: [], nothingToRestore: true, addedIds: [] };
   if (draftIsEmpty(draft) || !current) return empty;
   // An earlier visit's draft, kept while its offer was unanswered: replay it first, then this visit's edits on top.
   if (draft.earlier) {
@@ -96,17 +103,17 @@ export function planRegisterRestore(draft, current, titleOf = (i) => i.descripti
     const touchedIds = [...new Set([...first.touchedIds, ...then.touchedIds])];
     const metaTouched = first.metaTouched || then.metaTouched;
     const nothing = !touchedIds.length && !metaTouched;
-    return { reg: nothing ? current : then.reg, touchedIds, metaTouched, conflicts: [...first.conflicts, ...then.conflicts], removed: [...first.removed, ...then.removed], nothingToRestore: nothing };
+    return { reg: nothing ? current : then.reg, touchedIds, metaTouched, conflicts: [...first.conflicts, ...then.conflicts], removed: [...first.removed, ...then.removed], nothingToRestore: nothing, addedIds: [...first.addedIds, ...then.addedIds] };
   }
   const now = new Map(current.items.map((i) => [i.id, i]));
   const touchedIds = [], conflicts = [], removed = [];
   const added = [];
-  for (const { base, mine } of draft.items || []) {
+  for (const { base, mine, after } of draft.items || []) {
     if (!mine?.id) continue;
     const theirs = now.get(mine.id);
     if (!theirs) {
       if (base) { removed.push(titleOf(mine)); continue; }       // it existed and was removed elsewhere
-      added.push(makeItem({ ...mine, sync: null })); touchedIds.push(mine.id); continue;   // created here, never saved
+      added.push({ item: makeItem({ ...mine, sync: null }), ...(after === undefined ? {} : { after }) }); touchedIds.push(mine.id); continue;   // created here, never saved
     }
     const { item, conflicts: fields } = mergeItem(base, mine, theirs);
     if (fields.length) conflicts.push(`“${titleOf(mine)}” was also changed elsewhere (${fields.join(", ")}). The latest value is kept.`);
@@ -120,9 +127,16 @@ export function planRegisterRestore(draft, current, titleOf = (i) => i.descripti
     const merged = mergeMeta(base, mine, current.meta, (keys) => conflicts.push(`The pricing guide was also changed elsewhere (${keys.join(", ")}). The latest value is kept.`));
     if (!same({ ...merged, rev: null }, { ...current.meta, rev: null })) { meta = merged; metaTouched = true; }
   }
-  const items = [...current.items.map((i) => now.get(i.id)), ...added];
+  let items = current.items.map((i) => now.get(i.id));
+  const placed = [];
+  for (const { item, after } of added) {
+    // Straight after the record that was before it (first when none), else at the end (an older draft holds no place).
+    const k = after === null ? 0 : after === undefined ? -1 : items.findIndex((x) => x.id === after) + 1 || -1;
+    items = k < 0 ? [...items, item] : [...items.slice(0, k), item, ...items.slice(k)];
+    placed.push(item.id);
+  }
   const nothingToRestore = !touchedIds.length && !metaTouched;
-  return { reg: nothingToRestore ? current : { meta, items }, touchedIds, metaTouched, conflicts, removed, nothingToRestore };
+  return { reg: nothingToRestore ? current : { meta, items }, touchedIds, metaTouched, conflicts, removed, nothingToRestore, addedIds: placed };
 }
 
 // ── Approval kept for the visit, Undo of a delete, the meta after a save (pure; useRegister uses them) ──────
@@ -216,15 +230,21 @@ export function deletedPlaces(items, ids, ghosts = []) {
  * reached the server (or for a record that was never saved); flying = that delete is in the save on its way now;
  * before = the ids that were before it (deletedPlaces): it goes back straight after the last of them still on the list,
  * so several deletes undone in any order keep their old order. at = an index instead (the end when neither is known).
+ * base = the copy the record was deleted from (its version), so a server copy that moved on meanwhile is merged, not overwritten.
  * Returns { item, dirty, items } (dirty: it must be saved again; items: the list with it back), or null when the record
  * is already there.
  */
-export function planUndelete(item, { current = null, pending = null, flying = false, before = null, at = null } = {}) {
+export function planUndelete(item, { current = null, pending = null, flying = false, before = null, at = null, base = null } = {}) {
   const list = current?.items || [];
   if (!item?.id || list.some((i) => i.id === item.id)) return null;
   let plan;
   if (pending) {
-    const back = makeItem({ ...item, sync: pending.sync });
+    // Round 5 (K3): when the server's copy moved on while the delete waited (a save's answer, or another screen's edit read
+    // in meanwhile), the screen's older copy is not written over it: the record comes back as a three-way merge of what
+    // this screen changed (base = the copy it was deleted from) on the server's copy, so another screen's edit is kept.
+    const moved = !!base && !!pending.sync && !same(base.sync?.version, pending.sync.version);
+    const basis = moved ? mergeItem(base, item, pending).item : item;
+    const back = makeItem({ ...basis, sync: pending.sync });
     // Not sent yet: the delete is simply dropped, and only edits made before it need saving. Sent: the save under way may
     // remove it, so it is saved again (as new, same id, if the server did remove it: useRegister's save answer).
     plan = { item: back, dirty: flying || ITEM_FIELDS.some((f) => !same(back[f], pending[f])) };

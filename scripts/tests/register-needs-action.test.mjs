@@ -199,7 +199,8 @@ ok("footnote by who (the client brief's heading is “Decisions to make”)", fo
     const reg = apply(register, id, setActionPatch(it, C(who), { what: "Decide it", due: "next_meeting" }));
     const cpb = buildRegisterFixture("client_brief", { lead: realJob().lead, context, register: reg, projectRef: "X", status: "Draft", recipientName: "C" }).clientBrief;
     return { footnote: footnoteFor(item(reg, id), who), client: cpb.decisions.some((d) => d.action === "Decide it."),
-      architect: architectBriefModel(reg, context, {}).points.some((x) => x.ids.includes(id)) };
+      // printed for the architect: a numbered point in 03, or an Open line in its room's row in 04
+      architect: (() => { const m = architectBriefModel(reg, context, {}); return m.points.some((x) => x.ids.includes(id)) || m.roomGroups.some((g) => g.rows.some((r) => (r.open || []).some((o) => o.ids.includes(id)))); })() };
   };
   const bl = printsFor("i27", "blue_leaf");
   ok("Blue Leaf (Gutters): 'Not in the architect's brief. The client's brief lists it under “Decisions to make”.' — and both briefs agree",
@@ -212,7 +213,9 @@ ok("footnote by who (the client brief's heading is “Decisions to make”)", fo
   ok("Client: the footnote names the client brief's printed heading (“Decisions to make”), and the client brief lists it",
     cpbHeading === "Decisions to make" && cl.footnote === FOOTNOTE_CLIENT && FOOTNOTE_CLIENT.includes(`“${cpbHeading}”`) && FOOTNOTE_BLUE_LEAF.includes(`“${cpbHeading}”`) && cl.client, flat({ cl, cpbHeading }));
   const clReq = printsFor("i61", "client");
-  ok("Client on a requirement: never a decision in the client brief, so the footnote names the architect's 03, where it prints", clReq.footnote === FOOTNOTE_ARCHITECT && clReq.architect && !clReq.client, flat(clReq));
+  ok("Client on a requirement in a room: never a decision in the client brief, so the footnote names the room's row in the architect's brief (owner answer 17 Nov: room points print in the room's row)",
+    clReq.footnote === "Prints in the architect's brief, in this room's row, with who and by when." && clReq.architect && !clReq.client, flat(clReq));
+  ok("…a whole-house point still names 03", footnoteFor(item(register, "i27"), "architect") === FOOTNOTE_ARCHITECT);
   ok("no footnote for no one", footnoteFor(item(register, "i27"), null) === "" && footnoteFor(null, "blue_leaf") === FOOTNOTE_BLUE_LEAF);
 }
 ok("the sheet's subject line", subjectLine(register, item(register, "i27")) === "Throughout · Gutters" && subjectLine(register, item(register, "i61")) === "Laundry · Washer / dryer layout");

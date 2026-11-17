@@ -273,8 +273,10 @@ export async function resolveTarget(sb, leadId) {
  * movable }. Rows tied on sort_order read oldest first, so a tie never reads in a different order each time.
  * movable: a save may give the row a new sort_order to make room for a record put back by Undo (round 4, U1). Only a
  * row the register made that nobody else holds an interest in: a selection not on the client portal and not approved,
- * a scope row not in the signed baseline.
+ * a scope row or a selection not in the signed baseline (baselined_at, round 5).
  */
+/** A client_selections row a save may renumber: the register made it, it isn't on the client portal, isn't approved and isn't in the signed baseline. */
+export const selectionRowMovable = (r) => !!r?.source_register_item_id && r.client_visible === false && !r.baselined_at && !["approved", "ordered", "installed"].includes(r.status);
 async function readCanonical(sb, project) {
   const [{ data: sels, error: sErr }, { data: rsis, error: rErr }] = await Promise.all([
     sb.from(SEL).select("*").eq("project_id", project.id).order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
@@ -289,7 +291,7 @@ async function readCanonical(sb, project) {
     const it = selRowToItem(r, opts);
     items.push(it);
     rows.set(it.id, { table: SEL, order: Number(r.sort_order) || 0,
-      movable: !!r.source_register_item_id && r.client_visible === false && !["approved", "ordered", "installed"].includes(r.status) });
+      movable: selectionRowMovable(r) });
   }
   for (const r of rsis || []) {
     const it = rsiRowToItem(r);

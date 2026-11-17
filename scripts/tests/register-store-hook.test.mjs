@@ -28,7 +28,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { makeItem, makeRoom, emptyMeta, writeRegister, readRegister } from "../../src/lib/register.js";
 import { approvalStep, approvalRestore, planUndelete, metaAfterSave, deletedPlaces, placeHint } from "../../src/lib/registerMerge.js";
-import { saveRegister, loadRegister, promoteRegisterToProject, RegisterError, placeHints, orderWithHints, placeInTables } from "../../server/lib/registerStore.mjs";
+import { saveRegister, loadRegister, promoteRegisterToProject, RegisterError, placeHints, orderWithHints, placeInTables, selectionRowMovable } from "../../server/lib/registerStore.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -647,6 +647,45 @@ try {
     const del = puts(log).at(-1)?.body.deletes?.find((d) => d.id === "w21");
     ok("…the delete goes with the server's version now (the save just answered bumped it)", del && del.sync?.version === versionNow, flat([del, versionNow]));
     ok("…so it isn't refused as changed elsewhere, and the record is gone", refusals(log).length === 0 && !(await held("w21")), flat(refusals(log)));
+  }
+
+  for (const mode of ["lead", "project"]) {
+    section(`The store, ${mode} mode: a record deleted while the save that CREATES it travels (round 5, K1)`);
+    const w = world({ lead: { selections_schedule: scratchpad(), ...(mode === "lead" ? { job_id: null } : {}) }, project: mode === "project" ? {} : null });
+    if (mode === "project") await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { id: null, name: "Staff" } });
+    const log = serve(w);
+    const store = H.mountStore(LEAD_ID, { enabled: true });
+    await store.reload();
+    const peek = peekOf(store);
+    const screen = () => peek().items.map((i) => i.id).join(",");
+    const held = async (id) => (await loadRegister(w.sb, LEAD_ID)).register.items.find((i) => i.id === id) || null;
+
+    store.addItem(makeItem({ id: "n1", itemKind: "requirement", promptKey: "W-022", category: "notes", description: "A new note" }));
+    const creating = store.flush();            // the save that creates it
+    store.deleteItem("n1");                    // deleted while it travels
+    await creating;
+    ok("the answer doesn't bring it back on screen", !screen().split(",").includes("n1"), screen());
+    ok("…it is stored (the save created it)", !!(await held("n1")));
+    await store.flush();
+    ok("…and its delete goes next, so it doesn't stay stored", !(await held("n1")) && refusals(log).length === 0, flat(refusals(log)));
+    ok("…nothing is left waiting", (await store.flush()) === true && !screen().split(",").includes("n1"));
+
+    store.addItem(makeItem({ id: "n2", itemKind: "requirement", promptKey: "W-023", category: "notes", description: "Another note" }));
+    const creating2 = store.flush();
+    store.deleteItem("n2");
+    const shown2 = makeItem({ id: "n2", itemKind: "requirement", promptKey: "W-023", category: "notes", description: "Another note" });
+    await creating2;
+    store.undeleteItem(shown2);                // Undo pressed after the answer
+    await store.flush();
+    ok("Undo of it after the answer: kept once, nothing deletes it", (await held("n2")) && screen().split(",").filter((x) => x === "n2").length === 1, screen());
+  }
+
+  section("Round 5 (K4): a baselined selection is never renumbered");
+  {
+    const row = { source_register_item_id: "s1", client_visible: false, status: "not_started" };
+    ok("a register-made selection not on the portal, not approved, not baselined: movable", selectionRowMovable(row));
+    ok("…baselined: not movable (its sort_order is part of the signed baseline)", !selectionRowMovable({ ...row, baselined_at: "2026-11-10T00:00:00Z" }));
+    ok("…approved, on the portal or not the register's: not movable", !selectionRowMovable({ ...row, status: "approved" }) && !selectionRowMovable({ ...row, client_visible: true }) && !selectionRowMovable({ ...row, source_register_item_id: null }));
   }
 
   section("The store: a save refused while a delete waits keeps that record off the screen (U2)");

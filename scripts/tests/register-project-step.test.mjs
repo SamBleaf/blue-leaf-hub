@@ -414,8 +414,11 @@ section("A 'consultant' role row is reused only in the discipline the roster giv
   ok("a name-only energy assessor 'Sam Lee' is never reused as the land surveyor 'Sam Lee'", sameNamedOnJob(rows, { name: "Sam Lee", role: "land_surveyor" }, energyRoster) === null);
   ok("…nor as soil and geotech, lighting or sanitary", ["soil_geotech", "lighting", "sanitary"].every((role) => sameNamedOnJob(rows, { name: "Sam Lee", role }, energyRoster) === null));
   ok("…the energy assessor saved again (a retry) → reused", sameNamedOnJob(rows, { name: "sam  LEE", role: "energy" }, energyRoster)?.id === "c-sam");
-  ok("…the same firm, phone or email does not make another discipline the same", sameNamedOnJob([{ ...rows[0], contact: { ...sam, company: "Star Rate", phone: "0400 111 222" } }],
-    { name: "Sam Lee", company: "Star Rate", phone: "0400 111 222", role: "land_surveyor" }, energyRoster) === null);
+  ok("…the same firm alone, or the same phone alone, does not make another discipline the same (round 5: it takes the name, firm AND phone)",
+    sameNamedOnJob([{ ...rows[0], contact: { ...sam, company: "Star Rate", phone: "0400 111 222" } }], { name: "Sam Lee", company: "Star Rate", role: "land_surveyor" }, energyRoster) === null
+    && sameNamedOnJob([{ ...rows[0], contact: { ...sam, company: "Star Rate", phone: "0400 111 222" } }], { name: "Sam Lee", phone: "0400 111 222", role: "land_surveyor" }, energyRoster) === null);
+  ok("…name, firm and phone all the same: one person, one contact (round 5, K2)",
+    sameNamedOnJob([{ ...rows[0], contact: { ...sam, company: "Star Rate", phone: "0400 111 222" } }], { name: "Sam Lee", company: "Star Rate", phone: "0400 111 222", role: "land_surveyor" }, energyRoster)?.id === "c-sam");
   ok("one person under one 'consultant' row in two disciplines → reused in either, not in a third", sameNamedOnJob(rows, { name: "Sam Lee", role: "soil_geotech" },
     [{ role: "land_surveyor", contactId: "c-sam" }, { role: "soil_geotech", contact_id: "c-sam" }])?.id === "c-sam"
     && sameNamedOnJob(rows, { name: "Sam Lee", role: "lighting" }, [{ role: "land_surveyor", contactId: "c-sam" }, { role: "soil_geotech", contactId: "c-sam" }]) === null);
@@ -829,6 +832,20 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true });
   rmSync(out, { force: true });
+}
+
+section("Round 5 (K2): the same person in a second discipline is one contact");
+{
+  const nora = { id: "c-nora", first_name: "Nora", last_name: "Watts", company: "Star Ratings", phone: "0412 000 111", email: null };
+  const rows = [{ id: "rr1", status: "active", role: "consultant", contact: nora }, { id: "rr2", status: "active", role: "engineer", contact: { id: "c-eng", first_name: "Eli", last_name: "Beam", company: "Beam Engineers", phone: "0400 222 333" } }];
+  const energyRoster = [{ role: "energy", contactId: "c-nora" }];
+  ok("Nora, same firm and phone, named again as the land surveyor (both stored as 'consultant') → her contact, no duplicate", sameNamedOnJob(rows, { name: "Nora Watts", company: "star ratings", phone: "+61 412 000 111", role: "land_surveyor" }, energyRoster)?.id === "c-nora");
+  ok("…and as an engineer (another stored role) → her contact", sameNamedOnJob(rows, { name: "Nora Watts", company: "Star Ratings", phone: "0412000111", role: "engineer" }, energyRoster)?.id === "c-nora");
+  ok("same name and firm but no phone typed → a new contact (a duplicate is the safe failure)", sameNamedOnJob(rows, { name: "Nora Watts", company: "Star Ratings", role: "land_surveyor" }, energyRoster) === null);
+  ok("same name and phone but another firm → a new contact", sameNamedOnJob(rows, { name: "Nora Watts", company: "Other Co", phone: "0412 000 111", role: "land_surveyor" }, energyRoster) === null);
+  ok("same name and firm, a different phone → a new contact, never a merge of two people", sameNamedOnJob(rows, { name: "Nora Watts", company: "Star Ratings", phone: "0499 999 999", role: "land_surveyor" }, energyRoster) === null);
+  ok("someone who has left the job is not reused in another discipline", sameNamedOnJob([{ ...rows[0], status: "inactive" }], { name: "Nora Watts", company: "Star Ratings", phone: "0412 000 111", role: "land_surveyor" }, energyRoster) === null);
+  ok("the same discipline still reuses as before", sameNamedOnJob(rows, { name: "Nora Watts", company: "Star Ratings", role: "energy" }, energyRoster)?.id === "c-nora");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

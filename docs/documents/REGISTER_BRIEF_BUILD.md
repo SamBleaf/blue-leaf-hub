@@ -213,6 +213,13 @@ Also passed down:
 - **Don't run:** git commits, dev servers, or e2e/playwright/batch-a suites (they target production).
 - **Node tests** for pure helpers go in `scripts/tests/`.
 
+## Round 5 (18 Nov): owner answers built, known issues cleared
+
+- **Group by room.** `openPoints` adds `roomText`; `architectBriefModel` sends a point on a printing room into that room's row (`roomRow(..., { roomPoints })`, `row.open`), printed "Open: [what] Who: [who], by [when].". 03 keeps whole-house and site points only. Single-room drawing-impact selections already print in the room's row (a record on the room, or a house default that reaches exactly one room). Real job: 03 has 7 points, 36 lines; the laundry's row carries its open point. Needs action's ⚑ footnote names the room's row for a room record.
+- **Architect name changed elsewhere.** `server/lib/architectNameSync.mjs` flags a typed name that differs from the design team's architect. The job PATCH (RFQ Engine) no longer writes `jobs.architect_name` in that case and returns `architectNameFlag`; the Fee Proposal wizard asks `POST /api/jobs/:id/architect-name-check` on Save. `src/lib/architectNameAsk.js` asks "Change it everywhere?"; yes = the design-team save with `replaces`. No = nothing changes. This closes the open `jobs.architect_name` question.
+- **Known issues.** K1 delete during the creating save (`useRegister` `sendingNew`/`lateDeleted`); K2 same person, firm and phone in a second discipline (`sameNamedOnJob`); K3 Undo merges a newer server copy (`planUndelete` `base`); K4 baselined selections not movable (`selectionRowMovable`); K5 a draft-restored record keeps its place (`registerDraftOf` `after`, `planRegisterRestore` `addedIds`). Ticket still open: a record moved between client_selections and room_scope_items gets sort_order 0.
+- Tests: `npm run test:register-rebuild` (adds `register-architect-name`). SOPs: 21-01, 21-03 (TC-20, TC-21).
+
 ## Still to do
 
 1. Clear the known issues above (one small round), then a last browser pass.
@@ -221,3 +228,12 @@ Also passed down:
 4. Later (documented, not in this release):
    - The client brief, the tender notes and the baseline print each room's scope from `room.scope`.
    - Rewrite the sandbox e2e suites for the new screens.
+
+## Owner answers, 17 Nov (late)
+
+- **D1–D4:** agreed.
+- **Page count:** 3 pages is fine.
+- **To build: group by room.** All the info for a room goes in its row in 04: its open points, with Who and By, and its single-room selections. 03 keeps only whole-house and site points.
+- **Architect name changed elsewhere:** flag it and ask "Change it everywhere?".
+- **Chips:** 44 px on a tablet is fine.
+- **Then:** clear the 5 known issues.

@@ -165,7 +165,7 @@
     "test:register-css-layer": "node scripts/tests/register-css-layer.test.mjs",
     "test:register-approval-guard": "node scripts/tests/register-approval-guard.test.mjs",
     "test:crm-people-221": "node scripts/tests/crm-people-view-221.test.mjs",
-    "test:register-rebuild": "node scripts/tests/register-brief-model.test.mjs && node scripts/tests/register-needs-action.test.mjs && node scripts/tests/register-rooms-ui.test.mjs && node scripts/tests/register-project-step.test.mjs && node scripts/tests/register-documents-ui.test.mjs && node scripts/tests/register-store-hook.test.mjs && node scripts/tests/register-site-recheck.test.mjs && node scripts/tests/register-section-step.test.mjs && node scripts/tests/register-merge.test.mjs && node scripts/tests/register-overlay-layers.test.mjs && node scripts/tests/register-css-layer.test.mjs && node scripts/tests/register-approval-guard.test.mjs && node scripts/tests/documents-adb.test.mjs"
+    "test:register-rebuild": "node scripts/tests/register-brief-model.test.mjs && node scripts/tests/register-needs-action.test.mjs && node scripts/tests/register-rooms-ui.test.mjs && node scripts/tests/register-project-step.test.mjs && node scripts/tests/register-documents-ui.test.mjs && node scripts/tests/register-store-hook.test.mjs && node scripts/tests/register-site-recheck.test.mjs && node scripts/tests/register-section-step.test.mjs && node scripts/tests/register-merge.test.mjs && node scripts/tests/register-overlay-layers.test.mjs && node scripts/tests/register-css-layer.test.mjs && node scripts/tests/register-approval-guard.test.mjs && node scripts/tests/register-architect-name.test.mjs && node scripts/tests/documents-adb.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

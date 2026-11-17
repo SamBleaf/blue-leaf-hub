@@ -540,7 +540,19 @@ export function sameNamedOnJob(roleRows, { name, company, phone, email, role } =
   // The roster names the contact in this discipline (a roster entry's own "consultant" says no discipline, so it is not one).
   const rosterSays = (contactId) => entries.some((e) => rosterContactId(e) === contactId && (e.role || e.type) !== "consultant"
     && sameDiscipline(e.role || e.type || "other", want));
-  for (const r of Array.isArray(roleRows) ? roleRows : []) {
+  const rows = Array.isArray(roleRows) ? roleRows : [];
+  // Round 5 (K2): the same person named in a second discipline (the energy assessor who is also the land surveyor; both are stored as a "consultant"
+  // role row, and the roster check above sees one discipline of the person) is one
+  // contact. Only with proof it is the same person: the same full name AND the same firm AND the same phone (the match
+  // below asks for one of the three in the same discipline; across disciplines it needs two). Otherwise a new contact:
+  // a duplicate is the safe failure, a merge of two people is not.
+  const sameElsewhere = (r) => {
+    const c = r?.contact;
+    if (!c?.id || c.is_archived || !isOn(r.status) || !firm || !tel) return false;
+    const person = personName(c);
+    return !!person && nameKey(person) === key && firm === nameKey(c.company) && tel === phoneKey(c.phone);
+  };
+  for (const r of rows) {
     const c = r?.contact;
     if (!c?.id || c.is_archived || !isOn(r.status) || !sameDiscipline(r.role, role)) continue;
     if (r.role === "consultant" && !rosterSays(c.id)) continue;
@@ -557,7 +569,8 @@ export function sameNamedOnJob(roleRows, { name, company, phone, email, role } =
     const bothNameOnly = nameOnly && !theirFirm && !phoneKey(c.phone) && !clean(c.email);
     if (sameFirm || samePhone || sameMail || bothNameOnly) return c;
   }
-  return null;
+  const elsewhere = rows.find(sameElsewhere);
+  return elsewhere?.contact || null;
 }
 
 /**

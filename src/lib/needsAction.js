@@ -267,6 +267,7 @@ export const isOverdue = (due, today = todayIso()) => /^\d{4}-\d{2}-\d{2}$/.test
 export const addedWords = (choice, due) => `${choice.short || choice.label}${dueWords(due) ? ` · ${dueWords(due)}` : ""} — added to Actions`;
 
 export const FOOTNOTE_ARCHITECT = "Prints in the architect's brief under “Needed for the next drawing issue”.";
+const FOOTNOTE_ARCHITECT_ROOM = "Prints in the architect's brief, in this room's row, with who and by when.";
 export const FOOTNOTE_CLIENT = "Prints in the client's brief under “Decisions to make”.";
 export const FOOTNOTE_BLUE_LEAF = "Not in the architect's brief. The client's brief lists it under “Decisions to make”.";
 export const FOOTNOTE_OURS = "Our list only — doesn't print.";
@@ -282,13 +283,15 @@ export const FOOTNOTE_OURS = "Our list only — doesn't print.";
  * Asked of the same rules (forNextIssue, the brief's requirement rule), so the footnote can't say otherwise.
  */
 export function footnoteFor(item, whoKey) {
-  if (DESIGN_TEAM_KEYS.has(whoKey)) return FOOTNOTE_ARCHITECT;
+  // A point that belongs to one room prints in that room's row in 04, not in 03 (owner answer 17 Nov).
+  const FOOTNOTE_ARCHITECT_HERE = item?.roomId ? FOOTNOTE_ARCHITECT_ROOM : FOOTNOTE_ARCHITECT;
+  if (DESIGN_TEAM_KEYS.has(whoKey)) return FOOTNOTE_ARCHITECT_HERE;
   const choice = WHO_CHOICES.find((c) => c.key === whoKey);
   const asWho = item && choice ? { ...item, responsibility: choice.responsibility } : null;
   const requirement = item?.itemKind === "requirement";
-  if (whoKey === "client") return requirement && forNextIssue(asWho) ? FOOTNOTE_ARCHITECT : FOOTNOTE_CLIENT;
+  if (whoKey === "client") return requirement && forNextIssue(asWho) ? FOOTNOTE_ARCHITECT_HERE : FOOTNOTE_CLIENT;
   if (whoKey === "blue_leaf") {
-    if (asWho && forNextIssue(asWho)) return FOOTNOTE_ARCHITECT;
+    if (asWho && forNextIssue(asWho)) return FOOTNOTE_ARCHITECT_HERE;
     return requirement ? FOOTNOTE_OURS : FOOTNOTE_BLUE_LEAF;
   }
   return "";

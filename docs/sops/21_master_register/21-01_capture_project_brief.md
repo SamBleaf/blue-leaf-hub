@@ -1,6 +1,6 @@
 ---
 sop_version: 2.0
-last_reviewed: 2026-11-17
+last_reviewed: 2026-11-18
 app_version: register-brief-r01 (rebuilt capture screens, not deployed)
 screenshot_status: placeholders_only
 owner: Director / Sales lead
@@ -112,6 +112,8 @@ On a phone the site rows shrink to one line, for example "City of Seaview · Hil
 29. If someone else already has that email, you will see "Someone else uses that email: … Use them, or change the email." Tap **Use (their name)** if it is the same person, or **Back** to change the email. Nobody is linked without you choosing.
 30. The Architect row now reads "Name — Firm" with a ⋯ menu: **Change** or **Remove from this job**. Removing asks first, and the person stays in the client's contacts.
 31. Use **+ Add** on the Engineer and Energy assessor rows, and **+ Another consultant** for a land surveyor, soil and geotech, interior designer, lighting, sanitary and tapware, or another consultant.
+
+If a different architect is typed outside the register (the Fee Proposal wizard's Architect box, or an RFQ Engine extraction), the Hub asks "Change it everywhere?". **OK** replaces the architect on the design team (and the job); **Cancel** leaves the design team as it is. The architect is kept in one place: the design team. See 21-03 TC-21.
 
 If an architect's name was typed in Sales before, it shows under the row as "Noted in Sales: “…”", and **Name the architect** starts its search with that name. An older design-team note shows as "Noted earlier: “…”" with **Edit**. On a phone only the Architect row shows; tap **Engineer, energy assessor and others ›** for the rest.
 

@@ -412,6 +412,8 @@ export function openPoints(register, context, { scope = "next_issue", merge = tr
     if (p.inOut && p.labels.length > 1) p.text = `${andList(p.labels.map((l, k) => (k ? lowerFirst(l) : l)))}: are they part of this job?`;
     else p.text = `${p.subject}: ${p.ask}`;
     p.text = sentence(p.text);
+    // In its room's row the room's name is already the row's label: "Island bench: confirm height".
+    p.roomText = p.inOut && p.labels.length > 1 ? p.text : sentence(`${p.label}: ${p.ask}`);
   }
   return merged.sort((a, b) => WHO_ORDER.indexOf(a.who.key) - WHO_ORDER.indexOf(b.who.key) || a.place.order - b.place.order || a.k - b.k);
 }
@@ -487,7 +489,7 @@ export function hasRoomBrief(register, room) {
  * the placeholder; ids are every record the row stands for (so a click on it opens the room, and nothing is unreachable).
  * opts.taken: ids already printed elsewhere (section 03), so nothing prints twice.
  */
-export function roomRow(register, context, room, { taken = new Set(), houseDefaults = [] } = {}) {
+export function roomRow(register, context, room, { taken = new Set(), houseDefaults = [], roomPoints = [] } = {}) {
   const items = (register?.items || []).filter((i) => i.roomId === room.id);
   const ids = [], parts = [], held = [];
   const work = ROOM_SCOPES_WITH_WORK.has(room.scope);
@@ -545,10 +547,14 @@ export function roomRow(register, context, room, { taken = new Set(), houseDefau
   // 5 · House defaults that reach only this room (the laundry's cabinetry), then 6 · the room's scope words.
   for (const d of houseDefaults) { const w = recordWords(d, { impact: drawingImpactOf(d) }); if (w) { parts.push(`${plainShort(d)}: ${lowerFirst(w)}`); cover(d); } }
   parts.push(...scopeWords);
+  // 7 · The room's own open points, with who and by when (owner answer 17 Nov: all the info for a room is in its row).
+  const open = roomPoints.map((p) => ({ text: p.roomText || p.text, who: p.who.label, by: p.by, ids: p.ids, whoKey: p.who.key }));
+  for (const p of roomPoints) for (const id of p.ids) cover({ id });
+  const openText = open.map((o) => `Open: ${o.text} Who: ${o.who}${o.by ? `, by ${o.by.charAt(0).toLowerCase()}${o.by.slice(1)}` : ""}.`);
   const placeholder = work && !briefText;
-  const text = [briefText, ...parts.map(sentence)].filter(Boolean).join(" ");
+  const text = [briefText, ...parts.map(sentence), ...openText].filter(Boolean).join(" ");
   return { room, roomId: room.id, name: clean(room.name), floor: floorLabel(room.level), workKey: room.scope, work: ROOM_SCOPES[room.scope] || capFirst(String(room.scope || "")),
-    brief: briefText, placeholder, text, ids, held, empty: !text };
+    brief: briefText, placeholder, text, ids, held, open, empty: !text };
 }
 
 // ── The architect's brief (adb-2.0) ────────────────────────────────────────────────────────────────
@@ -665,8 +671,14 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
 
   // 03 Needed for the next drawing issue.
   const allPoints = openPoints(register, context, { scope: "next_issue" });
-  const points = allPoints.filter((p) => !p.held).map((p, k) => ({ n: k + 1, text: p.text, who: p.who.label, by: p.by, ids: p.ids, whoKey: p.who.key, source: { kind: "record" } }));
+  // A point that belongs to one room prints in that room's row in 04 (with Who and By); 03 keeps whole-house and site points.
+  const printedRoomIds = new Set(rooms.filter((r) => r.scope !== "not_in_scope").map((r) => r.id));
+  const inRoom = (p) => p.place.kind === "room" && printedRoomIds.has(p.place.key);
+  const pointsByRoom = new Map();
+  for (const p of allPoints.filter((x) => !x.held && inRoom(x))) { if (!pointsByRoom.has(p.place.key)) pointsByRoom.set(p.place.key, []); pointsByRoom.get(p.place.key).push(p); }
+  const points = allPoints.filter((p) => !p.held && !inRoom(p)).map((p, k) => ({ n: k + 1, text: p.text, who: p.who.label, by: p.by, ids: p.ids, whoKey: p.who.key, source: { kind: "record" } }));
   points.forEach((p) => take(p.ids));
+  [...pointsByRoom.values()].flat().forEach((p) => take(p.ids));
   const hasBy = points.some((p) => p.by);
 
   // 04 Rooms. House defaults the drawings depend on that reach exactly one room print in that room's row.
@@ -678,7 +690,7 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
     if (reach.length === 1) { if (!toRoom.has(reach[0].id)) toRoom.set(reach[0].id, []); toRoom.get(reach[0].id).push(d); }
     else shared.push({ d, reach });
   }
-  const rowsAll = rooms.filter((r) => r.scope !== "not_in_scope").map((r) => roomRow(register, context, r, { taken: printed, houseDefaults: toRoom.get(r.id) || [] }));
+  const rowsAll = rooms.filter((r) => r.scope !== "not_in_scope").map((r) => roomRow(register, context, r, { taken: printed, houseDefaults: toRoom.get(r.id) || [], roomPoints: pointsByRoom.get(r.id) || [] }));
   rowsAll.forEach((r) => take(r.ids));
   // Rooms with nothing recorded and the same Work share one row at the end of their floor.
   const floors = [...new Set(rowsAll.map((r) => r.floor))];
@@ -688,8 +700,8 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
     const bare = own.filter((r) => !r.text);
     const byWork = new Map();
     for (const r of bare) { if (!byWork.has(r.workKey)) byWork.set(r.workKey, []); byWork.get(r.workKey).push(r); }
-    const grouped = [...byWork.values()].map((rs) => ({ room: rs.map((r) => r.name).join(", "), work: rs[0].work, text: "", placeholder: rs[0].placeholder, ids: rs.flatMap((r) => r.ids), roomIds: rs.map((r) => r.roomId) }));
-    return { floor, rows: [...withText.map((r) => ({ room: r.name, work: r.work, text: r.text, brief: r.brief, placeholder: r.placeholder, ids: r.ids, roomIds: [r.roomId] })), ...grouped] };
+    const grouped = [...byWork.values()].map((rs) => ({ room: rs.map((r) => r.name).join(", "), work: rs[0].work, text: "", placeholder: rs[0].placeholder, ids: rs.flatMap((r) => r.ids), roomIds: rs.map((r) => r.roomId), open: [] }));
+    return { floor, rows: [...withText.map((r) => ({ room: r.name, work: r.work, text: r.text, brief: r.brief, placeholder: r.placeholder, ids: r.ids, roomIds: [r.roomId], open: r.open })), ...grouped] };
   });
 
   // 05 Selections that affect the drawings: whole-house records, said once per subject.

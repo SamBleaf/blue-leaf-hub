@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { emptyMeta, makeRoom, makeItem } from "../../src/lib/register.js";
-import { mergeMeta, distinctRoomOrder, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, deletedPlaces, planUndelete, placeHint, insertInPlace, withoutPendingDeletes } from "../../src/lib/registerMerge.js";
+import { mergeMeta, distinctRoomOrder, planRegisterRestore, registerDraftOf, saveFailure, metaSaveState, SAVE_RETRY_WORDS, deletedPlaces, planUndelete, placeHint, insertInPlace, withoutPendingDeletes } from "../../src/lib/registerMerge.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -178,6 +178,43 @@ section("The store and the header use them");
   ok("the ⋯ menu holds the existing-building override, following the project type", /Ask about the existing building/.test(workshop) && /disabled=\{byType\}/.test(workshop) && /renovationOverlay: !reg\.meta\.renovationOverlay/.test(workshop));
   ok("the subline has no '—' placeholders, and the badge's words no system terms", !/Project type —|Drawings —/.test(workshop) && !/h: "[^"]*canonical/.test(workshop));
   ok("the badge shows on the Register and Handover tabs only", /MODE_BADGE_STEPS = new Set\(\["register", "handover"\]\)/.test(workshop));
+}
+
+section("Round 5 (K5): a record put back by Undo and restored from the device draft keeps its place");
+{
+  const mk = (id, extra = {}) => makeItem({ id, itemKind: "requirement", promptKey: "W-020", category: "notes", description: `Item ${id}`, ...extra });
+  const baseItems = new Map(["a", "c", "d"].map((id) => [id, mk(id, { sync: { mode: "lead", version: "v1" } })]));
+  const onScreen = { meta: emptyMeta({}), items: ["a", "b", "c", "d"].map((id) => (baseItems.get(id) || mk(id))) };   // b put back by Undo after its delete reached the server
+  const draft = registerDraftOf({ reg: onScreen, baseMeta: onScreen.meta, baseItems, dirtyIds: ["b"], metaDirty: false });
+  ok("the draft keeps the record that was before it", draft.items.length === 1 && draft.items[0].after === "a" && draft.items[0].base === null, JSON.stringify(draft.items.map((i) => i.after)));
+  const reloaded = { meta: emptyMeta({}), items: ["a", "c", "d"].map((id) => baseItems.get(id)) };
+  const plan = planRegisterRestore(draft, reloaded);
+  ok("restored straight after it, not at the end", plan.reg.items.map((i) => i.id).join("") === "abcd" && plan.addedIds.join() === "b", plan.reg.items.map((i) => i.id).join(""));
+  const first = registerDraftOf({ reg: { meta: onScreen.meta, items: ["b", "a", "c", "d"].map((id) => baseItems.get(id) || mk(id)) }, baseMeta: onScreen.meta, baseItems, dirtyIds: ["b"], metaDirty: false });
+  ok("first on the list: restored first", planRegisterRestore(first, reloaded).reg.items.map((i) => i.id).join("") === "bacd");
+  const gone = planRegisterRestore({ meta: null, items: [{ base: null, mine: mk("b"), after: "zzz" }] }, reloaded);
+  ok("the record before it has gone: at the end", gone.reg.items.map((i) => i.id).join("") === "acdb");
+  const old = planRegisterRestore({ meta: null, items: [{ base: null, mine: mk("b") }] }, reloaded);
+  ok("an older draft holds no place: at the end, as before", old.reg.items.map((i) => i.id).join("") === "acdb");
+  ok("an edit of a stored record carries no place", registerDraftOf({ reg: onScreen, baseMeta: onScreen.meta, baseItems, dirtyIds: ["c"], metaDirty: false }).items[0].after === undefined);
+}
+
+section("Round 5 (K3): Undo after the version refresh never writes the older copy over another screen's edit");
+{
+  const mk = (extra = {}) => makeItem({ id: "x", itemKind: "requirement", promptKey: "W-020", category: "notes", description: "Keep the lemon tree", ...extra });
+  const base = mk({ sync: { mode: "lead", version: "v1" } });
+  const shown = mk({ sync: { mode: "lead", version: "v1" } });                                            // what this screen showed when it was deleted
+  const theirs = mk({ nextAction: "Ask about the fence", sync: { mode: "lead", version: "v2" } });          // another screen's edit, read in while the delete waited
+  const cur = { items: [] };
+  const plan = planUndelete(shown, { current: cur, pending: theirs, base });
+  ok("the other screen's edit is kept, and nothing is written (no field of mine changed)", plan.item.nextAction === "Ask about the fence" && plan.dirty === false && plan.item.sync.version === "v2", JSON.stringify([plan.item.nextAction, plan.dirty]));
+  const mine = mk({ description: "Keep the lemon tree and the fig", sync: { mode: "lead", version: "v1" } });
+  const merged = planUndelete(mine, { current: cur, pending: theirs, base });
+  ok("what this screen changed is kept on top, and saved", merged.item.description === "Keep the lemon tree and the fig" && merged.item.nextAction === "Ask about the fence" && merged.dirty === true);
+  const same1 = planUndelete(shown, { current: cur, pending: base, base });
+  ok("no refresh in between: as before (not dirty)", same1.dirty === false && same1.item.nextAction === "");
+  const noBase = planUndelete(shown, { current: cur, pending: theirs });
+  ok("without the base copy it behaves as before", noBase.item.nextAction === "" && noBase.dirty === true);
 }
 
 console.log(`\nregister-merge: ${pass} passed, ${fail} failed`);

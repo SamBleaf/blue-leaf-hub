@@ -27,7 +27,7 @@ const lines = architectBriefLines(m, { siteAddress: "Site address, Seaview Park"
 const allText = lines.map((l) => `${l.label} ${l.text}`).join("\n");
 
 section("The real job, through the brief model (S6)");
-ok("37 printed lines, 48 of 72 records printed, 24 not", lines.length === 37 && m.counts.printed === 48 && m.counts.notPrinted === 24, flat({ lines: lines.length, ...m.counts }));
+ok("36 printed lines, 48 of 72 records printed, 24 not", lines.length === 36 && m.counts.printed === 48 && m.counts.notPrinted === 24, flat({ lines: lines.length, ...m.counts }));
 const reached = new Set([...lines.flatMap((l) => l.ids), ...m.notPrinted.map((x) => x.id)]);
 ok("every record is reachable: on a printed line or in 'Not in this brief' with a reason", register.items.every((i) => reached.has(i.id)), register.items.filter((i) => !reached.has(i.id)).map((i) => i.id));
 ok("no reference codes in the reading text", !/\b[A-Z]\d{3}-[A-Z0-9]{3}\b/.test(allText));
@@ -37,7 +37,7 @@ ok("01: what's planned, funding and timing, budget to be confirmed, priorities",
   "Cash. Target start April 2027.", "To be confirmed by Blue Leaf.", "Natural light and space. Quality priorities: upgraded."]), flat(m.project.map((r) => r.text)));
 ok("02: council and zone, bushfire, complexity, access, occupancy", flat(m.site.map((r) => r.label)) === flat(["Council and zone", "Bushfire", "Site complexity", "Access", "During the works"])
   && m.site[0].text === "City of Seaview. Hills Neighbourhood zone." && m.site[1].text === "In a mapped bushfire area. BAL to be assessed.", flat(m.site));
-ok("03: the eight points in print order (architect, energy assessor, client, then to be agreed)", flat(m.points.map((p) => p.who)) === flat(["Architect", "Architect", "Energy assessor", "Client", "To be agreed", "To be agreed", "To be agreed", "To be agreed"]), flat(m.points.map((p) => p.who)));
+ok("03: the seven whole-house and site points in print order (architect, energy assessor, client, then to be agreed)", flat(m.points.map((p) => p.who)) === flat(["Architect", "Architect", "Energy assessor", "Client", "To be agreed", "To be agreed", "To be agreed"]), flat(m.points.map((p) => p.who)));
 ok("03: retaining and pool asked once", m.points.at(-1).text === "Retaining and pool: are they part of this job?" && flat(m.points.at(-1).ids) === flat(["i71", "i72"]));
 ok("03: '(agreed with the client)' only on an evidenced approval", m.points.filter((p) => /agreed with the client/.test(p.text)).map((p) => p.ids[0]).join() === "i07,i08");
 ok("03: one parenthesis when both notes apply (D4): '(agreed with the client; for consultant review)'", /6\.0 \(agreed with the client; for consultant review\)\.$/.test(m.points[2].text) && !/\) \(/.test(allText), m.points[2].text);
@@ -49,7 +49,9 @@ ok("04: the Kitchen prints its brief, must-haves and cooking; Work from the room
   && rooms[1].text === "Feature range hood, meditrean curved micro cement, love the curves. Layout & family use: island. Storage: full-height, walk-in, drawers. Cooking & exhaust: induction.", rooms[1].text);
 ok("04: the Living's 'stairs -' is held back, so its brief is to follow", rooms[0].placeholder && /^Layout, outlook & acoustics: gas fire place/.test(rooms[0].text));
 ok("04: 'Pantry' in a pantry is skipped, but the record still rides on the row", !/Layout & family use: pantry/i.test(rooms[2].text) && rooms[2].ids.includes("i57"));
-ok("04: the laundry's cabinetry (a house default reaching only the laundry) prints in its row", rooms[3].text === "Cabinetry, bench & trough: cabinetry, bench, splashback, mixer, trough." && rooms[3].ids.includes("i44"));
+ok("04: the laundry's cabinetry (a house default reaching only the laundry) prints in its row", rooms[3].text.startsWith("Cabinetry, bench & trough: cabinetry, bench, splashback, mixer, trough.") && rooms[3].ids.includes("i44"));
+ok("04: the laundry's own open point prints in its row with Who (group by room), and is not in 03", rooms[3].text.endsWith("Open: Washer / dryer layout: still to be decided. Who: To be agreed.")
+  && rooms[3].open.length === 1 && rooms[3].ids.includes("i61") && !m.points.some((p) => p.ids.includes("i61")), rooms[3].text);
 ok("04: agreeing scope words print (Bedroom); agreeing records ride on the Work cell", rooms[5].text === "Sliding doors to robe in bedrooms." && rooms[6].ids.includes("i48"));
 ok("05: the selections that affect the drawings, said once", flat(m.selections.map((r) => r.label)) === flat(["Internal doors", "Ceilings", "Upper level", "Main roof", "Driveway", "All bathrooms", "Fencing"])
   && m.selections[1].text === "Square set, flat." && /By others\.$/.test(m.selections[3].text), flat(m.selections));
@@ -254,15 +256,16 @@ section("Open work never prints as settled (review R2; D3 only takes Blue Leaf's
   ok("…and isn't also in 'Not in this brief'", !("sh1" in wb.np) && !("rw1" in wb.np));
   // A point for the next drawing issue is still said once, in 03.
   const ra = shed("architect"), wa = where(ra);
-  ok("the architect's open work: a point in 03, not repeated in 04 or 05", wa.pts.length === 2 && !wa.sel.length && !wa.room.length, flat({ pts: wa.pts.map((p) => p.text), sel: wa.sel, room: wa.room }));
+  ok("the architect's open work: the site point in 03, the Laundry's point in its row in 04 (not in 05), never twice", wa.pts.length === 1 && !wa.sel.length && wa.room.length === 1 && /Open: Demolition/.test(wa.room[0]) && /Who: Architect/.test(wa.room[0]), flat({ pts: wa.pts.map((p) => p.text), sel: wa.sel, room: wa.room }));
   ok("…and the Laundry's row on its own (How this room reads) agrees: no 'old trough'", !/old trough/i.test(roomRow(ra, context, ra.meta.rooms.find((x) => x.id === "ld")).text));
   // A room must-have the client is still to confirm (a requirement: always for the next drawing issue) is a point in 03 only.
   const mh = load((j) => j.register.items.push({ id: "mh1", kind: "item", promptKey: "L-002", itemKind: "requirement", roomId: "ld", section: "room", category: "layout",
     description: "Folding bench under the window", nextAction: "Client to confirm the bench length", responsibility: "client" })).register;
   const mm2 = architectBriefModel(mh, context, {}), ln2 = architectBriefLines(mm2, {});
-  ok("a must-have waiting on the client: a point in 03 (Client)", mm2.points.some((p) => p.ids.includes("mh1") && p.who === "Client") && forNextIssue(item(mh, "mh1")), flat(mm2.points.map((p) => [p.ids, p.who])));
-  ok("…not also in the Laundry's row in 04, in the brief or on its own", !ln2.some((l) => l.section === "rooms" && /folding bench/i.test(l.text))
-    && !/folding bench/i.test(roomRow(mh, context, mh.meta.rooms.find((x) => x.id === "ld")).text));
+  ok("a must-have waiting on the client: a point in the Laundry's row (Who: Client), not in 03", !mm2.points.some((p) => p.ids.includes("mh1")) && forNextIssue(item(mh, "mh1"))
+  && ln2.some((l) => l.section === "rooms" && l.ids.includes("mh1") && /Open: Washer \/ dryer layout: client to confirm the bench length\.? Who: Client\./i.test(l.text)), flat(ln2.filter((l) => l.section === "rooms" && /Laundry/.test(l.label))));
+ok("…said once, and not in the room's own 'How this room reads'", ln2.filter((l) => /bench length/i.test(l.text)).length === 1
+  && !/bench length/i.test(roomRow(mh, context, mh.meta.rooms.find((x) => x.id === "ld")).text));
   // Blue Leaf's own must-have point (D3): not in 03, so it prints in the room's row.
   const mhb = load((j) => j.register.items.push({ id: "mh2", kind: "item", promptKey: "L-002", itemKind: "requirement", roomId: "ld", section: "room", category: "layout",
     description: "Folding bench under the window", nextAction: "Check the window sill height", responsibility: "blue_leaf" })).register;
