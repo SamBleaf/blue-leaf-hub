@@ -18,6 +18,9 @@ import PromptRow from "./PromptRow.jsx";
 import { NeedsActionFlag } from "./NeedsAction.jsx";
 
 const REASON_LABEL = { decision: "Decision", verification: "Verification", action: "Action" };
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// Text boxes: 16 px on a phone so iOS doesn't zoom on focus, the dense 11 px from 640 px up (the input's own size wins).
+const DENSE = "text-[16px] sm:text-[11px]";
 const NON_WORK_NATURES = new Set(["fact", "risk", "technical", "action", "requirement"]);
 /** A site fact or a risk has no work disposition to set. */
 const hasWorkStatus = (i) => dispositionApplies(answerConfigFor(resolvePromptId(i.promptKey))) && !NON_WORK_NATURES.has(natureOf(i));
@@ -69,14 +72,14 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
-        <span><b className="text-ink">{counts.total}</b> items</span>
-        <span>· {counts.decision} decisions</span><span>· {counts.verification} to verify</span><span>· {counts.action} actions</span>
+        <span><b className="text-ink">{counts.total}</b> {counts.total === 1 ? "item" : "items"}</span>
+        <span>· {plural(counts.decision, "decision")}</span><span>· {counts.verification} to verify</span><span>· {plural(counts.action, "action")}</span>
         {info.mode === "project" && <span>· portal: {counts.staged} staged / {counts.live} issued{counts.review ? ` / ${counts.review} to review` : ""}</span>}
       </div>
 
       <div className="space-y-1.5 text-xs">
         <div className="flex flex-wrap items-center gap-1.5">
-          <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Search item, product, ref…" className="inp w-44 text-[11px]" />
+          <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Search item, product, ref…" aria-label="Search the register" className={`inp w-44 ${DENSE}`} />
           <label className="flex items-center gap-1 text-ink"><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={f.open} onChange={(e) => set("open", e.target.checked)} /> Not finished</label>
           <Select value={f.room} onChange={(v) => set("room", v)} options={[["__project", "Whole house / site"], ...rooms.map((r) => [r.id, r.name])]} placeholder="All rooms" className="w-36" />
           <Select value={f.cert} onChange={(v) => set("cert", v)} options={CERTAINTY_ORDER.map((k) => [k, REGISTER_CERTAINTY[k]])} placeholder="Any client status" className="w-36" />
@@ -123,7 +126,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                     {info.mode === "project" && <td className="py-1 pr-1">{canPick && !readOnly && <input type="checkbox" className="h-3 w-3 accent-primary" checked={picked.includes(i.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, i.id] : p.filter((x) => x !== i.id)))} />}</td>}
                     <td className="whitespace-nowrap py-1 pr-2 font-mono text-[10px] text-muted">{refCode(i)}</td>
                     <td className="py-1 pr-2 text-ink">{roomLabel(reg, i)}</td>
-                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} placeholder={answerSummary(i)} className="inp w-full min-w-[9rem] text-[11px]" />
+                    <td className="py-1 pr-2"><input value={i.description} disabled={readOnly || lock} onChange={(e) => updateItem(i.id, { description: e.target.value })} placeholder={answerSummary(i)} aria-label="Item or direction" className={`inp w-full min-w-[9rem] ${DENSE}`} />
                       <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-muted">
                         <Chip tone={i.itemKind === "selection" ? "blue" : i.itemKind === "requirement" ? "violet" : i.itemKind === "action" ? "amber" : "slate"}>{ITEM_KINDS[i.itemKind]}</Chip>
                         <span>{categoryLabel(i.category)}</span>
@@ -139,8 +142,9 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                     </td>
                     <td className="py-1 pr-2">
                       <NeedsActionFlag reg={reg} context={context} item={i} updateItem={updateItem} readOnly={readOnly} actor={actor} />
-                      <Select value={i.responsibility} onChange={(v) => updateItem(i.id, { responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" disabled={readOnly} />
-                      <input value={i.nextAction} disabled={readOnly} onChange={(e) => updateItem(i.id, { nextAction: e.target.value, resolved: false })} placeholder="next action" className="inp mt-1 w-full min-w-[8rem] text-[11px]" />
+                      {/* pr-7 keeps the owner's name clear of the select's chevron. */}
+                      <Select value={i.responsibility} onChange={(v) => updateItem(i.id, { responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" disabled={readOnly} className="max-w-full pr-7" />
+                      <input value={i.nextAction} disabled={readOnly} onChange={(e) => updateItem(i.id, { nextAction: e.target.value, resolved: false })} placeholder="next action" aria-label="Next action" className={`inp mt-1 w-full min-w-[8rem] ${DENSE}`} />
                       {!i.responsibility && (reasons.includes("action") || reasons.includes("verification")) && <div className="mt-0.5 text-[10px] font-medium text-amber-700">Assign an owner</div>}
                     </td>
                     <td className="py-1 pr-2">{reasons.map((r) => <div key={r}><Chip tone="amber">{REASON_LABEL[r]}</Chip></div>)}
@@ -168,7 +172,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
         <p className="section-label mb-1">Technical coordination (office / consultant — not client questions)</p>
         <p className="mb-1.5 text-[11px] text-muted">Add an element check only when that system is in scope. It becomes an owned action marked “needs verification” and appears in the Architect Brief and tender risks.</p>
         <div className="flex flex-wrap items-center gap-1.5">
-          <select value={techAdd} onChange={(e) => setTechAdd(e.target.value)} className="inp max-w-[28rem] text-[11px]" disabled={readOnly}>
+          <select value={techAdd} onChange={(e) => setTechAdd(e.target.value)} className={`inp max-w-[28rem] ${DENSE}`} disabled={readOnly} aria-label="Coordination check to add">
             <option value="">Choose a coordination check…</option>
             {TECH_TOPICS.map((t) => (
               <optgroup key={t.key} label={t.label}>

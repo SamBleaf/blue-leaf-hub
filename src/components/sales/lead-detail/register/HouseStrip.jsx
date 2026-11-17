@@ -6,12 +6,14 @@
  * "Different here", which lists each house line with its own "Different here" (a room exception, the existing logic).
  *
  * Under it, one line per house choice zoned to this room that is still open (amber) or not allowed (red, the K-005
- * engineered-stone default). Its button opens that house record (onOpenItem, or here in place); it never edits other rooms.
- * On a phone the strip opens a bottom sheet with the lines; the red and amber lines stay visible under it.
+ * engineered-stone default). Its button opens that house record in the edit drawer (onOpenItem; here in place when the
+ * screen has no drawer); it never edits other rooms. A line whose record is an open point carries its ⚑ on the same row
+ * (a pill once someone is named). On a phone the strip opens a bottom sheet with the lines; the red and amber lines stay
+ * visible under it.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { confirmRoomDefaults, questionById, answerSummary } from "../../../../lib/register.js";
-import { clean, lowerFirst, chipWords } from "../../../../lib/briefModel.js";
+import { clean, lowerFirst, chipWords, isOpenPoint } from "../../../../lib/briefModel.js";
 import { stripView, exceptionSeedFrom, shortName, patchRoom } from "../../../../lib/roomScreen.js";
 import { NeedsActionFlag } from "./NeedsAction.jsx";
 import ChoiceRow from "./ChoiceRow.jsx";
@@ -26,6 +28,7 @@ export default function HouseStrip({ reg, room, questions, mutateMeta, upsertIte
   const narrow = useNarrow();
   const [list, setList] = useState(false);
   const [editing, setEditing] = useState(null);
+  const trigger = useRef(null);
   if (!room || room.scope === "not_in_scope") return null;
   const S = stripView(reg, room, questions);
   if (!S.lines.length && !S.houseLines.length) return null;
@@ -63,10 +66,10 @@ export default function HouseStrip({ reg, room, questions, mutateMeta, upsertIte
   return (
     <section aria-labelledby={`house-${room.id}`} className="space-y-2 rounded-card border border-hairline bg-page px-3 pb-3 pt-1" data-testid="house-strip">
       {narrow ? (
-        <button type="button" onClick={() => setList(true)} className="flex min-h-[56px] w-full items-center gap-2 text-left">
+        <button ref={trigger} type="button" onClick={() => setList(true)} aria-haspopup="dialog" aria-expanded={list} className="focus-ring flex min-h-[56px] w-full items-center gap-2 rounded-lg text-left">
           <span className="min-w-0 flex-1">
             <span id={`house-${room.id}`} className="block text-[15px] font-bold text-ink">Same as the rest of the house</span>
-            {S.summary && <span className="block truncate text-[13px] text-muted">{S.summary}</span>}
+            {S.summary && <span className="line-clamp-2 text-[13px] text-muted">{S.summary}</span>}
           </span>
           <span className={`shrink-0 text-[13px] font-bold ${S.pending.length ? "text-primary" : "text-accent"}`}>
             {S.pending.length ? `Confirm ${S.pending.length}` : S.confirmedCount ? `✓ ${S.confirmedCount} confirmed` : ""} ›
@@ -76,7 +79,7 @@ export default function HouseStrip({ reg, room, questions, mutateMeta, upsertIte
         <div className="flex min-h-[56px] items-center gap-3">
           <div className="min-w-0 flex-1">
             <h2 id={`house-${room.id}`} className="text-sm font-bold text-ink">Same as the rest of the house</h2>
-            {S.summary && <p className="truncate text-[13px] text-muted" title={S.summary}>{S.summary}</p>}
+            {S.summary && <p className="line-clamp-2 text-[13px] text-muted" title={S.summary}>{S.summary}</p>}
           </div>
           {confirmed}{confirmBtn}
           {S.lines.length > 0 && <button type="button" aria-expanded={list} onClick={() => setList((v) => !v)} className={textBtn}>Different here</button>}
@@ -84,7 +87,7 @@ export default function HouseStrip({ reg, room, questions, mutateMeta, upsertIte
       )}
       {!narrow && list && <div className="rounded-lg border border-hairline bg-surface px-3">{lines}</div>}
       {narrow && (
-        <Popover open={list} onClose={() => setList(false)} narrow title="Same as the rest of the house">
+        <Popover open={list} onClose={() => setList(false)} narrow anchorRef={trigger} title="Same as the rest of the house">
           <div className="space-y-2 pb-2">
             {confirmBtn}
             {confirmed}
@@ -98,11 +101,15 @@ export default function HouseStrip({ reg, room, questions, mutateMeta, upsertIte
         const q = questionById(h.sourceId) || h.question;
         return (
           <div key={h.item.id} data-testid={`house-line-${h.item.id}`}>
-            <div className={`flex items-center gap-3 rounded-lg py-0.5 pl-3 pr-1 ${red ? "border border-red-200 bg-red-50" : "bg-warning/10"}`}>
-              <span className={`min-w-0 flex-1 text-[15px] leading-5 sm:text-sm ${red ? "text-red-700" : "text-amber-800"}`}>{narrow ? h.shortText : h.text}</span>
-              <button type="button" onClick={() => open(h)} className={textBtn}>{h.action}</button>
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg py-0.5 pl-3 pr-1 ${red ? "border border-red-200 bg-red-50" : "bg-warning/10"}`} data-testid={`house-line-row-${h.item.id}`}>
+              <span className={`min-w-[10rem] flex-1 py-2 text-[15px] leading-5 sm:text-sm ${red ? "text-red-700" : "text-amber-800"}`}>{narrow ? h.shortText : h.text}</span>
+              <span className="flex min-w-0 max-w-full items-center gap-1">
+                <button type="button" onClick={() => open(h)} className={textBtn}>{h.action}</button>
+                {isOpenPoint(h.item) && (
+                  <span className="flex min-w-0 items-center"><NeedsActionFlag reg={reg} context={context} actor={actor} item={h.item} updateItem={updateItem} upsertItem={upsertItem} readOnly={readOnly} /></span>
+                )}
+              </span>
             </div>
-            <div className="pl-3"><NeedsActionFlag reg={reg} context={context} item={h.item} updateItem={updateItem} upsertItem={upsertItem} readOnly={readOnly} /></div>
             {editing === h.item.id && (
               <div className="mt-1 rounded-lg border border-hairline bg-surface">
                 <p className="px-4 pt-3 text-xs text-muted">This is the house record{h.item.answer?.zone?.label ? ` for the ${lowerFirst(h.item.answer.zone.label)}` : ""}. A change here is a change for the whole house.</p>

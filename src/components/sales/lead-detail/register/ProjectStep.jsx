@@ -16,8 +16,11 @@
  *
  * focusKey ("vision", "must_haves", "budget", "architect", "planRev", …) scrolls to that field and focuses it on mount.
  * onOpenRecord(id), when given, opens a record in the edit drawer (access, the earlier notes); otherwise they open in place.
+ * "Re-check" runs public mapping again for any staff member (POST …/site/recheck, rate-limited per lead on the server).
+ * The site sheet (phone) and the delivery-model menu take focus when they open and hand it back on close; Escape closes
+ * only the top one (overlayFlag.useEscapeLayer).
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   makeItem, questionById, resolvePromptId, answerConfigFor, answerIsEditable, toggleOption, itemPatch, promptsFor, siteLine,
   DELIVERY_MODELS, PROJECT_TYPE_LABELS,
@@ -25,10 +28,13 @@ import {
 import { clean, chipWords, recordWords } from "../../../../lib/briefModel.js";
 import { PROJECT_TYPES } from "../../../../lib/salesPipeline.js";
 import { apiPost, apiPut } from "../../../../lib/apiFetch.js";
+import { useBodyFlag, useEscapeLayer } from "../../../../lib/overlayFlag.js";
 import { projectGaps, prioritiesFromNote, siteRows, siteSummary, SHOW_IN_SALES, PHONE_MORE_KEYS } from "../../../../lib/projectStory.js";
 import StoryFields, { Tick } from "./StoryFields.jsx";
 import DesignTeamCard from "./DesignTeamCard.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
+import { useDialogFocus, useNarrow } from "./useRoomUi.js";
+import { contractFixed } from "../../../../lib/roomScreen.js";
 
 const OCCUPANCY = [["vacant", "Moving out"], ["partly", "Partly lived in"], ["occupied", "Living there"]];
 const card = "flex flex-col gap-3 rounded-card border border-hairline bg-surface p-4";
@@ -36,13 +42,42 @@ const cardTitle = "m-0 text-base font-semibold text-ink";
 const textBtn = "focus-ring inline-flex min-h-[44px] flex-none items-center px-2 text-[13px] font-bold text-primary";
 const capFirst = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
 const adelaideDay = (d = new Date()) => d.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Adelaide" });
+const RECHECK_FAILED = "Couldn't reach the mapping service. Nothing changed.";
+const MENU_W = 256;
+/** Where a fixed menu goes: under the element, kept 8 px inside the window. */
+const menuPos = (el) => {
+  const r = el?.getBoundingClientRect?.();
+  return r ? { top: Math.round(r.bottom + 4), left: Math.round(Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8))) } : null;
+};
+// A link inside a wrapping line keeps a 44 px tap area through padding, without making its line 44 px tall.
+const inlineTap = "min-h-0 py-[11px] -my-[11px]";
+
+/**
+ * Items on a wrapping line with a "·" between them. Each separator rides at the front of its item and the line is shifted
+ * left by the separator's width and clipped, so the separator at the start of every line falls outside: no line starts
+ * or ends with a stray dot. items: [{ key, node, dot = true }]; dot false keeps the space without the dot.
+ */
+function DotLine({ items, className = "" }) {
+  return (
+    <div className={`min-w-0 flex-1 overflow-x-clip ${className}`}>
+      <p className="m-0 -ml-[12px] flex flex-wrap items-center">
+        {items.map((it) => (
+          <span key={it.key} className="inline-flex min-w-0 max-w-full items-center whitespace-nowrap">
+            <span aria-hidden="true" className="inline-block w-[12px] flex-none text-center">{it.dot === false ? "" : "·"}</span>
+            {it.node}
+          </span>
+        ))}
+      </p>
+    </div>
+  );
+}
 
 /** A muted line holding words recorded earlier, with a way to reword or remove them. */
 function EarlierNote({ item, prefix, action, readOnly, updateItem, deleteItem, onOpenRecord }) {
   const [open, setOpen] = useState(false);
   const words = clean(item.description) || chipWords(item);
   if (!words) return null;
-  const locked = !!item.sync?.locked;
+  const locked = contractFixed(item);   // locked or in the signed baseline: the server refuses a reword of either (N21)
   return (
     <div>
       <div className="flex flex-wrap items-center gap-x-2.5 text-[13px] text-muted">
@@ -117,19 +152,42 @@ function Priorities({ reg, upsertItem, updateItem, readOnly }) {
   );
 }
 
-/** Delivery model, tappable in the identity line: a 4-option popover saved through the facts endpoint. */
+/**
+ * Delivery model, tappable in the identity line: a 4-option menu saved through the facts endpoint. A bottom sheet on a
+ * phone; wider up it sits under the button in fixed position (so the identity line's clipping never cuts it) and follows
+ * the button while the page scrolls. It takes focus on open and hands it back on close; Escape closes it.
+ */
 function DeliveryModel({ value, onPick, readOnly }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btn = useRef(null);
+  const menu = useRef(null);
+  const narrow = useNarrow();
+  useDialogFocus(menu, open, btn);
+  useEscapeLayer(open, () => setOpen(false));
+  useBodyFlag("register-overlay-open", open && narrow);
+  const place = () => { const p = menuPos(btn.current); if (p) setPos(p); };
+  useEffect(() => {
+    if (!open || narrow) return undefined;
+    const follow = () => { const p = menuPos(btn.current); if (p) setPos(p); };
+    window.addEventListener("scroll", follow, true);
+    window.addEventListener("resize", follow);
+    return () => { window.removeEventListener("scroll", follow, true); window.removeEventListener("resize", follow); };
+  }, [open, narrow]);
   const words = DELIVERY_MODELS[value] || "Delivery model not set";
   if (readOnly) return <span>{DELIVERY_MODELS[value] || "Delivery model not set"}</span>;
   return (
-    <span className="relative inline-block">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${words}, change delivery model`} onClick={() => setOpen((o) => !o)}
-        className="focus-ring min-h-[44px] text-[13px] text-muted underline decoration-dotted underline-offset-[3px]">{words}</button>
+    <span className="inline-block">
+      <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${words}, change delivery model`}
+        onClick={() => { if (!open) place(); setOpen((o) => !o); }}
+        className={`focus-ring ${inlineTap} text-[13px] leading-[22px] text-muted underline decoration-dotted underline-offset-[3px]`}>{words}</button>
       {open && (
         <>
-          <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/30 sm:z-10 sm:bg-transparent" />
-          <span role="menu" aria-label="Delivery model" className="fixed inset-x-0 bottom-0 z-50 block overflow-hidden rounded-t-2xl border border-hairline bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:z-20 sm:mt-1 sm:w-64 sm:rounded-lg sm:pb-0 sm:shadow-lg">
+          <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setOpen(false)} className={`fixed inset-0 z-40 cursor-default ${narrow ? "bg-black/30" : "bg-transparent"}`} />
+          <span ref={menu} role="menu" aria-label="Delivery model" tabIndex={-1} style={narrow ? undefined : { top: pos.top, left: pos.left, width: MENU_W }}
+            className={`fixed z-50 block overflow-hidden border border-hairline bg-surface outline-none ${narrow
+              ? "inset-x-0 bottom-0 rounded-t-2xl pb-[env(safe-area-inset-bottom)] shadow-2xl"
+              : "rounded-lg shadow-lg"}`}>
             {Object.entries(DELIVERY_MODELS).map(([k, l]) => (
               <button key={k} type="button" role="menuitemradio" aria-checked={value === k} onClick={() => { setOpen(false); if (k !== value) onPick(k); }}
                 className="flex min-h-[44px] w-full items-center gap-2 px-3 text-left text-sm text-ink hover:bg-page">
@@ -143,11 +201,28 @@ function DeliveryModel({ value, onPick, readOnly }) {
   );
 }
 
+/** Phone: the full Site and planning card as a bottom sheet. Takes focus, hands it back, closes on Escape. */
+function SiteSheet({ onClose, returnTo, children }) {
+  const box = useRef(null);
+  useDialogFocus(box, true, returnTo);
+  useEscapeLayer(true, onClose);
+  useBodyFlag("register-overlay-open", true);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="Site and planning">
+      <button type="button" aria-label="Close" tabIndex={-1} onClick={onClose} className="absolute inset-0 cursor-default bg-black/30" />
+      <div ref={box} tabIndex={-1} className="relative max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-surface p-4 shadow-2xl outline-none">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectStep({
   reg, context, lead, stage, actor, patchLead, reloadContext, setDeliveryModel, mutateMeta, upsertItem, updateItem, deleteItem, addItem: _addItem, saveState,
   focusKey, readOnly = false, onOpenRecord,
 }) {
   const rootRef = useRef(null);
+  const siteRowRef = useRef(null);
   const meta = reg.meta;
   const [storyMore, setStoryMore] = useState(false);
   const [gapList, setGapList] = useState(false);
@@ -156,6 +231,7 @@ export default function ProjectStep({
   const [mgmtOpen, setMgmtOpen] = useState(false);
   const [siteMsg, setSiteMsg] = useState(null);
   const [typeError, setTypeError] = useState(null);
+  const narrow = useNarrow();
   const gaps = useMemo(() => projectGaps(reg, context), [reg, context]);
 
   const projectType = context?.projectType || lead.project_type || "";
@@ -200,12 +276,15 @@ export default function ProjectStep({
       if (r === null || r === false) setTypeError("Not saved — try again.");
     }
   }
+  // The server picks the job (else the lead), and skips a lookup under 10 minutes old: "Updated" names the lookup's day.
   async function recheck() {
     setSiteMsg("Checking public mapping…");
-    const onJob = context?.owner === "job" && lead.job_id;
-    const r = await apiPost(`/api/geo/enrich/${onJob ? "jobs" : "leads"}/${onJob ? lead.job_id : lead.id}`, {});
-    if (r.ok) { setSiteMsg(`Updated ${adelaideDay()}`); reloadContext?.(); }
-    else setSiteMsg("Couldn't reach the mapping service. Nothing changed.");
+    const r = await apiPost(`/api/register/leads/${lead.id}/site/recheck`, {});
+    if (r.ok) {
+      const at = r.data?.context?.site?.enrichedAt;
+      setSiteMsg(`Updated ${adelaideDay(at && Number.isFinite(Date.parse(at)) ? new Date(at) : new Date())}`);
+      reloadContext?.();
+    } else setSiteMsg(r.network ? RECHECK_FAILED : r.error || RECHECK_FAILED);
   }
   const showInSales = (what) => document.dispatchEvent(new CustomEvent(SHOW_IN_SALES, { detail: what }));
 
@@ -227,8 +306,8 @@ export default function ProjectStep({
   const id = context.identity || {};
   const site = context.site || {};
   const rows = siteRows(site, access ? recordWords(access).replace(/\.$/, "") : "");
-  // Public mapping can be re-run only by an admin (POST /api/geo/enrich is admin-only); everyone else sees the values.
-  const canRecheck = !readOnly && actor?.role === "admin";
+  // Any staff member can run public mapping again (the server rate-limits it per lead); read-only viewers see the values.
+  const canRecheck = !readOnly;
   const n = gaps.length;
   const gapCount = `${n} gap${n === 1 ? "" : "s"}`;
   const drawings = context.drawings || [];
@@ -257,19 +336,16 @@ export default function ProjectStep({
       {/* R1 · the gaps, where they are fixed */}
       {n > 0 && (
         <>
-          <div role="status" className="hidden min-h-[48px] items-center gap-4 rounded-card border border-warning bg-amber-50 px-4 py-1.5 sm:flex" data-testid="project-gaps">
-            <p className="m-0 flex min-w-0 flex-1 flex-wrap items-center gap-x-1 text-sm leading-[21px] text-ink">
-              <span className="mr-0.5">Still missing for the architect&apos;s brief:</span>
-              {gaps.map((g, i) => (
-                <Fragment key={g.key}>
-                  {i > 0 && <span aria-hidden="true">·</span>}
-                  <button type="button" onClick={() => focusField(g.key)} className="focus-ring inline-flex min-h-[44px] items-center font-bold text-amber-800 underline underline-offset-2">{g.label}</button>
-                </Fragment>
-              ))}
-            </p>
+          <div role="status" className="hidden min-h-[48px] items-center gap-4 rounded-card border border-warning bg-amber-50 px-4 py-[13px] sm:flex" data-testid="project-gaps">
+            <DotLine className="text-sm leading-[22px] text-ink" items={[
+              { key: "lead", dot: false, node: <span>Still missing for the architect&apos;s brief:</span> },
+              ...gaps.map((g, i) => ({ key: g.key, dot: i > 0, node: (
+                <button type="button" onClick={() => focusField(g.key)} className={`focus-ring ${inlineTap} font-bold text-amber-800 underline underline-offset-2`}>{g.label}</button>
+              ) })),
+            ]} />
             <span className="flex-none text-[13px] font-bold text-amber-800">{gapCount}</span>
           </div>
-          <div className="sticky top-0 z-20 -mx-2 sm:hidden">
+          <div className="sticky top-[65px] z-20 -mx-2 sm:hidden md:top-0">
             <button type="button" onClick={() => setGapList((o) => !o)} aria-expanded={gapList}
               className="flex min-h-[44px] w-full items-center justify-between border-y border-warning bg-amber-50 px-4 text-left text-sm font-bold text-amber-800">
               {gapCount} for the architect&apos;s brief <span aria-hidden="true">›</span>
@@ -286,23 +362,21 @@ export default function ProjectStep({
       )}
 
       {/* R2 · identity line */}
-      <div className="flex min-h-[36px] flex-wrap items-center justify-between gap-x-3 text-[13px] text-muted">
-        <p className="m-0 flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
-          {[
-            id.clientName ? <span key="c" className="min-w-0 truncate">{id.clientName}</span> : null,
-            id.siteAddress || id.suburb ? <span key="s" className="min-w-0 truncate">{siteLine(id.siteAddress, id.suburb)}</span> : null,
-            projectType ? <span key="t">{PROJECT_TYPE_LABELS[projectType] || capFirst(projectType.replace(/_/g, " "))}</span>
-              : readOnly ? <span key="t">Project type not set</span> : (
-                <select key="t" value="" onChange={(e) => setProjectType(e.target.value)} aria-label="Set project type" className="inp min-h-[44px] px-2 text-[16px] sm:text-[13px]">
-                  <option value="">Set project type…</option>
-                  {PROJECT_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              ),
-            <DeliveryModel key="d" value={deliveryModel} onPick={(v) => setDeliveryModel(v)} readOnly={readOnly} />,
-            context.commercial?.ptsaStatus ? <span key="p">PTSA {String(context.commercial.ptsaStatus).replace(/_/g, " ")}</span> : null,
-          ].filter(Boolean).map((el, i) => <Fragment key={i}>{i > 0 && <span aria-hidden="true">·</span>}{el}</Fragment>)}
-        </p>
-        <button type="button" onClick={() => showInSales("details")} className="focus-ring min-h-[44px] flex-none text-[13px] font-bold text-primary">Change in Sales ›</button>
+      <div className="flex min-h-[36px] flex-wrap items-center justify-between gap-x-3 text-[13px] leading-[22px] text-muted">
+        <DotLine items={[
+          id.clientName ? { key: "c", node: <span className="min-w-0 truncate">{id.clientName}</span> } : null,
+          id.siteAddress || id.suburb ? { key: "s", node: <span className="min-w-0 truncate">{siteLine(id.siteAddress, id.suburb)}</span> } : null,
+          { key: "t", node: projectType ? <span>{PROJECT_TYPE_LABELS[projectType] || capFirst(projectType.replace(/_/g, " "))}</span>
+            : readOnly ? <span>Project type not set</span> : (
+              <select value="" onChange={(e) => setProjectType(e.target.value)} aria-label="Set project type" className="inp my-0.5 min-h-[44px] px-2 text-[16px] sm:text-[13px]">
+                <option value="">Set project type…</option>
+                {PROJECT_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) },
+          { key: "d", node: <DeliveryModel value={deliveryModel} onPick={(v) => setDeliveryModel(v)} readOnly={readOnly} /> },
+          context.commercial?.ptsaStatus ? { key: "p", node: <span>PTSA {String(context.commercial.ptsaStatus).replace(/_/g, " ")}</span> } : null,
+        ].filter(Boolean).map((it, i) => ({ ...it, dot: i > 0 }))} />
+        <button type="button" onClick={() => showInSales("details")} className={`focus-ring ${inlineTap} flex-none text-[13px] font-bold text-primary`}>Change in Sales ›</button>
       </div>
       {typeError && <p className="-mt-2 text-[12px] text-red-600" role="alert">{typeError}</p>}
 
@@ -326,7 +400,7 @@ export default function ProjectStep({
           {canRecheck && <button type="button" onClick={recheck} disabled={siteMsg === "Checking public mapping…"} className={`${textBtn} -my-1.5 disabled:opacity-50`}>Re-check</button>}
         </div>
         {siteMsg && <p className="-mt-1 text-[12px] text-muted" role="status">{siteMsg}</p>}
-        <button type="button" onClick={() => setSiteSheet(true)} className="flex min-h-[56px] w-full items-center justify-between gap-2 border-y border-hairline text-left text-sm text-ink sm:hidden">
+        <button ref={siteRowRef} type="button" aria-haspopup="dialog" onClick={() => setSiteSheet(true)} className="flex min-h-[56px] w-full items-center justify-between gap-2 border-y border-hairline text-left text-sm text-ink sm:hidden">
           <span className="min-w-0">{siteSummary(site)}</span><span aria-hidden="true" className="text-muted">›</span>
         </button>
         <div className="hidden sm:block">{siteGrid}</div>
@@ -404,11 +478,9 @@ export default function ProjectStep({
         </div>
       )}
 
-      {/* Phone: the full Site and planning card as a bottom sheet. */}
-      {siteSheet && (
-        <div className="fixed inset-0 z-50 flex items-end sm:hidden" role="dialog" aria-modal="true" aria-label="Site and planning">
-          <button type="button" aria-label="Close" onClick={() => setSiteSheet(false)} className="absolute inset-0 cursor-default bg-black/30" />
-          <div className="relative max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-surface p-4 shadow-2xl">
+      {/* Phone: the full Site and planning card as a bottom sheet (only while the screen is phone-width). */}
+      {siteSheet && narrow && (
+        <SiteSheet onClose={() => setSiteSheet(false)} returnTo={siteRowRef}>
             <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-hairline" aria-hidden="true" />
             <div className="mb-2 flex items-start justify-between gap-2">
               <div>
@@ -419,9 +491,8 @@ export default function ProjectStep({
             </div>
             {siteGrid}
             {canRecheck && <button type="button" onClick={recheck} disabled={siteMsg === "Checking public mapping…"} className={`${textBtn} mt-2 px-0 disabled:opacity-50`}>Re-check</button>}
-            {siteMsg && <p className="text-[12px] text-muted">{siteMsg}</p>}
-          </div>
-        </div>
+            {siteMsg && <p className="text-[12px] text-muted" role="status">{siteMsg}</p>}
+        </SiteSheet>
       )}
     </div>
   );

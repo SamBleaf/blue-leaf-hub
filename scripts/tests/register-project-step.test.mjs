@@ -6,10 +6,15 @@
  * the gap strip, Site and planning in plain words, and the design team (job_contact_roles + consultant_roster merged,
  * deduped, and kept in step). Also: the story facts are registered on the Lead spine. Then the real ProjectStep,
  * StoryFields, DesignTeamCard and NameArchitectPanel rendered to a string (esbuild, no browser). No database, no network.
+ * Fixes covered here: only a plain yes confirms the budget (B2); one budget figure against the stored other (N26);
+ * "Use these" leaves unmatched words as typed (P10); the site reads from the lead until the job is looked up (M3); Re-check
+ * for every staff member, rate-limited (N16); plain errors from the facts service (N25); "+ Add someone new" never links
+ * the wrong person or saves twice (N24, M6); the roster written against what is stored (N29); the architect typed in Sales
+ * stays visible (M14); "Not named" never cut (N30); no stray separators in the identity line and gap strip (P9).
  *
  *   node scripts/tests/register-project-step.test.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,7 +24,9 @@ import {
   startParts, startValue, startYears, MONTH_NAMES, normaliseStoryPatch, prioritiesFromNote, projectGaps, siteRows, siteSummary,
   mergeConsultants, rosterAdd, rosterRemove, rosterNeedsRole, sameDiscipline, storageRolesFor, teamRows, contactLabel, splitName,
   searchWords, contactMatches, STORY_COLUMNS, BUDGET_FIELD_KEYS, STORY_FIELD_KEYS, PHONE_MORE_KEYS, DESIGN_TEAM_ROLES, OTHER_CONSULTANT_ROLES,
+  budgetPairError, emailMatch, sameNamedOnJob, conflictWords, contactNameOf, nameKey,
 } from "../../src/lib/projectStory.js";
+import { siteSource, siteFacts, recheckDue, RECHECK_MIN_MS } from "../../server/lib/registerContext.mjs";
 import { BUDGET_BANDS, budgetLine, designTeam, namedArchitect } from "../../src/lib/briefModel.js";
 import { answerConfigFor, makeItem, emptyMeta } from "../../src/lib/register.js";
 import { LEAD_FINANCE_STATUS_LABELS } from "../../src/lib/constants.js";
@@ -67,12 +74,20 @@ ok("an exact range that IS a band reads as the band", budgetChoice(...Object.val
 
 section("Confirmed with the client");
 ok("the toggle writes a plain 'Yes'", BUDGET_CONFIRMED_TEXT === "Yes" && budgetConfirmedOn("Yes"));
-ok("free text from Sales that names a figure counts as confirmed", budgetConfirmedOn("$1.3M–$1.5M approved finance"));
-ok("'no', 'TBC', 'not yet', '-' and blank do not", ["no", "No.", "TBC", "not yet", "-", "", null, "to be confirmed"].every((t) => !budgetConfirmedOn(t)));
-ok("a boolean passes through", budgetConfirmedOn(true) && !budgetConfirmedOn(false));
-ok("words beyond a plain yes stay visible under the toggle", confirmedNoteOf("$1.3M–$1.5M approved finance") === "$1.3M–$1.5M approved finance" && confirmedNoteOf("Yes") === "" && confirmedNoteOf("confirmed") === "");
-const confirmedCtx = { budget: { min: 800000, max: 1000000, confirmed: budgetConfirmedOn("Yes") } };
-ok("the brief prints the band only once confirmed (owner decision 1)", budgetLine(confirmedCtx) === "$800k–$1m construction budget, ex GST (the client's figure)." && budgetLine({ budget: { ...confirmedCtx.budget, confirmed: budgetConfirmedOn("no") } }) === "");
+// Only a plain yes counts: a hopeful note in Sales never prints the band (owner decision 1).
+const CONFIRMED_TABLE = [
+  ["Yes", true], ["yes - approved finance", true], ["Yes, approved finance", true], ["Confirmed", true], ["Confirmed with the client", true],
+  ["true", true], ["Y", true], [true, true],
+  ["Pending bank approval", false], ["Awaiting finance", false], ["Waiting on broker", false], ["Maybe", false],
+  ["Client to confirm after valuation", false], ["$1.3M–$1.5M approved finance", false], ["Not yet", false], ["no", false], ["No.", false],
+  ["TBC", false], ["to be confirmed", false], ["Unconfirmed", false], ["Yesterday they said maybe", false], ["-", false], ["", false], [null, false], [false, false],
+];
+for (const [text, want] of CONFIRMED_TABLE) ok(`${JSON.stringify(text)} reads as ${want ? "confirmed" : "not confirmed"}`, budgetConfirmedOn(text) === want);
+const bandCtx = (text) => ({ budget: { min: 800000, max: 1000000, confirmed: budgetConfirmedOn(text) } });
+ok("the brief prints the band for a plain yes (owner decision 1)", ["Yes", "yes - approved finance", "Confirmed", true].every((t) => budgetLine(bandCtx(t)) === "$800k–$1m construction budget, ex GST (the client's figure)."));
+ok("…and never for a hopeful note or nothing", ["Pending bank approval", "Awaiting finance", "Maybe", "Client to confirm after valuation", "", "no"].every((t) => budgetLine(bandCtx(t)) === ""));
+ok("words beyond a plain yes stay visible under the toggle, never rewritten", confirmedNoteOf("Pending bank approval") === "Pending bank approval"
+  && confirmedNoteOf("Yes - approved finance") === "Yes - approved finance" && confirmedNoteOf("Yes") === "" && confirmedNoteOf("confirmed") === "");
 
 // ── 2 · Target start ────────────────────────────────────────────────────────────────────────────────
 section("Target start (month + year, stored as YYYY-MM-01)");
@@ -99,7 +114,22 @@ ok("budget figures as numbers pass", eq(normaliseStoryPatch({ construction_budge
 ok("a numeric string from an older form is stored as a number", normaliseStoryPatch({ construction_budget_min: "800000" }).updates?.construction_budget_min === 800000);
 ok("words or a negative figure are refused", !!normaliseStoryPatch({ construction_budget_max: "about 1m" }).error && !!normaliseStoryPatch({ construction_budget_min: -5 }).error);
 ok("lower more than upper (in one save) is refused", !!normaliseStoryPatch({ construction_budget_min: 1000000, construction_budget_max: 800000 }).error);
-ok("one figure on its own is never cross-checked (Sales saves min and max separately)", !normaliseStoryPatch({ construction_budget_min: 1500000 }).error);
+ok("one figure on its own passes the body check (the pair is checked against the stored figure)", !normaliseStoryPatch({ construction_budget_min: 1500000 }).error);
+section("Lead PATCH: one budget figure against the stored other (Sales saves them separately)");
+const stored = { construction_budget_min: "800000", construction_budget_max: "1000000" };
+const minAbove = budgetPairError({ construction_budget_min: 1200000 }, stored);
+ok("a lower figure above the stored upper one is refused, in plain English", /lower figure is more than its upper figure \(\$1,000,000\)/.test(minAbove || "") && /Nothing was saved/.test(minAbove), minAbove);
+const maxBelow = budgetPairError({ construction_budget_max: 600000 }, stored);
+ok("an upper figure below the stored lower one is refused", /upper figure is less than its lower figure \(\$800,000\)/.test(maxBelow || ""), maxBelow);
+ok("Sales' min 1,200,000 then max 800,000: the second save is refused", !!budgetPairError({ construction_budget_max: 800000 }, { construction_budget_min: 1200000, construction_budget_max: null }));
+ok("a figure inside the stored range passes", budgetPairError({ construction_budget_min: 900000 }, stored) === null && budgetPairError({ construction_budget_max: 900000 }, stored) === null);
+ok("equal figures pass", budgetPairError({ construction_budget_min: 1000000 }, stored) === null);
+ok("clearing a figure is never checked", budgetPairError({ construction_budget_min: null }, stored) === null);
+ok("no stored other figure → nothing to check", budgetPairError({ construction_budget_min: 5000000 }, { construction_budget_max: null }) === null && budgetPairError({ construction_budget_max: 1 }, {}) === null);
+ok("both figures in one body are left to normaliseStoryPatch", budgetPairError({ construction_budget_min: 2000000, construction_budget_max: 1000000 }, stored) === null);
+ok("a body without budget figures is untouched", budgetPairError({ name: "X" }, stored) === null);
+const salesSrc = readFileSync(new URL("../../server/lib/salesRoutes.mjs", import.meta.url), "utf8");
+ok("the lead PATCH runs the pair check against the stored lead", /budgetPairError\(body, storedLead\)/.test(salesSrc));
 ok("a blank figure clears it", normaliseStoryPatch({ construction_budget_max: "" }).updates.construction_budget_max === null);
 ok("a date passes, a non-date is refused", !normaliseStoryPatch({ desired_start_date: "2027-04-01" }).error && !!normaliseStoryPatch({ desired_start_date: "April" }).error && !!normaliseStoryPatch({ desired_start_date: "2027-13-01" }).error);
 ok("blank story text is stored as nothing", normaliseStoryPatch({ wo_client_vision: "   " }).updates.wo_client_vision === null);
@@ -128,7 +158,13 @@ const P5 = answerConfigFor("P-005");
 const p1 = prioritiesFromNote("Natural light, Space", P5.options, [], P5.max);
 ok("the real job's 'Natural light, Space' ticks both chips and leaves nothing", eq(p1.add, ["natural_light", "space"]) && p1.rest === "", flat(p1));
 const p2 = prioritiesFromNote("natural light and a big pool; storage", P5.options, [], 3);
-ok("words that match no chip stay in the note", eq(p2.add, ["natural_light", "storage"]) && p2.rest === "a big pool", flat(p2));
+ok("only commas, semicolons and new lines separate phrases: the rest stays exactly as typed", eq(p2.add, ["storage"]) && p2.rest === "natural light and a big pool", flat(p2));
+const pFlow = prioritiesFromNote("Indoor/outdoor flow and room for the grandkids", P5.options, [], 3);
+ok("'Indoor/outdoor flow and room for the grandkids' is left exactly as typed", pFlow.add.length === 0 && pFlow.rest === "Indoor/outdoor flow and room for the grandkids", flat(pFlow));
+const pMix = prioritiesFromNote("Natural light; Indoor/outdoor flow & a deck\nSpace", P5.options, [], 3);
+ok("matched phrases come out, the rest keeps its own words and separators", eq(pMix.add, ["natural_light", "space"]) && pMix.rest === "Indoor/outdoor flow & a deck", flat(pMix));
+const pMid = prioritiesFromNote("a big pool, Space; north light", P5.options, [], 3);
+ok("a phrase taken from the middle keeps the separator before the next one", eq(pMid.add, ["space"]) && pMid.rest === "a big pool, north light", flat(pMid));
 const p3 = prioritiesFromNote("Space, Privacy, Comfort, Storage", P5.options, ["energy_use"], 3);
 ok("never more than three chosen; the ones that don't fit stay in the note", eq(p3.add, ["space", "privacy"]) && p3.rest === "Comfort, Storage", flat(p3));
 const p4 = prioritiesFromNote("Space", P5.options, ["space"], 3);
@@ -171,6 +207,30 @@ ok("no access answer reads 'Not recorded'", row("access", siteRows({})).text ===
 ok("the phone's one-line summary", siteSummary(realCtx.site) === "City of Seaview · Hills Neighbourhood · Bushfire area · High complexity", siteSummary(realCtx.site));
 ok("nothing from mapping yet", siteSummary({}) === "Nothing from public mapping yet" && siteSummary(null) === "Nothing from public mapping yet");
 ok("a council with no bushfire answer says so", siteSummary({ council: "CITY OF MARION" }) === "City of Marion · Bushfire not confirmed");
+
+section("Site after conversion: where the rows read from (registerContext.siteSource)");
+const leadSite = { site_council: "CITY OF MARION", site_zone: "Hills Neighbourhood", site_bushfire_prone: true, site_complexity: "high", site_enriched_at: "2026-11-01T00:00:00Z" };
+const jobSite = { site_council: "CITY OF HOLDFAST BAY", site_zone: "General Neighbourhood", site_bushfire_prone: false, site_complexity: "low", site_enriched_at: "2026-11-16T00:00:00Z" };
+const jobBlank = { id: "j1", site_enriched_at: null };
+ok("a job that has been looked up → the job's values", siteSource(jobSite, leadSite) === jobSite && siteFacts(jobSite, leadSite).council === "CITY OF HOLDFAST BAY");
+ok("a job not looked up yet → the lead's values (no blank rows after the PTSA)", siteSource(jobBlank, leadSite) === leadSite && siteFacts(jobBlank, leadSite).zone === "Hills Neighbourhood" && siteFacts(jobBlank, leadSite).bushfire === true);
+ok("no job → the lead's values", siteSource(null, leadSite) === leadSite);
+ok("neither looked up → every value null", siteSource(jobBlank, { id: "l1" }) === null && Object.values(siteFacts(jobBlank, { id: "l1" })).every((v) => v === null));
+ok("a false bushfire value is kept (never read as 'not known')", siteFacts(jobSite, null).bushfire === false);
+ok("conversion runs the lookup for the new job", /if \(!job\.site_enriched_at\) enrichSite\("jobs", job\.id\)\.catch/.test(salesSrc));
+
+section("Re-check: any staff member, rate-limited per lead");
+const NOW_MS = Date.parse("2026-11-17T10:00:00Z");
+ok("never looked up → due", recheckDue(null, NOW_MS) && recheckDue("not a date", NOW_MS));
+ok("looked up 5 minutes ago → not due", !recheckDue(new Date(NOW_MS - 5 * 60 * 1000).toISOString(), NOW_MS));
+ok("looked up 10 minutes ago or more → due", recheckDue(new Date(NOW_MS - RECHECK_MIN_MS).toISOString(), NOW_MS) && recheckDue("2026-11-01T00:00:00Z", NOW_MS));
+const regRoutesSrc = readFileSync(new URL("../../server/lib/registerRoutes.mjs", import.meta.url), "utf8");
+const recheckRoute = regRoutesSrc.slice(regRoutesSrc.indexOf("/site/recheck`"), regRoutesSrc.indexOf("/promote`"));
+ok("the staff route needs a sign-in but no admin role", /app\.post\(`\$\{base\}\/site\/recheck`, requireAuth, async/.test(regRoutesSrc) && !/requireRole/.test(recheckRoute));
+ok("it answers { context } and never sends the lookup's reason", /ok\(res, \{ context \}\)/.test(recheckRoute) && !/result\?\.reason\)\s*\)/.test(recheckRoute.replace(/recheckFailureWords\(result\?\.reason\)/g, "")) && /recheckFailureWords/.test(recheckRoute));
+ok("the plain-English failure line", /Couldn't reach the mapping service\. Nothing changed\./.test(regRoutesSrc));
+const regCtxSrc = readFileSync(new URL("../../server/lib/registerContext.mjs", import.meta.url), "utf8");
+ok("a failed fact write logs the database text and sends a plain line", /Could not save the project fact\. Nothing changed\./.test(regCtxSrc) && !/new Error\(r\?\.error/.test(regCtxSrc));
 
 // ── 7 · The design team: roles + roster merged ──────────────────────────────────────────────────────
 section("Design team: storage roles");
@@ -258,6 +318,38 @@ ok("a contact matches when every word is in its name, firm or email", contactMat
 ok("'Jane van der Berg' splits into first and last", eq(splitName(" Jane  van der Berg "), { first_name: "Jane", last_name: "van der Berg" }) && eq(splitName("Cher"), { first_name: "Cher", last_name: null }));
 ok("a firm-only contact reads as the firm", contactLabel({ name: "Arch Studio", company: "Arch Studio" }) === "Arch Studio" && contactLabel({ name: "Ava", company: null }) === "Ava");
 
+section("'+ Add someone new': an email links a contact only when the names match");
+const ava = { id: "c-ava", first_name: "Ava", last_name: "Arch", company: "Arch Studio", email: "Info@ArchStudio.test" };
+const ben = { id: "c-ben", first_name: "Ben", last_name: "Draw", company: "Arch Studio", email: "info@archstudio.test" };
+const gone = { id: "c-old", first_name: "Ava", last_name: "Arch", company: "Arch Studio", email: "info@archstudio.test", is_archived: true };
+ok("the same email (any case) and the same name → that contact", emailMatch([ava], { name: "ava  arch", email: "info@archstudio.test" }).contact === ava);
+ok("a shared office email with a different name → a conflict, never a silent link", emailMatch([ben], { name: "Ava Arch", email: "info@archstudio.test" }).conflict === ben && !emailMatch([ben], { name: "Ava Arch", email: "info@archstudio.test" }).contact);
+ok("of several with that email, the one whose name matches", emailMatch([ben, ava], { name: "Ava Arch", email: "INFO@archstudio.test" }).contact === ava);
+ok("an archived contact is never linked", !emailMatch([gone], { name: "Ava Arch", email: "info@archstudio.test" }).contact && !emailMatch([gone], { name: "Ava Arch", email: "info@archstudio.test" }).conflict);
+ok("an over-matched query is re-checked exactly ('*' and '_' are wildcards in the query)", eq(emailMatch([{ ...ava, email: "infoXarchstudio.test" }], { name: "Ava Arch", email: "info*archstudio.test" }), {}));
+ok("no email → nothing to match", eq(emailMatch([ava], { name: "Ava Arch", email: "" }), {}));
+ok("the conflict names the person in plain words", conflictWords(ben) === "Ben Draw, Arch Studio" && conflictWords({ company: "Studio X" }) === "Studio X" && contactNameOf(ben) === "Ben Draw");
+ok("names compare without case, punctuation or extra spaces", nameKey(" O'Neil,  AVA ") === "o neil ava");
+ok("the route links by email only through emailMatch, archived contacts left out", /emailMatch\(same, \{ name, email \}\)/.test(salesSrc) && /\.not\("is_archived", "is", true\)\.limit\(20\)/.test(salesSrc) && /code: "EMAIL_IN_USE"/.test(salesSrc));
+
+section("'+ Add someone new' twice: the second save reuses the person");
+const onJob = [
+  { id: "r1", status: "active", contact: { id: "c-dup", first_name: "BLH TEST Dup", last_name: "Archer", company: "Dup Studio" } },
+  { id: "r2", status: "inactive", contact: { id: "c-off", first_name: "Old", last_name: "Hand", company: null } },
+  { id: "r3", status: "active", contact: { id: "c-firm", first_name: "", last_name: null, company: "Studio X" } },
+];
+ok("the same name and firm already on this job → that contact (no duplicate)", sameNamedOnJob(onJob, { name: "blh test dup  archer", company: "Dup Studio" })?.id === "c-dup");
+ok("the same name with another firm is someone else", sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Other Studio" }) === null);
+ok("someone who has left the job is not reused", sameNamedOnJob(onJob, { name: "Old Hand", company: "" }) === null);
+ok("a firm-only contact is matched by its firm", sameNamedOnJob(onJob, { name: "Studio X", company: "" })?.id === "c-firm");
+ok("no name → nothing", sameNamedOnJob(onJob, { name: " ", company: "Dup Studio" }) === null && sameNamedOnJob(null, { name: "A" }) === null);
+ok("the route reuses the same-named person when no email is given", /sameNamedOnJob\(onJob, \{ name, company: text\(b\.company\) \}\)/.test(salesSrc));
+
+section("The roster is written against what is stored now (no lost update)");
+ok("the roster write is conditional on the lead being unchanged", /\.eq\("updated_at", current\.updated_at\)/.test(salesSrc) && /current = fresh;/.test(salesSrc));
+ok("both the add and the remove re-apply their change to the fresh roster", /saveRoster\(sb, lead, \(roster\) => rosterAdd\(roster,/.test(salesSrc) && /saveRoster\(sb, lead, \(roster\) => rosterRemove\(roster,/.test(salesSrc));
+ok("a second clash says so in plain words", salesSrc.includes("Someone else changed the design team — try again.") && (salesSrc.match(/err\(res, 409, ROSTER_CLASH, "CONFLICT"\)/g) || []).length === 2);
+
 // ── Rendered (esbuild → string, no browser) ────────────────────────────────────────────────────────
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REG = join(REPO, "src/components/sales/lead-detail/register");
@@ -303,7 +395,15 @@ try {
   ok("'+ What they're most excited about' is offered", tx.includes("What they're most excited about"));
   ok("Site and planning in plain words", tx.includes("From public mapping — a guide only. Check before relying on it.") && tx.includes("City of Seaview") && tx.includes("In a mapped bushfire area BAL to be assessed")
     && tx.includes("Slope Not known") && tx.includes("Site complexity High") && tx.includes("Access Standard driveway"), tx);
-  ok("'Re-check' is offered only to an admin (the mapping service is admin-only)", !tx.includes("Re-check") && text(R.step({ reg: real.register, context: real.context, lead: real.lead, actor: { role: "admin" } })).includes("Re-check"));
+  ok("'Re-check' is offered to every staff member, not only an admin", tx.includes("Re-check") && text(R.step({ reg: real.register, context: real.context, lead: real.lead, actor: { role: "admin" } })).includes("Re-check"));
+  const stepSrc = readFileSync(join(REG, "ProjectStep.jsx"), "utf8");
+  ok("…through the staff route, not the admin geo route", stepSrc.includes("/site/recheck`") && !stepSrc.includes("/api/geo/enrich"));
+  // P9: each "·" rides inside its item (and is clipped at a line start), so no line starts or ends with a stray dot.
+  const idLine = h.slice(h.indexOf("overflow-x-clip", h.indexOf("for the architect&#x27;s brief <span")), h.indexOf("Change in Sales"));
+  ok("identity line: every separator sits inside its item, none on its own", (idLine.match(/<span aria-hidden="true" class="inline-block w-\[12px\][^"]*">·<\/span>/g) || []).length === 4
+    && !/<span aria-hidden="true">·<\/span>/.test(h), idLine.slice(0, 500));
+  ok("…and the line is shifted and clipped by the separator's width", /class="min-w-0 flex-1 overflow-x-clip[^"]*"><p class="m-0 -ml-\[12px\] flex flex-wrap/.test(h));
+  ok("the gap strip's links keep a 44 px tap without 44 px lines", /data-testid="project-gaps"[\s\S]*?min-h-0 py-\[11px\] -my-\[11px\] font-bold/.test(h));
   ok("'During the works': Moving out · Partly lived in ✓ · Living there", /aria-pressed="false"[^>]*>Moving out</.test(h) && /aria-pressed="true"[^>]*>(<svg[\s\S]*?<\/svg>)?Partly lived in</.test(h) && h.includes(">Living there<"));
   ok("the earlier site note, with 'Tidy up'", tx.includes("Earlier note: “not sure if they want to live in - shouldn't -” Tidy up"));
   ok("the design team: Architect not named, 'Name the architect', engineer and energy assessor '+ Add'", tx.includes("Architect Not named Name the architect") && tx.includes("Engineer Not named Add") && tx.includes("Energy assessor Not named Add") && tx.includes("Another consultant"));
@@ -321,6 +421,12 @@ try {
   const ro = R.step({ reg: real.register, context: real.context, lead: real.lead, readOnly: true });
   ok("read-only: values, no inputs", !/<(textarea|input|select)\b/.test(ro) && text(ro).includes("Partly lived in") && text(ro).includes("DA rev 3") && text(ro).includes("April 2027") && text(ro).includes("Cash"), ro.match(/<(textarea|input|select)\b[^>]*>/)?.[0]);
   ok("read-only: no 'Name the architect', 'Tidy up' or 'Use these'", !/Name the architect<|Tidy up<|Use these</.test(ro));
+  ok("read-only: no 'Re-check'", !text(ro).includes("Re-check"));
+  const legacyJob = load((j) => { j.context.legacyArchitectName = "Studio X Architects"; });
+  const hl = R.step({ reg: legacyJob.register, context: legacyJob.context, lead: legacyJob.lead });
+  ok("an architect typed in Sales shows under the Architect row ('Noted in Sales')", text(hl).includes("Architect Not named Name the architect Noted in Sales: “Studio X Architects”"), text(hl).slice(text(hl).indexOf("Design team"), text(hl).indexOf("Design team") + 300));
+  ok("…and still reads 'Not named': the brief prints only a contact", text(hl).includes("Architect Not named"));
+  ok("'Not named' never wraps under the button (phone)", /whitespace-nowrap text-sm font-bold text-amber-800">Not named</.test(hl) && /class="flex basis-full pl-\[122px\] sm:basis-auto sm:pl-0"><button[^>]*data-focus-key="architect"/.test(hl));
 
   const withP9 = load((j) => { j.register.items.push({ id: "p9", promptKey: "P-009", itemKind: "action", category: "notes", section: "project", description: "Confirm the stair position" }); });
   ok("'Decisions before next milestone' shows when it holds a record", text(R.step({ reg: withP9.register, context: withP9.context, lead: withP9.lead })).includes("Decisions before next milestone"));
@@ -350,10 +456,21 @@ try {
   ok("the excited line shows once it holds words", excited.includes("What they're most excited about") && /The kitchen/.test(R.story({ context: { ...real.context, goals: { ...real.context.goals, excitedAbout: "The kitchen" } } })));
   const conf = text(R.story({ context: { ...real.context, budget: { ...real.context.budget, confirmed: true, confirmedNote: "$1.3M–$1.5M approved finance" } }, fields: ["confirmed"] }));
   ok("words typed in Sales under 'Confirmed' stay visible", conf.includes("Noted in Sales: “$1.3M–$1.5M approved finance”"));
+  const pending = text(R.story({ context: { ...real.context, budget: { ...real.context.budget, confirmed: budgetConfirmedOn("Pending bank approval"), confirmedNote: confirmedNoteOf("Pending bank approval") } }, fields: ["confirmed"] }));
+  ok("a hopeful note in Sales reads as not confirmed, and says how to confirm", /aria-pressed="false"/.test(R.story({ context: { ...real.context, budget: { ...real.context.budget, confirmed: false, confirmedNote: "Pending bank approval" } }, fields: ["confirmed"] }))
+    && pending.includes("Noted in Sales: “Pending bank approval”. Tick “Confirmed with the client” once they confirm."), pending);
   ok("no question codes in the story fields", !codes(R.story({ context: real.context })));
   const p = text(R.panel({ lead: real.lead, context: real.context }));
   ok("the name-the-architect sheet: title, search, '+ Add someone new', footnote", p.includes("Name the architect") && /placeholder="Search people and firms"/.test(R.panel({ lead: real.lead, context: real.context })) && p.includes("Add someone new") && p.includes("Saved to the client's contacts — Sales shows the same."));
   ok("the panel names other roles", text(R.panel({ lead: real.lead, context: real.context, role: "engineer" })).includes("Name the engineer"));
+  const legacyCtx = { ...real.context, legacyArchitectName: "Studio X Architects" };
+  ok("naming the architect starts from the name typed in Sales", /type="search"[^>]*value="Studio X Architects"/.test(R.panel({ lead: real.lead, context: legacyCtx })));
+  ok("…but not when changing an architect, or for another role", /type="search"[^>]*value=""/.test(R.panel({ lead: real.lead, context: legacyCtx, replaces: { roleId: "r1" } })) && /type="search"[^>]*value=""/.test(R.panel({ lead: real.lead, context: legacyCtx, role: "engineer" })));
+  const teamSrc = readFileSync(join(REG, "DesignTeamCard.jsx"), "utf8");
+  ok("the search box waits for the sheet to hand it focus (no autofocus fight)", /type="search"[^>]*data-autofocus=""/.test(R.panel({ lead: real.lead, context: real.context }))
+    && !/type="search"[^\n]*autoFocus/.test(teamSrc) && /querySelector\("\[data-autofocus\]"\)/.test(teamSrc));
+  ok("after a save the panel resets (no second Save of the same person)", /setAdding\(false\); setForm\(EMPTY_FORM\); setQ\(""\)/.test(teamSrc) && /inFlight\.current/.test(teamSrc));
+  ok("an email someone else uses offers 'Use <them>' or 'Back'", /r\.code === "EMAIL_IN_USE"/.test(teamSrc) && teamSrc.includes("Use {clash.name || \"them\"}"));
   const tm = text(R.team({ lead: real.lead, context: { ...real.context, consultants: merged }, readOnly: true }));
   ok("read-only design team: names, no buttons", tm.includes("Ava Arch — Arch Studio") && tm.includes("Eli Beam — Beam Engineers") && !tm.includes("Name the architect") && !tm.includes("Another consultant"));
   ok("the others follow, in plain words", tm.includes("Land surveyor Sam Level — Level Survey") && tm.includes("Soil and geotech Sam Level — Level Survey"));

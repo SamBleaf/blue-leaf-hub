@@ -8,7 +8,9 @@
  *             under the field, and the typed words stay in the box
  *   budget    one tap on a band writes both figures (ex GST), a second tap clears both; "Exact…" opens From and To;
  *             a stored range that is no band shows as a chosen "Exact: $… – $…" chip
- *   confirmed "Confirmed with the client" writes "Yes" to the Sales field (words typed there show under it)
+ *   confirmed "Confirmed with the client" writes "Yes" to the Sales field. Only a plain yes there reads as confirmed
+ *             ("Pending bank approval" doesn't); any other words typed there show under the toggle, never rewritten
+ *             unless the toggle is changed (and then only after asking)
  *   paying    one of LEAD_FINANCE_STATUS_LABELS; a second tap clears it
  *   start     month + year, stored as YYYY-MM-01
  *
@@ -170,6 +172,7 @@ export default function StoryFields({ context, patchLead, readOnly = false, fiel
   async function toggleConfirmed() {
     const on = !confirmedOn;
     if (!on && note && !window.confirm(`Turn this off? The note in Sales, “${note}”, will be cleared.`)) return;
+    if (on && note && !window.confirm(`Confirmed with the client? The note in Sales, “${note}”, will read “${BUDGET_CONFIRMED_TEXT}”.`)) return;
     setConfirmedOn(on);
     if (!(await save("confirmed", { [STORY_COLUMNS.confirmed]: on ? BUDGET_CONFIRMED_TEXT : null }))) setConfirmedOn(!on);
   }
@@ -271,7 +274,11 @@ export default function StoryFields({ context, patchLead, readOnly = false, fiel
               <SavedMark state={states.confirmed} />
             </div>
           )}
-          {note && <p className="mt-1 text-[13px] text-muted">Noted in Sales: “{note}”</p>}
+          {note && (
+            <p className="mt-1 text-[13px] text-muted">
+              Noted in Sales: “{note}”.{!confirmedOn && !readOnly ? " Tick “Confirmed with the client” once they confirm." : ""}
+            </p>
+          )}
           {states.confirmed === "error" && <p className="mt-1 text-[12px] text-red-600" role="alert">Not saved — try again.</p>}
         </div>
       )}

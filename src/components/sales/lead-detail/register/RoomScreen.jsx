@@ -16,13 +16,19 @@
  *
  * Hidden whole-room scope questions are never asked: their records show in the banner (disagree) or under "Other things
  * recorded here" (agree). Where every record goes is roomLayout() in src/lib/roomScreen.js (tested on the real job).
+ *
+ * The room bar owns the save state on a room screen (spec S3 correction): the worst of the room's records and of the
+ * room-level (meta) save, metaState, with the store's last save time, saveAt. onOpenRecord(id) opens a record in the
+ * edit drawer (the house strip's Change / Open; "Other things recorded here" › Show details passes { details: true }
+ * so Product details opens). A room holding records on the client portal or in the contract can't
+ * be removed: its menu offers "Not in this job" instead.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { genId, ROOM_SCOPES, ROOM_WORK_WORDS } from "../../../../lib/register.js";
 import { clean, openPoints, floorLabel } from "../../../../lib/briefModel.js";
 import {
   roomLayout, roomPosition, roomSaveState, saveWords, flushWithin, setRoomScope, duplicateRoomMeta, removeRoomPlan, removeRoomText, duplicatedText,
-  roomSeed,
+  roomSeed, canRemoveRoom,
 } from "../../../../lib/roomScreen.js";
 import RoomBriefCard, { WorkControl, EarlierAnswerBanner, FloorChips } from "./RoomBriefCard.jsx";
 import HouseStrip from "./HouseStrip.jsx";
@@ -49,7 +55,7 @@ export default function RoomScreen(props) {
   return <RoomView key={room.id} {...props} room={room} />;
 }
 
-function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, deleteItem, addItem, replaceItems, mutateMeta, saveState, onPortalItem, flush, onBack, onOpenRoom }) {
+function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, deleteItem, addItem, replaceItems, mutateMeta, saveState, metaState, saveAt, onPortalItem, flush, onBack, onOpenRoom, onOpenRecord }) {
   const narrow = useNarrow();
   const stageInset = useStageBarInset();
   const rootRef = useRef(null);
@@ -82,13 +88,15 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
   const layout = useMemo(() => roomLayout(reg, context, room, { projectType: context?.projectType || "", stage, points }), [reg, context, room, stage, points]);
   const pos = roomPosition(rooms, room.id);
 
-  // The room bar's save state: the worst of this room's records, with the time it last became saved.
+  // The room bar's save state: the worst of this room's records and the room-level save, with the store's last save
+  // time (so it reads "Saved 9:41 pm" on first open), else the time it last became saved here.
   const roomItems = reg.items.filter((i) => i.roomId === room.id);
-  const agg = roomSaveState(roomItems, saveState);
+  const agg = roomSaveState(roomItems, saveState, metaState || "saved");
   const [seenAgg, setSeenAgg] = useState(agg);
   const [savedAt, setSavedAt] = useState(null);
   if (agg !== seenAgg) { setSeenAgg(agg); if (agg === "saved") setSavedAt(new Date()); }
-  const sw = saveWords({ state: agg, at: savedAt });
+  const sw = saveWords({ state: agg, at: agg === "saved" ? (saveAt || savedAt) : null });
+  const removable = canRemoveRoom(reg, room);
   const swTone = { ok: "text-accent", muted: "text-muted", warn: "font-bold text-amber-800", error: "font-bold text-red-700" }[sw?.tone] || "text-muted";
 
   // A question not answered yet keeps one id until its record exists; an id that has been used is never offered again.
@@ -121,7 +129,7 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
     setMenu(null);
     if (made) { const id = made.id; show(duplicatedText(made, source), () => replaceItems?.(removeRoomPlan(id))); }
   };
-  const remove = () => { setMenu(null); replaceItems?.(removeRoomPlan(room.id)); onBack?.(); };
+  const remove = () => { setMenu(null); if (!removable) return; replaceItems?.(removeRoomPlan(room.id)); onBack?.(); };
 
   async function go(targetId) {
     if (moving) return;
@@ -148,14 +156,15 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
       <MenuItem onClick={() => setMenu("details")}>{phone ? "Room details" : "Room details (name, type, drawing sheet)"}</MenuItem>
       <MenuItem onClick={duplicate}>Duplicate room</MenuItem>
       <MenuDivider />
-      <MenuItem danger onClick={() => setMenu("remove")}>Remove room…</MenuItem>
+      {removable ? <MenuItem danger onClick={() => setMenu("remove")}>Remove room…</MenuItem>
+        : <MenuItem disabled hint={out ? undefined : "Use “Not in this job” instead."} testId="room-remove-blocked">Can&apos;t remove: it holds items on the client portal or in the contract</MenuItem>}
     </div>
   );
   const menuBody = (phone) => (
     <>
       {(menu === "work" || menu === "bar") && roomMenuItems(phone)}
       {menu === "details" && <RoomDetails room={room} editRooms={editRooms} onDone={closeMenu} />}
-      {menu === "remove" && <Confirm text={removeRoomText(reg, room)} confirmLabel="Remove" onConfirm={remove} onCancel={closeMenu} />}
+      {menu === "remove" && removable && <Confirm text={removeRoomText(reg, room)} confirmLabel="Remove" onConfirm={remove} onCancel={closeMenu} />}
       {menu === "floor" && <div className="p-2"><FloorChips reg={reg} room={room} mutateMeta={mutateMeta} onDone={closeMenu} /></div>}
     </>
   );
@@ -176,14 +185,14 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
       </span>
     </div>
   ) : (
-    <div className="sticky top-0 z-20 -mx-2 -mt-2 grid min-h-[56px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-hairline bg-surface px-2 sm:-mx-4 sm:-mt-4 sm:px-3" data-testid="room-bar">
+    <div className="sticky top-[65px] z-20 -mx-2 -mt-2 grid min-h-[56px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-hairline bg-surface px-2 sm:-mx-4 sm:-mt-4 sm:px-3 md:top-0" data-testid="room-bar">
       <div><button type="button" onClick={onBack} className={textBtn} data-testid="room-back">‹ Rooms</button></div>
       <div className="min-w-0 text-center">
         <h2 className="truncate text-[17px] font-bold leading-[22px] text-ink">{name}</h2>
         <div className="text-[13px] leading-[18px] text-muted">
           <span className="relative inline-block">
-            <button ref={floorBtn} type="button" aria-label={`Floor: ${floorLabel(room.level)}. Change floor`} aria-expanded={menu === "floor"} onClick={() => setMenu((m) => (m === "floor" ? null : "floor"))}
-              className="focus-ring -my-3 rounded px-1 py-3 font-bold text-primary">{floorLabel(room.level)} ▾</button>
+            <button ref={floorBtn} type="button" aria-label={`Floor: ${floorLabel(room.level)}. Change floor`} aria-haspopup="dialog" aria-expanded={menu === "floor"} onClick={() => setMenu((m) => (m === "floor" ? null : "floor"))}
+              className="focus-ring -my-[13px] inline-flex min-h-[44px] items-center rounded px-1 font-bold text-primary">{floorLabel(room.level)} ▾</button>
             <Popover open={menu === "floor"} onClose={closeMenu} anchorRef={floorBtn} align="left" title="Floor">
               <div className="p-2"><FloorChips reg={reg} room={room} mutateMeta={mutateMeta} onDone={closeMenu} /></div>
             </Popover>
@@ -199,7 +208,7 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
   const workRow = !out && (
     <div className="flex min-h-[52px] items-center gap-2" data-testid="room-work">
       {!narrow && <span className="w-16 shrink-0 text-[13px] text-muted">Work</span>}
-      <div className={narrow ? "w-full" : "min-w-0 flex-1 sm:max-w-[30rem]"}><WorkControl full room={room} readOnly={readOnly} onChange={setScope} /></div>
+      <div className={narrow ? "w-full" : "min-w-0 flex-1 sm:max-w-[30rem]"}><WorkControl full room={room} readOnly={readOnly} onChange={setScope} minSegment={narrow ? 0 : 96} /></div>
       {!narrow && (
         <span className="relative">
           <IconButton label="More for this room" buttonRef={workMenuBtn} expanded={menu === "work" || menu === "details" || menu === "remove"}
@@ -255,13 +264,13 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
             </>
           )}
           <HouseStrip reg={reg} room={room} questions={layout.questions} mutateMeta={mutateMeta} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem}
-            actor={actor} readOnly={readOnly} context={context} saveState={saveState} />
+            actor={actor} readOnly={readOnly} context={context} saveState={saveState} onOpenItem={onOpenRecord ? (id) => onOpenRecord(id) : undefined} />
           <ActionsInRoom reg={reg} context={context} actor={actor} room={room} points={layout.actions} updateItem={updateItem} upsertItem={upsertItem} readOnly={readOnly} />
         </>
       )}
 
       <OtherRecorded reg={reg} room={room} items={layout.other} actor={actor} saveState={saveState} updateItem={updateItem} deleteItem={deleteItem} addItem={addItem}
-        onPortalItem={onPortalItem} readOnly={readOnly} onToast={show} />
+        onPortalItem={onPortalItem} readOnly={readOnly} onToast={show} onOpenRecord={onOpenRecord} />
 
       {/* 9 sticky footer: above the Hub's bottom nav on a phone, above the lead's stage bar wherever it shows */}
       <div className={`sticky bottom-[76px] z-20 -mx-2 -mb-2 border-t border-hairline bg-surface px-4 py-2 pb-[max(8px,env(safe-area-inset-bottom))] sm:-mx-4 sm:-mb-4 md:bottom-0 ${footerHidden ? "hidden" : ""}`}

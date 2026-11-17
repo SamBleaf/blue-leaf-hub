@@ -9,6 +9,7 @@
  *   PUT  /api/register/leads/:leadId                 save { meta?, changes[], deletes[] }  (409 + conflicts ⇒ nothing written)
  *   GET  /api/register/leads/:leadId/context         read-only Sales/project context (prefill)
  *   PUT  /api/register/leads/:leadId/facts           { deliveryModel?, projectType?, estimatedValue? } → lead (pre-job) or job fact (post-job)
+ *   POST /api/register/leads/:leadId/site/recheck    public mapping again for the job (else the lead) → { context }; any staff member
  *   POST /api/register/leads/:leadId/promote         explicit promotion / recovery (normally automatic)
  *   POST /api/register/leads/:leadId/portal/:action  issue | withdraw | return  { items:[{id,sync}], note }
  *   GET  /api/register/leads/:leadId/history         item history (?itemId=)
@@ -19,7 +20,8 @@ import { ok, err } from "./apiResponse.mjs";
 import {
   loadRegister, saveRegister, promoteRegisterToProject, portalAction, itemHistory, RegisterError, registerEnabledFor,
 } from "./registerStore.mjs";
-import { loadRegisterContext, setDeliveryModel, setProjectFacts } from "./registerContext.mjs";
+import { loadRegisterContext, setDeliveryModel, setProjectFacts, recheckDue } from "./registerContext.mjs";
+import { enrichSite } from "./siteEnrichmentService.mjs";
 import {
   previewDocument, issueDocument, listDocuments, documentUrl, supplierPack, addSourceDocument, updateSourceDocument,
 } from "./registerDocuments.mjs";
@@ -48,8 +50,16 @@ export function sendRegisterError(res, e, fallback = "Register request failed") 
   return err(res, 500, fallback);
 }
 
+/** "Re-check" in plain words for each way public mapping can fail (enrichSite's reasons never reach the browser). */
+export function recheckFailureWords(reason) {
+  if (reason === "no_coords") return "Couldn't find the site address on the map. Check the address in Sales. Nothing changed.";
+  if (reason === "row_not_found") return "The project couldn't be found. Reload the page. Nothing changed.";
+  return "Couldn't reach the mapping service. Nothing changed.";
+}
+
 export function registerRegisterRoutes(app) {
   const base = "/api/register/leads/:leadId";
+  const recheckRunning = new Set();                      // lead ids with a lookup in flight (one at a time per lead)
 
   // Feature switch (REGISTER_ENABLED / REGISTER_PILOT_LEADS, default off) — see registerEnabledFor.
   app.use(base, (req, res, next) => (registerEnabledFor(req.params.leadId)
@@ -103,6 +113,40 @@ export function registerRegisterRoutes(app) {
       const context = await loadRegisterContext(sb, req.params.leadId);
       ok(res, { context, owner });
     } catch (e) { sendRegisterError(res, e, "Could not save the project fact."); }
+  });
+
+  // "Re-check" on The project and in the Documents edit drawer, for every staff member (REGISTER_SCREENS_SPEC.md S1, S5).
+  // The lookup runs for the job once there is one (that is where the register reads the site from), else for the lead.
+  // Rate-limited per lead: a lookup under 10 minutes old, or one still running, is not repeated; the current context comes back.
+  // select("*") so a database without the site columns (pre-mig-135) still answers instead of erroring on a missing column.
+  app.post(`${base}/site/recheck`, requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Database not configured.");
+    const leadId = req.params.leadId;
+    try {
+      const { data: lead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
+      if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+      let table = "leads", id = lead.id, enrichedAt = lead.site_enriched_at || null;
+      if (lead.job_id) {
+        const { data: job } = await sb.from("jobs").select("*").eq("id", lead.job_id).maybeSingle();
+        if (job) { table = "jobs"; id = job.id; enrichedAt = job.site_enriched_at || null; }
+      }
+      if (recheckDue(enrichedAt) && !recheckRunning.has(leadId)) {
+        recheckRunning.add(leadId);
+        let result;
+        try { result = await enrichSite(table, id); } finally { recheckRunning.delete(leadId); }
+        if (!result?.ok) {
+          console.warn(`[register] site recheck ${table}/${id}:`, result?.reason);
+          return err(res, 502, recheckFailureWords(result?.reason), "SITE_LOOKUP");
+        }
+      }
+      const context = await loadRegisterContext(sb, leadId);
+      if (!context) return err(res, 404, "Lead not found", "NOT_FOUND");
+      ok(res, { context });
+    } catch (e) {
+      console.warn("[register] site recheck:", e?.message || e);
+      err(res, 500, "Couldn't reach the mapping service. Nothing changed.");
+    }
   });
 
   app.post(`${base}/promote`, requireAuth, async (req, res) => {

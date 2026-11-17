@@ -1,135 +1,233 @@
 /**
- * SectionStep — a project-wide section of the library: "Whole house" (Tab 21 §3, defaults rooms inherit)
- * or "Site & existing conditions" (Tab 21 §2). Only the prompts relevant to the project type / stage are
- * shown, grouped by topic; nothing is compulsory.
+ * SectionStep — the Throughout step (the house-wide choices rooms read) and the Site & existing step
+ * (REGISTER_SCREENS_SPEC.md S3: "The same compact row is used on the Throughout and Site & existing steps").
+ *
+ * One card per topic, each built from the room screen's parts: flat ChoiceRow rows (label, chips, ⚑, ⋯ → Product
+ * details), "More choices (n)" for the detailed ones, and a collapsed "Office only (n)". No question codes, kind or
+ * category chips, help lines, "Recorded:" echoes or office-field toggles. A house standard is laid out one row per zone
+ * (ChoiceRepeat); gutters sit under their roof. Which question goes where, and what no row shows, is sectionLayout() in
+ * src/lib/sectionLayout.js; this file only draws it. Anything recorded that no row shows is under "Other things recorded
+ * here", so nothing is hidden.
  */
-import { useState } from "react";
-import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, partAssumptionFor, questionById, HIDDEN_SITE_PROMPTS, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
-import { Section } from "./ui.jsx";
-import PromptRow, { RepeatRows } from "./PromptRow.jsx";
+import { useRef, useState } from "react";
+import { genId, answerConfigFor, questionById, resolvePromptId, assumptionFor, partAssumptionFor } from "../../../../lib/register.js";
+import { labelOf } from "../../../../lib/briefModel.js";
+import { sectionLayout } from "../../../../lib/sectionLayout.js";
+import { contractFixed } from "../../../../lib/roomScreen.js";
+import ChoiceRow, { ChoiceRepeat } from "./ChoiceRow.jsx";
 import BaselineGuide, { PerformanceReview } from "./BaselineGuide.jsx";
+import { NeedsActionFlag } from "./NeedsAction.jsx";
+import { ChoiceChip, ChipLine, DraftInput } from "./RoomUi.jsx";
 
-const tierOf = (q) => { const c = answerConfigFor(q.id); return c?.standard?.tier || c?.tier || "essential"; };
-// "Areas in the project" (P-006) moved here from the Project step (REGISTER_SCREENS_SPEC.md S1): it sits with the existing building.
-const topicOf = (q) => (q.id === "P-006" ? "existing" : answerConfigFor(q.id)?.standard?.topic || q.topic);
+const h2 = "text-[17px] font-bold leading-6 text-ink";
+const disclosure = "focus-ring flex min-h-[48px] w-full items-center justify-between gap-2 px-4 text-left text-[15px] font-bold sm:text-sm";
+const addBtn = "focus-ring inline-flex min-h-[44px] items-center rounded-full border border-dashed border-primary px-4 text-sm font-bold text-primary hover:bg-primary/5";
+const Chevron = ({ open, down = false }) => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+    className={`shrink-0 transition ${open ? (down ? "rotate-180" : "rotate-90") : ""}`}>
+    {down ? <path d="M6 9l6 6 6-6" /> : <path d="M9 6l6 6-6 6" />}
+  </svg>
+);
 
-export default function SectionStep({ section, reg, context, stage, showDetail, actor, upsertItem, updateItem, deleteItem, readOnly, saveState, mutateMeta }) {
-  const [showConnection, setShowConnection] = useState(false);
-  const projectType = context?.projectType || "";
-  const qs = [...promptsFor(section === "site" ? "site" : "project", {
-    projectType, deliveryModel: context?.deliveryModel, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail,
-  }).filter((q) => q.topic !== "brief"), ...(section === "site" ? [questionById("P-006")].filter(Boolean) : standardPrompts())]
-    // "Living on site during works" (W-007) is the Project step's "During the works" now; an earlier record still shows here.
-    .filter((q) => !HIDDEN_SITE_PROMPTS.has(q.id) || reg.items.some((i) => !i.roomId && resolvePromptId(i.promptKey) === q.id));
-  const topics = section === "site" ? SITE_TOPICS : PROJECT_TOPICS.filter((t) => t.key !== "brief");
-  const secKey = section === "site" ? "site" : "project";
-  const allFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);
-  const itemsFor = (qid) => allFor(qid).filter((i) => !isLinkedRow(answerConfigFor(qid), i));
-  const itemFor = (qid) => itemsFor(qid)[0] || null;
-  const rowProps = { actor, saveState, meeting: true, assumptionOf: (it) => assumptionFor(reg, it) || partAssumptionFor(reg, it) };
-  const store = { upsertItem, updateItem, deleteItem };
-  const areaOptions = (reg.meta.rooms || []).map((r) => ({ id: r.id, label: r.name }));
-  const qById = (id) => qs.find((q) => q.id === id);
-  // W-006 and W-008 are reached from the W-004 path (Tab 27 B06). Every record keeps its own promptKey, so nothing merges in the data.
-  const presentedElsewhere = (q) => !!answerConfigFor(q.id)?.presentedWith;
-  const existingWorks = (q, cfg, seed) => {
-    const records = reg.items.filter((i) => !i.overridesDefaultId && ["W-004", "W-006", "R-013"].includes(resolvePromptId(i.promptKey)) && (!i.roomId || resolvePromptId(i.promptKey) === "R-013"));
-    const roomOf = (i) => (i.roomId ? (reg.meta.rooms || []).find((r) => r.id === i.roomId)?.name : "");
-    const connections = qById("W-008");
-    const connection = connections && itemFor("W-008");
-    return (
-      <div key={q.id} className="space-y-2">
-        <RepeatRows question={q} items={records} seed={seed} readOnly={readOnly} areaOptions={areaOptions} titleOf={roomOf} {...rowProps} {...store} />
-        {connections && (connection || showConnection) && (
-          <PromptRow question={connections} item={connection} seed={{ itemKind: connections.itemKind, category: connections.category, promptKey: "W-008", section: secKey, technicalStatus: connections.technical, responsibility: connections.owner || "", disposition: "undecided" }}
-            readOnlyReason={readOnly ? "Read-only" : null} {...rowProps}
-            onChange={(partial) => (connection ? updateItem(connection.id, partial) : upsertItem({ itemKind: connections.itemKind, category: connections.category, promptKey: "W-008", section: secKey, technicalStatus: connections.technical, responsibility: connections.owner || "", disposition: "undecided" }, partial))}
-            onDelete={connection ? () => deleteItem(connection.id) : null} />
-        )}
-        {connections && !connection && !showConnection && !readOnly && (
-          <button type="button" onClick={() => setShowConnection(true)} data-testid="add-connection" className="focus-ring inline-flex min-h-[40px] items-center rounded-full border border-dashed border-hairline px-3 text-[11px] font-semibold text-primary hover:bg-page sm:min-h-[30px]">+ New-to-existing connection</button>
-        )}
-      </div>
-    );
-  };
-  const renderPrompt = (q) => {
-    const cfg = answerConfigFor(q.id);
-    const seed = { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: secKey, isDefault: !!q.isDefault || !!cfg?.standard,
-      technicalStatus: q.technical, responsibility: q.owner || "", disposition: "undecided" };
-    if (q.id === "W-004") return existingWorks(q, cfg, seed);
-    if (cfg?.linked) return renderWithLinked(q, cfg, seed);
-    if (cfg?.repeat || cfg?.standard) {
-      return <RepeatRows key={q.id} question={q} items={itemsFor(q.id)} seed={seed} readOnly={readOnly} {...rowProps} {...store} />;
-    }
-    const item = itemFor(q.id);
-    return (
-      <div key={q.id} className="space-y-1.5">
-        <PromptRow question={q} item={item} seed={seed} readOnlyReason={readOnly ? "Read-only" : null} {...rowProps}
-          onChange={(partial) => (item ? updateItem(item.id, partial) : upsertItem(seed, partial))}
-          onDelete={item ? () => deleteItem(item.id) : null} />
-        {cfg?.reviewSuggestions && <PerformanceReview item={item} />}
-      </div>
-    );
-  };
-  // A linked item (gutters) is its own record under the row it belongs to, so a roof's colour never has to say what its gutters are.
-  function renderWithLinked(q, cfg, seed) {
-    const linked = allFor(q.id).filter((i) => isLinkedRow(cfg, i));
-    const rows = itemsFor(q.id);
-    const under = (parent) => linked.filter((i) => (i.answer?.linkedItemIds || []).includes(parent.id));
-    const linkedSeed = (parent) => ({ ...seed, isDefault: false, responsibility: "", answer: { element: { id: `el_${cfg.linked.key}_${parent.id}`, key: cfg.linked.key, label: cfg.linked.label }, linkedItemIds: [parent.id] } });
-    const orphans = linked.filter((i) => !rows.some((r) => (i.answer?.linkedItemIds || []).includes(r.id)));
-    return (
-      <div key={q.id} className="space-y-2">
-        <RepeatRows question={q} items={rows} seed={seed} readOnly={readOnly} {...rowProps} {...store}
-          renderBelow={(parent) => (
-            <div className="ml-3 border-l-2 border-hairline pl-2">
-              <RepeatRows question={q} items={under(parent)} seed={linkedSeed(parent)} readOnly={readOnly} noAdd actor={actor} saveState={saveState} {...store} />
+const INTRO = {
+  project: "Set the house-wide choices once, starting with what the client wants the home to be. Every room reads these; a room only says so where it's different.",
+  site: "What the site and the existing house mean for the work. Council, zone and bushfire are on The project.",
+};
+
+/** The seed a question's new record is made from. */
+function seedOf(q, secKey) {
+  const cfg = answerConfigFor(q.id);
+  // A record keeps its question's own section ("Areas in the project" stays a project record); a house standard is Throughout's.
+  return { itemKind: q.itemKind, category: q.category, promptKey: q.id, section: q.section === "project" || q.section === "site" ? q.section : secKey, isDefault: !!q.isDefault || !!cfg?.standard,
+    technicalStatus: q.technical, responsibility: q.owner || "", disposition: "undecided" };
+}
+
+// "Areas in the project": what each area's place in this job is. The disposition IS the answer here.
+const AREA_STATES = [["included", "Included"], ["undecided", "Optional"], ["excluded", "Excluded"], ["deferred", "Deferred"]];
+
+/**
+ * "Areas in the project" (P-006, moved here from The project, spec S1): one record per area of the property, each named
+ * in words with Included · Optional · Excluded · Deferred, its ⚑, and Remove. "+ Area" starts the next one.
+ */
+function AreasRow({ q, items, secKey, reg, context, upsertItem, updateItem, deleteItem, readOnly }) {
+  const [adding, setAdding] = useState(null);
+  const seed = (id) => ({ ...seedOf(q, secKey), id, disposition: "included" });
+  const open = adding && !items.some((i) => i.id === adding) ? adding : null;
+  const rows = [...items, ...(open ? [null] : [])];
+  return (
+    <div className="border-t border-hairline px-4 py-3 first:border-t-0" data-testid="choice-row-P-006">
+      <p className="text-[15px] font-bold leading-5 text-ink sm:text-sm" title={q.text || undefined}>{q.short}</p>
+      {!rows.length && <p className="mt-0.5 text-[13px] text-muted">Name each part of the property, and whether it&apos;s in this job.</p>}
+      {rows.map((it) => {
+        const id = it ? it.id : open;
+        const fixed = !!readOnly || contractFixed(it);
+        const patch = (partial) => (it ? updateItem(it.id, partial) : upsertItem(seed(id), partial));
+        return (
+          <div key={id} className="mt-3 space-y-2" data-testid={`area-${id}`}>
+            <div className="flex items-start gap-1">
+              <DraftInput value={it?.description || ""} onCommit={(v) => patch({ description: v })} disabled={fixed} aria-label="Area"
+                placeholder="Area, e.g. rear extension or front garden" className="inp min-h-[44px] w-full px-3 text-base sm:text-sm" />
+              {it && <NeedsActionFlag reg={reg} context={context} item={it} updateItem={updateItem} upsertItem={upsertItem} readOnly={readOnly} />}
             </div>
-          )} />
-        {orphans.length > 0 && <RepeatRows question={q} items={orphans} seed={{ ...seed, isDefault: false, answer: { element: { key: cfg.linked.key, label: cfg.linked.label } } }} readOnly={readOnly} noAdd actor={actor} saveState={saveState} {...store} />}
+            <ChipLine heading="In this job?">
+              {AREA_STATES.map(([d, l]) => <ChoiceChip key={d} on={(it?.disposition || "included") === d && !!it} disabled={fixed} onClick={() => patch({ disposition: d })}>{l}</ChoiceChip>)}
+              {it && !fixed && <button type="button" onClick={() => deleteItem(it.id)} className="focus-ring inline-flex min-h-[44px] items-center rounded px-2 text-sm font-bold text-red-700 hover:underline">Remove</button>}
+            </ChipLine>
+          </div>
+        );
+      })}
+      {!readOnly && !open && (
+        <div className="pt-3">
+          <button type="button" onClick={() => setAdding(genId())} className={addBtn} data-testid="add-area">+ Area</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A topic's card: the primary rows, then "More choices (n)", then a collapsed "Office only (n)". */
+function TopicCard({ topic, renderQ }) {
+  const { primary, more, office: officeQs } = topic;
+  // A topic with nothing to ask first opens on its detailed choices.
+  const [moreOpen, setMoreOpen] = useState(!primary.length);
+  const [officeOpen, setOfficeOpen] = useState(false);
+  const officeGroup = officeQs.length > 0 && (
+    <div className="border-t border-hairline">
+      <button type="button" aria-expanded={officeOpen} onClick={() => setOfficeOpen((v) => !v)} className={`${disclosure} text-muted`} data-testid={`office-only-${topic.key}`}>
+        <span>Office only ({officeQs.length})</span><Chevron open={officeOpen} />
+      </button>
+      {officeOpen && <div className="bg-page/40">{officeQs.map(renderQ)}</div>}
+    </div>
+  );
+  return (
+    <section aria-labelledby={`topic-${topic.key}`} className="rounded-card border border-hairline bg-surface" data-testid={`topic-${topic.key}`}>
+      <h2 id={`topic-${topic.key}`} className={`${h2} px-4 pb-1 pt-4`}>{topic.label}</h2>
+      {primary.map(renderQ)}
+      {more.length > 0 && (
+        <div className="border-t border-hairline">
+          <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)} className={`${disclosure} text-primary`} data-testid={`more-choices-${topic.key}`}>
+            <span>More choices ({more.length})</span><Chevron open={moreOpen} down />
+          </button>
+          {moreOpen && <div>{more.map(renderQ)}</div>}
+        </div>
+      )}
+      {officeGroup}
+      {!primary.length && !more.length && !officeQs.length && <p className="px-4 pb-3 text-[13px] text-muted">Nothing to record here yet.</p>}
+    </section>
+  );
+}
+
+export default function SectionStep({ section, reg, context, stage, actor, upsertItem, updateItem, deleteItem, readOnly, saveState, mutateMeta, onPortalItem }) {
+  const layout = sectionLayout(reg, context, section, { stage });
+  const secKey = layout.section;
+  const [showConnection, setShowConnection] = useState(false);
+  const [otherOpen, setOtherOpen] = useState(false);
+
+  // One stable id per unanswered question, so a quick second tap updates the record the first one made (RoomScreen's rule).
+  const seedIds = useRef(new Map());
+  const usedIds = useRef(new Set());
+  const present = new Set(reg.items.map((i) => i.id));
+  for (const id of seedIds.current.values()) if (present.has(id)) usedIds.current.add(id);
+  const seedFor = (q, key = q.id) => {
+    let id = seedIds.current.get(key);
+    if (!id || (usedIds.current.has(id) && !present.has(id))) { id = genId(); seedIds.current.set(key, id); }
+    return { ...seedOf(q, secKey), id };
+  };
+
+  const rooms = reg.meta.rooms || [];
+  const roomName = (id) => rooms.find((r) => r.id === id)?.name || "";
+  const areaOptions = rooms.map((r) => ({ id: r.id, label: r.name }));
+  const row = {
+    reg, context, actor, saveState, upsertItem, updateItem, deleteItem, readOnly, onPortalItem, room: null,
+    assumptionOf: (it) => assumptionFor(reg, it) || partAssumptionFor(reg, it),
+  };
+
+  function existingWorks(q) {
+    const ex = layout.existing;
+    const w6 = questionById("W-006"), r13 = questionById("R-013"), w8 = ex.connectionQuestion;
+    return (
+      <div key={q.id} className="border-t border-hairline first:border-t-0" data-testid="existing-works">
+        <ChoiceRepeat question={q} items={ex.records} seed={seedOf(q, secKey)} areaOptions={areaOptions} {...row} />
+        {w6 && ex.protect.map((it) => <ChoiceRow key={it.id} question={w6} item={it} seed={{ ...seedOf(w6, secKey), id: it.id }} areaOptions={areaOptions} {...row} />)}
+        {r13 && ex.rooms.map((it) => (
+          <ChoiceRow key={it.id} question={r13} item={it} seed={{ id: it.id, roomId: it.roomId, promptKey: "R-013" }}
+            rowTitle={`${r13.short}${roomName(it.roomId) ? `: ${roomName(it.roomId)}` : ""}`} {...row} />
+        ))}
+        {w8 && (ex.connection || showConnection) && (
+          <ChoiceRow question={w8} item={ex.connection} seed={ex.connection ? { ...seedOf(w8, secKey), id: ex.connection.id } : seedFor(w8)} {...row} />
+        )}
+        {w8 && !ex.connection && !showConnection && !readOnly && (
+          <div className="px-4 pb-3 pt-1">
+            <button type="button" onClick={() => setShowConnection(true)} data-testid="add-connection" className={addBtn}>+ New-to-existing connection</button>
+          </div>
+        )}
       </div>
     );
   }
-  const s = context?.site;
 
-  return (
-    <div className="space-y-3">
-      {section === "site" && (
-        <div className="rounded-lg border border-hairline bg-page p-3 text-xs">
-          <p className="section-label mb-1">Site intelligence on file (read-only)</p>
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-ink">
-            <span>Council: <b>{s?.council || "—"}</b></span>
-            <span>Zone: <b>{s?.zone || "—"}</b></span>
-            <span>Bushfire prone: <b>{s?.bushfire == null ? "—" : s.bushfire ? "Yes" : "No"}</b></span>
-            <span>Slope: <b>{s?.slopeBand || "—"}</b></span>
-            <span>Complexity: <b>{s?.complexity || "—"}</b></span>
-            {s?.whsProfileId && <span className="text-muted">WHS site profile exists (compliance record — not scope)</span>}
-          </div>
-          <p className="mt-1 text-[10px] text-muted">Record what affects scope, cost or design below. Anything a consultant must confirm is marked “needs verification” and flows to the Architect Brief and tender risks — never to the client portal.</p>
+  // Gutters are their own records under the roof they belong to, so a roof's colour never has to say what its gutters are.
+  function withLinked(q, cfg) {
+    const l = layout.linked(q);
+    const base = seedOf(q, secKey);
+    const linkedSeed = (parent) => ({ ...base, isDefault: false, responsibility: "", answer: { element: { id: `el_${cfg.linked.key}_${parent.id}`, key: cfg.linked.key, label: cfg.linked.label }, linkedItemIds: [parent.id] } });
+    return (
+      <div key={q.id} className="border-t border-hairline first:border-t-0">
+        <ChoiceRepeat question={q} items={layout.rowItems(q)} seed={base} {...row}
+          renderBelow={(parent) => (
+            <div className="ml-4 border-l-2 border-hairline">
+              <ChoiceRepeat question={q} items={l.under(parent.id)} seed={linkedSeed(parent)} noAdd {...row} />
+            </div>
+          )} />
+        {l.orphans.length > 0 && (
+          <ChoiceRepeat question={q} items={l.orphans} seed={{ ...base, isDefault: false, answer: { element: { key: cfg.linked.key, label: cfg.linked.label } } }} noAdd {...row} />
+        )}
+      </div>
+    );
+  }
+
+  function renderQ(q) {
+    const cfg = answerConfigFor(q.id);
+    if (q.id === "W-004" && layout.existing) return existingWorks(q);
+    if (q.id === "P-006") return <AreasRow key={q.id} q={q} items={layout.rowItems(q)} secKey={secKey} {...row} />;
+    if (cfg?.linked) return withLinked(q, cfg);
+    if (cfg?.repeat || cfg?.standard) {
+      return (
+        <div key={q.id} className="border-t border-hairline first:border-t-0">
+          <ChoiceRepeat question={q} items={layout.rowItems(q)} seed={seedOf(q, secKey)} {...row} />
         </div>
+      );
+    }
+    const item = layout.rowItems(q)[0] || null;
+    return (
+      <div key={q.id} className="border-t border-hairline first:border-t-0">
+        <ChoiceRow question={q} item={item} seed={item ? { ...seedOf(q, secKey), id: item.id } : seedFor(q)} {...row} />
+        {cfg?.reviewSuggestions && item && <div className="px-4 pb-3"><PerformanceReview item={item} /></div>}
+      </div>
+    );
+  }
+
+  const other = layout.other;
+  return (
+    <div className="space-y-3" data-testid={`section-step-${secKey}`}>
+      <p className="text-[15px] leading-snug text-muted sm:text-sm">{INTRO[secKey]}</p>
+      {layout.topics.map((t) => <TopicCard key={t.key} topic={t} renderQ={renderQ} />)}
+      {!layout.topics.length && <p className="text-[15px] text-muted sm:text-sm">Nothing to record here yet.</p>}
+      {other.length > 0 && (
+        <section className="rounded-card border border-hairline bg-surface" data-testid="section-other">
+          <button type="button" aria-expanded={otherOpen} onClick={() => setOtherOpen((v) => !v)} className={`${disclosure} text-muted`}>
+            <span>Other things recorded here ({other.length})</span><Chevron open={otherOpen} />
+          </button>
+          {otherOpen && (
+            <div className="border-t border-hairline">
+              {other.map((it) => {
+                const q = questionById(resolvePromptId(it.promptKey)) || null;
+                return <ChoiceRow key={it.id} question={q} item={it} seed={{ id: it.id }} rowTitle={q ? undefined : labelOf(it)} {...row} />;
+              })}
+            </div>
+          )}
+        </section>
       )}
-      {section !== "site" && (
-        <p className="text-xs text-muted">Set the project-wide standards once, starting with what the client wants the home to be. Rooms inherit floors, paint, kitchen, wet-area and laundry standards; record a <span className="font-medium text-ink">room exception</span> only where a room differs.</p>
-      )}
-      {topics.map((t) => {
-        const list = qs.filter((q) => topicOf(q) === t.key && !presentedElsewhere(q));
-        if (!list.length) return null;
-        const started = list.filter((q) => itemFor(q.id)).length;
-        const lead = list.filter((q) => tierOf(q) === "essential");
-        const explore = list.filter((q) => tierOf(q) === "more_detail");
-        const office = list.filter((q) => tierOf(q) === "office_only");
-        return (
-          <Section key={t.key} title={t.label} count={started ? `${started}/${list.length}` : null} defaultOpen>
-            {lead.map(renderPrompt)}
-            {explore.length > 0 && (lead.length > 0
-              ? <Section title="Explore more" count={explore.length} defaultOpen={false}>{explore.map(renderPrompt)}</Section>
-              : explore.map(renderPrompt))}
-            {office.length > 0 && <Section title="Office only" count={office.length} defaultOpen={false}>{office.map(renderPrompt)}</Section>}
-          </Section>
-        );
-      })}
-      {!qs.length && <p className="text-xs text-muted">No prompts apply at this stage. Turn on “Show detailed prompts” to work ahead.</p>}
-      {section !== "site" && <BaselineGuide reg={reg} actor={actor} mutateMeta={mutateMeta} readOnly={readOnly} />}
+      {secKey === "project" && <BaselineGuide reg={reg} actor={actor} mutateMeta={mutateMeta} readOnly={readOnly} />}
     </div>
   );
 }

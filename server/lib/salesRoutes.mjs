@@ -34,7 +34,8 @@ import {
 import { CONTRACT_DOC_TYPE, withContractEvidence, decodePdfUpload } from "./leadContractEvidence.mjs";
 import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
 import {
-  normaliseStoryPatch, storageRolesFor, rosterAdd, rosterRemove, rosterNeedsRole, splitName, searchWords, contactMatches, CONTACT_TYPE_WORDS,
+  normaliseStoryPatch, budgetPairError, storageRolesFor, rosterAdd, rosterRemove, rosterNeedsRole, splitName, searchWords, contactMatches, CONTACT_TYPE_WORDS,
+  emailMatch, sameNamedOnJob, conflictWords, contactNameOf,
 } from "../../src/lib/projectStory.js";
 import { loadRegisterContext } from "./registerContext.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
@@ -412,6 +413,11 @@ export async function convertLeadToJob(sb, lead, actorId = null) {
     if (r?.ok) stamped.push(key);
     else console.warn(`[convert-to-job] setFact ${key}:`, r?.error);
   }
+
+  // 5b. Public mapping for the job (council, zone, bushfire, slope): the register reads the site from the job once one
+  //     exists, so look it up now, as POST /api/jobs does. Fire-and-forget: enrichSite geocodes from jobs.address when
+  //     there are no coordinates yet. Until it lands the register shows the lead's values (registerContext.siteSource).
+  if (!job.site_enriched_at) enrichSite("jobs", job.id).catch(() => {});
 
   // 6. Link the lead to the new job (so the UI/CRM read the job).
   await sb.from("leads").update({ job_id: job.id, updated_at: new Date().toISOString() }).eq("id", lead.id);
@@ -1042,11 +1048,29 @@ export function registerSalesRoutes(app) {
       }
     } catch (e) { console.warn("[design-team] architect_name:", e?.message || e); }
   }
-  async function saveRoster(sb, lead, next) {
-    if (JSON.stringify(next) === JSON.stringify(lead.consultant_roster || [])) return;
-    const { error } = await sb.from("leads").update({ consultant_roster: next, updated_at: new Date().toISOString() }).eq("id", lead.id);
-    if (error) console.warn("[design-team] consultant_roster:", error.message);   // pre-mig-193: the role row still holds the person
+  /**
+   * Write the roster as compute(roster) of the roster stored now. The write is conditional on the lead being unchanged
+   * since it was read (updated_at), so a Sales deliverable update or another design-team save in between is never lost:
+   * on a clash the lead is read again and compute() re-applied once. → { ok, roster } (ok false: changed twice meanwhile).
+   */
+  async function saveRoster(sb, lead, compute) {
+    let current = lead;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = Array.isArray(current.consultant_roster) ? current.consultant_roster : [];
+      const next = compute(before);
+      if (JSON.stringify(next) === JSON.stringify(before)) return { ok: true, roster: next };
+      let q = sb.from("leads").update({ consultant_roster: next, updated_at: new Date().toISOString() }).eq("id", lead.id);
+      q = current.updated_at ? q.eq("updated_at", current.updated_at) : q.is("updated_at", null);
+      const { data, error } = await q.select("id");
+      if (error) { console.warn("[design-team] consultant_roster:", error.message); return { ok: true, roster: next }; }   // pre-mig-193: the role row still holds the person
+      if (data?.length) return { ok: true, roster: next };
+      const { data: fresh } = await sb.from("leads").select("id, consultant_roster, updated_at").eq("id", lead.id).maybeSingle();
+      if (!fresh) return { ok: false, roster: before };
+      current = fresh;
+    }
+    return { ok: false, roster: null };
   }
+  const ROSTER_CLASH = "Someone else changed the design team — try again.";
   const designTeamOf = async (sb, leadId) => (await loadRegisterContext(sb, leadId))?.consultants || [];
 
   // Name someone: { contactId? | name, company?, email?, phone?, role, replaces?: { roleId?, contactId? } } → { consultants, roleId, contactId }
@@ -1064,7 +1088,8 @@ export function registerSalesRoutes(app) {
     const now = new Date().toISOString();
     const text = (v) => (v == null ? "" : String(v).trim());
 
-    // 1 · The contact: the one picked, or someone new (linked to the existing contact with the same email, if any).
+    // 1 · The contact: the one picked, or someone new (linked to an existing contact only when the email and the name
+    //     both match, or when the same name and firm are already on this lead or job).
     let contact = null;
     if (b.contactId) {
       const { data } = await sb.from("crm_contacts").select("*").eq("id", b.contactId).maybeSingle();
@@ -1076,8 +1101,26 @@ export function registerSalesRoutes(app) {
       const email = text(b.email) || null;
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(res, 400, "That email address doesn't look right. Nothing was saved.");
       if (email) {
-        const { data: same } = await sb.from("crm_contacts").select("*").ilike("email", email.replace(/[\\%_]/g, "\\$&")).limit(1);
-        contact = same?.[0] || null;
+        // The same email, any case, archived contacts left out. The pattern only narrows the query ('*' is PostgREST's
+        // wildcard, so it becomes a one-character '_'); emailMatch re-checks the address exactly and links the contact
+        // only when the names match too. Someone else with that email is never linked silently.
+        const pattern = email.replace(/[\\%_]/g, "\\$&").replace(/\*/g, "_");
+        const { data: same, error: sErr } = await sb.from("crm_contacts").select("*").ilike("email", pattern).not("is_archived", "is", true).limit(20);
+        if (sErr) return err(res, 400, translateDbError(sErr));
+        const m = emailMatch(same, { name, email });
+        if (m.conflict) {
+          const c = m.conflict;
+          return res.status(409).json({ ok: false, code: "EMAIL_IN_USE", error: `Someone else uses that email: ${conflictWords(c)}. Use them, or change the email.`,
+            candidate: { id: c.id, name: contactNameOf(c), company: c.company || null, email: c.email || null } });
+        }
+        contact = m.contact || null;
+      } else {
+        // No email: the person already on this lead or job under the same name and firm (a second Save, a double tap)
+        // is reused, so the save never adds a second contact and role.
+        const ors = [`lead_id.eq.${lead.id}`]; if (lead.job_id) ors.push(`job_id.eq.${lead.job_id}`);
+        const { data: onJob } = await sb.from("job_contact_roles")
+          .select("id, status, contact:crm_contacts(*)").or(ors.join(","));
+        contact = sameNamedOnJob(onJob, { name, company: text(b.company) });
       }
       if (!contact) {
         const row = { ...splitName(name), email, phone: text(b.phone) || null, company: text(b.company) || null, contact_type: roles.contactType, status: "active", created_by: actorId };
@@ -1117,14 +1160,14 @@ export function registerSalesRoutes(app) {
       if (roleBelongsToLead(old, lead)) { oldRow = old; replacedContactId = replacedContactId || old.contact_id; }
     }
     if (replacedContactId === contact.id) replacedContactId = null;
-    const nextRoster = rosterAdd(lead.consultant_roster, { contactId: contact.id, rosterRole: roles.rosterRole, replacesContactId: replacedContactId }, now);
-    if (oldRow && !rosterNeedsRole(nextRoster, oldRow.contact_id, oldRow.role)) {
+    // 4 · The roster (written against the roster stored now, never a copy read earlier), then the replaced person's role
+    //     row, then the architect's name on the job.
+    const saved = await saveRoster(sb, lead, (roster) => rosterAdd(roster, { contactId: contact.id, rosterRole: roles.rosterRole, replacesContactId: replacedContactId }, now));
+    if (!saved.ok) return err(res, 409, ROSTER_CLASH, "CONFLICT");
+    if (oldRow && !rosterNeedsRole(saved.roster, oldRow.contact_id, oldRow.role)) {
       const { error } = await sb.from("job_contact_roles").update({ status: "inactive", updated_at: now }).eq("id", oldRow.id);
       if (error) console.warn("[design-team] replace:", error.message);
     }
-
-    // 4 · The roster, then the architect's name on the job.
-    await saveRoster(sb, lead, nextRoster);
     if (["architect", "designer"].includes(role)) {
       await setArchitectName(sb, lead, text(contact.company) || [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || null, actorId);
     }
@@ -1153,13 +1196,13 @@ export function registerSalesRoutes(app) {
       return err(res, 400, "Say who to remove. Nothing was changed.");
     }
     const rosterRole = (role && storageRolesFor(role)?.rosterRole) || null;
-    const nextRoster = rosterRemove(lead.consultant_roster, { contactId, rosterRole }, now);
+    const saved = await saveRoster(sb, lead, (roster) => rosterRemove(roster, { contactId, rosterRole }, now));
+    if (!saved.ok) return err(res, 409, ROSTER_CLASH, "CONFLICT");
     // The role row ends (status inactive, never deleted) unless another of this person's disciplines still uses it.
-    if (row && !rosterNeedsRole(nextRoster, row.contact_id, row.role)) {
+    if (row && !rosterNeedsRole(saved.roster, row.contact_id, row.role)) {
       const { error } = await sb.from("job_contact_roles").update({ status: "inactive", updated_at: now }).eq("id", row.id);
       if (error) return err(res, 400, translateDbError(error));
     }
-    await saveRoster(sb, lead, nextRoster);
     // The architect's name on the job goes too, when it was this person's.
     if (["architect", "designer"].includes(role)) {
       try {
@@ -1829,6 +1872,9 @@ export function registerSalesRoutes(app) {
       .eq("id", req.params.id)
       .maybeSingle();
     if (!storedLead) return err(res, 404, "Lead not found", "NOT_FOUND");
+    // One budget figure on its own (Sales saves Budget min and Budget max separately) is checked against the stored other.
+    const pairError = budgetPairError(body, storedLead);
+    if (pairError) return err(res, 400, pairError, "INVALID_FIELD");
     const current = await withContractEvidence(sb, storedLead);
     // Master Register R03: once the brief has been promoted onto the project record, the lead scratchpad
     // is read-only history — a stale screen must never write a second, competing copy (Tab 23 Q5).

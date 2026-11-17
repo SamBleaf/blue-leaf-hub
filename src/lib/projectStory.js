@@ -7,7 +7,8 @@
  *   gaps       what the architect's brief is still missing, from the same content checks the Documents step uses
  *   site       the public-mapping rows, in plain words (a missing bushfire value is "Not confirmed", never "No")
  *   team       the design team: job_contact_roles and the lead's consultant_roster merged into one list
- *   lead PATCH the server-side check of the story and budget columns
+ *   lead PATCH the server-side check of the story and budget columns (and the budget pair when one figure is sent)
+ *   contacts   "+ Add someone new": an email links a contact only when the names match; a second save reuses the person
  *
  * Read by the browser (ProjectStep, StoryFields, DesignTeamCard) and by the server (registerContext.mjs, salesRoutes.mjs).
  * Pure: no React, no network. The story lives on the lead only (Canonical Data Law): nothing here stores a copy.
@@ -93,16 +94,18 @@ export function exactPatch(fromText, toText) {
   return { patch: { construction_budget_min: a.value, construction_budget_max: b.value } };
 }
 
-// wo_budget_confirmed is free text in Sales ("Budget confirmed: approved finance"). Words that say it isn't confirmed don't count.
-const NOT_CONFIRMED_RX = /^(no\b|not\b|nope|false|unconfirmed|tbc|tba|to be confirmed|unsure|unknown|n\/?a\b|[-–—?]+$)/i;
+// wo_budget_confirmed is free text in Sales. Only a plain yes counts ("Yes", "Yes - approved finance", "Confirmed with the
+// client"): anything else ("Pending bank approval", "Awaiting finance", "Maybe") reads as not confirmed, so the band never
+// prints on a hopeful note (owner decision 1). The words are never rewritten: they show under the toggle.
+const CONFIRMED_RX = /^(yes|y|true|confirmed)\b/i;
 const PLAIN_YES_RX = /^(yes|y|true|confirmed|confirmed with the client)\.?$/i;
 /** The word the toggle writes. Sales shows it as "Budget confirmed: Yes". */
 export const BUDGET_CONFIRMED_TEXT = "Yes";
-/** Does the stored text mean the client confirmed the budget? */
+/** Does the stored text mean the client confirmed the budget? Only boolean true or text that starts with a plain yes. */
 export function budgetConfirmedOn(text) {
   if (typeof text === "boolean") return text;
   const t = clean(text);
-  return !!t && !NOT_CONFIRMED_RX.test(t);
+  return !!t && CONFIRMED_RX.test(t);
 }
 /** Words typed in Sales beyond a plain yes, shown under the toggle so nothing is hidden ("" for none). */
 export function confirmedNoteOf(text) {
@@ -137,20 +140,26 @@ const norm = (s) => clean(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 /**
  * "Use these": the chips the earlier words name, and the words left over.
  *   add   option ids to tick (never more than the question allows; already-ticked ones aren't repeated)
- *   rest  the earlier words with every ticked one taken out; words that match no chip, or don't fit, stay
+ *   rest  the earlier words with every ticked one taken out, otherwise exactly as typed
+ * Only commas, semicolons and new lines separate the words: "Indoor/outdoor flow and room for the grandkids" is one
+ * phrase, never split on "/" or "and" and rejoined with commas. A phrase that matches no chip, or doesn't fit, stays.
  */
 export function prioritiesFromNote(text, options = [], selectedIds = [], max = 3) {
-  const parts = String(text || "").split(/\s*(?:[,;\n/+&]|\band\b)\s*/i).map(clean).filter(Boolean);
+  const pieces = String(text || "").split(/([,;\n])/);                     // [phrase, sep, phrase, sep, …]
   const chosen = new Set(selectedIds);
-  const add = [], rest = [];
-  for (const p of parts) {
-    const o = options.find((x) => norm(x.label) === norm(p) || norm(x.id) === norm(p));
+  const add = [], kept = [];
+  for (let k = 0; k < pieces.length; k += 2) {
+    const phrase = pieces[k], sep = pieces[k + 1] || "";
+    if (!clean(phrase)) continue;                                            // an empty piece carries no words
+    const o = options.find((x) => norm(x.label) === norm(phrase) || norm(x.id) === norm(phrase));
     if (o && chosen.has(o.id)) continue;                                     // already ticked: the words go
     if (o && !add.includes(o.id) && chosen.size + add.length < max) { add.push(o.id); continue; }
     if (o && add.includes(o.id)) continue;
-    rest.push(p);
+    kept.push({ phrase, sep });
   }
-  return { add, rest: rest.join(", ") };
+  // The kept phrases as typed, each followed by the separator that followed it (none after the last).
+  const rest = kept.map((p, i) => (i < kept.length - 1 ? p.phrase + (p.sep || ",") : p.phrase)).join("").trim();
+  return { add, rest };
 }
 
 // ── Gaps for the architect's brief ─────────────────────────────────────────────────────────────────
@@ -420,4 +429,70 @@ export function normaliseStoryPatch(body = {}) {
   }
   for (const k of TEXT_COLUMNS) if (has(out, k) && typeof out[k] === "string" && !out[k].trim()) out[k] = null;
   return { updates: out };
+}
+
+/**
+ * The budget pair when a PATCH carries only one of the two figures (Sales saves Budget min and Budget max separately):
+ * the figure sent against the one stored. Returns a plain-English error, or null when the pair is fine. Run after
+ * normaliseStoryPatch (the figures are numbers or null by then). A figure cleared, or no figure stored, is never checked.
+ */
+export function budgetPairError(updates = {}, stored = {}) {
+  const sentMin = has(updates, "construction_budget_min"), sentMax = has(updates, "construction_budget_max");
+  if (sentMin === sentMax) return null;                                       // both (normaliseStoryPatch checks them) or neither
+  const lo = amount(sentMin ? updates.construction_budget_min : stored?.construction_budget_min);
+  const hi = amount(sentMax ? updates.construction_budget_max : stored?.construction_budget_max);
+  if (lo == null || hi == null || lo <= hi) return null;
+  return sentMin
+    ? `The budget's lower figure is more than its upper figure (${moneyText(hi)}). Change the upper figure first. Nothing was saved.`
+    : `The budget's upper figure is less than its lower figure (${moneyText(lo)}). Change the lower figure first. Nothing was saved.`;
+}
+
+// ── New design-team contacts (server side) ─────────────────────────────────────────────────────────
+
+/** A person's name for comparing: lower case, punctuation and extra spaces gone ("O'Neil,  Ava" → "o neil ava"). */
+export const nameKey = (s) => norm(s);
+/** The name a crm_contacts row goes by: first + last, else the firm. */
+export const contactNameOf = (row) => pick(personName(row), row?.company);
+
+/**
+ * "+ Add someone new" with an email that a contact already has. The email is matched exactly (any case, archived
+ * contacts left out by the caller); it links that contact only when the names match too, so a shared office address
+ * (info@studio.com) never links the wrong person or drops the typed name.
+ *   rows  crm_contacts rows that may share the email (the caller's query may over-match: the email is re-checked here)
+ * Returns { contact } to reuse, { conflict } for someone else with that email, or {} when nobody has it.
+ */
+export function emailMatch(rows, { name, email }) {
+  const want = clean(email).toLowerCase();
+  if (!want) return {};
+  const same = (Array.isArray(rows) ? rows : []).filter((r) => r && !r.is_archived && clean(r.email).toLowerCase() === want);
+  if (!same.length) return {};
+  const key = nameKey(name);
+  const hit = same.find((r) => key && (nameKey(personName(r)) === key || nameKey(r.company) === key));
+  return hit ? { contact: hit } : { conflict: same[0] };
+}
+
+/**
+ * "+ Add someone new" with no email: the person already on this lead or job under the same name and firm (a second Save,
+ * a double tap), so the save reuses them instead of adding a duplicate contact and role.
+ *   roleRows  [{ status, contact: { id, first_name, last_name, company, is_archived? } }] for this lead and its job
+ * Returns the contact, or null.
+ */
+export function sameNamedOnJob(roleRows, { name, company }) {
+  const key = nameKey(name), firm = nameKey(company);
+  if (!key) return null;
+  for (const r of Array.isArray(roleRows) ? roleRows : []) {
+    const c = r?.contact;
+    if (!c?.id || c.is_archived || !isOn(r.status)) continue;
+    const person = personName(c);
+    const nameOk = person ? nameKey(person) === key : nameKey(c.company) === key;   // a firm-only contact goes by its firm
+    const firmOk = nameKey(c.company) === firm || (!person && !firm);
+    if (nameOk && firmOk) return c;
+  }
+  return null;
+}
+
+/** "Ava Arch, Arch Studio": the person someone else's email belongs to, in plain words. */
+export function conflictWords(row) {
+  const name = contactNameOf(row), firm = clean(row?.company);
+  return [name, firm && firm !== name ? firm : ""].filter(Boolean).join(", ") || "another contact";
 }

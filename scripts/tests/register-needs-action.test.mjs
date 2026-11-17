@@ -16,6 +16,7 @@ import {
   prefillWhat, suggestedWho, defaultDue, whoChoices, choiceByKey, setActionPatch, donePatch, checkedPatch, clearPatch, undoPatchFor,
   flagState, pillWords, footnoteFor, groupPoints, actionsSummary, copyListText, copiedWords, pointLine, pointTags, pointSubject,
   isOverdue, addedWords, subjectLine, openingView, rowOpensSheet, WHO_CHOICES, PARK_REASON, UNNAMED_GROUP,
+  assignPatch, whatToSaveOnClose, actionPoints,
 } from "../../src/lib/needsAction.js";
 import { realJob } from "../documents/fixtures/real-extension-job.mjs";
 
@@ -152,35 +153,70 @@ section("Closing: Done, Checked, Clear");
   ok("Clear reopens nothing and leaves the record's own state alone", flagState(makeItem({ ...g, ...clearPatch(g) })) === "open");
 }
 
+section("Closing the sheet saves only what was typed (M4)");
+{
+  const base = { itemKind: "selection", isNew: false, savedWhat: "" };
+  ok("a done record opened and closed, nothing typed → nothing saved (it stays done)", whatToSaveOnClose({ ...base, state: "done", text: "Confirm half round", edited: false }) === null);
+  ok("a done record with new words typed → reopened with them", flat(whatToSaveOnClose({ ...base, state: "done", text: "Confirm quad instead", edited: true })) === flat({ nextAction: "Confirm quad instead", resolved: false }));
+  ok("a set record, nothing typed, the prefill differing from what's saved → nothing saved", whatToSaveOnClose({ ...base, state: "set", savedWhat: "", text: "Confirm half round", edited: false }) === null);
+  ok("a set record whose words are unchanged → nothing saved", whatToSaveOnClose({ ...base, state: "set", savedWhat: "Confirm it", text: "  Confirm it ", edited: true }) === null);
+  ok("a new follow-up with typed words keeps them as its own", flat(whatToSaveOnClose({ state: "none", itemKind: "action", isNew: true, savedWhat: "", text: "Check the stair", edited: true })) === flat({ description: "Check the stair", nextAction: "Check the stair" }));
+  ok("words typed before anyone is named wait under 'No one named yet'", flat(whatToSaveOnClose({ ...base, state: "open", text: "Check the fall", edited: true })) === flat({ nextAction: "Check the fall", resolved: false }));
+  ok("…and the untouched prefill doesn't", whatToSaveOnClose({ ...base, state: "open", text: "Confirm half round", edited: false }) === null);
+  ok("an emptied box saves nothing", whatToSaveOnClose({ ...base, state: "set", savedWhat: "x", text: "  ", edited: true }) === null);
+  // An action closed with the old PromptRow "Done" box: its words are in description, nextAction empty.
+  const oldDone = makeItem({ ...item(register, "i46"), resolved: true, nextAction: "" });
+  ok("the real case: an old 'Done' action viewed and closed stays done", flagState(oldDone) === "done"
+    && whatToSaveOnClose({ state: flagState(oldDone), itemKind: oldDone.itemKind, isNew: false, savedWhat: oldDone.nextAction, text: prefillWhat(register, oldDone), edited: false }) === null);
+}
+
+section("Naming who keeps what was already typed (M5)");
+{
+  const typed = makeItem({ ...item(register, "i27"), nextAction: "Check fall over the kitchen extension with the engineer", actionDue: "2026-12-04" });
+  const p = assignPatch(register, typed, C("architect"));
+  ok("words and by-when already typed stay", p.nextAction === "Check fall over the kitchen extension with the engineer" && p.actionDue === "2026-12-04" && p.responsibility === "architect", flat(p));
+  const blank = assignPatch(register, item(register, "i27"), C("architect"));
+  ok("a blank record still gets the prefill and the default by-when", blank.nextAction === "Confirm half round" && blank.actionDue === "next_issue");
+  ok("a by-when chosen in the sheet wins", assignPatch(register, typed, C("client"), { due: "next_meeting" }).actionDue === "next_meeting");
+  ok("Undo puts the record back as it was", flat(undoPatchFor(typed, p)) === flat({ responsibility: "", actionRole: "", nextAction: typed.nextAction, actionDue: "2026-12-04", resolved: false }), flat(undoPatchFor(typed, p)));
+}
+
 section("The ⚑'s states");
 ok("outline grey: nothing needed", flagState(item(register, "i28")) === "none" && flagState(null) === "none");
 ok("outline amber: open but no one asked (a check, a choice not decided, an element in or out)", ["i27", "i61", "i71", "i06"].every((id) => flagState(item(register, id)) === "open"));
 ok("set → pill; resolved → done", flagState(makeItem({ nextAction: "x" })) === "set" && flagState(makeItem({ actionDue: "next_meeting" })) === "set" && flagState(makeItem({ resolved: true, nextAction: "x" })) === "done");
 ok("no one named yet reads so on the pill", pillWords(context, makeItem({ nextAction: "x", actionDue: "2026-11-28" })) === "No one named · 28 Nov");
 ok("a past date is overdue", isOverdue("2026-11-16", "2026-11-17") && !isOverdue("2026-11-17", "2026-11-17") && !isOverdue("next_issue", "2026-11-17"));
-ok("footnote by who", footnoteFor(item(register, "i27"), "architect") === "Prints in the architect's brief under “Needed for the next drawing issue”."
-  && footnoteFor(item(register, "i29"), "client") === "Prints in the client's brief under “Decisions we need from you”.");
-ok("Blue Leaf: our list only, unless the architect's list carries it anyway", footnoteFor(makeItem({ promptKey: "K-006", itemKind: "selection" }), "blue_leaf") === "Our list only — doesn't print."
-  && footnoteFor(item(register, "i27"), "blue_leaf").startsWith("Prints in the architect's brief"));
+ok("footnote by who (the client brief's heading is “Decisions to make”)", footnoteFor(item(register, "i27"), "architect") === "Prints in the architect's brief under “Needed for the next drawing issue”."
+  && footnoteFor(item(register, "i29"), "client") === "Prints in the client's brief under “Decisions to make”.");
+// Owner decision D3: Blue Leaf's own actions are our list; the architect's 03 leaves responsibility "blue_leaf" out.
+ok("Blue Leaf: our list only — even a technical check (D3), and the brief agrees", footnoteFor(makeItem({ promptKey: "K-006", itemKind: "selection" }), "blue_leaf") === "Our list only — doesn't print."
+  && footnoteFor(item(register, "i27"), "blue_leaf") === "Our list only — doesn't print."
+  && !architectBriefModel(apply(register, "i27", setActionPatch(item(register, "i27"), C("blue_leaf"), { what: "Confirm half round", due: "next_meeting" })), context, {}).points.some((x) => x.ids.includes("i27")));
 ok("the sheet's subject line", subjectLine(register, item(register, "i27")) === "Throughout · Gutters" && subjectLine(register, item(register, "i61")) === "Laundry · Washer / dryer layout");
 
-section("The Actions list is openPoints, grouped (the real job)");
+section("The Actions list is openPoints with every element its own row, grouped (the real job)");
 {
-  const next = openPoints(register, context, { scope: "next_issue" });
-  const all = openPoints(register, context, { scope: "all" });
+  const next = actionPoints(register, context, "next_issue");
+  const all = actionPoints(register, context, "all");
   const gNext = groupPoints(next), gAll = groupPoints(all);
-  ok("Next drawing issue: 9; Everything open: 11", next.length === 9 && all.length === 11, `${next.length} / ${all.length}`);
-  ok("the groups, flattened, are openPoints exactly (same points, same order)", ids(gNext.flatMap((g) => g.points)) === ids(next) && ids(gAll.flatMap((g) => g.points)) === ids(all));
-  ok("Architect 2 · Energy assessor 1 · Client 2 · No one named yet 4", flat(gNext.map((g) => [g.label, g.points.length])) === flat([["Architect", 2], ["Energy assessor", 1], ["Client", 2], ["No one named yet", 4]]), flat(gNext.map((g) => [g.label, g.points.length])));
+  ok("the list is openPoints with merge off", ids(next) === ids(openPoints(register, context, { scope: "next_issue", merge: false })) && ids(all) === ids(openPoints(register, context, { scope: "all", merge: false })));
+  ok("Next drawing issue: 10; Everything open: 12 (spec S4)", next.length === 10 && all.length === 12, `${next.length} / ${all.length}`);
+  ok("the groups, flattened, are the list exactly (same points, same order)", ids(gNext.flatMap((g) => g.points)) === ids(next) && ids(gAll.flatMap((g) => g.points)) === ids(all));
+  ok("Architect 2 · Energy assessor 1 · Client 2 · No one named yet 5", flat(gNext.map((g) => [g.label, g.points.length])) === flat([["Architect", 2], ["Energy assessor", 1], ["Client", 2], ["No one named yet", 5]]), flat(gNext.map((g) => [g.label, g.points.length])));
   ok("the client's held action is in the list, flagged", gNext.find((g) => g.key === "client").points.some((p) => p.ids[0] === "i46" && p.held === "no_ask"));
   ok("everything open adds the bedroom floor and the splashback", ids(all).split(",").filter((x) => !ids(next).split(",").includes(x)).sort().join() === "i29,i39");
-  ok("the header pill: exactly { count: 9, unnamed: 4 }", flat(actionsSummary(register, context)) === flat({ count: 9, unnamed: 4 }), flat(actionsSummary(register, context)));
+  ok("the header pill: exactly { count: 10, unnamed: 5 }", flat(actionsSummary(register, context)) === flat({ count: 10, unnamed: 5 }), flat(actionsSummary(register, context)));
   ok("…the count is the next-issue points, unnamed those with no one named", actionsSummary(register, context).count === next.length && actionsSummary(register, context).unnamed === next.filter((p) => p.who.key === UNNAMED_GROUP).length);
   ok("where the list opens: next issue, everything, or the next-issue list at 'No one named yet'",
     flat(openingView("next_issue")) === flat({ filter: "next_issue", focusGroup: null }) && flat(openingView("all")) === flat({ filter: "all", focusGroup: null })
     && flat(openingView("unnamed")) === flat({ filter: "next_issue", focusGroup: "none" }) && flat(openingView(undefined)) === flat({ filter: "next_issue", focusGroup: null }));
   ok("a row with nothing asked yet opens the sheet; the others open the record", rowOpensSheet(next.find((p) => p.ids[0] === "i06")) && !rowOpensSheet(next.find((p) => p.ids[0] === "i27")) && !rowOpensSheet(next.find((p) => p.ids[0] === "i46")));
-  ok("retaining and pool are asked once", pointSubject(next.find((p) => p.ids.includes("i71"))) === "Retaining and pool");
+  ok("Retaining and Pool are their own rows, each with its own who", pointSubject(next.find((p) => p.ids.includes("i71"))) === "Retaining" && pointSubject(next.find((p) => p.ids.includes("i72"))) === "Pool"
+    && next.filter((p) => p.ids.includes("i71") || p.ids.includes("i72")).every((p) => p.ids.length === 1 && p.who.key === UNNAMED_GROUP));
+  const printed = architectBriefModel(register, context, {}).points;
+  ok("…while the printed 03 still asks them once: 'Retaining and pool: are they part of this job?'", printed.some((p) => p.ids.includes("i71") && p.ids.includes("i72") && /^Retaining and pool: are they part of this job\?/.test(p.text))
+    && pointSubject(openPoints(register, context).find((p) => p.ids.includes("i71"))) === "Retaining and pool", flat(printed.map((p) => p.text)));
   const line = (id) => pointLine(all.find((p) => p.ids.includes(id)));
   ok("row words: nothing asked, designer to confirm, check still open, not decided, in or out",
     line("i06").text === "Nothing asked yet" && line("i06").nothingAsked && line("i38").text === "Designer to confirm" && line("i27").text === "Check still open"
@@ -192,7 +228,7 @@ section("The Actions list is openPoints, grouped (the real job)");
   const r3 = apply(register, "i06", { actionDue: "next_issue" });
   ok("Copy list, plain text", copyListText(openPoints(r3, context)).split("\n")[0] === "Architect — Windows & glazing priorities (Throughout): confirm double glazed aluminium, Jolong, white frames — next drawing issue",
     copyListText(openPoints(r3, context)).split("\n")[0]);
-  ok("one line a point", copyListText(next).split("\n").length === 9 && copiedWords(9) === "Copied 9 actions" && copiedWords(1) === "Copied 1 action");
+  ok("one line a point", copyListText(next).split("\n").length === 10 && copiedWords(10) === "Copied 10 actions" && copiedWords(1) === "Copied 1 action");
   const named2 = load((j) => { j.context.consultants = [{ role: "architect", name: "Jo Bright", company: "Bright Studio", status: "active" }]; });
   ok("a named architect shows in the copied line", copyListText(openPoints(named2.register, named2.context)).startsWith("Architect (Bright Studio) — "));
   ok("an empty register: nothing waiting", groupPoints(openPoints({ meta: emptyMeta({}), items: [] }, context)).length === 0 && flat(actionsSummary(null, context)) === flat({ count: 0, unnamed: 0 }));
@@ -227,16 +263,17 @@ try {
 
   section("Rendered: the Actions list");
   const h = R.panel({ reg: register, context, initialFilter: "next_issue" });
-  ok("9 rows, and the two filter counts", count(h, /data-testid="action-row-/g) === 9 && h.includes("Next drawing issue (9)") && h.includes("Everything open (11)"));
-  ok("groups in print order, 'No one named yet' last", h.indexOf("Architect · 2") < h.indexOf("Energy assessor · 1") && h.indexOf("Energy assessor · 1") < h.indexOf("Client · 2") && h.indexOf("Client · 2") < h.indexOf("No one named yet · 4"));
-  ok("rows with no one named carry the inline who chips", count(h, /data-testid="assign-architect"/g) === 4 && count(h, />More…</g) === 4);
+  ok("10 rows, and the two filter counts", count(h, /data-testid="action-row-/g) === 10 && h.includes("Next drawing issue (10)") && h.includes("Everything open (12)"));
+  ok("groups in print order, 'No one named yet' last", h.indexOf("Architect · 2") < h.indexOf("Energy assessor · 1") && h.indexOf("Energy assessor · 1") < h.indexOf("Client · 2") && h.indexOf("Client · 2") < h.indexOf("No one named yet · 5"));
+  ok("rows with no one named carry the inline who chips (Retaining and Pool each their own)", count(h, /data-testid="assign-architect"/g) === 5 && count(h, />More…</g) === 5
+    && h.includes('data-testid="action-row-i71"') && h.includes('data-testid="action-row-i72"'));
   ok("the first 'nothing asked' row says what a tap does, once", count(h, /tap to say what&#x27;s needed/g) === 1);
   ok("a technical check's ✓ asks for the reference; others mark done", h.includes("Mark checked: Gutters") && h.includes("Mark done: Outstanding whole-house decision"));
   ok("the held tag and the footer", h.includes("Say what&#x27;s needed — won&#x27;t print until it does") && h.includes("+ Needs action for the whole job") && h.includes("Copy list"));
   ok("no question codes on screen", !/\b[A-Z]-\d{3}\b/.test(h.replace(/data-testid="[^"]*"/g, "")));
-  ok("Everything open shows 11", count(R.panel({ reg: register, context, initialFilter: "all" }), /data-testid="action-row-/g) === 11);
+  ok("Everything open shows 12", count(R.panel({ reg: register, context, initialFilter: "all" }), /data-testid="action-row-/g) === 12);
   const un = R.panel({ reg: register, context, initialFilter: "unnamed" });
-  ok("'unnamed' opens the next-issue list with 'No one named yet' highlighted", count(un, /data-testid="action-row-/g) === 9 && /aria-pressed="true"[^>]*data-testid="actions-filter-next"/.test(un)
+  ok("'unnamed' opens the next-issue list with 'No one named yet' highlighted", count(un, /data-testid="action-row-/g) === 10 && /aria-pressed="true"[^>]*data-testid="actions-filter-next"/.test(un)
     && /data-testid="actions-group-none" data-highlight="true"/.test(un) && count(un, /data-highlight=/g) === 1);
   ok("…and the other openings highlight nothing", !/data-highlight=/.test(h) && !/data-highlight=/.test(R.panel({ reg: register, context, initialFilter: "all" })));
   ok("touch targets: the filter and Copy list are 44 px, the inline who chips have a 44 px tap area", /h-11 whitespace-nowrap px-3[^"]*"[^>]*data-testid="actions-filter-next"/.test(h) && /data-testid="assign-architect" class="[^"]*min-h-\[44px\]/.test(h));
@@ -246,7 +283,9 @@ try {
   section("Rendered: the ⚑ and PromptRow");
   const grey = R.flag({ reg: register, context, item: item(register, "i28") });
   const amber = R.flag({ reg: register, context, item: item(register, "i27") });
-  ok("grey when nothing is needed, amber when open", /border-hairline/.test(grey) && !/border-warning/.test(grey) && /border-warning/.test(amber) && /Needs action from… Throughout · Gutters/.test(amber));
+  ok("grey when nothing is needed, amber when open", /border-hairline/.test(grey) && !/border-warning/.test(grey) && /border-warning/.test(amber));
+  ok("open is said, not only coloured: its name and a dot the grey one never has", /aria-label="Needs action: open, no one asked yet. Throughout · Gutters"/.test(amber)
+    && /aria-label="Needs action from… /.test(grey) && /rounded-full border border-surface bg-warning/.test(amber) && !/bg-warning/.test(grey));
   const set = apply(register, "i27", setActionPatch(item(register, "i27"), C("architect"), { what: "Confirm half round", due: "next_issue" }));
   ok("the pill once set", R.flag({ reg: set, context, item: item(set, "i27") }).includes("Architect · Next issue"));
   ok("'✓ Done' once closed", R.flag({ reg: register, context, item: makeItem({ ...item(register, "i46"), resolved: true }) }).includes("✓ Done"));

@@ -535,6 +535,8 @@ export function emptyMeta(partial = {}) {
     renovationOverlay: !!partial.renovationOverlay,
     scopeAreas: Array.isArray(partial.scopeAreas) ? partial.scopeAreas : [],
     rooms: Array.isArray(partial.rooms) ? partial.rooms.map((r) => makeRoom(r)) : [],
+    // Floors added on the Rooms list that have no room yet (level names); a floor with a room is carried by its rooms.
+    floors: Array.isArray(partial.floors) ? partial.floors.filter((l) => typeof l === "string" && l.trim()).map((l) => l.trim().slice(0, 40)).slice(0, 12) : [],
     lastRoomId: partial.lastRoomId || null,
     lastStep: partial.lastStep || null,
     baseline: normaliseBaseline(partial.baseline),             // staff-only pricing guide (below). Never reaches a client
@@ -803,14 +805,19 @@ export function itemAxes(item) {
 
 const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
 
+/** Words compared for an approval: spaces collapsed, case ignored, so re-saving the same words never trips it. */
+export const approvalWords = (t) => String(t ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+
 /**
- * Does this edit go beyond what the client approved? An approval covers a specific product on a selection,
- * and a specific answer on any item. The screen steps the item back to Proposed; the server refuses otherwise.
+ * Does this edit go beyond what the client approved? An approval covers a specific product on a selection, the
+ * words of a requirement, scope or action (its description is what was agreed), and a specific answer on any item.
+ * The screen steps the item back to Proposed; the server refuses otherwise (registerStore approvalGuardReason).
  */
 export function editOutrunsApproval(item, partial) {
-  if (!item || item.certainty !== "client_approved" || "certainty" in partial) return false;
+  if (!item || !partial || item.certainty !== "client_approved" || "certainty" in partial) return false;
   const productMoved = item.itemKind === "selection" && PRODUCT_FIELDS.some((f) => f in partial && stableStringify(partial[f]) !== stableStringify(item[f]));
-  return productMoved || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer));
+  const wordsMoved = item.itemKind !== "selection" && "description" in partial && approvalWords(partial.description) !== approvalWords(item.description);
+  return productMoved || wordsMoved || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer));
 }
 
 /** Business-rule problems with one item (shown inline; the server enforces the same rules). */

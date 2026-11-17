@@ -15,15 +15,20 @@
  *
  * reg / context / actor come from the props, else from <NeedsActionProvider> (the lead mounts it once round the
  * workshop), so rows deep inside older screens get them without new props.
+ *
+ * Layers: the sheet and the toast are portalled to <body> and carry data-layer="sheet", so a menu they were opened from
+ * (RoomUi's Popover) doesn't count a tap in them as "outside". Escape goes through useEscapeLayer (src/lib/overlayFlag.js):
+ * only the top layer closes. While any sheet is open, a toast shows at the top, clear of the sheet's footer.
  */
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { makeItem, genId, questionById, resolvePromptId } from "../../../../lib/register.js";
 import { clean, dueLabel } from "../../../../lib/briefModel.js";
 import {
-  whoChoices, whoKeyOf, suggestedWho, defaultDue, prefillWhat, setActionPatch, donePatch, checkedPatch, clearPatch, undoPatchFor,
-  flagState, pillWords, isOverdue, addedWords, footnoteFor, subjectLine, isLocked,
+  whoChoices, whoKeyOf, suggestedWho, defaultDue, prefillWhat, setActionPatch, assignPatch, donePatch, checkedPatch, clearPatch, undoPatchFor,
+  flagState, pillWords, isOverdue, addedWords, footnoteFor, subjectLine, isLocked, whatToSaveOnClose,
 } from "../../../../lib/needsAction.js";
+import { useBodyFlag, useEscapeLayer } from "../../../../lib/overlayFlag.js";
 
 const Scope = createContext(null);
 
@@ -58,8 +63,24 @@ function CloseIcon() {
   return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>;
 }
 
-/** One short message at a time ("Marked done. Undo"): 5 s with Undo, 3 s without. Never sends anything. */
-export function ActionToast({ toast, onDismiss }) {
+// How many "Needs action from…" sheets are open (any caller's), so a toast knows to keep clear of their footers.
+let sheetsOpen = 0;
+const sheetListeners = new Set();
+const sheetCount = { subscribe: (fn) => { sheetListeners.add(fn); return () => sheetListeners.delete(fn); }, get: () => sheetsOpen, server: () => 0 };
+function useMarkSheetOpen() {
+  useEffect(() => {
+    sheetsOpen += 1;
+    sheetListeners.forEach((fn) => fn());
+    return () => { sheetsOpen -= 1; sheetListeners.forEach((fn) => fn()); };
+  }, []);
+}
+
+/**
+ * One short message at a time ("Marked done. Undo"): 5 s with Undo, 3 s without. Never sends anything.
+ * Top on a phone (the bottom sheet and the Hub's bottom bar sit low); bottom on a tablet or desktop, except while a sheet
+ * is open, when it shows at the top so it never covers the sheet's Checked / Done (placement "top" | "bottom" forces it).
+ */
+export function ActionToast({ toast, onDismiss, placement }) {
   const dismiss = useRef(onDismiss);
   useEffect(() => { dismiss.current = onDismiss; });
   const id = toast?.id;
@@ -69,10 +90,15 @@ export function ActionToast({ toast, onDismiss }) {
     const t = setTimeout(() => dismiss.current?.(), ms);
     return () => clearTimeout(t);
   }, [id, ms]);
+  const sheets = useSyncExternalStore(sheetCount.subscribe, sheetCount.get, sheetCount.server);
+  // Where a toast first shows, it stays: it doesn't jump when the sheet behind it closes.
+  const [latched, setLatched] = useState({ id: null, top: false });
+  const wantTop = placement === "top" || (placement !== "bottom" && sheets > 0);
+  if (id && latched.id !== id) setLatched({ id, top: wantTop });
+  const top = latched.id === id ? latched.top : wantTop;
   if (!toast || typeof document === "undefined") return null;
   return createPortal(
-    // Top on a phone (the bottom sheet and the Hub's bottom bar sit low), bottom on a tablet or desktop.
-    <div className="pointer-events-none fixed inset-x-0 top-3 z-[70] flex justify-center px-4 sm:bottom-6 sm:top-auto">
+    <div data-layer="sheet" className={`pointer-events-none fixed inset-x-0 top-3 z-[70] flex justify-center px-4 ${top ? "" : "sm:bottom-6 sm:top-auto"}`}>
       <div role="status" aria-live="polite" className="pointer-events-auto flex min-h-[44px] max-w-full items-center gap-3 rounded-lg bg-ink px-4 text-sm text-white shadow-lg">
         <span>{toast.text}</span>
         {toast.undo && (
@@ -124,16 +150,19 @@ export function NeedsActionFlag({ reg, context, item, seed, updateItem, upsertIt
         </button>
       ) : (
         <button ref={btn} type="button" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} disabled={readOnly && state === "none"}
-          aria-label={`Needs action from… ${subject}`} title={state === "open" ? "Open: no one has been asked yet" : "Needs action from…"} data-testid={`needs-action-${rec.id}`}
-          className={`focus-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-surface disabled:opacity-40 ${state === "open" ? "border-warning text-amber-800" : "border-hairline text-muted hover:text-ink"} ${open ? "ring-2 ring-primary ring-offset-2" : ""}`}>
+          aria-label={state === "open" ? `Needs action: open, no one asked yet. ${subject}` : `Needs action from… ${subject}`}
+          title={state === "open" ? "Open: no one has been asked yet" : "Needs action from…"} data-testid={`needs-action-${rec.id}`} data-flag-state={state}
+          className={`focus-ring relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-surface disabled:opacity-40 ${state === "open" ? "border-warning text-amber-800" : "border-hairline text-muted hover:text-ink"} ${open ? "ring-2 ring-primary ring-offset-2" : ""}`}>
           <FlagIcon />
+          {/* Open is told by shape as well as colour: a dot on the flag that the grey "nothing needed" one never has. */}
+          {state === "open" && <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-surface bg-warning" />}
         </button>
       )}
       {open && (
         <NeedsActionSheet reg={R} context={C} actor={A} item={item || null} seed={seedWithId} updateItem={updateItem} upsertItem={upsertItem}
           readOnly={readOnly} anchor={btn} onClose={close} onNotify={setToast} />
       )}
-      <ActionToast toast={toast} onDismiss={() => setToast(null)} />
+      <ActionToast toast={toast} onDismiss={() => setToast(null)} placement={open ? "top" : undefined} />
     </>
   );
 }
@@ -192,20 +221,13 @@ export function NeedsActionSheet({ reg, context, actor, item, seed, extras = [],
   const saveExtras = (fn) => { if (ro) return; for (const x of extras) { const p = fn(x); if (p) updateItem?.(x.id, p); } };
   const subject = rec ? subjectLine(reg, rec, extras) : "";
 
+  // Only words really typed are saved on closing: opening and closing a done action never reopens it (needsAction.js).
   function saveWhat() {
-    const text = clean(what);
-    if (ro || !rec || !text || text === savedWhat) return;
-    if (isSet) {
-      // A new next action reopens a done one (the existing rule).
-      save({ nextAction: text, resolved: false });
-      if (edited) saveExtras(() => ({ nextAction: text, resolved: false }));
-    } else if (!item && rec.itemKind === "action") {
-      save({ description: text, nextAction: text });   // a new follow-up keeps its words, with no one named yet
-    } else if (edited) {
-      // Words typed before anyone is named aren't lost on closing: they wait under "No one named yet".
-      save({ nextAction: text, resolved: false });
-      saveExtras(() => ({ nextAction: text, resolved: false }));
-    }
+    if (ro || !rec) return;
+    const patch = whatToSaveOnClose({ state, itemKind: rec.itemKind, isNew: !item, savedWhat, text: what, edited });
+    if (!patch) return;
+    save(patch);
+    if (edited && !patch.description) saveExtras(() => ({ nextAction: patch.nextAction, resolved: false }));
   }
   const close = () => { saveWhat(); onClose?.(); };
   const closeRef = useRef(close);
@@ -217,7 +239,8 @@ export function NeedsActionSheet({ reg, context, actor, item, seed, extras = [],
     const nextDue = dueTouched ? due : defaultDue(c.key);
     setDue(nextDue);
     save(setActionPatch(rec, c, { what: text, due: nextDue }));
-    saveExtras((x) => setActionPatch(x, c, { what: edited ? text : prefillWhat(reg, x), due: nextDue }));
+    // The others asked with it keep their own words and by-when unless this sheet's were typed or picked.
+    saveExtras((x) => (edited ? setActionPatch(x, c, { what: text, due: nextDue }) : assignPatch(reg, x, c, dueTouched ? { due: nextDue } : {})));
     if (!currentKey || state === "done") onNotify?.({ id: genId(), text: addedWords(c, nextDue) });
   }
   function chooseDue(v) {
@@ -279,24 +302,33 @@ export function NeedsActionSheet({ reg, context, actor, item, seed, extras = [],
     return () => { ro2?.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
   }, [wide, anchor]);
 
-  // Outside tap and Escape close it (Escape doesn't also leave the full-width workspace).
+  // An outside tap closes it. A tap in another layer (its toast) isn't outside. Escape: only the top layer closes, so it
+  // doesn't also close the menu, drawer or full-width workspace it was opened from.
   useEffect(() => {
     const onDown = (e) => {
       if (!wide) return;                       // the phone sheet has its own scrim
       if (box.current?.contains(e.target) || anchor?.current?.contains(e.target)) return;
+      if (e.target?.closest?.("[data-layer='sheet']")) return;
       closeRef.current?.();
     };
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeRef.current?.(); } };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("touchstart", onDown); window.removeEventListener("keydown", onKey, true); };
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("touchstart", onDown); };
   }, [wide, anchor]);
+  const onEscape = useCallback(() => closeRef.current?.(), []);
+  useEscapeLayer(true, onEscape);
+  useMarkSheetOpen();
+  useBodyFlag("register-overlay-open", !wide);   // the phone sheet covers the page: the floating buttons step aside
 
-  // Focus: the words when asked (a new follow-up), otherwise the sheet itself.
+  // Focus: the words when asked (a new follow-up), otherwise the sheet itself. On a tablet the popover's first frame is
+  // hidden until it is placed, and a hidden box can't take focus, so this waits for the placement.
+  const placed = !wide || !!pos;
+  const focused = useRef(false);
   useEffect(() => {
+    if (!placed || focused.current) return;
+    focused.current = true;
     if (focusWhat) whatRef.current?.focus(); else box.current?.focus();
-  }, [focusWhat]);
+  }, [placed, focusWhat]);
   useEffect(() => {
     if (!picking || !dateRef.current || dateRef.current.value) return;
     dateRef.current.focus();
@@ -404,7 +436,7 @@ export function NeedsActionSheet({ reg, context, actor, item, seed, extras = [],
   const dialog = { role: "dialog", "aria-labelledby": ids.title, "aria-describedby": ids.sub, tabIndex: -1, "data-testid": "needs-action-sheet" };
   return createPortal(
     wide ? (
-      <div ref={box} {...dialog} style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { left: -9999, top: 0, width: 360, visibility: "hidden" }}
+      <div ref={box} {...dialog} data-layer="sheet" style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { left: -9999, top: 0, width: 360, visibility: "hidden" }}
         className="fixed z-[60] flex max-h-[calc(100vh-16px)] flex-col overflow-y-auto rounded-card border border-hairline bg-surface shadow-[0_12px_32px_rgba(26,26,46,0.16)] outline-none">
         {pos && (
           <span aria-hidden="true" style={{ left: pos.arrow }}
@@ -413,7 +445,7 @@ export function NeedsActionSheet({ reg, context, actor, item, seed, extras = [],
         {body}
       </div>
     ) : (
-      <div className="fixed inset-0 z-[60]">
+      <div className="fixed inset-0 z-[60]" data-layer="sheet">
         <div className="absolute inset-0 bg-ink/40" aria-hidden="true" onClick={close} />
         <div ref={box} {...dialog} aria-modal="true" style={drag ? { transform: `translateY(${drag}px)` } : undefined}
           className="absolute inset-x-0 bottom-0 flex max-h-[90vh] flex-col overflow-y-auto rounded-t-card bg-surface pb-[env(safe-area-inset-bottom)] shadow-xl outline-none">

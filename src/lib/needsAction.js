@@ -183,6 +183,34 @@ export function setActionPatch(item, choice, { what = "", due = "" } = {}) {
   return parked ? { ...parked, ...patch } : patch;
 }
 
+/**
+ * Naming who on a point that already says something (the Actions list's inline chips, and the extra records a sheet
+ * names at once): the words and the by-when already typed stay; only a blank record takes the prefill and the default
+ * by-when for that who. A by-when given here (the sheet's own choice) wins over both.
+ */
+export function assignPatch(reg, item, choice, { due } = {}) {
+  return setActionPatch(item, choice, {
+    what: clean(item?.nextAction) || prefillWhat(reg, item),
+    due: due ?? (item?.actionDue || defaultDue(choice.key)),
+  });
+}
+
+/**
+ * What closing the sheet saves of "What's needed", or null for nothing (spec S4: "nothing is lost", and only typing new
+ * text on a done action reopens it):
+ *   set or done ...... only words really typed: { nextAction, resolved: false }; merely opening and closing saves nothing
+ *   a new follow-up .. its words are its own: { description, nextAction }
+ *   no one named ..... words typed before anyone is named wait under "No one named yet": { nextAction, resolved: false }
+ * state is flagState(item); text the box's words; savedWhat the record's nextAction; edited whether staff typed.
+ */
+export function whatToSaveOnClose({ state, itemKind, isNew, savedWhat, text, edited }) {
+  const t = clean(text);
+  if (!t || t === clean(savedWhat)) return null;
+  if (state === "set" || state === "done") return edited ? { nextAction: t, resolved: false } : null;
+  if (isNew && itemKind === "action") return { description: t, nextAction: t };
+  return edited ? { nextAction: t, resolved: false } : null;
+}
+
 /** Done: closed, kept, no longer printed. */
 export const donePatch = () => ({ resolved: true });
 
@@ -242,9 +270,11 @@ export const addedWords = (choice, due) => `${choice.short || choice.label}${due
 export function footnoteFor(item, whoKey) {
   const ARCHITECT = "Prints in the architect's brief under “Needed for the next drawing issue”.";
   if (DESIGN_TEAM_KEYS.has(whoKey)) return ARCHITECT;
-  if (whoKey === "client") return "Prints in the client's brief under “Decisions we need from you”.";
+  // The client brief's heading for these (scripts/documents/author-cpb.mjs).
+  if (whoKey === "client") return "Prints in the client's brief under “Decisions to make”.";
   if (whoKey === "blue_leaf") {
-    // A Blue Leaf technical check, requirement or drawing record still prints in the architect's next-issue list.
+    // Blue Leaf's own actions are our list (owner decision D3: forNextIssue leaves responsibility "blue_leaf" out of the
+    // architect's 03). Asked of the same rule, so the footnote can never say otherwise than the brief prints.
     const choice = WHO_CHOICES.find((c) => c.key === "blue_leaf");
     return item && forNextIssue({ ...item, responsibility: choice.responsibility }) ? ARCHITECT : "Our list only — doesn't print.";
   }
@@ -277,10 +307,17 @@ export const rowOpensSheet = (point) => !!pointLine(point).nothingAsked;
 /** The group a point with no one named sits in ("No one named yet"). */
 export const UNNAMED_GROUP = "none";
 
-/** The header pill: { count: the next-issue points (openPoints), unnamed: those with no one named (the amber dot) }. */
+/**
+ * The Actions list's points: openPoints with every element its own row (merge: false), so Retaining and Pool each get
+ * their own who chips and count once each. Only the printed 03 asks in-or-out elements in one place as one line.
+ * The header pill, the Actions list and its filter counts all come from here.
+ */
+export const actionPoints = (reg, context, scope = "next_issue") => (reg ? openPoints(reg, context, { scope, merge: false }) : []);
+
+/** The header pill: { count: the next-issue points (actionPoints), unnamed: those with no one named (the amber dot) }. */
 export function actionsSummary(reg, context) {
   if (!reg) return { count: 0, unnamed: 0 };
-  const next = openPoints(reg, context, { scope: "next_issue" });
+  const next = actionPoints(reg, context, "next_issue");
   return { count: next.length, unnamed: next.filter((p) => p.who.key === UNNAMED_GROUP).length };
 }
 

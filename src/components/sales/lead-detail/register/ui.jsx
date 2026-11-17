@@ -22,18 +22,26 @@ export function Field({ label, hint, children }) {
   );
 }
 
+/**
+ * A small captioned field. The label wraps its field, so the caption is the field's accessible name (a screen reader
+ * says "Issue to, edit text"). Wrap inputs and selects only: a label around a button changes what a click does.
+ */
 export function Mini({ label, children, wide }) {
   return (
-    <div className={wide ? "sm:col-span-2" : ""}>
-      <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-muted">{label}</label>
+    <label className={`block ${wide ? "sm:col-span-2" : ""}`}>
+      <span className="mb-0.5 block text-[10px] uppercase tracking-wide text-muted">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
 
+// A font-size class the caller already chose (text-xs, sm:text-[13px] …), not a colour such as text-muted.
+const SIZED = /(^|\s)(?:[a-z]+:)*text-(?:xs|sm|base|lg|xl|\[\d)/;
+/** A select. 16 px on a phone so iOS doesn't zoom on focus, the dense 11 px from 640 px up, unless the caller sizes it. */
 export function Select({ value, onChange, options, placeholder, className = "", disabled, title }) {
+  const size = SIZED.test(className) ? "" : "text-[16px] sm:text-[11px]";
   return (
-    <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} title={title} className={`inp text-[11px] ${className}`}>
+    <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} title={title} className={`inp ${size} ${className}`}>
       {placeholder !== undefined && <option value="">{placeholder}</option>}
       {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </select>

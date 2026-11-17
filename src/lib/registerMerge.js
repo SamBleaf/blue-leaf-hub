@@ -8,7 +8,7 @@
 import { makeItem, emptyMeta, mergeBaseline } from "./register.js";
 
 export const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
-export const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep"];
+export const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep", "floors"];
 export const ROOM_FIELDS = ["level", "name", "roomType", "scope", "order", "sheet", "defaultConfirmations"];
 export const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -51,8 +51,22 @@ export function mergeMeta(base, mine, theirs, onBaselineConflict) {
   for (const t of theirs.rooms || []) {                   // added elsewhere, or I never had it
     if (!rooms.some((r) => r.id === t.id) && !(baseRooms.has(t.id) && !(mine.rooms || []).some((r) => r.id === t.id))) rooms.push(t);
   }
-  out.rooms = rooms.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  out.rooms = distinctRoomOrder(rooms.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));   // a stable sort: ties keep my order first
   return emptyMeta({ ...out, rev: theirs.rev });
+}
+
+/**
+ * Rooms in list order with no two sharing an order. Two rooms added at once on two screens both take the next number;
+ * after the merge the later one moves down by one, and so does anything it then meets. Orders that are already
+ * distinct and rising are kept exactly (gaps too), so a merge never rewrites rooms nobody touched.
+ */
+export function distinctRoomOrder(rooms) {
+  let last = -Infinity;
+  return (rooms || []).map((r) => {
+    const o = Number.isFinite(r.order) && r.order > last ? r.order : (last === -Infinity ? 0 : last + 1);
+    last = o;
+    return o === r.order ? r : { ...r, order: o };
+  });
 }
 
 // ── Recovery of unsaved edits (device-local; see takeoffRecovery.js saveRegisterDraft) ──────────────
@@ -109,4 +123,33 @@ export function planRegisterRestore(draft, current, titleOf = (i) => i.descripti
   const items = [...current.items.map((i) => now.get(i.id)), ...added];
   const nothingToRestore = !touchedIds.length && !metaTouched;
   return { reg: nothingToRestore ? current : { meta, items }, touchedIds, metaTouched, conflicts, removed, nothingToRestore };
+}
+
+// ── The store's save words (pure, so they can be tested without React; useRegister uses them) ─────────────
+
+export const SAVE_RETRY_WORDS = "Not saved — retrying";
+
+/**
+ * How a failed save is reported: { message, retry }. Never the browser's own text ("Failed to fetch"): offline, or a
+ * gateway page instead of the Hub's answer, reads "Not saved — retrying" and is tried again. The Hub's own refusal is
+ * already plain English (apiResponse.mjs) and is shown as it is, with no automatic retry.
+ */
+export function saveFailure(r) {
+  if (!r || r.network) return { message: SAVE_RETRY_WORDS, retry: true };
+  const own = typeof r.body?.error === "string" ? r.body.error.trim() : "";
+  if (own) return { message: own, retry: false };
+  if (!r.status || r.status >= 500) return { message: SAVE_RETRY_WORDS, retry: true };
+  return { message: "Not saved — press Save to try again", retry: false };
+}
+
+/**
+ * The save state of the brief's own details (rooms, floors, work words, drawings: the meta block), from the store's
+ * edit counters: 'dirty' | 'saving' | 'error' | 'saved'. seq = edits made, sent = edits in the last batch sent,
+ * saved = edits the server has, saving = a batch is in flight, state = the store's overall save state.
+ */
+export function metaSaveState({ seq = 0, sent = 0, saved = 0, saving = false, state = "idle" } = {}) {
+  if (seq === saved) return "saved";
+  if (state === "error") return "error";
+  if (saving && sent === seq) return "saving";
+  return "dirty";
 }

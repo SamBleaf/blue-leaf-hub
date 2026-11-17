@@ -621,7 +621,7 @@ export default function AppShell() {
       </main>
 
       {/* ── Quick Add FAB (hidden on finance command centre mobile — page has inline actions) ── */}
-      <div className={`fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6 ${leadDetailActionMode ? "hidden lg:block" : ""} ${location.pathname.startsWith("/finance/jobs/") ? "hidden md:block" : ""}`}>
+      <div data-quick-add="" className={`fixed bottom-20 right-4 z-50 md:bottom-6 md:right-6 ${leadDetailActionMode ? "hidden lg:block" : ""} ${location.pathname.startsWith("/finance/jobs/") ? "hidden md:block" : ""}`}>
         {quickAddOpen ? (
           <>
             <div className="fixed inset-0 z-[-1]" onClick={() => setQuickAddOpen(false)} />

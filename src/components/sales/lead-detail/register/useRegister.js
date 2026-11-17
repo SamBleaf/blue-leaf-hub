@@ -11,12 +11,15 @@
  *     both sides changed keep the server value and raise a notice; guard refusals (issued to the portal,
  *     approved under contract, missing evidence) revert that item with the reason;
  *   • an edit made while a save is in flight is never marked saved (per-item edit sequence).
+ * A failed save never shows the browser's own error text: offline reads "Not saved — retrying" (saveFailure).
+ * The brief's own details (rooms, floors, work words) report their own save state (metaState), and saveAt is the time
+ * of the last save that reached the server this visit, so the room bar can read "Saved 9:41 pm".
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
 import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
 // The three-way merge lives in registerMerge.js (shared with the recovery of unsaved edits, and unit-tested there).
-import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore } from "../../../../lib/registerMerge.js";
+import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS } from "../../../../lib/registerMerge.js";
 import { saveRegisterDraft, loadRegisterDraft, clearRegisterDraft, rememberActor } from "../../../../lib/takeoffRecovery.js";
 
 const AUTOSAVE_MS = 1200;
@@ -38,6 +41,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const [info, setInfo] = useState({ mode: null, projectId: null, isPreconstruction: true, promotion: null, pendingPromotion: false, schemaReady: true });
   const [reg, setReg] = useState(null);
   const [save, setSave] = useState({ state: "idle", at: null, message: null });
+  const [saveAt, setSaveAt] = useState(null);   // the last save that reached the server (kept while later edits are pending)
   const [notices, setNotices] = useState([]);
   // Unsaved edits from an earlier visit on this device, offered back (never applied by themselves).
   const [recovery, setRecovery] = useState(null);
@@ -85,7 +89,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (!mounted.current) return null;
     if (!r.ok) {
       const disabled = r.code === "REGISTER_DISABLED"; // feature switch off for this lead — not an error
-      setStatus({ loading: false, error: disabled ? null : r.error, disabled });
+      // Offline, or a gateway page instead of the Hub's answer: plain words, never the browser's own error text.
+      const plain = r.network || !r.body?.error ? "Couldn't load the brief. Check the connection, then reload the page." : r.error;
+      setStatus({ loading: false, error: disabled ? null : plain, disabled });
       return null;
     }
     const next = adopt(r.data);
@@ -186,7 +192,8 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (!dirty.current.size && !deleted.current.size && !metaDirty) { setSave((s) => (s.state === "dirty" ? { ...s, state: "saved" } : s)); return true; }
     if (saving.current) { pending.current = true; return false; }
     saving.current = true;
-    setSave((s) => ({ ...s, state: "saving" }));
+    // A retry after an offline failure keeps saying "Not saved — retrying" until it gets through (no Saving… flicker).
+    setSave((s) => (s.state === "error" && s.message === SAVE_RETRY_WORDS ? s : { ...s, state: "saving" }));
 
     const sentSeq = new Map(dirty.current);
     const changes = [...sentSeq.keys()].map((id) => cur.items.find((i) => i.id === id)).filter(Boolean);
@@ -201,6 +208,8 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (!mounted.current) return false;
 
     if (r.ok) {
+      const at = new Date();
+      setSaveAt(at);
       const server = adopt(r.data);
       const local = regRef.current;
       const items = server.items.map((s) => {
@@ -230,7 +239,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
         outcome.current = null;
         if (pending.current) { pending.current = false; schedule(); }
       } else {
-        setSave({ state: "saved", at: new Date(), message: null });
+        setSave({ state: "saved", at, message: null });
         if (pending.current) { pending.current = false; schedule(); }
       }
       return true;
@@ -240,9 +249,10 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       await resolveConflicts(r.body?.conflicts || [], r.body?.code, r.error);
       return false;
     }
-    setSave({ state: "error", at: null, message: r.error || "Could not save — will retry." });
-    if (!r.network) return false;
-    timer.current = setTimeout(() => { flushRef.current(); }, 5000);   // offline / network: retry
+    const failed = saveFailure(r);
+    setSave({ state: "error", at: null, message: failed.message });
+    if (!failed.retry) return false;
+    timer.current = setTimeout(() => { flushRef.current(); }, 5000);   // offline, or a gateway page: retry
     return false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, adopt, schedule, persistDraft]);
@@ -329,7 +339,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     } else if (pendingOutcome) {
       setSave({ state: pendingOutcome.state, at: null, message: pendingOutcome.message });
     } else {
-      setSave({ state: "saved", at: new Date(), message: null });
+      const at = new Date();
+      setSaveAt(at);
+      setSave({ state: "saved", at, message: null });
     }
   }
 
@@ -379,9 +391,11 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
 
   /** How one item's own save went. A refusal on another item says nothing about this one. */
   const saveStateOf = (id) => refused.current.get(id) || (dirty.current.has(id) ? (save.state === "error" ? "error" : "dirty") : "saved");
+  /** How the brief's own details (rooms, floors, work words, drawings) are saving: 'dirty' | 'saving' | 'error' | 'saved'. */
+  const metaState = metaSaveState({ seq: metaSeq.current, sent: metaSent.current, saved: metaSaved.current, saving: saving.current, state: save.state });
 
   return {
-    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices, saveStateOf,
+    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, saveAt, metaState, notices, saveStateOf,
     recovery, restoreDraft, discardDraft,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
     reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,

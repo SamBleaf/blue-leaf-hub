@@ -4,12 +4,12 @@
  * (RoomsList, RoomScreen, RoomBriefCard, ChoiceRow, HouseStrip) call these, and scripts/tests/register-rooms-ui.test.mjs
  * tests them on the real job.
  *
- *   Floors          normaliseFloor, floorKey, floorsOf, walkOrder, floorChoices
+ *   Floors          normaliseFloor, floorKey, floorsOf, walkOrder, floorChoices, savedFloors, withFloor, pruneFloors, floorsPatch
  *   Room list edits nextRoomName, addRoomMeta, duplicateRoomMeta, moveRoomToFloor, moveRoomStep, tickMoveMeta,
- *                   restoreLevels, renameRoomMeta, setRoomScope, removeRoomPlan, answerCount
+ *                   restoreLevels, renameRoomMeta, setRoomScope, removeRoomPlan, removalBlocked, canRemoveRoom, answerCount
  *   List rows       briefPreview, roomListRow, listCounts, workSummary, filterRooms, floorBlocks, actionsPillText, storeysNote
  *   List words      removeRoomText, addedText, duplicatedText, movedText, tickMoveLabel, tickCount
- *   Earlier answers earlierWords, workWordFor, keepWorkPlan, changeWorkPlan, readdable
+ *   Earlier answers earlierWords, workWordFor, keepWorkPlan, changeWorkPlan, readdable, readdIfGone
  *   Room screen     roomPromptSet, roomLayout (which prompt goes in which group, and what no row shows), houseLinesFor,
  *                   stripView, exceptionSeedFrom, roomActionPoints, roomPosition, existingWorksFor, existingWorkSeed,
  *                   actionSeed, roomSaveState, flushWithin
@@ -72,10 +72,37 @@ export function floorsOf(rooms, extra = []) {
 /** Every room in walk order across floors: the order the list shows and Next / Previous follow. */
 export const walkOrder = (rooms, extra = []) => floorsOf(rooms, extra).flatMap((f) => f.rooms);
 
-/** The floor chips offered for a room: the job's floors, then Ground and Upper if they aren't there yet. */
-export function floorChoices(rooms) {
-  const floors = floorsOf(rooms, ["Ground", "Upper"]);
+/**
+ * The floor chips offered for a room: the job's floors (with the ones added on the Rooms list and still empty, extra),
+ * then Ground and Upper if they aren't there yet.
+ */
+export function floorChoices(rooms, extra = []) {
+  const floors = floorsOf(rooms, [...(extra || []), "Ground", "Upper"]);
   return floors.map((f) => ({ level: f.level, label: f.label, key: f.key }));
+}
+
+/**
+ * Floors added with "+ Add a floor" that have no room yet live in meta.floors (level names), so they are kept and offered
+ * as a chip everywhere on the job (spec S2). A floor leaves the list as soon as a room is on it: from then on the rooms
+ * carry it, as for every other floor.
+ */
+export const savedFloors = (meta) => (Array.isArray(meta?.floors) ? meta.floors.filter((l) => clean(l)) : []);
+/** meta.floors with one more floor, unless the job already has it (on a room or in the list). */
+export function withFloor(floors, rooms, level) {
+  const list = Array.isArray(floors) ? floors.filter((l) => clean(l)) : [];
+  if (!clean(level)) return list;
+  const key = floorKey(level);
+  if (list.some((l) => floorKey(l) === key) || (rooms || []).some((r) => floorKey(r.level) === key)) return list;
+  return [...list, normaliseFloor(level)];
+}
+/** meta.floors without the floors that now have a room. */
+export const pruneFloors = (floors, rooms) => (Array.isArray(floors) ? floors : [])
+  .filter((l) => clean(l) && !(rooms || []).some((r) => floorKey(r.level) === floorKey(l)));
+/** The meta.floors part of a room-list write: {} when nothing would change, so a write that moves no floor stays as it was. */
+export function floorsPatch(floors, rooms) {
+  const before = Array.isArray(floors) ? floors : [];
+  const after = pruneFloors(before, rooms);
+  return after.length === before.length ? {} : { floors: after };
 }
 
 // ── Room list edits (one mutateMeta call each) ─────────────────────────────────────────────────────
@@ -194,12 +221,25 @@ export const patchRoom = (rooms, id, partial) => (rooms || []).map((r) => (r.id 
 
 /** How many records a room holds (the remove confirmation names them). */
 export const answerCount = (register, id) => (register?.items || []).filter((i) => i.roomId === id).length;
-/** Remove a room and its records: the replaceItems function (the existing ContextStep removal). */
-export const removeRoomPlan = (id) => (cur) => ({
-  ...cur,
-  meta: { ...cur.meta, rooms: reorder((cur.meta.rooms || []).filter((r) => r.id !== id)) },
-  items: cur.items.filter((i) => i.roomId !== id),
-});
+/**
+ * A record the server would refuse to delete: fixed by the signed contract, or issued to the client portal. Removing it
+ * (or the room that holds it) would be refused and the record restored, so the screens don't offer it.
+ */
+export const removalBlocked = (item) => contractFixed(item) || !!item?.sync?.clientVisible;
+/** Can this room be removed? Not while it holds a record on the client portal or in the contract ("Not in this job" instead). */
+export const canRemoveRoom = (register, room) => !!room && !(register?.items || []).some((i) => i.roomId === room.id && removalBlocked(i));
+/**
+ * Remove a room and its records: the replaceItems function (the existing ContextStep removal). A room that holds a
+ * record the server keeps is left as it is: removing it would leave that record pointing at no room.
+ */
+export const removeRoomPlan = (id) => (cur) => {
+  if ((cur.items || []).some((i) => i.roomId === id && removalBlocked(i))) return cur;
+  return {
+    ...cur,
+    meta: { ...cur.meta, rooms: reorder((cur.meta.rooms || []).filter((r) => r.id !== id)) },
+    items: cur.items.filter((i) => i.roomId !== id),
+  };
+};
 
 // ── The add panel ──────────────────────────────────────────────────────────────────────────────────
 
@@ -335,10 +375,14 @@ export function storeysNote(rooms, storeys) {
   return n > s ? `Rooms are on ${n} floors; the job says ${s} storey${s === 1 ? "" : "s"} — check in Sales.` : "";
 }
 
-/** The room bar's save state from each record's (the store's saveStateOf): the worst one wins. */
-export function roomSaveState(items, saveStateOf) {
+/**
+ * The room bar's save state: the worst of this room's records (the store's saveStateOf) and of the room-level save
+ * (metaState: Work, floor, Confirm all, rename are meta writes), so a Work tap reads "Saving…" there too (spec S3).
+ */
+export function roomSaveState(items, saveStateOf, metaState = "saved") {
   const states = (items || []).map((i) => (saveStateOf ? saveStateOf(i.id) : "saved"));
-  for (const s of ["rejected", "conflict", "error", "dirty"]) if (states.includes(s)) return s;
+  if (metaState) states.push(metaState);
+  for (const s of ["rejected", "conflict", "error", "dirty", "saving"]) if (states.includes(s)) return s;
   return "saved";
 }
 
@@ -388,6 +432,11 @@ export function changeWorkPlan(register, room, scope) {
 }
 /** A removed record as Undo puts it back: the same content under a fresh id, so the save never sends a delete and an insert for one id. */
 export const readdable = (item) => { const rest = { ...item }; delete rest.id; return { ...rest, sync: null }; };
+/**
+ * What Undo after a removal should add back, read from the register as it is when Undo is tapped: nothing when the
+ * record is still (or again) there, as after a delete the server refused and the store restored; else readdable(item).
+ */
+export const readdIfGone = (register, item) => ((register?.items || []).some((i) => i.id === item?.id) ? null : readdable(item));
 
 // ── Which prompt goes where on the room screen ─────────────────────────────────────────────────────
 
@@ -459,7 +508,10 @@ export function houseLinesFor(register, room, questions) {
       const chips = chipWords(def);
       const reason = reasonWords(def);
       const words = noted ? midSentence(noted) : clean(def.nextAction) ? lowerFirst(tidy(def.nextAction)) : `${chips ? `${lowerFirst(chips)} — ` : ""}${reason || "still to be chosen"}`;
-      out.push({ item: def, question: q, sourceId, tone: "amber", action: "Open", text: `${short}: ${words}`, shortText: `${short}: ${words}` });
+      // On a phone a staff note shortens to its last clause, what is still open ("Splashback: client to decide", spec S3p).
+      const clauses = noted ? words.split(/,\s*/).filter(Boolean) : [];
+      const shortWords = clauses.length > 1 ? clauses.at(-1) : words;
+      out.push({ item: def, question: q, sourceId, tone: "amber", action: "Open", text: `${short}: ${words}`, shortText: `${short}: ${shortWords}` });
     }
   }
   return out;
@@ -635,14 +687,18 @@ export function connectCandidates(rooms, room, chosen = [], n = 5) {
 /**
  * "Noted earlier: … · Use these". Words typed on a record that match a chip's label exactly (case aside) become that chip,
  * and those words come off the typed note; words that match nothing stay. Returns null when nothing matches.
+ * A choice that is never offered (engineered stone on the benchtop, HIDDEN_OPTION_IDS) is never chosen from a note either:
+ * its words stay in the note. qid defaults to the record's own question.
  */
-export function usableNotedWords(config, item) {
+export function usableNotedWords(config, item, qid = resolvePromptId(item?.promptKey)) {
   const typed = clean(item?.description);
   if (!typed || !config?.options) return null;
+  const hidden = HIDDEN_OPTION_IDS[qid] || null;
+  const offered = config.options.filter((x) => !hidden?.has(x.id));
   const parts = typed.split(/\s*[,;]\s*|\s+-\s+/).map(clean).filter(Boolean);
   const matched = [], left = [];
   for (const p of parts) {
-    const o = config.options.find((x) => clean(x.label).toLowerCase() === p.toLowerCase());
+    const o = offered.find((x) => clean(x.label).toLowerCase() === p.toLowerCase());
     if (o && !matched.some((m) => m.id === o.id)) matched.push(o); else if (!o) left.push(p);
   }
   if (!matched.length) return null;

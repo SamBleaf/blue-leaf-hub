@@ -14,8 +14,12 @@
  *
  * Every room-list write is one replaceItems call built from the current list (roomScreen.js), so taps never overwrite
  * each other. Records are never copied: Duplicate copies type, floor and Work only.
+ *
+ * A floor added with "+ Add a floor" is saved in meta.floors until a room is on it, so it is kept and offered as a
+ * chip on every room. onTickChange(bool) tells the frame when tick mode starts and ends (it hides the stage bar then).
+ * A room holding records on the client portal or in the contract can't be removed; its menu offers "Not in this job".
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ROOM_SCOPES, ROOM_WORK_WORDS } from "../../../../lib/register.js";
 import { clean, openPoints } from "../../../../lib/briefModel.js";
@@ -23,8 +27,9 @@ import { upperFloorHint } from "../../../../lib/registerQuality.js";
 import {
   floorBlocks, floorsOf, floorKey, normaliseFloor, listCounts, workSummary, roomListRow, addRoomMeta, duplicateRoomMeta, moveRoomStep, dropRoomBefore,
   moveRoomToFloor, tickMoveMeta, restoreLevels, setRoomScope, removeRoomPlan, removeRoomText, addedText, duplicatedText, movedText, tickMoveLabel,
-  tickCount, actionsPillText, storeysNote, addFloorOptions, workLabel, ADD_ROOM_CHIPS,
+  tickCount, actionsPillText, storeysNote, addFloorOptions, workLabel, ADD_ROOM_CHIPS, savedFloors, withFloor, floorsPatch, canRemoveRoom,
 } from "../../../../lib/roomScreen.js";
+import { useEscapeLayer } from "../../../../lib/overlayFlag.js";
 import { FloorChips } from "./RoomBriefCard.jsx";
 import { RoomDetails, WorkMenuItems, WorkPill } from "./RoomEdit.jsx";
 import { FlagIcon } from "./NeedsAction.jsx";
@@ -37,10 +42,11 @@ const primaryBtn = "focus-ring inline-flex min-h-[44px] items-center justify-cen
 const outlineBtn = "focus-ring inline-flex min-h-[44px] items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-bold text-primary hover:bg-primary/5";
 const textBtn = "focus-ring inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-bold text-ink hover:bg-page";
 const linkBtn = "focus-ring inline-flex min-h-[44px] items-center rounded-lg px-2 text-sm font-bold text-primary hover:underline";
-const addChip = "focus-ring inline-flex min-h-[44px] items-center rounded-full border px-3.5 text-[15px] sm:min-h-[40px] sm:text-sm";
+const addChip = "focus-ring inline-flex min-h-[44px] items-center rounded-full border px-3.5 text-[15px] sm:text-sm";
+const inputCls = "inp min-h-[44px] flex-1 px-3 text-[16px] sm:text-sm";   // 16 px on a phone, so iOS doesn't zoom
 const TAG = "inline-flex h-5 shrink-0 items-center rounded-full border border-warning px-2 text-xs font-bold text-amber-800";
 
-export default function RoomsList({ reg, context, mutateMeta, replaceItems, openRoom, readOnly, startTickMode }) {
+export default function RoomsList({ reg, context, mutateMeta, replaceItems, openRoom, readOnly, startTickMode, onTickChange }) {
   const narrow = useNarrow();
   const { leadId } = useParams();
   const jobKey = leadId || "job";
@@ -60,9 +66,18 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
   const [ticked, setTicked] = useState([]);
   const [discarding, setDiscarding] = useState(false);
   const [adding, setAdding] = useState(null);           // the floor key whose add panel is open
-  const [extraFloors, setExtraFloors] = useState([]);   // floors added here, still without rooms
+  const [firstFloor, setFirstFloor] = useState([]);     // the empty job's "Ground", until its first room is added
   const [floorPanel, setFloorPanel] = useState(false);  // "+ Add a floor"
   const [floorName, setFloorName] = useState("");
+  const stored = savedFloors(reg.meta);                 // floors added here that have no room yet (saved in meta.floors)
+  const extraFloors = [...stored, ...firstFloor.filter((l) => !stored.some((x) => floorKey(x) === floorKey(l)))];
+  const closeFloorPanel = useCallback(() => { setFloorPanel(false); setFloorName(""); }, []);
+  useEscapeLayer(floorPanel && !readOnly, closeFloorPanel);
+  // Tick mode up to the frame (it hides the lead's stage bar so two primary bars never stack), and off when this goes.
+  const tickCb = useRef(onTickChange);
+  tickCb.current = onTickChange;
+  useEffect(() => { tickCb.current?.(tick); }, [tick]);
+  useEffect(() => () => tickCb.current?.(false), []);
   const dragId = useRef(null);
   // Inside the Documents edit drawer the list scrolls in the drawer: no app header above it and no bottom nav below it.
   const rootRef = useRef(null);
@@ -70,9 +85,14 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
   useEffect(() => { try { setInDialog(!!rootRef.current?.closest('[role="dialog"]')); } catch { /* old browser */ } }, []);
 
   // One write path for the room list: a function of the CURRENT list (the store's), so quick taps never clobber each other.
-  const editRooms = (fn) => (replaceItems
-    ? replaceItems((cur) => ({ ...cur, meta: { ...cur.meta, rooms: fn(cur.meta.rooms || []) } }))
-    : mutateMeta({ rooms: fn(rooms) }));
+  // A saved floor that now has a room leaves meta.floors in the same write.
+  const editRooms = (fn) => {
+    if (replaceItems) {
+      return replaceItems((cur) => { const next = fn(cur.meta.rooms || []); return { ...cur, meta: { ...cur.meta, rooms: next, ...floorsPatch(cur.meta.floors, next) } }; });
+    }
+    const next = fn(rooms);
+    return mutateMeta({ rooms: next, ...floorsPatch(reg.meta.floors, next) });
+  };
   const removeRoom = (id) => (replaceItems ? replaceItems(removeRoomPlan(id)) : mutateMeta({ rooms: rooms.filter((r) => r.id !== id) }));
 
   const points = useMemo(() => openPoints(reg, context, { scope: "all" }), [reg, context]);
@@ -89,7 +109,7 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
     if (!work || readOnly) return;
     let added = null;
     editRooms((list) => { const r = addRoomMeta(list, { name, roomType, level: floor.level, scope: work }); added = r.room; return r.rooms; });
-    setExtraFloors((e) => e.filter((l) => floorKey(l) !== floor.key));
+    setFirstFloor((e) => e.filter((l) => floorKey(l) !== floor.key));
     if (added) { const id = added.id; show(addedText(added), () => removeRoom(id)); }
   }
   function duplicate(room) {
@@ -108,10 +128,12 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
   function addFloor(level) {
     const l = normaliseFloor(level);
     if (!clean(level)) return;
-    if (!allFloors.some((f) => f.key === floorKey(l))) setExtraFloors((e) => [...e, l]);
+    // Saved at once (meta.floors), so the floor is kept after leaving the list and is a chip on every room.
+    if (!allFloors.some((f) => f.key === floorKey(l))) mutateMeta({ floors: withFloor(reg.meta.floors, rooms, l) });
     setFloorPanel(false); setFloorName("");
     openAdd(floorKey(l));
   }
+  const removeFloor = (key) => mutateMeta({ floors: stored.filter((l) => floorKey(l) !== key) });
   const dropOn = (beforeId, level) => {
     const id = dragId.current;
     dragId.current = null;
@@ -130,8 +152,7 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
       <div className="flex min-h-[56px] items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-lg font-bold leading-6 text-ink">{tick ? "Tick the rooms that are upstairs" : "Rooms"}</h2>
-          {!tick && rooms.length > 0 && <p className="text-[13px] text-muted" data-testid="rooms-summary">{rooms.length} room{rooms.length === 1 ? "" : "s"} · {workSummary(rooms)}</p>}
-          {tick && <p className="text-[13px] text-muted">Which rooms are upstairs isn&apos;t on file, so nothing is ticked for you.</p>}
+          {!tick && rooms.length > 0 && <p className="text-[13px] text-muted" data-testid="rooms-summary">{workSummary(rooms)}</p>}
           {!tick && note && <p className="text-[13px] text-muted">{note}</p>}
         </div>
         {!tick && !readOnly && !empty && (narrow ? (
@@ -156,16 +177,16 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
       {!tick && rooms.length > 0 && (
         <Segmented full label="Show rooms" value={filter} onChange={setFilter} testId="rooms-filter"
           options={[
-            ["all", <span key="a">All <span className="font-normal">{counts.all}</span></span>],
-            ["brief", <span key="b">Brief needed <span className="font-normal">{counts.brief}</span></span>],
-            ["check", <span key="c">Check work <span className="font-normal">{counts.check}</span></span>],
+            ["all", <span key="a" className="whitespace-nowrap">All <span className="font-normal">{counts.all}</span></span>, `All rooms, ${counts.all}`],
+            ["brief", <span key="b" className="whitespace-nowrap"><span className="sm:hidden">Brief</span><span className="hidden sm:inline">Brief needed</span> <span className="font-normal">{counts.brief}</span></span>, `Brief needed, ${counts.brief}`],
+            ["check", <span key="c" className="whitespace-nowrap"><span className="sm:hidden">Check</span><span className="hidden sm:inline">Check work</span> <span className="font-normal">{counts.check}</span></span>, `Check work, ${counts.check}`],
           ]} />
       )}
 
       {empty ? (
         <div className="space-y-3 rounded-card border border-hairline bg-surface p-4" data-testid="rooms-empty">
           <p className="text-[15px] leading-6 text-ink sm:text-sm">Add the rooms off the drawings, in the order you&apos;d walk through. You can rename, move and reorder any time without losing anything.</p>
-          {!readOnly && <button type="button" onClick={() => { setExtraFloors(["Ground"]); openAdd("ground"); }} className={primaryBtn} data-testid="add-room"><PlusIcon />Add room</button>}
+          {!readOnly && <button type="button" onClick={() => { setFirstFloor(["Ground"]); openAdd("ground"); }} className={primaryBtn} data-testid="add-room"><PlusIcon />Add room</button>}
         </div>
       ) : (
         <>
@@ -180,7 +201,12 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
               <div className={`sticky z-10 flex h-10 items-center justify-between gap-2 bg-page ${inDialog ? "top-0" : "top-[65px] md:top-0"}`}
                 onDragOver={(e) => { if (dragId.current) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); dropOn(null, f.level); }}>
                 <h3 id={`floor-${f.key}`} className="text-[13px] font-bold uppercase tracking-[0.06em] text-muted">{f.label} · {f.rooms.length}</h3>
-                {multiFloor && !tick && !readOnly && adding !== f.key && <button type="button" onClick={() => openAdd(f.key)} className={linkBtn}>+ Add room here</button>}
+                <span className="flex items-center">
+                  {!f.total && !tick && !readOnly && stored.some((l) => floorKey(l) === f.key) && (
+                    <button type="button" onClick={() => removeFloor(f.key)} className={`${linkBtn} font-normal text-muted`} aria-label={`Remove ${f.label}`} data-testid={`remove-floor-${f.key}`}>Remove floor</button>
+                  )}
+                  {multiFloor && !tick && !readOnly && adding !== f.key && <button type="button" onClick={() => openAdd(f.key)} className={linkBtn}>+ Add room here</button>}
+                </span>
               </div>
               {adding === f.key && !tick && !readOnly && (
                 <AddPanel floor={f} work={work} setWork={setWork} narrow={narrow} onAdd={(name, type) => addRoom(f, name, type)} onDone={() => setAdding(null)} />
@@ -188,7 +214,7 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
               {f.rooms.length > 0 ? (
                 <ul className="rounded-card border border-hairline bg-surface">
                   {f.rooms.map((r, i) => (
-                    <RoomRow key={r.id} reg={reg} room={r} row={rows.get(r.id)} first={i === 0} narrow={narrow} readOnly={readOnly} tick={tick}
+                    <RoomRow key={r.id} reg={reg} room={r} row={rows.get(r.id)} first={i === 0} narrow={narrow} readOnly={readOnly} tick={tick} removable={canRemoveRoom(reg, r)}
                       ticked={ticked.includes(r.id)} onTick={() => setTicked((t) => (t.includes(r.id) ? t.filter((x) => x !== r.id) : [...t, r.id]))}
                       canUp={f.total > 1 && f.rooms[0]?.id !== r.id} canDown={f.total > 1 && f.rooms.at(-1)?.id !== r.id}
                       onOpen={() => openRoom?.(r.id)} editRooms={editRooms} mutateMeta={mutateMeta} onRemove={() => removeRoom(r.id)} onDuplicate={() => duplicate(r)}
@@ -213,11 +239,11 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
                     {floorOptions.map((l) => <button key={l} type="button" onClick={() => addFloor(l)} className={`${addChip} border-hairline bg-surface text-ink hover:bg-page`}>{l === UPPER ? "Upper floor" : l}</button>)}
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <input value={floorName} onChange={(e) => setFloorName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addFloor(floorName); if (e.key === "Escape") setFloorPanel(false); }}
-                      placeholder="Other… a short name, e.g. Loft" aria-label="Floor name" className="inp min-h-[44px] flex-1 text-base sm:text-sm" />
+                    <input value={floorName} onChange={(e) => setFloorName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addFloor(floorName); }}
+                      placeholder="Other… a short name, e.g. Loft" aria-label="Floor name" className={inputCls} />
                     <div className="flex gap-2">
                       <button type="button" disabled={!clean(floorName)} onClick={() => addFloor(floorName)} className={primaryBtn}>Add floor</button>
-                      <button type="button" onClick={() => { setFloorPanel(false); setFloorName(""); }} className={textBtn}>Cancel</button>
+                      <button type="button" onClick={closeFloorPanel} className={textBtn}>Cancel</button>
                     </div>
                   </div>
                 </div>
@@ -251,6 +277,8 @@ export default function RoomsList({ reg, context, mutateMeta, replaceItems, open
 function AddPanel({ floor, work, setWork, onAdd, onDone, narrow }) {
   const [other, setOther] = useState(false);
   const [name, setName] = useState("");
+  const closeOther = useCallback(() => { setOther(false); setName(""); }, []);
+  useEscapeLayer(other && !!work, closeOther);
   const addOther = () => { if (clean(name)) { onAdd(clean(name), "generic"); setName(""); setOther(false); } };
   const chip = (on) => `${addChip} ${on ? "border-hairline bg-surface text-ink hover:bg-page" : "cursor-not-allowed border-hairline bg-page text-muted"}`;
   const labelId = `add-as-${floor.key}`;
@@ -269,11 +297,11 @@ function AddPanel({ floor, work, setWork, onAdd, onDone, narrow }) {
       </div>
       {other && work && (
         <div className="flex flex-col gap-2 sm:flex-row">
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addOther(); if (e.key === "Escape") setOther(false); }}
-            placeholder="Room name, e.g. Rumpus" aria-label="Room name" enterKeyHint="done" className="inp min-h-[44px] flex-1 text-base sm:text-sm" />
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addOther(); }}
+            placeholder="Room name, e.g. Rumpus" aria-label="Room name" enterKeyHint="done" className={inputCls} />
           <div className="flex gap-2">
             <button type="button" disabled={!clean(name)} onClick={addOther} className={primaryBtn}>Add</button>
-            <button type="button" onClick={() => { setOther(false); setName(""); }} className={textBtn}>Cancel</button>
+            <button type="button" onClick={closeOther} className={textBtn}>Cancel</button>
           </div>
         </div>
       )}
@@ -282,7 +310,7 @@ function AddPanel({ floor, work, setWork, onAdd, onDone, narrow }) {
 }
 
 /** One room on the list: name, Work pill, action pill and ⋯; line 2 the brief preview or "Brief needed"; tags. */
-function RoomRow({ reg, room, row, first, narrow, readOnly, tick, ticked, onTick, canUp, canDown, onOpen, editRooms, mutateMeta, onRemove, onDuplicate, onDragStart, onDrop }) {
+function RoomRow({ reg, room, row, first, narrow, readOnly, tick, ticked, onTick, canUp, canDown, onOpen, editRooms, mutateMeta, onRemove, onDuplicate, onDragStart, onDrop, removable = true }) {
   const [menu, setMenu] = useState(null);   // null | "work" | "menu" | "rename" | "floor" | "details" | "remove"
   const workBtn = useRef(null);
   const moreBtn = useRef(null);
@@ -335,13 +363,18 @@ function RoomRow({ reg, room, row, first, narrow, readOnly, tick, ticked, onTick
             <MenuItem disabled={!canDown} onClick={() => { editRooms((list) => moveRoomStep(list, room.id, 1)); close(); }}>Move down</MenuItem>
             <MenuItem onClick={() => setMenu("details")}>Room type and drawing sheet…</MenuItem>
             <MenuDivider />
-            <MenuItem danger onClick={() => setMenu("remove")}>Remove room…</MenuItem>
+            {removable ? <MenuItem danger onClick={() => setMenu("remove")}>Remove room…</MenuItem> : (
+              <>
+                <MenuItem disabled testId={`remove-blocked-${room.id}`}>Can&apos;t remove: it holds items on the client portal or in the contract</MenuItem>
+                {!out && <MenuItem onClick={() => { editRooms((list) => setRoomScope(list, room.id, "not_in_scope")); close(); }}>Not in this job</MenuItem>}
+              </>
+            )}
           </div>
         )}
         {menu === "rename" && <RoomDetails room={room} editRooms={editRooms} fields={["name"]} autoFocus onDone={close} />}
         {menu === "details" && <RoomDetails room={room} editRooms={editRooms} fields={["type", "sheet"]} onDone={close} />}
         {menu === "floor" && <div className="p-2"><FloorChips reg={reg} room={room} mutateMeta={mutateMeta} onDone={close} /></div>}
-        {menu === "remove" && <Confirm text={removeRoomText(reg, room)} confirmLabel="Remove" onConfirm={() => { close(); onRemove(); }} onCancel={close} />}
+        {menu === "remove" && removable && <Confirm text={removeRoomText(reg, room)} confirmLabel="Remove" onConfirm={() => { close(); onRemove(); }} onCancel={close} />}
       </Popover>
     </span>
   );

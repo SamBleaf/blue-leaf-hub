@@ -14,12 +14,44 @@
 import { setFact } from "./factsService.mjs";
 import { DELIVERY_MODELS, PROJECT_TYPE_LABELS } from "../../src/lib/register.js";
 import { mergeConsultants, budgetConfirmedOn, confirmedNoteOf } from "../../src/lib/projectStory.js";
+import { namedArchitect } from "../../src/lib/briefModel.js";
 import { resolveEngagementPathway } from "../../src/lib/stageGates.js";
 
 const pickStr = (...vals) => { for (const v of vals) { const s = v == null ? "" : String(v).trim(); if (s) return s; } return ""; };
 const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 async function safe(fn, fallback) { try { const r = await fn(); return r ?? fallback; } catch { return fallback; } }
+
+const SITE_COLUMNS = ["site_council", "site_zone", "site_bushfire_prone", "site_slope_band", "site_complexity"];
+const looked = (row) => !!row && (!!row.site_enriched_at || SITE_COLUMNS.some((k) => row[k] != null));
+/**
+ * Where "Site and planning" reads from (both spines are enriched, mig 135): the job once its public-mapping lookup has run;
+ * until then the lead's (conversion re-runs the lookup for the job, which takes a moment), so the rows never go blank
+ * after the PTSA. Nothing is copied: the values are generated, and each spine keeps its own. null when neither has run.
+ */
+export function siteSource(job, lead) {
+  if (looked(job)) return job;
+  if (looked(lead)) return lead;
+  return null;
+}
+/** The site rows of the context, from siteSource (every value null when neither spine has been looked up). */
+export function siteFacts(job, lead) {
+  const src = siteSource(job, lead) || {};
+  return {
+    council: src.site_council || null, zone: src.site_zone || null, bushfire: src.site_bushfire_prone ?? null,
+    bushfireDetail: src.site_bushfire_detail || null,
+    slopeBand: src.site_slope_band || null, complexity: src.site_complexity || null,
+    enrichedAt: src.site_enriched_at || null,
+  };
+}
+
+/** "Re-check" runs public mapping again only when the last lookup is at least this old (per lead; the service is rate-limited). */
+export const RECHECK_MIN_MS = 10 * 60 * 1000;
+/** Is a fresh lookup due? A row never looked up is always due. */
+export function recheckDue(enrichedAt, now = Date.now()) {
+  const t = enrichedAt ? Date.parse(enrichedAt) : NaN;
+  return !Number.isFinite(t) || now - t >= RECHECK_MIN_MS;
+}
 
 export async function loadRegisterContext(sb, leadId) {
   const { data: lead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
@@ -77,7 +109,6 @@ export async function loadRegisterContext(sb, leadId) {
     return error ? null : (Number.isFinite(Number(data?.storeys)) && Number(data.storeys) > 0 ? Number(data.storeys) : null);
   }, null) : null;
 
-  const src = job || lead;                      // site intelligence is enriched on both spines (mig 135)
   const deliveryModel = job?.delivery_model || lead.delivery_model || null;
   return {
     owner: job ? "job" : "lead",
@@ -115,17 +146,14 @@ export async function loadRegisterContext(sb, leadId) {
       wonSubstatus: lead.won_substatus || null,
     },
     consultants,
+    // The architect typed in Sales before the design team held contacts (the Architect-tender form, older leads): shown
+    // as "Noted in Sales" so nothing is hidden, and offered as the search. The brief still prints only a contact (decision 6).
+    legacyArchitectName: namedArchitect({ consultants }) ? null : pickStr(job?.architect_name, lead.architect_name) || null,
     meetings: meetings.map((m) => ({ type: m.meeting_type, at: m.scheduled_at, status: m.status, title: m.title || null })),
     drawings: drawings.map((d) => ({ id: d.id, filename: d.filename, type: d.document_type, at: d.created_at, revision: d.revision_label || null,
       discipline: d.discipline || null, issuer: d.issuer || null, docNumber: d.doc_number || null, receivedAt: d.received_at || null, reviewStatus: d.review_status || null })),
     storeys,
-    site: {
-      council: src.site_council || null, zone: src.site_zone || null, bushfire: src.site_bushfire_prone ?? null,
-      bushfireDetail: src.site_bushfire_detail || null,
-      slopeBand: src.site_slope_band || null, complexity: src.site_complexity || null,
-      enrichedAt: src.site_enriched_at || null,
-      whsProfileId: whsProfile?.id || null,
-    },
+    site: { ...siteFacts(job, lead), whsProfileId: whsProfile?.id || null },
   };
 }
 
@@ -139,7 +167,8 @@ export async function setDeliveryModel(sb, leadId, value, { actorId } = {}) {
   if (!lead) throw Object.assign(new Error("Lead not found"), { status: 404 });
   if (lead.job_id) {
     const r = await setFact(lead.job_id, "delivery_model", value, { source: "manual", reason: "master_register", actorId });
-    if (!r?.ok) throw Object.assign(new Error(r?.error || "Could not save the delivery model."), { status: 400 });
+    // The facts service's reason can carry database text: it is logged here, never sent to the browser.
+    if (!r?.ok) { console.warn("[register] delivery_model:", r?.error); throw Object.assign(new Error("Could not save the delivery model. Nothing changed."), { status: 400 }); }
     return { owner: "job" };
   }
   const { error } = await sb.from("leads").update({ delivery_model: value, updated_at: new Date().toISOString() }).eq("id", leadId);
@@ -171,7 +200,7 @@ export async function setProjectFacts(sb, leadId, facts = {}, { actorId } = {}) 
   if (lead.job_id) {
     for (const [key, value] of writes) {
       const r = await setFact(lead.job_id, key, value, { source: "manual", reason: "master_register", actorId });
-      if (!r?.ok) throw Object.assign(new Error(r?.error || "Could not save the project fact."), { status: 400 });
+      if (!r?.ok) { console.warn(`[register] ${key}:`, r?.error); throw Object.assign(new Error("Could not save the project fact. Nothing changed."), { status: 400 }); }
     }
     return { owner: "job" };
   }

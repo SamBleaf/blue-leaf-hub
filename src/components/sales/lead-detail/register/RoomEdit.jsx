@@ -12,7 +12,7 @@ import { patchRoom, renameRoomMeta, workLabel } from "../../../../lib/roomScreen
 import { DraftInput, MenuDivider, MenuItem, NameInput } from "./RoomUi.jsx";
 
 const label13 = "text-[13px] font-bold text-ink";
-const inputCls = "inp min-h-[44px] w-full text-base sm:text-sm";
+const inputCls = "inp min-h-[44px] w-full px-3 text-[16px] sm:text-sm";   // 16 px on a phone, so iOS doesn't zoom
 
 /** Name, room type and drawing sheet. fields limits which show. Each saves as it changes. */
 export function RoomDetails({ room, editRooms, readOnly, fields = ["name", "type", "sheet"], autoFocus = false, onDone }) {

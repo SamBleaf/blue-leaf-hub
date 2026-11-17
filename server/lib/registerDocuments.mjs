@@ -35,10 +35,10 @@ import {
   roomLabel, refCode, outstandingReasons, isClientSelection, resolvePromptId, questionById, docGroupFor, categoryLabel, clientSafeAnswer,
   dispositionLabel, responsibilityLabel, supplyLabel, PROJECT_TYPE_LABELS, DELIVERY_MODELS, INCLUDED_DISPOSITIONS,
   QUESTION_LIBRARY_VERSION, answerSummary, natureOf, answerConfigFor, linkedParentLabel, baselineAssumptions, performanceSuggestions, technicalLabel, pricingLabel,
-  roomDefaultsFor,
+  roomDefaultsFor, stableStringify,
 } from "../../src/lib/register.js";
-import { architectBriefModel, architectBriefLines, budgetLine, BUDGET_BAND_RX, whoOf } from "../../src/lib/briefModel.js";
-import { contentChecks, roomBriefBlocker } from "../../src/lib/registerQuality.js";
+import { architectBriefModel, architectBriefLines, budgetLine, BUDGET_BAND_RX, whoOf, dueLabel } from "../../src/lib/briefModel.js";
+import { contentChecks, releaseBlockers, restrictedGuidance } from "../../src/lib/registerQuality.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = join(__dirname, "../../public/templates");
@@ -77,6 +77,9 @@ export class DocumentError extends Error {
 
 /** What a record says, in words people read: what was typed, else what was chosen on the card. Client-safe either way. */
 const said = (item) => clean(item.description) || clean(answerSummary(item));
+/** A by-when in a document's words (spec S4 actionDue): "By the next drawing issue", "By our next meeting", "By 28 Nov". */
+const byWords = (due, reader = "") => (due === "next_issue" ? "By the next drawing issue" : due === "next_meeting" ? (reader === "client" ? "By our next meeting" : "By the next meeting")
+  : dueLabel(due) ? `By ${dueLabel(due)}` : "");
 /** A recorded fact, risk or check is not work, whatever older status it carries (Tab 27 MR-UX-02.8). */
 const NOT_WORK = new Set(["fact", "risk", "technical", "requirement", "action"]);
 const isWork = (item) => item.itemKind === "scope" && !NOT_WORK.has(natureOf(item));
@@ -123,6 +126,7 @@ function baseFixture({ lead, context, register, revision, status, issuedDate, is
       supersedes: status === "Issued" && supersedes?.label ? { label: supersedes.label, issuedDate: supersedes.issuedDate || undefined } : undefined },
     project: {
       clientName: context.identity.clientName,
+      suburb: clean(context.identity.suburb),
       siteShort: [street, context.identity.suburb].filter(Boolean).filter((v, i, a) => i === 0 || !new RegExp(`,?\\s${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i").test(a[0])).join(", "),
       projectLabel: [typeLabel, DELIVERY_MODELS[context.deliveryModel]].filter(Boolean).join("  ·  "),
       stageLabel: STAGE_LABEL[lead.stage] || "",
@@ -500,12 +504,14 @@ function clientBriefFixture(input) {
   const block = (label, note, list) => ({ label, note, items: list });
   const physical = (i) => !NOT_WORK.has(natureOf(i));
 
-  // 7 · Decisions: a real action (an action record, or an open next action), never a recorded preference.
-  const decisions = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
+  // 7 · Decisions: a real action (an action record, or an open next action), never a recorded preference. Every one
+  // set for the client prints (the ⚑ says it will, spec S4); other decisions fill the list up to seven.
+  const open = items.filter((i) => outstandingReasons(i).some((r) => r === "decision" || r === "action") && i.itemKind !== "requirement")
     .filter((i) => !["architect", "consultant", "trade"].includes(i.responsibility))
     .map((i) => ({ i, action: clean(i.nextAction) && !i.resolved ? clean(i.nextAction) : natureOf(i) === "action" ? said(i) : "" }))
-    .filter(({ i, action }) => action && !(isClientSelection(i) && DESIGN_DIRECTION.has(i.certainty) && !clean(i.nextAction)))
-    .sort((a, b) => (a.i.responsibility === "client" ? -1 : 0) - (b.i.responsibility === "client" ? -1 : 0)).slice(0, 7);
+    .filter(({ i, action }) => action && !(isClientSelection(i) && DESIGN_DIRECTION.has(i.certainty) && !clean(i.nextAction)));
+  const clients = open.filter(({ i }) => i.responsibility === "client");
+  const decisions = [...clients, ...open.filter(({ i }) => i.responsibility !== "client").slice(0, Math.max(0, 7 - clients.length))];
   const inDecisions = new Set(decisions.map((d) => d.i.id));
 
   const boundaries = [
@@ -562,7 +568,7 @@ function clientBriefFixture(input) {
     boundaryTitle,
     preferences,
     noted: facts.length ? [{ label: "What we have noted about the site and household", items: facts }] : [],
-    decisions: decisions.map(({ i, action }) => ({ ref: refCode(i), action: sentence(action), owner: i.responsibility ? responsibilityLabel(i.responsibility) : "" })),
+    decisions: decisions.map(({ i, action }) => ({ ref: refCode(i), action: sentence(action), owner: i.responsibility ? responsibilityLabel(i.responsibility) : "", by: byWords(i.actionDue, "client") })),
     nextSteps: cpbNextSteps(lead, context, technicalChecks),
   };
   return fx;
@@ -589,6 +595,8 @@ function architectBriefFixture(input) {
   const fx = baseFixture(input);
   const model = architectBriefModel(register, context, { recipientName: input.recipientName });
   fx.project.projectLabel = model.projectLabel;
+  // The brief is from the business (spec S6); who issued it stays on the issue record (issued_by_name).
+  fx.project.preparedBy = "Blue Leaf Building";
   fx.architectBrief = {
     model: "adb-2.0",
     subtitle: model.subtitle, preparedFor: model.preparedFor, projectLabel: model.projectLabel,
@@ -823,11 +831,11 @@ function technicalScheduleFixture(input, opts = {}) {
   // 03 · Open actions and checks: every open next action on a schedule record, and the open actions recorded against
   // the schedule's trades (in a pack, that party's). Linked by reference; nothing repeats a product. Source problems
   // are the preview's pre-issue checks, never instructions printed for outside readers (spec critique).
-  const actions = records.filter((r) => r.next).map((r) => ({ ref: r.ref, text: r.next, who: adbWho(context, byIdOf(register, r.id)), resp: r.responsibility }));
+  const actions = records.filter((r) => r.next).map((r) => { const i = byIdOf(register, r.id); return { ref: r.ref, text: r.next, who: adbWho(context, i), by: byWords(i?.actionDue), resp: r.responsibility }; });
   const recordIds = new Set(records.map((r) => r.id));
   // Every selection decision the presentation asks the client about is here too (QA K-04): the same rule.
   for (const i of orderItems(register, register.items.filter((x) => !recordIds.has(x.id) && x.itemKind === "action" && !x.resolved && clean(x.nextAction)
-    && selectionAction(x, records, opts)))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i), resp: i.responsibility });
+    && selectionAction(x, records, opts)))) actions.push({ ref: refCode(i), text: clean(i.nextAction), who: adbWho(context, i), by: byWords(i.actionDue), resp: i.responsibility });
   // In a coordination pack, the party's own requests (owner Trade / supplier) come first, addressed to them; everything
   // else waits on the client or Blue Leaf and is listed for information only.
   const requests = opts.coord ? actions.filter((a) => a.resp === "trade").map((a) => ({ ...a, who: coordLabel })) : actions;
@@ -1015,25 +1023,37 @@ function withoutBudgetBand(docType, fx) {
   return { ...fx, architectBrief: { ...ab, budgetBand: undefined, project: (ab.project || []).map((r) => (r.key === "budget" && r.text === band ? { ...r, text: "" } : r)),
     lines: (ab.lines || []).map((l) => (l.source?.key === "budget" && l.text === band ? { ...l, text: "" } : l)) } };
 }
+/**
+ * What a dollar figure in print comes from, so its red entry has a Fix: the first printed line of the architect's brief
+ * that holds one (its record, room or fact), else the first record whose printed words hold one. [] when it can't tell.
+ */
+function moneyTargets(docType, fx, register) {
+  const band = fx?.architectBrief?.budgetBand;
+  const line = docType === "architect_brief" ? (fx.architectBrief?.lines || []).find((l) => MONEY_RX.test(`${l.label} ${l.text}`) && !(band && l.text === band)) : null;
+  if (line?.ids?.length) return [{ kind: "record", id: line.ids[0] }];
+  if (line?.source?.kind === "fact" && line.source.key) return [{ kind: "fact", key: line.source.key }];
+  if (line?.source?.kind === "room") { const id = String(line.source.key || "").split(",").find((x) => (register.meta.rooms || []).some((r) => r.id === x)); if (id) return [{ kind: "room", id }]; }
+  if (line?.source?.kind === "meta") return [{ kind: "meta", key: line.source.key }];
+  const item = (register.items || []).find((i) => MONEY_RX.test([i.description, i.product, i.model, i.colour, i.supplier, i.source, i.nextAction, i.clientLabel, i.clientDescription, answerSummary(i)].join(" ")));
+  return item ? [{ kind: "record", id: item.id }] : [];
+}
 export function registerDocChecks(docType, fx, { register, recipientName, mode }) {
   const errors = [], warnings = [], errorTargets = [];
   // Each red entry can carry what fixes it (REGISTER_SCREENS_SPEC.md S5: a Fix on every entry).
   const block = (list, msg, targets) => { list.push(msg); if (list === errors && targets?.length) errorTargets.push({ text: msg, targets }); };
-  if (!clean(fx.project.drawingBasis)) block(mode === "issue" ? errors : warnings, "Record the current drawing set / revision (Project step) before issuing.", [{ kind: "meta", key: "planRev" }]);
-  if (mode === "issue" && !clean(recipientName)) block(errors, docType === "architect_brief" ? "Say who it's going to: name the architect, or type a name under “Issue to”." : "Enter who the document is being issued to.", [{ kind: docType === "architect_brief" ? "architect" : "recipient" }]);
-  const falseApprovals = register.items.filter((i) => i.certainty === "client_approved" && !approvalIsEvidenced(i));
-  if (falseApprovals.length) block(mode === "issue" ? errors : warnings, `${falseApprovals.length} item(s) are marked client-approved without evidence — record the approval or step them back.`, falseApprovals.map((i) => ({ kind: "record", id: i.id })));
-  const unverified = register.items.filter((i) => i.technicalStatus === "verified" && !i.technicalEvidence?.ref);
-  if (unverified.length) block(mode === "issue" ? errors : warnings, `${unverified.length} item(s) are marked verified without a technical reference.`, unverified.map((i) => ({ kind: "record", id: i.id })));
-  // The agreed C2 rule: the architect's brief can't issue while a New, Renovated or Altered room has no room brief.
-  if (docType === "architect_brief") { const b = roomBriefBlocker(register); if (b) block(mode === "issue" ? errors : warnings, b.text, b.targets); }
+  const clientFacing = REGISTER_DOC_TYPES[docType]?.audience !== "internal";
+  // The release blockers the register can tell on its own: the same rules the Documents step counts and marks before a
+  // preview (src/lib/registerQuality.js). Outside an issue they warn; who it's going to matters only at issue.
+  for (const b of releaseBlockers(docType, register, { recipientName, drawingBasis: fx.project.drawingBasis, clientFacing })) {
+    if (b.key === "recipient" && mode !== "issue") continue;
+    block(mode === "issue" ? errors : warnings, b.text, b.targets);
+  }
   const strings = JSON.stringify(withoutBudgetBand(docType, fx));
-  if (MONEY_RX.test(strings)) errors.push("The document would contain a dollar figure — register documents never show prices or allowances.");
+  if (MONEY_RX.test(strings)) block(errors, "The document would contain a dollar figure — register documents never show prices or allowances.", moneyTargets(docType, fx, register));
   // Prohibited products (CPB-02; src/lib/restrictedProducts.js). A selection that will be supplied and names one stops a
   // client-facing document, whatever the wording around it; anything else that names one (a "no engineered stone"
   // requirement, the client's note, existing or removed stone, a brand, the estimator's notes) warns. The room is
   // named, so two records with the same name can be told apart.
-  const clientFacing = REGISTER_DOC_TYPES[docType]?.audience !== "internal";
   const found = restrictedFindings(register.items);
   // Five review rounds showed that free text can't be read for whether stone is new or already installed, so a client
   // document that would PRINT engineered stone (or its shorthand) can't be issued, whatever the wording; staff write the
@@ -1050,8 +1070,8 @@ export function registerDocChecks(docType, fx, { register, recipientName, mode }
     const room = roomLabel(register, item);
     const what = `"${clean(item.description || item.product) || itemShort(item)}"${room ? ` (${room})` : ""}`;
     const words = clean(said(item));
-    if (blocking) { const msg = `${what} names ${product.label.toLowerCase()} in a selection that will be supplied. ${product.rule} A selection names only what will be supplied, so reword it even if it says what was replaced or avoided (for example "Porcelain benchtop, 20 mm"); agree a compliant alternative with the client if needed. Existing or removed stone goes on a record marked Retain or Remove. The original wording stays in the register's history.`;
-      stop(msg); if (mode === "issue" && clientFacing) errorTargets.push({ text: msg, targets: [{ kind: "record", id: item.id }] }); reported.push(clean(item.description || item.product)); continue; }
+    // A supplied selection naming it is a release blocker above (releaseBlockers); an internal document only warns.
+    if (blocking) { if (!clientFacing) warnings.push(restrictedGuidance(register, { item, product })); reported.push(clean(item.description || item.product)); continue; }
     // Any of the record's own fields that names it and that this document prints (its description, card answer,
     // product, supplier …; review STONE4F-02).
     const shownField = restrictedFieldsOf(item).find((h) => printedHit(clean(h.text))) || (product.level === "error" && ["description", "option"].includes(field) && printedHit(words) ? { text: words } : null);
@@ -1249,7 +1269,8 @@ const digest = (v) => createHash("sha256").update(JSON.stringify(v ?? null)).dig
 export function registerItemVersions(register, context = null) {
   const v = Object.fromEntries((register?.items || []).map((i) => [i.id, i.sync?.version ?? i.updatedAt ?? null]));
   const m = register?.meta || {};
-  v.__rooms = digest([(m.rooms || []).map((r) => [r.id, r.name, r.level, r.scope, r.sheet, r.order]), m.planRev || "", m.occupancy || ""]);
+  // Room type and confirmed house defaults change the printed row too (a must-have naming only its room; a house line).
+  v.__rooms = digest([(m.rooms || []).map((r) => [r.id, r.name, r.level, r.scope, r.sheet, r.order, r.roomType || "", stableStringify(r.defaultConfirmations || {})]), m.planRev || "", m.occupancy || ""]);
   if (context) {
     const g = context.goals || {}, b = context.budget || {};
     v.__facts = digest([g.vision, g.keyRequirements, g.concern, b.min, b.max, b.confirmed, b.financeStatus, b.desiredStart, context.projectType, context.deliveryModel,

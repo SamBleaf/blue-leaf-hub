@@ -11,18 +11,21 @@ import { Chip, Section, Select } from "./ui.jsx";
 
 function Rows({ rows, empty, extra }) {
   if (!rows?.length) return <p className="text-[11px] text-muted">{empty}</p>;
+  // The table scrolls inside its own box on a phone, so the page never scrolls sideways.
   return (
-    <table className="w-full text-[11px]">
-      <tbody>{rows.map((r) => (
-        <tr key={r.id} className="border-t border-hairline/60 align-top">
-          <td className="w-20 py-0.5 pr-2 font-mono text-[10px] text-muted">{r.ref}</td>
-          <td className="w-28 py-0.5 pr-2 text-ink">{r.area}</td>
-          <td className="py-0.5 pr-2">{r.description || answerSummary(r) || r.category}{r.linkedTo ? <span className="text-muted"> ({r.linkedTo})</span> : null}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
-          <td className="py-0.5 pr-2 text-muted">{r.disposition}</td>
-          {extra && <td className="py-0.5">{extra(r)}</td>}
-        </tr>
-      ))}</tbody>
-    </table>
+    <div className="max-w-full overflow-x-auto">
+      <table className="w-full text-[11px]">
+        <tbody>{rows.map((r) => (
+          <tr key={r.id} className="border-t border-hairline/60 align-top">
+            <td className="w-20 py-0.5 pr-2 font-mono text-[10px] text-muted">{r.ref}</td>
+            <td className="w-28 py-0.5 pr-2 text-ink">{r.area}</td>
+            <td className="py-0.5 pr-2">{r.description || answerSummary(r) || r.category}{r.linkedTo ? <span className="text-muted"> ({r.linkedTo})</span> : null}{r.product ? <span className="text-muted"> · {r.product}</span> : null}</td>
+            <td className="py-0.5 pr-2 text-muted">{r.disposition}</td>
+            {extra && <td className="py-0.5">{extra(r)}</td>}
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -44,8 +47,9 @@ export default function TenderPanel({ lead, reg, updateItem, flush }) {
     if (!item) return null;
     return refOptions.length
       ? <Select value={item.pricingRef} onChange={(v) => updateItem(item.id, { pricingRef: v, pricingStatus: v ? (item.pricingStatus === "not_reviewed" ? "allowance_or_estimate" : item.pricingStatus) : item.pricingStatus })}
-          options={refOptions} placeholder="Link estimate line…" className="w-56" />
-      : <input value={item.pricingRef} onChange={(e) => updateItem(item.id, { pricingRef: e.target.value })} placeholder="estimate / RFQ ref" className="inp w-40 text-[11px]" />;
+          options={refOptions} placeholder="Link estimate line…" className="w-full min-w-[10rem] sm:w-56" />
+      : <input value={item.pricingRef} onChange={(e) => updateItem(item.id, { pricingRef: e.target.value })} placeholder="estimate / RFQ ref" aria-label="Estimate or RFQ reference"
+          className="inp w-full min-w-[8rem] text-[16px] sm:w-40 sm:text-[11px]" />;
   };
 
   return (

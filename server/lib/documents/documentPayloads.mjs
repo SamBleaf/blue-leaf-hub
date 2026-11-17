@@ -173,7 +173,8 @@ export function buildClientBriefPayload(fx) {
 
     HAS_S5: present.s5, S5_NUM: nums.s5 || "",
     DECISIONS_INTRO: decisions.length === 1 ? "This needs to be settled before the project can move on. We'll work through it with you." : "These need to be settled before the project can move on. We'll work through them with you.",
-    ...boundedRows("DECISIONS", decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: d.owner || "To be agreed" }))),
+    // Who, then by when on its own line once one is set (spec S4: the ⚑ sheet's by-when prints with the decision).
+    ...boundedRows("DECISIONS", decisions.map((d) => ({ REF: d.ref || "", ACTION: d.action, OWNER: `${d.owner || "To be agreed"}${d.by ? `\n${d.by}` : ""}` }))),
 
     S6_NUM: nums.s6,
     NEXT_PARAS: (b.nextSteps?.paras || []).map((t) => ({ PARA: t })),
@@ -212,7 +213,8 @@ export function buildArchitectBriefPayload(fx) {
   const drawing = String(p.drawingBasis || "").trim();
   return {
     HDR_DOC_TYPE: "Architect Design Brief",
-    HDR_PROJECT: p.siteShort || p.siteAddress || "",
+    // The header band names the suburb only (spec S6): the full site is in the meta rows.
+    HDR_PROJECT: p.suburb || p.siteShort || p.siteAddress || "",
     FTR_IDENTITY: `${id.number}   ·   ${id.statusText}`,
     DOC_KICKER: issued ? "Design coordination" : "Draft  /  Design coordination",
     DOC_TITLE: "Design brief",
@@ -330,11 +332,11 @@ export function buildSelectionsSchedulePayload(fx) {
     // Not "everything still open": a To-verify row's check is marked where it prints (QA K-06).
     ACTIONS_INTRO: t.party ? "Please reply against these references. A row in section 01 changes only once Blue Leaf has checked your reply and updated the register."
       : "The open actions on these selections and the decisions they wait on, by reference. A row in section 01 changes only once its action is closed and the register updated; a row marked To verify still needs its technical check.",
-    ...boundedRows("ACTIONS", actions.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
+    ...boundedRows("ACTIONS", actions.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: `${x.who || "To be agreed"}${x.by ? `\n${x.by}` : ""}` }))),
 
     HAS_S3B: present.s3b, S3B_NUM: nums.s3b || "",
     PENDING_INTRO: "Decisions and follow-ups with the client and Blue Leaf that affect these selections, for information. Nothing here is asked of you.",
-    ...boundedRows("PENDING", pending.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: x.who || "To be agreed" }))),
+    ...boundedRows("PENDING", pending.map((x) => ({ REF: x.ref || "", TEXT: sentenceOf(x.text), WHO: `${x.who || "To be agreed"}${x.by ? `\n${x.by}` : ""}` }))),
 
     HAS_S4: present.s4, S4_NUM: nums.s4 || "",
     SOURCES_INTRO: "The received documents this schedule cites, by key. The originals are kept as received; Blue Leaf reconciles each against the register by hand.",

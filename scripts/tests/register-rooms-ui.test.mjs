@@ -5,7 +5,7 @@
  *
  *   node scripts/tests/register-rooms-ui.test.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -21,7 +21,9 @@ import {
   usableNotedWords, adelaideDay, timeOfDay, saveWords, onFloor, addFloorOptions, notAllowedOption, ACTION_PROMPT,
   floorBlocks, roomPosition, actionsPillText, removeRoomText, addedText, duplicatedText, movedText, tickMoveLabel, tickCount, storeysNote, roomSaveState,
   flushWithin, isExistingWorksRow, existingWorksFor, existingWorkSeed, actionSeed,
+  savedFloors, withFloor, pruneFloors, floorsPatch, removalBlocked, canRemoveRoom, readdIfGone,
 } from "../../src/lib/roomScreen.js";
+import { dialogFocusTarget, focusReturnTarget, segmentColumns } from "../../src/components/sales/lead-detail/register/useRoomUi.js";
 import { realJob } from "../documents/fixtures/real-extension-job.mjs";
 
 let pass = 0, fail = 0;
@@ -45,6 +47,17 @@ ok("floors sort in building order and merge spellings", flat(floorsOf(mixed).map
 ok("walk order runs floor by floor", walkOrder(mixed).map((r) => r.id).join("") === "cbad");
 ok("floor chips always offer Ground floor and Upper floor", flat(floorChoices(rooms).map((f) => f.label)) === flat(["Ground floor", "Upper floor"]));
 ok("'+ Add a floor' offers only floors the job hasn't got", flat(addFloorOptions(rooms)) === flat(["Upper", "Lower ground"]) && flat(addFloorOptions(mixed)) === flat([]));
+// P7: a floor added on the list is kept (meta.floors) until a room is on it, and is a chip on every room.
+ok("emptyMeta keeps meta.floors (trimmed level names; junk dropped) and an old meta reads as none",
+  flat(emptyMeta({ floors: [" Upper ", "", 3, null, "Loft"] }).floors) === flat(["Upper", "Loft"]) && flat(emptyMeta({}).floors) === flat([]) && flat(register.meta.floors) === flat([]));
+ok("savedFloors reads meta.floors, and nothing for an old meta", flat(savedFloors({ floors: ["Upper"] })) === flat(["Upper"]) && flat(savedFloors({})) === flat([]) && flat(savedFloors(null)) === flat([]));
+ok("withFloor adds a floor once, in its stored spelling, never one a room already has",
+  flat(withFloor([], rooms, "upper floor")) === flat(["Upper"]) && flat(withFloor(["Upper"], rooms, "UPPER")) === flat(["Upper"]) && flat(withFloor([], rooms, "ground")) === flat([]) && flat(withFloor(["Upper"], rooms, "Loft")) === flat(["Upper", "Loft"]));
+ok("a saved floor is a chip on every room", flat(floorChoices(rooms, ["Loft"]).map((f) => f.label)) === flat(["Ground floor", "Upper floor", "Loft"]));
+ok("a saved floor shows as its own (empty) block on the list", flat(floorBlocks({ ...register, meta: { ...register.meta, floors: ["Loft"] } }, "all", ["Loft"]).map((f) => `${f.label}:${f.rooms.length}`)) === flat(["Ground floor:16", "Loft:0"]));
+const onUpper = moveRoomToFloor(rooms, "bd3", "Upper");
+ok("once a room is on it, the floor leaves meta.floors in the same write (and a write that moves no floor changes nothing)",
+  flat(pruneFloors(["Upper", "Loft"], onUpper)) === flat(["Loft"]) && flat(floorsPatch(["Upper"], onUpper)) === flat({ floors: [] }) && flat(floorsPatch(["Loft"], onUpper)) === flat({}) && flat(floorsPatch(undefined, onUpper)) === flat({}));
 
 section("Adding rooms (the add panel)");
 ok("'Bedroom' → 'Bedroom 5' on the real job; 'WC' → 'WC 3'; a new name stays bare", nextRoomName(rooms, "Bedroom") === "Bedroom 5" && nextRoomName(rooms, "WC") === "WC 3" && nextRoomName(rooms, "Study") === "Study" && nextRoomName(rooms, "Kitchen") === "Kitchen 2");
@@ -79,6 +92,15 @@ ok("Remove names the answer count: Laundry has 6", answerCount(register, "ld") =
 const afterRemove = removeRoomPlan("ld")(register);
 ok("Remove takes the room and its records (the existing removal) and renumbers", !afterRemove.meta.rooms.some((r) => r.id === "ld") && !afterRemove.items.some((i) => i.roomId === "ld")
   && afterRemove.items.length === register.items.length - 6 && afterRemove.meta.rooms.every((r, i) => r.order === i));
+// N22: a room holding a record on the client portal or in the contract can't be removed (the server would keep the record
+// and leave it pointing at no room).
+const portalReg = { ...register, items: register.items.map((i) => (i.id === "i61" ? makeItem({ ...i, sync: { mode: "project", clientVisible: true } }) : i)) };
+const baseReg = { ...register, items: register.items.map((i) => (i.id === "i61" ? makeItem({ ...i, sync: { mode: "project", baselined: true } }) : i)) };
+ok("removalBlocked: on the client portal, baselined or locked; an ordinary record isn't",
+  removalBlocked({ sync: { clientVisible: true } }) && removalBlocked({ sync: { baselined: true } }) && removalBlocked({ sync: { locked: true } }) && !removalBlocked({ sync: { clientVisible: false } }) && !removalBlocked({}));
+ok("canRemoveRoom: the Laundry can go on the real job, not once a record is on the portal or in the contract",
+  canRemoveRoom(register, room("ld")) && !canRemoveRoom(portalReg, room("ld", portalReg)) && !canRemoveRoom(baseReg, room("ld", baseReg)) && canRemoveRoom(portalReg, room("kt", portalReg)));
+ok("removeRoomPlan leaves a room with a kept record exactly as it is", removeRoomPlan("ld")(portalReg) === portalReg && removeRoomPlan("ld")(baseReg) === baseReg);
 
 section("Tick mode ('Choose upstairs rooms')");
 ok("the banner shows on the real job (every room on Ground, cladding for the upper level, stairs typed)", !!upperFloorHint(register));
@@ -157,6 +179,8 @@ const S = stripView(register, kt, L.questions);
 ok("the red line: 'Benchtop: engineered stone can't be used — choose another with the client' (i38)",
   S.houseLines.some((h) => h.item.id === "i38" && h.tone === "red" && h.text === "Benchtop: engineered stone can't be used — choose another with the client" && h.action === "Change"), flat(S.houseLines.map((h) => h.text)));
 ok("the amber line: 'Splashback: tiles allowed, client to decide' (i39)", S.houseLines.some((h) => h.item.id === "i39" && h.tone === "amber" && h.text === "Splashback: tiles allowed, client to decide"), flat(S.houseLines.map((h) => h.text)));
+ok("…and on a phone 'Splashback: client to decide' (spec S3p); the red line 'Benchtop: engineered stone can't be used'",
+  S.houseLines.some((h) => h.item.id === "i39" && h.shortText === "Splashback: client to decide") && S.houseLines.some((h) => h.item.id === "i38" && h.shortText === "Benchtop: engineered stone can't be used"), flat(S.houseLines.map((h) => h.shortText)));
 ok("the summary leaves the benchtop out", !/benchtop|engineered stone/i.test(S.summary) && /^Floor: .*Walls: .*Ceiling: square set, flat · Cabinetry: flat-panel, laminate$/.test(S.summary), S.summary);
 ok("'✓ Confirmed 16 Nov' (Adelaide day of 15 Nov 22:11 UTC); nothing left to confirm", S.confirmedOn === "16 Nov" && S.pending.length === 0 && S.confirmedCount === 4, flat({ on: S.confirmedOn, pending: S.pending.length, n: S.confirmedCount }));
 const bed = room("bd2");
@@ -202,10 +226,39 @@ ok("'Use these' ticks Full-height, Walk-in and Drawers and removes those words",
 const partly = usableNotedWords(k3, makeItem({ roomId: "kt", promptKey: "K-003", itemKind: "requirement", description: "full-height, spice rack" }));
 ok("unmatched words stay", flat(partly.matched) === flat(["Full-height"]) && partly.patch.description === "spice rack");
 ok("nothing matches: no 'Use these'", usableNotedWords(k3, makeItem({ description: "big" })) === null);
+// N20(a): engineered stone is never chosen from a note either; its words stay in the note.
+const k5c = answerConfigFor("K-005");
+ok("'Noted earlier: Engineered stone, waterfall end' offers no 'Use these'", usableNotedWords(k5c, makeItem({ roomId: "kt", promptKey: "K-005", itemKind: "selection", description: "Engineered stone, waterfall end" })) === null);
+const k5mix = usableNotedWords(k5c, makeItem({ roomId: "kt", promptKey: "K-005", itemKind: "selection", description: "Engineered stone, Natural stone" }));
+ok("…and with another match, only that one is chosen and 'Engineered stone' stays typed",
+  flat(k5mix.matched) === flat(["Natural stone"]) && !k5mix.patch.answer.selected.some((s) => s.optionId === "engineered_stone") && k5mix.patch.description === "Engineered stone", flat(k5mix));
 
 section("Words");
 ok("Adelaide day and time", adelaideDay("2026-11-15T22:11:37.563Z") === "16 Nov" && timeOfDay(new Date("2026-11-16T11:11:00Z")) === "9:41 pm", `${adelaideDay("2026-11-15T22:11:37.563Z")} ${timeOfDay(new Date("2026-11-16T11:11:00Z"))}`);
 ok("room bar save words", saveWords({ state: "saved", at: new Date("2026-11-16T11:11:00Z") }).text === "Saved 9:41 pm" && saveWords({ state: "error" }).text === "Not saved — will retry" && saveWords({ state: "error" }).tone === "warn" && saveWords(null) === null);
+// N28: Undo after a refused delete must not make a twin.
+const someItem = register.items.find((i) => i.id === "i54");
+ok("Undo after a removal re-adds a copy only when the record really went (a refused delete restores it under its own id)",
+  readdIfGone(register, someItem) === null && readdIfGone({ ...register, items: register.items.filter((i) => i.id !== "i54") }, someItem)?.description === someItem.description
+  && readdIfGone({ ...register, items: register.items.filter((i) => i.id !== "i54") }, someItem).id === undefined);
+// N10: focus goes into a menu on open (its current choice, else its first item, else the panel) and back on close.
+const fakeEl = (name, extra = {}) => ({ name, isConnected: true, focus() {}, ...extra });
+const checkedItem = fakeEl("checked"), firstItem = fakeEl("first");
+const menuPanel = fakeEl("panel", { querySelector: (sel) => (sel.includes('aria-checked="true"') ? checkedItem : firstItem), contains: (el) => el === checkedItem || el === firstItem });
+const plainPanel = fakeEl("plain", { querySelector: () => null, contains: () => false });
+ok("on open: the current choice, else the first item, else the panel", dialogFocusTarget(menuPanel) === checkedItem
+  && dialogFocusTarget({ ...menuPanel, querySelector: (sel) => (sel.includes("aria-checked") ? null : firstItem) }) === firstItem && dialogFocusTarget(plainPanel) === plainPanel && dialogFocusTarget(null) === null);
+const body = fakeEl("body"), trigger = fakeEl("trigger"), elsewhere = fakeEl("elsewhere");
+ok("on close: back to what had focus, or the trigger when the tap never focused it (iOS); never away from a field the person moved to",
+  focusReturnTarget({ before: trigger, now: body, panel: menuPanel, body }) === trigger
+  && focusReturnTarget({ before: body, fallback: trigger, now: body, panel: menuPanel, body }) === trigger
+  && focusReturnTarget({ before: trigger, now: firstItem, panel: menuPanel, body }) === trigger
+  && focusReturnTarget({ before: trigger, now: elsewhere, panel: menuPanel, body }) === null
+  && focusReturnTarget({ before: { ...trigger, isConnected: false }, fallback: null, now: body, panel: menuPanel, body }) === null);
+// N8: the Work control wraps to 2 × 2 rather than drop under 96 px a segment (spec S3); other controls never wrap.
+ok("segment columns: 4 equal columns that wrap to 2 × 2 under 4 × 96 px; a plain control stays one row",
+  segmentColumns(4, 96) === "repeat(auto-fit, minmax(clamp(calc(25.0000% - 1px), (384px - 100%) * 999, calc(50.0000% - 1px)), 1fr))"
+  && segmentColumns(4) === "repeat(4, minmax(0, 1fr))" && segmentColumns(3, 96) === "repeat(3, minmax(0, 1fr))");
 ok("no question codes in any list-row or strip text", !/\b[A-Z]-\d{3}\b/.test(flat([...rooms.map((r) => roomListRow(register, context, r)), S.summary, S.houseLines.map((h) => h.text), L.other.map((i) => otherWords(register, kt, i))])));
 
 section("The list's floor blocks and words");
@@ -239,6 +292,11 @@ ok("the room bar's save state is the worst of the room's records", roomSaveState
   && roomSaveState(register.items.slice(0, 3), (id) => (id === register.items[1].id ? "dirty" : "saved")) === "dirty"
   && roomSaveState(register.items.slice(0, 3), (id) => (id === register.items[0].id ? "error" : "dirty")) === "error"
   && roomSaveState(register.items.slice(0, 3), (id) => (id === register.items[2].id ? "rejected" : "error")) === "rejected" && roomSaveState([], null) === "saved");
+// N5: room-level saves (Work, floor, Confirm all, rename) are meta writes, and the room bar shows them too.
+ok("the room bar folds in the room-level save: a failed meta save reads as not saved, a pending one as saving",
+  roomSaveState([], () => "saved", "error") === "error" && roomSaveState([], () => "saved", "dirty") === "dirty" && roomSaveState([], () => "saved", "saving") === "saving"
+  && roomSaveState(register.items.slice(0, 3), () => "saved", "saved") === "saved" && roomSaveState(register.items.slice(0, 3), () => "rejected", "error") === "rejected"
+  && saveWords({ state: "saving" }).text === "Saving…");
 // flushWithin on a fake clock: no real waiting. The deadline only fires when the save itself never answers.
 const clock = () => { let t = 0; return { now: () => t, wait: (ms) => { t += ms; return Promise.resolve(); }, timeout: () => new Promise(() => {}) }; };
 const answers = (list) => { let k = 0; return () => { const v = list[Math.min(k, list.length - 1)]; k += 1; if (v instanceof Error) throw v; return Promise.resolve(v); }; };
@@ -295,6 +353,17 @@ ok("'+ Needs action from…' makes a follow-up for this room (R-010, an action),
 // ── Rendered (esbuild → string, no browser): the screens draw from the real job without throwing ──────────────────
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REG = join(REPO, "src/components/sales/lead-detail/register");
+
+section("'Other things recorded here' › Show details (M13: no codes, no Record type or disposition selects)");
+{
+  const parts = readFileSync(join(REG, "RoomScreenParts.jsx"), "utf8");
+  const screenSrc = readFileSync(join(REG, "RoomScreen.jsx"), "utf8");
+  const shop = readFileSync(join(REG, "RegisterWorkshop.jsx"), "utf8");
+  const rows = parts.match(/<PromptRow\b[^>]*/g) || [];
+  ok("the room screen's only PromptRow is the office one (Product details)", rows.length > 0 && rows.every((r) => /\boffice\b/.test(r)), flat(rows));
+  ok("Show details opens the edit drawer with Product details open", /onOpenRecord\(item\.id, \{ details: true \}\)/.test(parts) && /<OtherRecorded[^>]*onOpenRecord=\{onOpenRecord\}/s.test(screenSrc)
+    && /onOpenRecord=\{\(id, opts\) => setRecordDrawer\(\{ kind: "record", ids: \[id\], \.\.\.\(opts\?\.details \? \{ details: true \} : \{\}\) \}\)\}/.test(shop));
+}
 const dir = mkdtempSync(join(tmpdir(), "register-rooms-ui-"));
 const out = join(REPO, "node_modules", ".cache", `register-rooms-ui-${process.pid}.mjs`);
 const entry = join(dir, "entry.jsx");
@@ -303,11 +372,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import RoomsList from ${JSON.stringify(join(REG, "RoomsList.jsx"))};
 import RoomScreen from ${JSON.stringify(join(REG, "RoomScreen.jsx"))};
 import RoomBriefCard from ${JSON.stringify(join(REG, "RoomBriefCard.jsx"))};
+import { MenuItem, ChoiceChip } from ${JSON.stringify(join(REG, "RoomUi.jsx"))};
+import { WorkControl } from ${JSON.stringify(join(REG, "RoomBriefCard.jsx"))};
 const noop = () => {};
 const store = { mutateMeta: noop, replaceItems: noop, upsertItem: noop, updateItem: noop, deleteItem: noop, addItem: noop, saveState: () => "saved", flush: async () => true };
 export const list = (props) => renderToStaticMarkup(<RoomsList openRoom={noop} readOnly={false} {...store} {...props} />);
 export const screen = (props) => renderToStaticMarkup(<RoomScreen stage="consultants" actor={{ id: "u1" }} onBack={noop} onOpenRoom={noop} onPortalItem={noop} {...store} {...props} />);
 export const card = (props) => renderToStaticMarkup(<RoomBriefCard {...store} {...props} />);
+export const ui = () => ({
+  radioOn: renderToStaticMarkup(<MenuItem checked onClick={noop}>Renovated</MenuItem>),
+  radioOff: renderToStaticMarkup(<MenuItem checked={false} onClick={noop}>New</MenuItem>),
+  check: renderToStaticMarkup(<MenuItem checked kind="checkbox" onClick={noop}>Show details</MenuItem>),
+  plain: renderToStaticMarkup(<MenuItem onClick={noop}>Duplicate room</MenuItem>),
+  bad: renderToStaticMarkup(<ChoiceChip tone="bad" title="Engineered stone can't be used. Tap to take it off, then choose another with the client." onClick={noop}>Engineered stone · not allowed</ChoiceChip>),
+  workWrap: renderToStaticMarkup(<WorkControl full room={{ id: "r", scope: "new" }} onChange={noop} minSegment={96} />),
+  workPlain: renderToStaticMarkup(<WorkControl full room={{ id: "r", scope: "new" }} onChange={noop} />),
+});
 `);
 try {
   await build({
@@ -323,10 +403,12 @@ try {
   section("Rendered: the Rooms list (the real job)");
   const lh = R.list({ reg: register, context });
   const lt = text(lh);
-  ok("title, summary and '+ Add room'", lt.includes("Rooms 16 rooms · 8 new · 8 renovated") && lt.includes("Add room"), lt.slice(0, 300));
+  ok("title, summary '8 new · 8 renovated' (no room count: the filter carries it, spec S2) and '+ Add room'", lt.includes("Rooms 8 new · 8 renovated Add room") && !lt.includes("16 rooms"), lt.slice(0, 300));
   ok("the floor banner, with both buttons", lt.includes("Is anything upstairs? Every room is on the ground floor, but the cladding is recorded for the upper level and the living room mentions stairs.")
     && lt.includes("Choose upstairs rooms") && lt.includes("Not now"), lt.slice(0, 600));
   ok("the filter: All 16 · Brief needed 15 · Check work 3", lt.includes("All 16") && lt.includes("Brief needed 15") && lt.includes("Check work 3"));
+  ok("…shortened on a phone ('Brief 15', 'Check 3') with the full words for screen readers, never wrapping", /aria-label="Brief needed, 15"/.test(lh) && /aria-label="Check work, 3"/.test(lh)
+    && /<span class="sm:hidden">Brief<\/span>/.test(lh) && /class="whitespace-nowrap"/.test(lh));
   ok("one floor: 'Ground floor · 16', and no '+ Add room here' with a single floor", lt.includes("Ground floor · 16") && !lt.includes("Add room here"));
   ok("rows in walk order with their lines and tags", /Entry .*Living .*Dining .*Kitchen .*Pantry .*Laundry .*Lounge/.test(lt)
     && lt.includes("feature range hood - meditrean curved micro cement - love the curves Check work") && lt.includes("Unfinished: “stairs -”")
@@ -339,6 +421,20 @@ try {
     tt.includes("Tick the rooms that are upstairs") && (th.match(/role="checkbox" aria-checked="false"/g) || []).length === 16 && tt.includes("Cancel") && /disabled=""[^>]*>Move 0 rooms to Upper floor</.test(th)
     && !tt.includes("Is anything upstairs?") && !tt.includes("Brief needed 15"), tt.slice(0, 400));
   ok("tick mode hides line 2 except the 'Unfinished' tag", !tt.includes("feature range hood") && tt.includes("Unfinished: “stairs -”"));
+  ok("tick mode has no extra line under the title (the artboard has none)", !tt.includes("isn't on file"));
+  ok("chips are 44 px at every width (no 40 px tablet size)", !/sm:min-h-\[40px\]/.test(lh + R.screen({ reg: register, context, roomId: "kt" }) + R.card({ reg: register, room: room("kt"), context })));
+  const loftReg = { ...register, meta: { ...register.meta, floors: ["Loft"] } };
+  const loft = R.list({ reg: loftReg, context });
+  ok("a saved floor with no room yet: its block, 'No rooms on this floor yet.', '+ Add room here' and 'Remove floor'", text(loft).includes("Loft · 0") && text(loft).includes("No rooms on this floor yet.")
+    && /data-testid="remove-floor-loft"/.test(loft) && (text(loft).match(/\+ Add room here/g) || []).length === 2);
+  const portalList = R.list({ reg: portalReg, context });
+  ok("the list still draws with a room that can't be removed (the menu offers 'Not in this job' instead)", text(portalList).includes("Laundry") && !codes(portalList));
+  const ui = R.ui();
+  ok("a menu item with a tick says so to a screen reader (menuitemradio, aria-checked); a toggle is a menuitemcheckbox; a plain one stays menuitem",
+    /role="menuitemradio" aria-checked="true"[^>]*>.*Renovated/.test(ui.radioOn) && /role="menuitemradio" aria-checked="false"/.test(ui.radioOff)
+    && /role="menuitemcheckbox" aria-checked="true"/.test(ui.check) && /role="menuitem"/.test(ui.plain) && !/aria-checked/.test(ui.plain), flat(ui));
+  ok("the not-allowed chip reads as chosen and says it can't be used", /aria-pressed="true"/.test(ui.bad) && /aria-label="Engineered stone can&#x27;t be used/.test(ui.bad), ui.bad);
+  ok("the Work control can wrap 2 × 2 (dividers as 1 px gaps); the plain one keeps its rules", /gap-px bg-hairline/.test(ui.workWrap) && /auto-fit/.test(ui.workWrap) && !/gap-px/.test(ui.workPlain) && /border-l border-hairline/.test(ui.workPlain));
   const th2 = text(R.list({ reg: withRooms(tick.rooms), context }));
   ok("two floors: both headers with '+ Add room here', and no banner", th2.includes("Ground floor · 11") && th2.includes("Upper floor · 5") && (th2.match(/\+ Add room here/g) || []).length === 2 && !th2.includes("Is anything upstairs?"));
   const eh = text(R.list({ reg: withRooms([]), context }));
@@ -363,6 +459,30 @@ try {
   ok("the footer: '‹ Dining' · 'Next: Pantry ›'", kx.includes("‹ Dining") && kx.includes("Next: Pantry ›"));
   ok("no question codes on the room screen", !codes(kh), kx.match(/\b[A-Z]-\d{3}\b/)?.[0]);
   ok("phone text inputs are 16 px (the brief box)", /<textarea[^>]*class="[^"]*text-base/.test(kh));
+  ok("every .inp text box on the room screen and the list sets 16 px on a phone", (() => {
+    const boxes = [...(kh + lh).matchAll(/<(?:input|select)[^>]*class="([^"]*\binp\b[^"]*)"/g)].map((m) => m[1]);
+    return boxes.every((c) => /\btext-\[16px\]|\btext-base\b/.test(c));
+  })());
+  // N5: the room bar shows the room-level save too, with the store's last save time.
+  const failedMeta = text(R.screen({ reg: register, context, roomId: "kt", metaState: "error" }));
+  ok("a failed room-level save (Work, floor, Confirm all) reads 'Not saved — will retry' in the room bar", failedMeta.includes("Not saved — will retry"), failedMeta.slice(0, 200));
+  ok("a pending one reads 'Saving…'", text(R.screen({ reg: register, context, roomId: "kt", metaState: "dirty" })).slice(0, 200).includes("Saving…"));
+  ok("with nothing waiting it reads 'Saved 9:41 pm' on first open (the store's last save time)", text(R.screen({ reg: register, context, roomId: "kt", metaState: "saved", saveAt: new Date("2026-11-16T11:11:00Z") })).includes("Saved 9:41 pm"));
+  // P8: the house line's ⚑ sits on its own line's row, only for an open point, and Change opens the drawer when there is one.
+  const redRow = kh.slice(kh.indexOf('data-testid="house-line-row-i38"'), kh.indexOf('data-testid="house-line-i39"'));
+  ok("the red benchtop line carries its ⚑ on the same row, after [Change] (the artboard's 'Architect · not asked yet' pill)",
+    redRow.length > 0 && /data-testid="needs-action-i38"/.test(redRow) && redRow.indexOf(">Change<") < redRow.indexOf('data-testid="needs-action-i38"'), redRow.slice(0, 400));
+  ok("the strip's summary may wrap to 2 lines (no cut-off title)", /line-clamp-2[^"]*"[^>]*>Floor:/.test(kh));
+  // N22: the Kitchen's menu can't remove a room with a record on the portal (rendered closed; the rule is canRemoveRoom above).
+  // N21: after the contract the brief is shown, not offered.
+  const fixedReg = { ...register, items: register.items.map((i) => (i.id === "i22" ? makeItem({ ...i, sync: { mode: "project", baselined: true } }) : i)) };
+  const fixedCard = R.card({ reg: fixedReg, room: room("kt", fixedReg), context });
+  ok("a baselined room brief: the sentence box, chips and size are disabled, and the caption says to use a variation",
+    /<textarea[^>]*disabled=""/.test(fixedCard) && text(fixedCard).includes("Part of the signed contract — change it through a variation.") && !text(fixedCard).includes("In the architect's brief")
+    && /aria-pressed="(?:true|false)" disabled=""[^>]*>Outside</.test(fixedCard) && !/aria-pressed="(?:true|false)" disabled=""[^>]*>Outside</.test(R.card({ reg: register, room: kt, context }))
+    && /aria-label="Rough size in square metres"/.test(fixedCard) === /aria-label="Rough size in square metres"/.test(R.card({ reg: register, room: kt, context })), text(fixedCard).slice(0, 300));
+  const fixedCompact = text(R.card({ reg: fixedReg, room: room("kt", fixedReg), context, compact: true, onOpenRoom: () => {} }));
+  ok("…and in the Documents drawer too", fixedCompact.includes("Part of the signed contract — change it through a variation."));
   const lgx = text(R.screen({ reg: register, context, roomId: "lg" }));
   ok("the last room: 'Done — back to Rooms'", lgx.includes("Done — back to Rooms") && !lgx.includes("Next:"));
   const ldx = text(R.screen({ reg: register, context, roomId: "ld" }));

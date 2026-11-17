@@ -19,6 +19,8 @@ const base = "focus-ring inline-flex min-h-[40px] items-center rounded-full bord
 const pill = (on) => `${base} ${on ? "border-primary bg-primary font-semibold text-white" : "border-hairline bg-surface text-ink hover:bg-page"}`;
 const quiet = (on) => `${base} ${on ? "border-amber-500 bg-amber-100 font-semibold text-amber-900" : "border-dashed border-hairline text-muted hover:text-ink"}`;
 const textLink = "focus-ring inline-flex min-h-[40px] items-center rounded px-1 text-[11px] font-medium text-primary hover:underline sm:min-h-[30px]";
+// Text boxes: 16 px on a phone so iOS doesn't zoom on focus, the dense 11 px from 640 px up (the input's own size wins over .inp).
+const DENSE = "text-[16px] sm:text-[11px]";
 
 function Choice({ label, on, disabled, onClick, tone = pill, testId }) {
   return (
@@ -77,17 +79,17 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
     <div className="mt-1.5 space-y-1.5" data-testid={`card-${qid}`}>
       {config.asksWhat && (
         <input value={item.description} disabled={disabled} onChange={(e) => send({ description: e.target.value })} aria-label="What is this about"
-          placeholder={item.itemKind === "action" ? "What needs to happen…" : "What item…"} className="inp w-full text-[11px]" />
+          placeholder={item.itemKind === "action" ? "What needs to happen…" : "What item…"} className={`inp w-full ${DENSE}`} />
       )}
 
       {view.zone && !fixedZone && (
         <Row heading="Applies to">
           {view.zone.options.map((o) => <Choice key={o.id} label={o.label} on={o.on} disabled={disabled || o.disabled} testId={`zone-${qid}-${o.id}`} onClick={() => write(chooseZone(config, item.answer, o.id))} />)}
-          {view.zone.open && <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className="inp min-w-[9rem] flex-1 text-[11px]" />}
+          {view.zone.open && <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className={`inp min-w-[9rem] flex-1 ${DENSE}`} />}
         </Row>
       )}
       {view.zone?.open && fixedZone && (
-        <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className="inp w-full text-[11px]" />
+        <DraftInput value={view.zone.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setZoneWords(config, item.answer, v))} placeholder="Which area…" aria-label="Which area" className={`inp w-full ${DENSE}`} />
       )}
 
       {config.flow?.includes("area") && areaOptions?.length > 0 && (
@@ -99,7 +101,7 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
       {view.element && (
         <Row heading="Which">
           {view.element.options.map((o) => <Choice key={o.id} label={o.label} on={o.on} disabled={disabled} testId={`element-${qid}-${o.id}`} onClick={() => write(chooseElement(config, item.answer, o.id))} />)}
-          {view.element.open && <DraftInput value={view.element.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setElementWords(config, item.answer, v))} placeholder="Which one…" aria-label="Which one" className="inp min-w-[9rem] flex-1 text-[11px]" />}
+          {view.element.open && <DraftInput value={view.element.words} tidy={tidyWords} disabled={disabled} onCommit={(v) => write(setElementWords(config, item.answer, v))} placeholder="Which one…" aria-label="Which one" className={`inp min-w-[9rem] flex-1 ${DENSE}`} />}
         </Row>
       )}
 
@@ -111,7 +113,7 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
           ))}
           {level.options.filter((o) => o.openRows.length).flatMap((o) => o.openRows.map((row, i) => (
             <span key={`${o.id}-${i}`} className="flex min-w-[10rem] flex-1 items-center gap-1">
-              <DraftInput value={row.words} tidy={tidyWords} disabled={disabled} placeholder="Say what…" aria-label={`${o.label}: say what`} className="inp w-full text-[11px]" data-testid={`other-${qid}-${o.path.join("-")}`}
+              <DraftInput value={row.words} tidy={tidyWords} disabled={disabled} placeholder="Say what…" aria-label={`${o.label}: say what`} className={`inp w-full ${DENSE}`} data-testid={`other-${qid}-${o.path.join("-")}`}
                 onCommit={(v) => write(setOpenWords(config, item.answer, o.path, row.label, v))} />
               {row.words && !disabled && <button type="button" onClick={() => write(removeChoice(config, item.answer, { path: o.path, label: row.label }))} className={textLink} aria-label={`Remove ${row.words}`}>Remove</button>}
             </span>
@@ -122,7 +124,7 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
       {view.usual && <p className="text-[11px] text-muted" data-testid={`usual-${qid}`}>Usual finish for this surface: <span className="font-medium text-ink">{view.usual}</span>. Change it under + More detail.</p>}
 
       {config.clientNote && (!disabled || view.clientNote) && (
-        <DraftInput value={view.clientNote} disabled={disabled} onCommit={(v) => write(setClientNote(config, item.answer, v))} placeholder="Note for the client brief (the client reads this)…" aria-label="Note for the client brief. The client reads this" className="inp w-full text-[11px]" data-testid={`client-note-${qid}`} />
+        <DraftInput value={view.clientNote} disabled={disabled} onCommit={(v) => write(setClientNote(config, item.answer, v))} placeholder="Note for the client brief (the client reads this)…" aria-label="Note for the client brief. The client reads this" className={`inp w-full ${DENSE}`} data-testid={`client-note-${qid}`} />
       )}
 
       {view.kept.length > 0 && (
@@ -176,13 +178,13 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
       )}
 
       {showNote && (
-        <DraftInput value={view.note} disabled={disabled} onCommit={(v) => write(setAnswerNote(config, item.answer, v))} placeholder="Short note, staff only…" aria-label="Short note, staff only" className="inp w-full text-[11px]" data-testid={`note-input-${qid}`} />
+        <DraftInput value={view.note} disabled={disabled} onCommit={(v) => write(setAnswerNote(config, item.answer, v))} placeholder="Short note, staff only…" aria-label="Short note, staff only" className={`inp w-full ${DENSE}`} data-testid={`note-input-${qid}`} />
       )}
 
       {more && canDetail && (
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-          <input value={item.colour} disabled={disabled} onChange={(e) => send({ colour: e.target.value })} placeholder="Finish / colour, if known" aria-label="Finish or colour" className="inp text-[11px]" />
-          <input value={item.product} disabled={disabled} onChange={(e) => send({ product: e.target.value })} placeholder="Product / model, if known" aria-label="Product or model" className="inp text-[11px]" />
+          <input value={item.colour} disabled={disabled} onChange={(e) => send({ colour: e.target.value })} placeholder="Finish / colour, if known" aria-label="Finish or colour" className={`inp ${DENSE}`} />
+          <input value={item.product} disabled={disabled} onChange={(e) => send({ product: e.target.value })} placeholder="Product / model, if known" aria-label="Product or model" className={`inp ${DENSE}`} />
         </div>
       )}
 
@@ -195,7 +197,7 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
 
       {!config.asksWhat && item.description && (
         <label className="block text-[10px] text-muted">Written earlier
-          <input value={item.description} disabled={disabled} onChange={(e) => send({ description: e.target.value })} className="inp mt-0.5 w-full text-[11px]" />
+          <input value={item.description} disabled={disabled} onChange={(e) => send({ description: e.target.value })} className={`inp mt-0.5 w-full ${DENSE}`} />
         </label>
       )}
     </div>

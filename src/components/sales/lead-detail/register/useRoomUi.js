@@ -1,5 +1,6 @@
 /**
- * useRoomUi — small hooks shared by the Rooms list and the room screen (REGISTER_SCREENS_SPEC.md S2, S3, S3p).
+ * useRoomUi — small hooks shared by the Rooms list and the room screen (REGISTER_SCREENS_SPEC.md S2, S3, S3p), and
+ * useDialogFocus, which every register menu, sheet and drawer uses to take focus on open and hand it back on close.
  * Per-viewer conveniences only: nothing here is register data, and storage is wrapped so a private window still works.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -67,6 +68,64 @@ export function useStageBarInset() {
     return () => { cancelAnimationFrame(raf); clearTimeout(later); window.removeEventListener("resize", measure); mo?.disconnect(); };
   }, []);
   return inset;
+}
+
+/**
+ * Where focus goes when a menu or sheet opens: the current choice of a menu (a ticked radio item), else its first item,
+ * else the panel itself (give it tabIndex -1).
+ */
+export function dialogFocusTarget(panel) {
+  if (!panel) return null;
+  try {
+    return panel.querySelector?.('[role^="menuitem"][aria-checked="true"]:not([disabled])')
+      || panel.querySelector?.('[role^="menuitem"]:not([disabled])') || panel;
+  } catch { return panel; }
+}
+/**
+ * Where focus goes back to when it closes: the element that had it before (else the trigger, fallback), but only when
+ * focus was left inside the closed panel or dropped to the page. Someone who has moved on to another field keeps it.
+ */
+export function focusReturnTarget({ before, fallback, now, panel, body }) {
+  const dropped = !now || now === body || now.isConnected === false || (!!panel && typeof panel.contains === "function" && panel.contains(now));
+  if (!dropped) return null;
+  const usable = (el) => !!el && el !== body && el.isConnected !== false && typeof el.focus === "function";
+  if (usable(before)) return before;
+  if (usable(fallback)) return fallback;
+  return null;
+}
+/**
+ * Menus, sheets and drawers (finding N10): on open, remember what had focus and move it into ref.current (its current
+ * or first [role=menuitem], else the panel); on close, hand it back (to fallbackRef, the trigger, when the browser
+ * never focused it, as Safari does on a tap). An autofocused field inside keeps its focus.
+ */
+export function useDialogFocus(ref, open, fallbackRef = null) {
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return undefined;
+    const before = document.activeElement;
+    const panel = ref?.current || null;
+    const fallback = fallbackRef?.current || null;
+    if (panel && !panel.contains(document.activeElement)) {
+      const target = dialogFocusTarget(panel);
+      try { target?.focus?.({ preventScroll: true }); } catch { /* gone */ }
+    }
+    return () => {
+      let target = null;
+      try { target = focusReturnTarget({ before, fallback, now: document.activeElement, panel, body: document.body }); } catch { /* no document */ }
+      try { target?.focus({ preventScroll: true }); } catch { /* gone */ }
+    };
+  }, [open, ref, fallbackRef]);
+}
+
+/**
+ * The grid columns of a segmented control. minSegment (px): when the control is too narrow for every segment at that
+ * width, it wraps to two rows of half the segments each (2 × 2 for the Work control), never 3 + 1. Pure CSS, so it
+ * follows the column it sits in (the 754 px Hub column, Expand, a drawer) without measuring.
+ */
+export function segmentColumns(n, minSegment = 0) {
+  if (!minSegment || n < 4) return `repeat(${n}, minmax(0, 1fr))`;
+  const all = `calc(${(100 / n).toFixed(4)}% - 1px)`;
+  const half = `calc(${(100 / Math.ceil(n / 2)).toFixed(4)}% - 1px)`;
+  return `repeat(auto-fit, minmax(clamp(${all}, (${n * minSegment}px - 100%) * 999, ${half}), 1fr))`;
 }
 
 /** localStorage / sessionStorage, never throwing (private mode, blocked storage, previews). */

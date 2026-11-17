@@ -5,7 +5,7 @@
  * One module, read by the server (the PDF, adb-2.0) and the browser (the Documents step's "What will print" list, the
  * Actions list, a room's "How this room reads" line), so what staff see is what prints. Pure: no React, no network.
  *
- *   openPoints(register, context, { scope })  every record waiting on someone (the Actions list; section 03)
+ *   openPoints(register, context, { scope, merge }) every record waiting on someone (the Actions list; section 03)
  *   roomRow(register, context, room)          one room as the brief prints it (section 04; "How this room reads")
  *   architectBriefModel(register, context, o) the whole brief: sections, printed lines (with record ids), and every
  *                                             record that doesn't print, with the reason
@@ -23,7 +23,7 @@
 import {
   questionById, resolvePromptId, categoryLabel, natureOf, roomDefaultsFor, answerConfigFor, isClientSelection,
   ROOM_SCOPES, ROOM_SCOPES_WITH_WORK, ROOM_SCOPE_DISPOSITION, ROOM_TYPES, HIDDEN_ROOM_SCOPE_PROMPTS, ROOM_BRIEF_PROMPT, ROOM_MUST_HAVES,
-  DRAWING_IMPACT, ACTION_ROLES, ROOM_USED_BY, PROJECT_TYPE_LABELS, DELIVERY_MODELS, UNRESOLVED_REASONS, ANSWER_SCHEMA_VERSION,
+  DRAWING_IMPACT, ACTION_ROLES, ROOM_USED_BY, PROJECT_TYPE_LABELS, DELIVERY_MODELS, UNRESOLVED_REASONS, ANSWER_SCHEMA_VERSION, HIDDEN_OPTION_IDS,
 } from "./register.js";
 import { LEAD_FINANCE_STATUS_LABELS } from "./constants.js";
 
@@ -100,6 +100,14 @@ function typedIsChips(typed, chips) {
   if (!typed || !chips) return false;
   const have = new Set(chips.toLowerCase().split(/,\s*/));
   return typed.toLowerCase().split(/\s*,\s*/).every((p) => have.has(p.trim()));
+}
+
+/** Options a question never offers (K-005 engineered stone): a record that still holds one never prints it. */
+const hiddenOf = (item) => HIDDEN_OPTION_IDS[resolvePromptId(item?.promptKey)] || null;
+/** The card's choices in words, without an option that can't be offered (the same filter as needsAction's chips). */
+export function offeredChipWords(item) {
+  const h = hiddenOf(item);
+  return chipWords(item, h ? (s) => !h.has(s.optionId) && !(s.path || []).some((p) => h.has(p)) : null);
 }
 
 /** A question's short name, without its parenthesis or a trailing "who?" ("Envelope quality"). */
@@ -206,12 +214,33 @@ const evidenced = (item) => !!(item?.evidence?.at && item?.evidence?.by) || !!it
 /** An element whose place in the job is still open ("Retaining: in or out of this job?"). */
 export const isInOut = (item) => !!item?.answer?.element && item.disposition === "undecided" && natureOf(item) === "scope" && !liveSelected(item).length;
 
-/** Does the record hold anything at all? */
+// Answer keys a blank row is seeded with (the question's zone, the areas it covers, its version): they say nothing.
+const ANSWER_SEED_KEYS = new Set(["v", "state", "nature", "configVersion", "selected", "zone", "areaIds", "sourceQuestionIds"]);
+const filled = (v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === "object" ? Object.keys(v).length > 0 : typeof v === "number" ? true : !!clean(v));
+
+/**
+ * Does the record hold nothing at all? Only then is it offered for deletion ("Delete all … empty answers"), so anything
+ * a person put on it counts: words in any field, a room brief's links, users and rough size, a measured quantity, a
+ * status, evidence, a by-when, a link to a document, or a portal or contract state. Fields a blank row is seeded with
+ * (the question's owner and check, its zone, areas and answer version) don't. An answer from a newer screen this one
+ * can't read is never empty.
+ */
 export function isEmptyRecord(item) {
-  const a = item?.answer;
-  return !clean(item?.description) && !liveSelected(item).length && !clean(a?.note) && !clean(item?.product) && !clean(item?.nextAction)
-    && (item?.disposition || "undecided") === "undecided" && item?.technicalStatus !== "needs_verification" && a?.state !== "unresolved"
-    && !a?.element && item?.supplyBy !== "client" && item?.itemKind !== "action";
+  if (!item) return true;
+  if (item.itemKind === "action" || item.resolved) return false;
+  const words = [item.description, item.product, item.manufacturer, item.model, item.colour, item.supplier, item.source, item.unit, item.clientLabel,
+    item.clientDescription, item.nextAction, item.pricingRef];
+  if (words.some((t) => !!clean(t))) return false;
+  if (item.quantity != null || item.supplyBy || item.sourceDocId || item.overridesDefaultId || item.actionDue) return false;
+  if ((item.disposition || "undecided") !== "undecided" || ["needs_verification", "verified"].includes(item.technicalStatus)) return false;
+  if (item.evidence?.at || item.technicalEvidence?.at || item.technicalEvidence?.ref) return false;
+  const s = item.sync || {};
+  if (s.clientVisible || s.baselined || s.locked || s.boardCreated || s.approvedOnBoard || s.clientChoice || s.changeRequest) return false;
+  const a = item.answer;
+  if (!a) return true;
+  if (!(Number(a.v) <= ANSWER_SCHEMA_VERSION)) return false;
+  if (liveSelected(item).length || a.element || ["unresolved", "client_unsure", "not_applicable"].includes(a.state)) return false;
+  return !Object.entries(a).some(([k, v]) => !ANSWER_SEED_KEYS.has(k) && filled(v));
 }
 
 /**
@@ -238,7 +267,7 @@ export function heldBackReason(register, item) {
   return "";
 }
 export const HELD_BACK_WORDS = {
-  unfinished: "unfinished: it ends mid-thought",
+  unfinished: "unfinished — it ends mid-thought",
   disagrees: "it disagrees with the room's Work",
   contradicts: "its words contradict its status",
   no_ask: "it doesn't say what's needed",
@@ -256,8 +285,12 @@ export function isOpenPoint(item) {
   return !!clean(item.nextAction) || item.itemKind === "action" || item.technicalStatus === "needs_verification"
     || item.answer?.state === "unresolved" || isInOut(item);
 }
-/** Is an open point for the next drawing issue? Everything but a client's finish choice (that goes to the client and the schedule). */
+/**
+ * Is an open point for the next drawing issue? Everything but a client's finish choice (that goes to the client and the
+ * schedule) and Blue Leaf's own actions: those are our list only and never print (owner decision D3, 17 Nov 2026).
+ */
 export function forNextIssue(item) {
+  if (item.responsibility === "blue_leaf") return false;
   if (item.itemKind === "action" || DESIGN_TEAM_RESP.has(item.responsibility) || item.technicalStatus === "needs_verification") return true;
   if (DRAWING_IMPACT[resolvePromptId(item.promptKey)] || item.itemKind === "requirement" || isInOut(item)) return true;
   return false;
@@ -270,29 +303,46 @@ const reasonWords = (item) => {
   return key && UNRESOLVED_REASONS[key] ? lowerFirst(UNRESOLVED_REASONS[key]) : "";
 };
 
-/** What a point asks, in words (never the option a prohibited-product rule holds open). */
+/**
+ * The note after a record's words: one parenthesis, "(agreed with the client; for consultant review)". Agreed only when
+ * the approval is evidenced; a performance goal is intent for the consultant to assess, never a specified product
+ * (DEC-MRUX-03). "" when neither applies.
+ */
+function approvalNote(item) {
+  const notes = [item.certainty === "client_approved" && evidenced(item) ? "agreed with the client" : "",
+    answerConfigFor(resolvePromptId(item.promptKey))?.reviewSuggestions ? "for consultant review" : ""].filter(Boolean);
+  return notes.length ? ` (${notes.join("; ")})` : "";
+}
+// A question whose answer is a material (a benchtop, a splashback, the main walls): an open one says "material".
+const MATERIAL_CATEGORIES = new Set(["benchtop", "splashback"]);
+const isMaterialChoice = (item) => MATERIAL_CATEGORIES.has(item?.category) || !!hiddenOf(item) || /\bmaterials?\b/i.test(plainShort(item));
+
+/** What a point asks, in words (never the option a prohibited-product rule holds open: spec S6, line 2). */
 function askOf(item) {
   if (clean(item.nextAction)) return lowerFirst(tidy(item.nextAction));
   if (item.itemKind === "action") return lowerFirst(tidy(item.description));
   if (isInOut(item)) return "is it part of this job?";
-  if (item.answer?.state === "unresolved") {
-    const r = reasonWords(item);
-    return `still to be ${natureOf(item) === "choice" || item.itemKind === "selection" ? "chosen" : "decided"}${r ? `; ${r}` : ""}`;
-  }
-  const typed = clean(item.description), chips = chipWords(item);
-  const words = typed && !typedIsChips(typed, chips) ? tidy(typed) : chips || tidy(typed);
-  const agreed = item.certainty === "client_approved" && evidenced(item) ? " (agreed with the client)" : "";
-  // A performance goal is intent for the consultant to assess, never a specified product (DEC-MRUX-03).
-  const review = answerConfigFor(resolvePromptId(item.promptKey))?.reviewSuggestions ? " (for consultant review)" : "";
-  return words ? `confirm ${lowerFirst(words)}${agreed}${review}` : `to be confirmed${agreed}${review}`;
+  const chosen = natureOf(item) === "choice" || item.itemKind === "selection";
+  const stillOpen = (r) => `${chosen && isMaterialChoice(item) ? "material " : ""}still to be ${chosen ? "chosen" : "decided"}${r ? `; ${r}` : ""}`;
+  if (item.answer?.state === "unresolved") return stillOpen(reasonWords(item));
+  const typed = clean(item.description), all = chipWords(item), chips = offeredChipWords(item);
+  const words = typed && !typedIsChips(typed, all) ? tidy(typed) : chips;
+  // The only choice on the card is one that can't be offered (engineered stone): say why it's open, never the product.
+  if (!words && all) return stillOpen(reasonWords(item) || "designer to confirm");
+  const note = approvalNote(item);
+  return words ? `confirm ${lowerFirst(words)}${note}` : `to be confirmed${note}`;
 }
 
 /**
- * Every record waiting on someone, grouped for print: [{ ids, item, subject, label, place, who, by, due, text, held, nextIssue }].
- * scope "next_issue" keeps what the next drawing issue needs (section 03); "all" adds the client's finish choices.
+ * Every record waiting on someone, grouped for print: [{ ids, item, subject, label, labels, place, who, by, due, text, held, nextIssue }].
+ * scope "next_issue" keeps what the next drawing issue needs (section 03); "all" adds the client's finish choices and
+ * Blue Leaf's own actions.
+ * merge (default true): elements still in or out in one place are asked once, as the brief prints them ("Retaining and
+ * pool: are they part of this job?"). merge false keeps every record its own point, each with its own who: the
+ * Actions list, its header pill and the "no one named" check count records, not printed lines (spec S4, D5).
  * Held-back points (an action that doesn't say what's needed …) are kept, flagged, so the Actions list can show them.
  */
-export function openPoints(register, context, { scope = "next_issue" } = {}) {
+export function openPoints(register, context, { scope = "next_issue", merge = true } = {}) {
   const items = (register?.items || []).filter(isOpenPoint).filter((i) => scope === "all" || forNextIssue(i));
   const points = items.map((item, k) => {
     const place = placeOf(register, item), who = whoOf(context, item);
@@ -303,7 +353,7 @@ export function openPoints(register, context, { scope = "next_issue" } = {}) {
   // Elements still in or out in one place are asked once ("Retaining and pool: are they part of this job?").
   const merged = [];
   for (const p of points) {
-    const twin = p.inOut && !p.held && merged.find((m) => m.inOut && !m.held && m.place.key === p.place.key && m.who.key === p.who.key && m.due === p.due
+    const twin = merge && p.inOut && !p.held && merged.find((m) => m.inOut && !m.held && m.place.key === p.place.key && m.who.key === p.who.key && m.due === p.due
       && resolvePromptId(m.item.promptKey) === resolvePromptId(p.item.promptKey));
     if (twin) { twin.ids.push(...p.ids); twin.labels.push(p.label); continue; }
     merged.push({ ...p, labels: [p.label] });
@@ -433,7 +483,7 @@ export function roomRow(register, context, room, { taken = new Set(), houseDefau
     if (impact) {
       const w = recordWords(i, { impact });
       if (w) { fittings.push(`${clean(i.answer?.element?.label) || plainShort(i)}: ${lowerFirst(w)}`); cover(i); }
-    } else if (isWorkRecord(i) && !isOpenPoint(i)) {
+    } else if (isWorkRecord(i) && !(isOpenPoint(i) && forNextIssue(i))) {      // a point in 03 isn't said twice
       const w = recordWords(i) || DISPOSITION_WORDS[i.disposition];
       fittings.push(`${clean(i.answer?.element?.label) || plainShort(i)}: ${lowerFirst(w)}`); cover(i);
     }
@@ -459,9 +509,10 @@ export const BUDGET_BANDS = [
   { key: "over_1_5m", min: 1500000, max: null, label: "Over $1.5m" },
 ];
 const money = (n) => (n >= 1000000 ? `$${String(Math.round(n / 100000) / 10).replace(/\.0$/, "")}m` : `$${Math.round(n / 1000)}k`);
-/** "$800k–$1m", "Under $400k", "Over $1.5m". "" without a figure. */
+/** "$800k–$1m", "Under $400k", "Over $1.5m". "" without a figure, or when the lower figure is above the upper (it can't print). */
 export function budgetWords(min, max) {
   const lo = Number.isFinite(min) && min > 0 ? min : null, hi = Number.isFinite(max) && max > 0 ? max : null;
+  if (lo && hi && lo > hi) return "";
   if (lo && hi) return lo === hi ? money(lo) : `${money(lo)}–${money(hi)}`;
   if (hi) return `Under ${money(hi)}`;
   if (lo) return `Over ${money(lo)}`;
@@ -469,6 +520,11 @@ export function budgetWords(min, max) {
 }
 /** The one line of the brief that may hold dollars (owner decision 1): only once the client confirmed it. Checked at issue. */
 export const BUDGET_BAND_RX = /^(?:(?:Under|Over) )?\$\d+(?:\.\d)?[km](?:–\$\d+(?:\.\d)?[km])? construction budget, ex GST \(the client's figure\)\.$/;
+/** Is the budget recorded upside down (lower figure above the upper)? Then nothing prints and the Documents step warns. */
+export function budgetInverted(context) {
+  const b = context?.budget || {};
+  return Number.isFinite(b.min) && Number.isFinite(b.max) && b.min > 0 && b.max > 0 && b.min > b.max;
+}
 export function budgetLine(context) {
   const b = context?.budget || {};
   const words = budgetWords(b.min, b.max);
@@ -500,6 +556,9 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   const rooms = (register?.meta?.rooms || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const printed = new Set();
   const take = (ids) => ids.forEach((id) => printed.add(id));
+  // A record that prints as a point in 03 isn't said again in 01, 04 or 05. Blue Leaf's own open points don't print in 03
+  // (D3), so their content prints where it belongs.
+  const inPoints = (i) => isOpenPoint(i) && forNextIssue(i);
 
   // Cover.
   const architect = namedArchitect(context);
@@ -532,12 +591,10 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   // What the design must achieve, house-wide, once settled (open ones are points in 03): each under its own subject.
   for (const i of items) {
     const qid = resolvePromptId(i.promptKey);
-    if (i.roomId || i.itemKind !== "requirement" || ["P-005", "W-009"].includes(qid) || isOpenPoint(i) || heldBackReason(register, i) || isEmptyRecord(i) || officeOnly(i)) continue;
+    if (i.roomId || i.itemKind !== "requirement" || ["P-005", "W-009"].includes(qid) || inPoints(i) || heldBackReason(register, i) || isEmptyRecord(i) || officeOnly(i)) continue;
     const w = recordWords(i);
     if (!w) continue;
-    const agreed = i.certainty === "client_approved" && evidenced(i) ? " (agreed with the client)" : "";
-    const review = answerConfigFor(qid)?.reviewSuggestions ? " (for consultant review)" : "";
-    project.push({ key: `req:${i.id}`, label: labelOf(i), text: sentence(`${w.replace(/\.$/, "")}${agreed}${review}`), source: { kind: "record" }, ids: [i.id] });
+    project.push({ key: `req:${i.id}`, label: labelOf(i), text: sentence(`${w.replace(/\.$/, "")}${approvalNote(i)}`), source: { kind: "record" }, ids: [i.id] });
     take([i.id]);
   }
 
@@ -597,7 +654,7 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   // House-wide and site work (demolition, a new opening …): it changes the drawings, so it prints here too.
   let hasWork = false;
   for (const i of items) {
-    if (i.roomId || printed.has(i.id) || !isWorkRecord(i) || drawingImpactOf(i) || isOpenPoint(i) || heldBackReason(register, i) || isEmptyRecord(i)) continue;
+    if (i.roomId || printed.has(i.id) || !isWorkRecord(i) || drawingImpactOf(i) || inPoints(i) || heldBackReason(register, i) || isEmptyRecord(i)) continue;
     sel(`work:${i.id}`, labelOf(i), recordWords(i) || DISPOSITION_WORDS[i.disposition], [i.id]);
     hasWork = true;
   }
@@ -632,6 +689,7 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
     if (why) notPrinted.push({ id: i.id, group: "held", reason: why });
     else if (isEmptyRecord(i)) notPrinted.push({ id: i.id, group: "empty", reason: "empty" });
     else if (isClientSelection(i) || i.itemKind === "selection") notPrinted.push({ id: i.id, group: "schedule", reason: "schedule" });
+    else if (isOpenPoint(i) && i.responsibility === "blue_leaf") notPrinted.push({ id: i.id, group: "office", reason: "office" });
     else if (isOpenPoint(i) && !forNextIssue(i)) notPrinted.push({ id: i.id, group: "client", reason: "client" });
     else notPrinted.push({ id: i.id, group: "office", reason: "office" });
   }
@@ -649,23 +707,54 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
 }
 
 /**
- * Every line the architect's brief prints, in print order: [{ section, group, label, text, ids, source, placeholder }].
+ * Every line the architect's brief prints, in print order: [{ section, group, label, text, ids, source, placeholder, gap, segments? }].
  * The Documents step lists these beside the PDF; each opens its source. The cover lines come from the fixture's project.
+ *   placeholder  a gap that blocks issue and prints grey in a draft (spec S6 correction: only those): "Prepared for: The
+ *                design team", "Drawing basis: Not yet recorded", a room's "Brief to follow."
+ *   gap          a gap that prints plain and doesn't block (the budget "To be confirmed by Blue Leaf"): marked, not greyed.
+ *   segments     a room line whose gap is only its first words: [{ text, muted }], so only "Brief to follow." is greyed.
  */
 export function architectBriefLines(model, cover = {}) {
   const lines = [];
-  const push = (section, row, extra = {}) => lines.push({ section, label: row.label || "", text: row.text || "", ids: row.ids || [], source: row.source || { kind: "record" }, ...extra });
-  push("cover", { label: "Prepared for", text: model.preparedFor || "The design team", source: { kind: "consultant", key: "architect" } }, { placeholder: model.preparedForGap });
+  const push = (section, row, extra = {}) => lines.push({ section, label: row.label || "", text: row.text || "", ids: row.ids || [], source: row.source || { kind: "record" }, placeholder: false, gap: false, ...extra });
+  push("cover", { label: "Prepared for", text: model.preparedFor || "The design team", source: { kind: "consultant", key: "architect" } }, { placeholder: !!model.preparedForGap });
   if (cover.siteAddress) push("cover", { label: "Site", text: cover.siteAddress, source: { kind: "fact", key: "site" } });
   if (cover.clientName) push("cover", { label: "Client", text: cover.clientName, source: { kind: "fact", key: "client" } });
   push("cover", { label: "Drawing basis", text: cover.drawingBasis || "Not yet recorded", source: { kind: "meta", key: "planRev" } }, { placeholder: !cover.drawingBasis });
   if (model.projectLabel) push("cover", { label: "Project", text: model.projectLabel, source: { kind: "fact", key: "project" } });
-  for (const r of model.project) push("project", r, { placeholder: !!r.gap });
+  for (const r of model.project) push("project", r, { gap: !!r.gap });
   for (const r of model.site) push("site", r);
   for (const p of model.points) push("points", { label: String(p.n), text: `${p.text} · ${p.who}${p.by ? ` · ${p.by}` : ""}`, ids: p.ids, source: { kind: "record" } });
-  for (const g of model.roomGroups) for (const r of g.rows) push("rooms", { label: r.room, text: `${r.work}${r.placeholder ? " · Brief to follow." : ""}${r.text ? ` ${r.text}` : ""}`, ids: r.ids, source: { kind: "room", key: r.roomIds.join(",") } }, { group: model.floorBands ? g.floor : "", placeholder: r.placeholder });
+  for (const g of model.roomGroups) {
+    for (const r of g.rows) {
+      const segments = r.placeholder ? [{ text: `${r.work} · `, muted: false }, { text: "Brief to follow.", muted: true }, ...(r.text ? [{ text: ` ${r.text}`, muted: false }] : [])] : null;
+      push("rooms", { label: r.room, text: `${r.work}${r.placeholder ? " · Brief to follow." : ""}${r.text ? ` ${r.text}` : ""}`, ids: r.ids, source: { kind: "room", key: r.roomIds.join(",") } },
+        { group: model.floorBands ? g.floor : "", placeholder: !!r.placeholder, ...(segments ? { segments } : {}) });
+    }
+  }
   for (const r of model.selections) push("selections", r);
   for (const r of model.outside) push("outside", r);
   return lines;
 }
+/** The section titles, unnumbered. Use briefSectionTitles(model) for the numbers the PDF prints. */
 export const BRIEF_SECTION_TITLES = { cover: "Cover", project: "01 The project", site: "02 Site and constraints", points: "03 Needed for the next drawing issue", rooms: "04 Rooms", selections: "05 Selections that affect the drawings", outside: "06 Outside this job" };
+const SECTION_WORDS = { project: "The project", site: "Site and constraints", points: "Needed for the next drawing issue", rooms: "Rooms", selections: "Selections that affect the drawings", outside: "Outside this job" };
+/**
+ * The section titles as the PDF prints them (buildArchitectBriefPayload): numbered in print order, counting only the
+ * sections that print, and 05 retitled "Work and selections that affect the drawings" when it holds work. A section that
+ * doesn't print keeps its words without a number. { cover, project, site, points, rooms, selections, outside }.
+ */
+export function briefSectionTitles(model) {
+  const m = model || {};
+  const has = (list) => (list || []).some((r) => r && r.text);
+  const present = {
+    project: has(m.project), site: has(m.site), points: has(m.points),
+    rooms: (m.roomGroups || []).some((g) => (g.rows || []).some((r) => r && (r.text || r.placeholder || r.work))),
+    selections: has(m.selections), outside: has(m.outside),
+  };
+  const words = { ...SECTION_WORDS, selections: m.selectionsTitle || SECTION_WORDS.selections };
+  const out = { cover: "Cover" };
+  let n = 0;
+  for (const k of ["project", "site", "points", "rooms", "selections", "outside"]) out[k] = present[k] ? `${String(++n).padStart(2, "0")} ${words[k]}` : words[k];
+  return out;
+}

@@ -3,10 +3,12 @@
  *
  * Everything waiting on someone, grouped by who in the order the architect reads it. The list IS openPoints() from
  * src/lib/briefModel.js (scope "next_issue" = the brief's numbered "Needed for the next drawing issue" list; "all" adds
- * the client's finish choices); this file never decides what is open. Each row:
+ * the client's finish choices), through needsAction.actionPoints: every element is its own row here (merge: false), even
+ * where the printed 03 asks two in one line ("Retaining and pool"). This file never decides what is open. Each row:
  *   subject · place, then what's needed (or an amber prompt), tags, the by-when pill and a 44 px ✓
  *   ✓ closes it (a technical check asks for its drawing or document reference first) into "Done today", Undo for 5 s
- *   no one named: one tap on [Architect] [Engineer] [Energy assessor] [Client] [More…] names who
+ *   no one named: one tap on [Architect] [Engineer] [Energy assessor] [Client] [More…] names who, keeping any words or
+ *   by-when already typed (needsAction.assignPatch), with Undo
  *   the row body opens the record (onOpenRecord(id, ids)); a row with nothing asked yet opens the "Needs action from…"
  *   sheet at "What's needed" instead, as its words say; the pill and More… open the sheet too
  * "Copy list" copies plain text. Nothing is ever sent from the Hub.
@@ -14,17 +16,20 @@
  * initialFilter: "next_issue" (the default) | "all" | "unnamed" — the next-issue list opened at its "No one named yet"
  * group, scrolled to and highlighted (the Documents step's "Name who").
  *
- * A 420 px right drawer on a tablet or desktop, a full-screen sheet on a phone. It renders in place (no portal), so the
- * record drawer opened from a row, mounted after it, sits on top of it and closing that drawer comes back to the list.
+ * A 420 px right drawer on a tablet or desktop, a full-screen sheet on a phone. It is portalled to <body> (so no parent's
+ * margin or stacking moves it), holds the "register-overlay-open" body flag while open (the floating buttons step aside)
+ * and registers its Escape as a layer (src/lib/overlayFlag.js): the record drawer opened from a row, a sheet or an open
+ * reference field are later layers, so Escape closes those first and comes back to the list.
  */
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { genId } from "../../../../lib/register.js";
-import { openPoints } from "../../../../lib/briefModel.js";
 import {
-  groupPoints, pointKey, pointSubject, pointLine, pointTags, copyListText, copiedWords, choiceByKey, setActionPatch, prefillWhat,
-  defaultDue, donePatch, checkedPatch, undoPatchFor, isLocked, openingView, rowOpensSheet, INLINE_WHO_KEYS, WHO_CHOICES, WHOLE_JOB_ACTION_SEED,
+  groupPoints, pointKey, pointSubject, pointLine, pointTags, copyListText, copiedWords, choiceByKey, assignPatch, addedWords,
+  donePatch, checkedPatch, undoPatchFor, isLocked, openingView, rowOpensSheet, actionPoints, INLINE_WHO_KEYS, WHO_CHOICES, WHOLE_JOB_ACTION_SEED,
   UNNAMED_GROUP,
 } from "../../../../lib/needsAction.js";
+import { useBodyFlag, useEscapeLayer } from "../../../../lib/overlayFlag.js";
 import { NeedsActionSheet, ActionToast } from "./NeedsAction.jsx";
 
 // The header pill's numbers live with the rules; exported here too so the pill and the panel come from one import.
@@ -69,6 +74,11 @@ function PointRow({ p, hint, fading, arrived, checking, refText, onRefText, onBo
     return () => cancelAnimationFrame(r);
   }, [shown]);
   const refId = useId();
+  // The open reference field is its own layer: Escape cancels it before it would close the list.
+  const cancelCheck = useRef(onCheckCancel);
+  useEffect(() => { cancelCheck.current = onCheckCancel; });
+  const onEscape = useCallback(() => cancelCheck.current?.(), []);
+  useEscapeLayer(!!checking, onEscape);
   const line = pointLine(p);
   const tags = pointTags(p);
   const subject = pointSubject(p);
@@ -112,7 +122,7 @@ function PointRow({ p, hint, fading, arrived, checking, refText, onRefText, onBo
           <label htmlFor={refId} className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Drawing or document reference</label>
           <div className="flex gap-2">
             <input id={refId} type="text" required autoFocus value={refText} onChange={(e) => onRefText(e.target.value)} placeholder="e.g. A301 Rev D detail 4"
-              onKeyDown={(e) => { if (e.key === "Enter") onCheckSave(); if (e.key === "Escape") { e.stopPropagation(); onCheckCancel(); } }}
+              onKeyDown={(e) => { if (e.key === "Enter") onCheckSave(); }}
               className="focus-ring h-11 min-w-0 flex-1 rounded-lg border border-hairline bg-surface px-3 text-base text-ink sm:text-sm" />
             <button type="button" disabled={!refText.trim()} onClick={onCheckSave} className="focus-ring h-11 rounded-lg bg-primary px-4 text-sm font-bold text-white disabled:opacity-40">Save</button>
             <button type="button" onClick={onCheckCancel} className="focus-ring h-11 rounded-lg px-2 text-sm text-muted hover:text-ink">Cancel</button>
@@ -139,8 +149,8 @@ export default function ActionsPanel({ reg, context, updateItem, upsertItem, add
   const listRef = useRef(null);
   const panelRef = useRef(null);
   const groupRefs = useRef({});
-  const next = useMemo(() => (reg ? openPoints(reg, context, { scope: "next_issue" }) : []), [reg, context]);
-  const all = useMemo(() => (reg ? openPoints(reg, context, { scope: "all" }) : []), [reg, context]);
+  const next = useMemo(() => actionPoints(reg, context, "next_issue"), [reg, context]);
+  const all = useMemo(() => actionPoints(reg, context, "all"), [reg, context]);
   const points = filter === "all" ? all : next;
   const groups = groupPoints(points);
   const byId = useMemo(() => new Map((reg?.items || []).map((i) => [i.id, i])), [reg]);
@@ -163,26 +173,19 @@ export default function ActionsPanel({ reg, context, updateItem, upsertItem, add
   const head = useRef(null);
   const by = actor?.full_name || actor?.email || "Blue Leaf";
 
-  // Open: focus the title, hold the page still; close: give focus back. Escape closes (a sheet open on top closes first).
-  const sheetOpen = useRef(false);
-  useEffect(() => { sheetOpen.current = !!sheet; }, [sheet]);
+  // Open: focus the title, hold the page still; close: give focus back. Escape closes, as a layer: a sheet, an open
+  // reference field or the record drawer opened on top are later layers and close first.
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; });
+  const onEscape = useCallback(() => closeRef.current?.(), []);
+  useEscapeLayer(true, onEscape);
+  useBodyFlag("register-overlay-open", true);
   useEffect(() => {
     const before = typeof document !== "undefined" ? document.activeElement : null;
     head.current?.focus();
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e) => {
-      if (e.key !== "Escape" || sheetOpen.current) return;
-      // A dialog opened on top (the record drawer from a row) closes first.
-      const other = document.activeElement?.closest?.("[role='dialog']");
-      if (other && !panelRef.current?.contains(other)) return;
-      e.stopPropagation();
-      closeRef.current?.();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => { window.removeEventListener("keydown", onKey, true); document.body.style.overflow = prev; before?.focus?.(); };
+    return () => { document.body.style.overflow = prev; before?.focus?.(); };
   }, []);
   // After the title takes focus on opening: the group asked for, at the top of the list.
   useEffect(() => {
@@ -203,13 +206,18 @@ export default function ActionsPanel({ reg, context, updateItem, upsertItem, add
   const openSheet = (p, el, focusWhat = false) => { anchor.current = el; setSheet({ id: p.ids[0], extraIds: p.ids.slice(1), focusWhat }); };
   const openRow = (p, el) => (rowOpensSheet(p) || !onOpenRecord ? openSheet(p, el, rowOpensSheet(p)) : onOpenRecord(p.ids[0], p.ids));
 
+  // One tap names who. Words and a by-when already typed under "No one named yet" stay (assignPatch); Undo puts it back.
   function assign(p, key) {
     const c = choiceByKey(key, context);
     const k = pointKey(p);
+    const items = itemsOf(p);
+    const patches = items.map((it) => [it, assignPatch(reg, it, c)]);
+    const undo = patches.map(([it, patch]) => [it.id, undoPatchFor(it, patch)]);
     fadeThen(k, () => {
-      for (const it of itemsOf(p)) save(it.id, setActionPatch(it, c, { what: prefillWhat(reg, it), due: defaultDue(key) }));
+      for (const [it, patch] of patches) save(it.id, patch);
       setArrived((a) => ({ ...a, [k]: true }));
       later(() => setArrived((a) => omit(a, k)), 600);
+      setToast({ id: genId(), text: addedWords(c, patches[0]?.[1]?.actionDue || ""), undo: () => { for (const [id, patch] of undo) save(id, patch); } });
     });
   }
   function closePoint(p, patchFor, words) {
@@ -246,7 +254,7 @@ export default function ActionsPanel({ reg, context, updateItem, upsertItem, add
   const hintKey = pointKey(points.find((p) => pointLine(p).nothingAsked) || null);
   const seg = (on) => `focus-ring h-11 whitespace-nowrap px-3 text-[13px] ${on ? "bg-primary font-bold text-white" : "bg-surface text-ink hover:bg-page"}`;
 
-  return (
+  const panel = (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 hidden bg-ink/20 sm:block" aria-hidden="true" onClick={onClose} />
       <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="actions-panel"
@@ -316,4 +324,6 @@ export default function ActionsPanel({ reg, context, updateItem, upsertItem, add
       <ActionToast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
+  // Rendered in place where there is no document (server rendering, tests).
+  return typeof document === "undefined" ? panel : createPortal(panel, document.body);
 }

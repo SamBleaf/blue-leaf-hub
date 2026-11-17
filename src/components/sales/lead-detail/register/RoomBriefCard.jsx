@@ -11,48 +11,66 @@
  *
  * Also exported: WorkControl (the room's one Work word), EarlierAnswerBanner (an earlier whole-room answer that disagrees)
  * and FloorChips (the floor, chosen from chips).
+ *
+ * After the contract (a baselined or locked brief) the sentence, chips and size are read-only: the server refuses those
+ * changes, so they are never offered, and the caption says to use a variation.
  */
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   genId, makeItem, answerConfigFor, questionById, resolvePromptId, ROOM_SCOPES, ROOM_WORK_WORDS, ROOM_SCOPES_WITH_WORK, ROOM_MUST_HAVES, ROOM_USED_BY, ROOM_BRIEF_PROMPT,
 } from "../../../../lib/register.js";
 import { clean, isUnfinished, hasRoomBrief, roomBriefRecord, disagreeingScope, roomRow, architectBriefModel, labelOf } from "../../../../lib/briefModel.js";
 import {
   briefSeed, roomSeed, standardBriefText, toggleAnswerList, connectedFrom, connectCandidates, earlierWords, workWordFor, keepWorkPlan, changeWorkPlan,
-  readdable, contractFixed, setRoomScope, renameRoomMeta, moveRoomToFloor, floorChoices, floorKey, normaliseFloor, workLabel,
+  readdable, contractFixed, setRoomScope, renameRoomMeta, moveRoomToFloor, floorChoices, floorKey, normaliseFloor, workLabel, savedFloors, floorsPatch,
 } from "../../../../lib/roomScreen.js";
+import { useEscapeLayer } from "../../../../lib/overlayFlag.js";
 import { ChoiceChips } from "./ChoiceRow.jsx";
 import { AutoTextarea, ChipLine, ChoiceChip, NameInput, Segmented, Toast } from "./RoomUi.jsx";
 import { useToast } from "./useRoomUi.js";
 
 const label13 = "text-[13px] font-bold text-ink";
 const textBtn = "focus-ring inline-flex min-h-[44px] items-center rounded px-1 text-sm font-bold text-primary hover:underline";
-const inputCls = "inp w-full text-base sm:text-sm";
+const inputCls = "inp min-h-[44px] w-full px-3 text-[16px] sm:text-sm";   // 16 px on a phone, so iOS doesn't zoom
 
-/** The room's one Work word: New · Renovated · Altered · No change ("Not in this job" sits behind ⋯). */
-export function WorkControl({ room, onChange, readOnly, full = false }) {
+/**
+ * The room's one Work word: New · Renovated · Altered · No change ("Not in this job" sits behind ⋯). minSegment: the
+ * narrowest a segment may be before the control wraps to 2 × 2 (96 px in the tablet room screen, spec S3).
+ */
+export function WorkControl({ room, onChange, readOnly, full = false, minSegment = 0 }) {
   return (
     <Segmented full={full} label="Work" value={room?.scope} disabled={readOnly} onChange={(k) => { if (k !== room.scope) onChange(k); }}
-      options={ROOM_WORK_WORDS.map((k) => [k, ROOM_SCOPES[k]])} testId="work-control" />
+      options={ROOM_WORK_WORDS.map((k) => [k, ROOM_SCOPES[k]])} minSegment={minSegment} testId="work-control" />
   );
 }
 
-/** The floor, from chips: the job's floors, Ground and Upper, and "+ Floor" for a named one. Saves on tap. */
+/**
+ * The floor, from chips: the job's floors (with one added on the Rooms list and still empty), Ground and Upper, and
+ * "+ Floor" for a named one. Saves on tap.
+ */
 export function FloorChips({ reg, room, mutateMeta, readOnly, onDone }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const rooms = reg.meta.rooms || [];
-  const set = (level) => { mutateMeta({ rooms: moveRoomToFloor(rooms, room.id, level) }); onDone?.(); };
+  const extra = savedFloors(reg.meta);
+  // Escape while naming a floor closes only the name box (the top layer), never the menu or the workspace under it.
+  const stopNaming = useCallback(() => { setNaming(false); setName(""); }, []);
+  useEscapeLayer(naming && !readOnly, stopNaming);
+  const set = (level) => {
+    const next = moveRoomToFloor(rooms, room.id, level);
+    mutateMeta({ rooms: next, ...floorsPatch(reg.meta.floors, next) });
+    onDone?.();
+  };
   const save = () => { const n = normaliseFloor(name); if (clean(name)) set(n); setNaming(false); setName(""); };
   return (
     <ChipLine heading="Floor">
-      {floorChoices(rooms).map((f) => (
+      {floorChoices(rooms, extra).map((f) => (
         <ChoiceChip key={f.key} on={floorKey(room.level) === f.key} disabled={readOnly} onClick={() => set(f.level)}>{f.label}</ChoiceChip>
       ))}
       {!readOnly && (naming ? (
         <span className="flex w-full items-center gap-2 sm:w-auto">
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setNaming(false); }}
-            placeholder="e.g. Lower ground" aria-label="Floor name" className="inp min-h-[44px] flex-1 text-base sm:w-44 sm:text-sm" />
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+            placeholder="e.g. Lower ground" aria-label="Floor name" className="inp min-h-[44px] flex-1 px-3 text-[16px] sm:w-44 sm:text-sm" />
           <button type="button" onClick={save} className="min-h-[44px] rounded-lg bg-primary px-3 text-sm font-bold text-white">Add</button>
         </span>
       ) : <ChoiceChip tone="add" onClick={() => setNaming(true)}>+ Floor</ChoiceChip>)}
@@ -158,6 +176,9 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
   const brief = room ? roomBriefRecord(reg, room) : null;
   const [showWho, setShowWho] = useState(() => !!(brief?.answer?.usedBy?.length || brief?.quantity != null));
   if (!room) return null;
+  // The signed contract fixes the brief's words, chips and size (the server refuses a change): show them, don't offer them.
+  const fixed = contractFixed(brief);
+  const off = readOnly || fixed;
   const rooms = reg.meta.rooms || [];
   const seed = briefSeed(room, seedId.current);
   const writeBrief = (partial) => (brief ? updateItem(brief.id, partial) : upsertItem(seed, partial));
@@ -174,7 +195,8 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
   const ownChips = !mustHaves.length || (brief?.answer?.selected || []).some((s) => !s.stale);
   const mhSeed = (q) => { if (!mhIds.current[q.id]) mhIds.current[q.id] = genId(); return { ...roomSeed(q, room), id: mhIds.current[q.id] }; };
   const toggleList = (key, value) => writeBrief({ answer: toggleAnswerList(brief?.answer, key, value) });
-  const caption = has ? { t: "In the architect's brief", c: "text-muted" }
+  const caption = fixed ? { t: "Part of the signed contract — change it through a variation.", c: "font-bold text-ink" }
+    : has ? { t: "In the architect's brief", c: "text-muted" }
     : work ? { t: "Needed before the architect's brief can go", c: "font-bold text-amber-800" } : { t: "No brief needed", c: "text-muted" };
   const typing = (on) => onTypingChange?.(on);
   const rename = (v) => { const next = renameRoomMeta(rooms, room.id, v); if (next !== rooms) mutateMeta({ rooms: next }); };
@@ -182,16 +204,17 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
   const box = (
     <div className="space-y-1.5">
       <label htmlFor={`room-brief-${room.id}`} className={label13}>What must this room do?</label>
-      <AutoTextarea id={`room-brief-${room.id}`} value={text} disabled={readOnly} spellCheck enterKeyHint="done" rows={3}
+      <AutoTextarea id={`room-brief-${room.id}`} value={text} disabled={off} spellCheck enterKeyHint="done" rows={3}
         onChange={(e) => writeBrief({ description: e.target.value })}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
         onFocus={(e) => { typing(true); const el = e.currentTarget; setTimeout(() => { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch { /* old browser */ } }, 300); }}
         onBlur={() => typing(false)}
         placeholder="Who uses it, what happens here, what it must be near or keep. Their words are fine."
-        className="block w-full resize-none rounded-lg border border-hairline bg-surface px-3 py-2.5 text-base leading-[22px] text-ink placeholder:text-muted focus:border-primary focus:outline-none sm:text-[15px]"
+        className="block w-full resize-none rounded-lg border border-hairline bg-surface px-3 py-2.5 text-base leading-[22px] text-ink placeholder:text-muted focus:border-primary focus:outline-none disabled:bg-page disabled:text-ink sm:text-[15px]"
         data-testid="room-brief-text" />
+      {compact && fixed && <p className="text-[13px] font-bold text-ink" data-testid="brief-fixed">Part of the signed contract — change it through a variation.</p>}
       {isUnfinished(text) && <p className="text-[13px] font-bold text-amber-800">Looks unfinished — it won&apos;t print until it&apos;s finished.</p>}
-      {!clean(text) && !readOnly && (
+      {!clean(text) && !off && (
         <div className="pt-1"><ChoiceChip tone="add" onClick={() => writeBrief({ description: standardBriefText(room) })} testId="standard-room">Nothing special — standard room</ChoiceChip></div>
       )}
     </div>
@@ -202,9 +225,9 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
       <p className={label13}>Connects to</p>
       <div className="flex flex-wrap gap-2">
         {[...cand.shown, ...(moreRooms ? cand.more : [])].map((r) => (
-          <ChoiceChip key={r.id} on={connects.includes(r.id)} disabled={readOnly} onClick={() => toggleList("connectsTo", r.id)}>{clean(r.name)}</ChoiceChip>
+          <ChoiceChip key={r.id} on={connects.includes(r.id)} disabled={off} onClick={() => toggleList("connectsTo", r.id)}>{clean(r.name)}</ChoiceChip>
         ))}
-        <ChoiceChip on={connects.includes("outside")} disabled={readOnly} onClick={() => toggleList("connectsTo", "outside")}>Outside</ChoiceChip>
+        <ChoiceChip on={connects.includes("outside")} disabled={off} onClick={() => toggleList("connectsTo", "outside")}>Outside</ChoiceChip>
         {cand.more.length > 0 && !moreRooms && <ChoiceChip tone="add" onClick={() => setMoreRooms(true)}>+ More rooms</ChoiceChip>}
       </div>
       {fromOthers.length > 0 && <p className="text-[13px] text-muted">{fromOthers.map((r) => `Connects to ${clean(r.name)} (set from the ${clean(r.name)})`).join(" · ")}</p>}
@@ -219,13 +242,13 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
         return (
           <div key={q.id} className="space-y-1.5">
             <p className="text-xs text-muted" title={q.text}>{q.short}</p>
-            <ChoiceChips qid={q.id} config={cfg} item={it} disabled={readOnly || !!it.sync?.locked}
+            <ChoiceChips qid={q.id} config={cfg} item={it} disabled={readOnly || contractFixed(it)}
               onPatch={(p) => (item ? updateItem(item.id, p) : upsertItem(mhSeed(q), p))} />
           </div>
         );
       })}
       {ownChips && r004 && (
-        <ChoiceChips qid={ROOM_BRIEF_PROMPT} config={r004} item={brief || makeItem(seed)} disabled={readOnly} onPatch={writeBrief} showNoted={false} />
+        <ChoiceChips qid={ROOM_BRIEF_PROMPT} config={r004} item={brief || makeItem(seed)} disabled={off} onPatch={writeBrief} showNoted={false} />
       )}
     </div>
   );
@@ -234,7 +257,7 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
     return (
       <div className="space-y-4" data-testid="room-brief-compact">
         <label className="block space-y-1.5"><span className={label13}>Room name</span>
-          <NameInput value={room.name} disabled={readOnly} onCommit={rename} className={`${inputCls} min-h-[44px]`} aria-label="Room name" />
+          <NameInput value={room.name} disabled={readOnly} onCommit={rename} className={inputCls} aria-label="Room name" />
         </label>
         <FloorChips reg={reg} room={room} mutateMeta={mutateMeta} readOnly={readOnly} />
         <div className="space-y-1.5"><p className={label13}>Work</p>
@@ -263,13 +286,13 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
       ) : (
         <div className="space-y-3">
           <ChipLine heading="Who uses it">
-            {Object.entries(ROOM_USED_BY).map(([k, l]) => <ChoiceChip key={k} on={usedBy.includes(k)} disabled={readOnly} onClick={() => toggleList("usedBy", k)}>{l}</ChoiceChip>)}
+            {Object.entries(ROOM_USED_BY).map(([k, l]) => <ChoiceChip key={k} on={usedBy.includes(k)} disabled={off} onClick={() => toggleList("usedBy", k)}>{l}</ChoiceChip>)}
           </ChipLine>
           <label className="flex items-center gap-2">
             <span className="text-xs text-muted">Rough size</span>
-            <input type="number" inputMode="decimal" min="0" step="any" disabled={readOnly} value={brief?.quantity ?? ""} aria-label="Rough size in square metres"
+            <input type="number" inputMode="decimal" min="0" step="any" disabled={off} value={brief?.quantity ?? ""} aria-label="Rough size in square metres"
               onChange={(e) => { const v = e.target.value; writeBrief(v === "" ? { quantity: null, unit: brief?.unit === "m²" ? "" : brief?.unit || "" } : { quantity: Number(v), unit: "m²" }); }}
-              className="inp min-h-[44px] w-24 text-base sm:text-sm" />
+              className="inp min-h-[44px] w-24 px-3 text-[16px] sm:text-sm" />
             <span className="text-sm text-ink">m²</span>
           </label>
         </div>

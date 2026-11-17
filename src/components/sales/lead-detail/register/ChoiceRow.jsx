@@ -4,30 +4,38 @@
  * line (it is the label's hover title, or a long-press), no "Recorded:" echo.
  *
  * The chips use the existing answer machinery (registerChoice.js: choiceView, toggleOption, itemPatch …) exactly as the
- * ProgressiveChoiceCard does, so a tap stores the same answer it always did. "Not decided yet", "Not needed here", the
- * office note, the settle-out answers and "Product details…" (the full PromptRow: office fields, approvals, portal) sit
- * behind ⋯. The K-005 "Engineered stone" option is never offered; an existing one shows as not allowed.
+ * ProgressiveChoiceCard does, so a tap stores the same answer it always did. The ⋯ menu is spec S3's, exactly:
+ *   Not decided yet · Not needed here · Note for the office (doesn't print) · Product details… · Remove answer
+ * "Product details…" opens PromptRow's office mode (product, manufacturer, model, colour, supplier, client wording,
+ * supplied by, technical check, drawing ref, approvals, the client portal, and the settle-outs By others · Excluded ·
+ * Deferred · Existing to remain). Disposition and record-type selects stay in the Register table. The K-005
+ * "Engineered stone" option is never offered; an existing one shows as not allowed.
+ *
+ * A record that is part of the signed contract (roomScreen.contractFixed: baselined or locked) can't change its content;
+ * who, what's needed and by when stay open on the ⚑, as the server allows.
  *
  * Also exported:
  *   ChoiceChips   the chips alone (the room brief's must-haves use them)
- *   ChoiceRepeat  one row per record for a question that repeats, with "+ Add another"
+ *   ChoiceRepeat  one row per record for a question that repeats, with "+ Add another"; a house standard laid out one row
+ *                 per zone ("+ Scullery" for the rarer ones); renderBelow(item) for what is linked under a row (gutters)
  *   ApplianceRow  K-008: one chip per appliance, each tap one record (stable id per appliance), "Mostly supplied by"
  */
 import { useRef, useState } from "react";
 import {
   makeItem, genId, configForRow, isGuidedConfig, answerIsEditable, choiceView, itemPatch, toggleOption, setOpenWords, removeChoice, reuseChoice,
-  chooseZone, chooseElement, setZoneWords, setElementWords, toggleArea, toggleNotDecided, toggleNotApplicable, setAnswerNote, settleOptions,
-  settlePatch, statedText, dispositionLabel, UNRESOLVED_REASONS, RESPONSIBILITIES, HIDDEN_OPTION_IDS,
+  chooseZone, chooseElement, setZoneWords, setElementWords, toggleArea, toggleNotDecided, toggleNotApplicable, setAnswerNote,
+  statedText, dispositionLabel, UNRESOLVED_REASONS, RESPONSIBILITIES, HIDDEN_OPTION_IDS, OPEN_OPTION_IDS,
 } from "../../../../lib/register.js";
 import { clean, labelOf } from "../../../../lib/briefModel.js";
-import { usableNotedWords, notAllowedOption } from "../../../../lib/roomScreen.js";
+import { usableNotedWords, notAllowedOption, contractFixed } from "../../../../lib/roomScreen.js";
 import { NeedsActionFlag } from "./NeedsAction.jsx";
 import PromptRow from "./PromptRow.jsx";
 import { ChoiceChip, ChipLine, DraftInput, IconButton, MenuDivider, MenuItem, Popover, Segmented, Confirm } from "./RoomUi.jsx";
 import { useNarrow } from "./useRoomUi.js";
 
 const tidyWords = (v) => statedText(String(v || "").trim());
-const inputCls = "inp w-full text-base sm:text-sm";
+// 44 px, and 16 px on a phone so iOS doesn't zoom (the input's own size wins over .inp).
+const inputCls = "inp min-h-[44px] w-full px-3 text-base sm:text-sm";
 const textBtn = "focus-ring inline-flex min-h-[44px] items-center rounded px-1 text-sm font-bold text-primary hover:underline";
 const SETTLED = new Set(["by_others", "excluded", "deferred", "retain"]);
 
@@ -76,7 +84,8 @@ export function ChoiceChips({ qid, config, item, disabled, onPatch, usedZones, c
         return (
           <ChipLine key={level.key} heading={k || view.element ? level.heading : null}>
             {options.map((o) => (hidden?.has(o.id)
-              ? <ChoiceChip key={o.id} tone="bad" disabled={disabled} title={`${o.label} can't be used. Tap to take it off, then choose another with the client.`}
+              // Only ever the stored value: it reads as chosen (pressed) and its name, the title, says it can't be used.
+              ? <ChoiceChip key={o.id} on tone="bad" disabled={disabled} title={`${o.label} can't be used. Tap to take it off, then choose another with the client.`}
                   onClick={() => write(toggleOption(config, item.answer, o.path, { keepReplaced: hasDetails }))}>{o.label} · not allowed</ChoiceChip>
               : <ChoiceChip key={o.id} on={o.on} disabled={disabled || o.disabled} testId={`choice-${tid}-${o.path.join("-")}`}
                   onClick={() => write(toggleOption(config, item.answer, o.path, { keepReplaced: hasDetails }))}>{o.label}</ChoiceChip>))}
@@ -118,6 +127,7 @@ export function ChoiceChips({ qid, config, item, disabled, onPatch, usedZones, c
 function statusOf(item, view, config, qid, saveState) {
   const out = [];
   if (item.sync?.locked) out.push({ text: "Approved under the contract — change it through a variation.", tone: "muted" });
+  else if (contractFixed(item)) out.push({ text: "Part of the signed contract — change it through a variation.", tone: "muted" });
   const bad = notAllowedOption(qid, item);
   if (bad) out.push({ text: `${bad.label} can't be used — choose another with the client`, tone: "red" });
   if (view?.notApplicable || (item.disposition === "na" && !view?.notApplicable)) out.push({ text: "Not needed here", tone: "muted" });
@@ -142,7 +152,7 @@ const TONE = { muted: "text-muted", amber: "text-amber-800", red: "text-red-700"
  */
 export default function ChoiceRow({
   reg, context, question, item, seed, room, upsertItem, updateItem, deleteItem, readOnly, saveState, actor, onPortalItem,
-  rowTitle, fixedZone, usedZones, coveredQuestions, areaOptions,
+  rowTitle, fixedZone, usedZones, coveredQuestions, areaOptions, assumptionOf,
 }) {
   const narrow = useNarrow();
   const menuBtn = useRef(null);
@@ -155,7 +165,7 @@ export default function ChoiceRow({
   const qid = question?.id || null;
   const config = configForRow(qid, it);
   const guided = isGuidedConfig(config) && answerIsEditable(it.answer);
-  const locked = !!it.sync?.locked;
+  const locked = contractFixed(it);     // the signed contract fixes its content (baselined or locked)
   const disabled = !!readOnly || locked;
   const patch = (partial) => (item ? updateItem(item.id, partial) : upsertItem(seed, partial));
   const write = (next) => patch(itemPatch(it, config, next));
@@ -195,13 +205,11 @@ export default function ChoiceRow({
                 onConfirm={() => { deleteItem(item.id); close(); }} onCancel={close} />
             ) : (
               <div role="menu">
-                {guided && !isAction && !disabled && <MenuItem checked={view.notDecided} onClick={pick(() => write(toggleNotDecided(config, it.answer)))}>Not decided yet</MenuItem>}
+                {guided && !isAction && !disabled && <MenuItem kind="checkbox" checked={!!view.notDecided} onClick={pick(() => write(toggleNotDecided(config, it.answer)))}>Not decided yet</MenuItem>}
                 {guided && !isAction && !disabled && !view.ownNotApplicable && (
-                  <MenuItem checked={view.notApplicable || legacyNa} onClick={pick(() => (legacyNa ? patch({ disposition: "undecided" }) : write(toggleNotApplicable(config, it.answer))))}>Not needed here</MenuItem>
+                  <MenuItem kind="checkbox" checked={!!(view.notApplicable || legacyNa)} onClick={pick(() => (legacyNa ? patch({ disposition: "undecided" }) : write(toggleNotApplicable(config, it.answer))))}>Not needed here</MenuItem>
                 )}
-                {guided && !disabled && settleOptions(config, { showDetail: true, current: it.disposition }).map(([d, label]) => (
-                  <MenuItem key={d} checked={it.disposition === d} onClick={pick(() => patch(settlePatch(it, config, d)))}>{label}</MenuItem>
-                ))}
+                {/* An office note isn't the answer: it stays open on a contract record (the server allows notes). */}
                 {guided && !readOnly && <MenuItem onClick={pick(() => setNoteOpen(true))}>Note for the office (doesn&apos;t print)</MenuItem>}
                 <MenuItem onClick={pick(() => setDetails(true))}>Product details…</MenuItem>
                 {item && deleteItem && !readOnly && !locked && <><MenuDivider /><MenuItem danger onClick={() => setMenu("remove")}>Remove answer</MenuItem></>}
@@ -227,53 +235,93 @@ export default function ChoiceRow({
 
       {details && (narrow ? (
         <Popover open narrow onClose={() => setDetails(false)} title={`${title}: product details`}>
-          <div className="pb-2"><DetailRow {...{ question, item, seed, actor, readOnly, saveState, patch, deleteItem, onPortalItem, fixedZone, usedZones, areaOptions, coveredQuestions }} /></div>
+          <div className="pb-2"><DetailRow {...{ question, item, seed, actor, readOnly, saveState, patch, onPortalItem, assumptionOf }} /></div>
         </Popover>
       ) : (
-        <div className="mt-2 rounded-lg border border-hairline bg-page p-2" data-testid={`details-${qid || it.id}`}>
-          <div className="flex items-center justify-between px-1 pb-1">
+        <div className="mt-2 rounded-lg border border-hairline bg-page p-3" data-testid={`details-${qid || it.id}`}>
+          <div className="flex items-center justify-between pb-1">
             <p className="text-xs font-bold uppercase tracking-wide text-muted">Product details</p>
             <button type="button" onClick={() => setDetails(false)} className={textBtn}>Close</button>
           </div>
-          <DetailRow {...{ question, item, seed, actor, readOnly, saveState, patch, deleteItem, onPortalItem, fixedZone, usedZones, areaOptions, coveredQuestions }} />
+          <DetailRow {...{ question, item, seed, actor, readOnly, saveState, patch, onPortalItem, assumptionOf }} />
         </div>
       ))}
     </div>
   );
 }
 
-/** The full record (PromptRow): office fields, approvals with their evidence, the client portal. */
-function DetailRow({ question, item, seed, actor, readOnly, saveState, patch, deleteItem, onPortalItem, fixedZone, usedZones, areaOptions, coveredQuestions }) {
+/**
+ * Product details: PromptRow's office mode (no codes, kind or category chips, help line, record-type or disposition
+ * select; the chips and the ⚑ are on the row above, Remove answer is in its ⋯).
+ */
+function DetailRow({ question, item, seed, actor, readOnly, saveState, patch, onPortalItem, assumptionOf }) {
   return (
-    <PromptRow question={question} item={item} seed={seed} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState} actionFlag={false}
-      onChange={patch} onDelete={item && deleteItem && !readOnly ? () => deleteItem(item.id) : null}
-      onPortal={item && onPortalItem ? (action, ev) => onPortalItem(item, action, ev) : null}
-      fixedZone={fixedZone} usedZones={usedZones} areaOptions={areaOptions} coveredQuestions={coveredQuestions} />
+    <PromptRow office question={question} item={item} seed={seed} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState} actionFlag={false}
+      onChange={patch} onPortal={item && onPortalItem ? (action, ev) => onPortalItem(item, action, ev) : null} assumptionOf={assumptionOf} />
   );
 }
 
 /**
  * One row per record for a question that repeats. A blank row isn't saved until something is answered; a used id is
  * never offered again, so a removed row stays removed (the RepeatRows rule).
+ *
+ * A house standard whose every zone is its own default (a floor per zone, paint per surface, kitchen and scullery) is laid
+ * out one row per usual zone, so the zone takes no tap; the rarer zones are a "+ Scullery" button away, and anything
+ * already recorded always has a row. renderBelow(item) adds what is linked under a saved row (gutters under a roof);
+ * noAdd leaves "+ Add another" off; titleOf(item) names a saved row.
  */
-export function ChoiceRepeat({ question, items, seed, readOnly, ...row }) {
+export function ChoiceRepeat({ question, items, seed, readOnly, renderBelow, noAdd, titleOf, ...row }) {
   const spare = useRef(genId());
-  const [added, setAdded] = useState(null);
+  const slotIds = useRef({});                    // the open row for each zone laid out, by zone
+  const [added, setAdded] = useState(null);      // the row opened by "+ Add another" or "+ Scullery": { id, zone? }
   const saved = new Set(items.map((i) => i.id));
   if (saved.has(spare.current)) spare.current = genId();
-  const openAdded = added && !saved.has(added) ? added : null;
-  const blankId = openAdded || (items.length ? null : spare.current);
-  const rows = [...items.map((i) => ({ id: i.id, item: i })), ...(blankId ? [{ id: blankId, item: null }] : [])];
+  for (const z of Object.keys(slotIds.current)) if (saved.has(slotIds.current[z])) delete slotIds.current[z];
+  const cfg = configForRow(question.id, makeItem(seed));
+  const zones = cfg?.repeat?.eachZone ? cfg.zones || [] : [];
+  const zoneOf = (i) => zones.find((z) => z.id === i.answer?.zone?.key) || null;
+  const openZone = (z) => OPEN_OPTION_IDS.has(z.id);
+  const seedFor = (id, zone) => ({ ...seed, id, ...(zone ? { answer: { ...(seed.answer || {}), zone: { key: zone.id, label: zone.label } } } : {}) });
+
+  const taken = new Set();
+  const laidOut = zones.filter((z) => !z.detail && !openZone(z)).map((zone) => {
+    const item = items.find((i) => !taken.has(i.id) && zoneOf(i)?.id === zone.id) || null;
+    if (item) taken.add(item.id);
+    if (!item && !slotIds.current[zone.id]) slotIds.current[zone.id] = genId();
+    return { id: item ? item.id : slotIds.current[zone.id], item, zone };
+  });
+  const openAdded = added && !saved.has(added.id) ? added : null;
+  const blankId = zones.length ? null : openAdded ? openAdded.id : items.length ? null : spare.current;
+  const rows = [
+    ...laidOut,
+    ...items.filter((i) => !taken.has(i.id)).map((item) => ({ id: item.id, item, zone: zoneOf(item) })),
+    ...(blankId ? [{ id: blankId, item: null, zone: null }] : []),
+    ...(zones.length && openAdded ? [{ id: openAdded.id, item: null, zone: openAdded.zone }] : []),
+  ];
+  const rowZones = new Set(rows.map((r) => r.zone?.id).filter(Boolean));
+  const moreZones = zones.filter((z) => (z.detail || openZone(z)) && (openZone(z) ? openAdded?.zone?.id !== z.id : !rowZones.has(z.id)));
+  const usedZones = zones.length ? new Set(items.map((i) => i.answer?.zone?.key).filter((k) => k && !OPEN_OPTION_IDS.has(k))) : row.usedZones;
   const short = question.short;
+  const addBtn = "focus-ring inline-flex min-h-[44px] items-center rounded-full border border-dashed border-primary px-4 text-sm font-bold text-primary hover:bg-primary/5";
+  const titleFor = ({ item, zone }, k) => {
+    if (zone) return zone.label;
+    if (item && titleOf?.(item)) return titleOf(item);
+    return k ? `${short} · ${clean(item?.answer?.zone?.label) || clean(item?.answer?.element?.label) || "another"}` : undefined;
+  };
   return (
-    <div>
-      {rows.map(({ id, item }, k) => (
-        <ChoiceRow key={id} question={question} item={item} seed={{ ...seed, id }} readOnly={readOnly} {...row}
-          rowTitle={k ? `${short} · ${clean(item?.answer?.element?.label) || "another"}` : undefined} />
+    <div data-testid={`repeat-${question.id}`}>
+      {zones.length > 0 && <p className="px-4 pt-3 text-[15px] font-bold leading-5 text-ink sm:text-sm" title={question.text || undefined}>{short}</p>}
+      {rows.map((r, k) => (
+        <div key={r.id} className={zones.length ? "pl-3" : undefined} data-testid={r.zone ? `slot-${question.id}-${r.zone.id}` : undefined}>
+          <ChoiceRow question={question} item={r.item} seed={seedFor(r.id, r.zone)} readOnly={readOnly} {...row}
+            rowTitle={titleFor(r, k)} fixedZone={!!r.zone || row.fixedZone} usedZones={usedZones} />
+          {r.item && renderBelow?.(r.item)}
+        </div>
       ))}
-      {!readOnly && !blankId && (
-        <div className="px-4 pb-3">
-          <button type="button" onClick={() => setAdded(genId())} className="focus-ring inline-flex min-h-[44px] items-center rounded-full border border-dashed border-primary px-4 text-sm font-bold text-primary hover:bg-primary/5">+ Add another</button>
+      {!readOnly && (moreZones.length > 0 || (!zones.length && !blankId && !noAdd)) && (
+        <div className="flex flex-wrap gap-2 px-4 pb-3">
+          {!zones.length && !blankId && !noAdd && <button type="button" onClick={() => setAdded({ id: genId() })} className={addBtn} data-testid={`add-another-${question.id}`}>+ Add another</button>}
+          {moreZones.map((z) => <button key={z.id} type="button" onClick={() => setAdded({ id: genId(), zone: z })} className={addBtn} data-testid={`add-zone-${question.id}-${z.id}`}>+ {z.label}</button>)}
         </div>
       )}
     </div>

@@ -119,7 +119,7 @@ ok("partition: only the genuine choice goes to client_selections",
   const loadedDemo = rsiRowToItem(rsiRow);
   const sb = fakeSb({ tables, rpc: () => ({ data: { ok: true, results: [] }, error: null }) });
   await saveRegister(sb, lead.id, {
-    meta: { ...meta, rev: 4, planRev: "A102 Rev D" },
+    meta: { ...meta, rev: 4, planRev: "A102 Rev D", floors: ["Upper"] },
     changes: [
       makeItem({ ...loadedSink, product: "Franke Bell 1.5", sync: loadedSink.sync }),                                // same store → update
       makeItem({ ...loadedDemo, itemKind: "selection", disposition: "included", sync: loadedDemo.sync }),              // scope → selection
@@ -129,6 +129,7 @@ ok("partition: only the genuine choice goes to client_selections",
   }, { actor: { id: null, name: "T" } });
   const ops = sb.calls.find((c) => c.rpc === "register_apply")?.args.p_ops || [];
   ok("save: meta change → meta_set with base rev", ops.some((o) => o.op === "meta_set" && o.base_rev === 4 && o.meta.planRev === "A102 Rev D"));
+  ok("save: a floor added before any room is on it reaches the project (meta.floors, P7)", ops.some((o) => o.op === "meta_set" && JSON.stringify(o.meta.floors) === JSON.stringify(["Upper"])));
   ok("save: same-store edit → sel_update with the loaded base version", ops.some((o) => o.op === "sel_update" && o.row_id === "row-sink" && o.base_version === selRow.updated_at && o.row.selected_product === "Franke Bell 1.5"));
   ok("save: reclassification → scope_delete + sel_insert with the SAME stable id",
     ops.some((o) => o.op === "scope_delete" && o.item_id === demo.id && o.base_version === rsiRow.updated_at) && ops.some((o) => o.op === "sel_insert" && o.item_id === demo.id));

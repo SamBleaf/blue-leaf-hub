@@ -4,20 +4,23 @@
  *   ActionsInRoom      "Actions in this room": the room's open points (briefModel.openPoints, the Actions rule), ✓ to
  *                      close one, and "+ Needs action from…" (a new follow-up for this room with "What's needed?" focused)
  *   OtherRecorded      "Other things recorded here (n) ▸": every record of the room no row shows, each with Remove
+ *                      (never for a record in the signed contract or on the client portal: the server would refuse it;
+ *                      Undo puts a record back only when it really went)
  *
  * Which question goes in which group, and what no row shows, is roomLayout() in src/lib/roomScreen.js; this file only
  * draws it. Repeat questions keep one row per record (ChoiceRepeat / ApplianceRow) with their repeat keys.
  */
-import { useRef, useState } from "react";
-import { genId, answerConfigFor, questionById, resolvePromptId } from "../../../../lib/register.js";
+import { useCallback, useRef, useState } from "react";
+import { genId, answerConfigFor, questionById } from "../../../../lib/register.js";
 import { clean } from "../../../../lib/briefModel.js";
 import { pointSubject, pointLine, pointTags, pointKey, donePatch, checkedPatch, undoPatchFor, isLocked } from "../../../../lib/needsAction.js";
-import { roomSeed, isExistingWorksRow, existingWorksFor, existingWorkSeed, otherWords, readdable, contractFixed, actionSeed } from "../../../../lib/roomScreen.js";
+import { roomSeed, isExistingWorksRow, existingWorksFor, existingWorkSeed, otherWords, readdIfGone, contractFixed, actionSeed } from "../../../../lib/roomScreen.js";
 import ChoiceRow, { ChoiceRepeat, ApplianceRow } from "./ChoiceRow.jsx";
 import PromptRow from "./PromptRow.jsx";
 import { NeedsActionFlag, NeedsActionSheet, ActionToast } from "./NeedsAction.jsx";
 import { IconButton, MenuItem, Popover } from "./RoomUi.jsx";
 import { useNarrow } from "./useRoomUi.js";
+import { useEscapeLayer } from "../../../../lib/overlayFlag.js";
 
 const h2 = "text-[17px] font-bold leading-6 text-ink";
 const disclosure = "focus-ring flex min-h-[48px] w-full items-center justify-between gap-2 px-4 text-left text-[15px] font-bold sm:text-sm";
@@ -120,6 +123,15 @@ export function ActionsInRoom({ reg, context, actor, room, points, updateItem, u
   const [refText, setRefText] = useState("");
   const [toast, setToast] = useState(null);
   const addBtn = useRef(null);
+  const stopChecking = useCallback(() => { setChecking(null); setRefText(""); }, []);
+  useEscapeLayer(!!checking && !readOnly, stopChecking);
+  // The new follow-up's sheet hands focus back to "+ Needs action from…" (a tap never focuses it on iOS).
+  const closeSheet = () => {
+    setSheet(null);
+    setTimeout(() => {
+      try { const a = document.activeElement; if (!a || a === document.body) addBtn.current?.focus({ preventScroll: true }); } catch { /* gone */ }
+    }, 0);
+  };
   const byId = new Map(reg.items.map((i) => [i.id, i]));
   const by = actor?.full_name || actor?.email || "Blue Leaf";
   const save = (id, patch) => updateItem(id, patch);
@@ -165,8 +177,8 @@ export function ActionsInRoom({ reg, context, actor, room, points, updateItem, u
                     <label className="text-xs font-bold uppercase tracking-[0.06em] text-muted" htmlFor={`ref-${k}`}>Drawing or document reference</label>
                     <div className="flex gap-2">
                       <input id={`ref-${k}`} autoFocus value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="e.g. A301 Rev D detail 4"
-                        onKeyDown={(e) => { if (e.key === "Enter" && refText.trim()) close(p, (it) => (it.technicalStatus === "needs_verification" ? checkedPatch(it, { ref: refText, by }) : donePatch()), "Marked checked."); if (e.key === "Escape") setChecking(null); }}
-                        className="focus-ring h-11 min-w-0 flex-1 rounded-lg border border-hairline bg-surface px-3 text-base text-ink sm:text-sm" />
+                        onKeyDown={(e) => { if (e.key === "Enter" && refText.trim()) close(p, (it) => (it.technicalStatus === "needs_verification" ? checkedPatch(it, { ref: refText, by }) : donePatch()), "Marked checked."); }}
+                        className="focus-ring h-11 min-w-0 flex-1 rounded-lg border border-hairline bg-surface px-3 text-[16px] text-ink sm:text-sm" />
                       <button type="button" disabled={!refText.trim()} onClick={() => close(p, (it) => (it.technicalStatus === "needs_verification" ? checkedPatch(it, { ref: refText, by }) : donePatch()), "Marked checked.")}
                         className="focus-ring h-11 rounded-lg bg-primary px-4 text-sm font-bold text-white disabled:opacity-40">Save</button>
                     </div>
@@ -185,22 +197,29 @@ export function ActionsInRoom({ reg, context, actor, room, points, updateItem, u
       )}
       {sheet && (
         <NeedsActionSheet key={sheet.seed.id} reg={reg} context={context} actor={actor} item={sheetItem} seed={sheetItem ? null : sheet.seed}
-          updateItem={updateItem} upsertItem={upsertItem} anchor={addBtn} focusWhat onClose={() => setSheet(null)} onNotify={setToast} />
+          updateItem={updateItem} upsertItem={upsertItem} anchor={addBtn} focusWhat onClose={closeSheet} onNotify={setToast} />
       )}
       <ActionToast toast={toast} onDismiss={() => setToast(null)} />
     </section>
   );
 }
 
-/** One record no row shows: its words, and ⋯ with "Show details" (the full record) and "Remove" (with Undo). */
-function OtherRow({ reg, room, item, actor, saveState, updateItem, deleteItem, onPortalItem, readOnly, onRemoved }) {
+/**
+ * One record no row shows: its words, and ⋯ with "Show details" and "Remove" (with Undo). "Show details" opens the edit
+ * drawer with Product details open (onOpenRecord(id, { details: true }), spec S3 M13); with no drawer to open it shows the
+ * office fields in place. Neither shows question codes or the Record type and Scope/disposition selects.
+ */
+function OtherRow({ reg, room, item, actor, saveState, updateItem, deleteItem, onPortalItem, readOnly, onRemoved, onOpenRecord }) {
   const narrow = useNarrow();
   const [menu, setMenu] = useState(false);
   const [details, setDetails] = useState(false);
   const btn = useRef(null);
   const fixed = contractFixed(item);
+  const onPortal = !fixed && !!item.sync?.clientVisible;
+  const keep = fixed || onPortal;   // the server refuses these deletes: never offer one
   const remove = () => {
     setMenu(false);
+    if (keep) return;
     deleteItem(item.id);
     onRemoved(item);
   };
@@ -212,17 +231,20 @@ function OtherRow({ reg, room, item, actor, saveState, updateItem, deleteItem, o
           <IconButton label="More for this record" buttonRef={btn} expanded={menu} onClick={() => setMenu((v) => !v)} />
           <Popover open={menu} onClose={() => setMenu(false)} narrow={narrow} anchorRef={btn} title={narrow ? "This record" : undefined}>
             <div role="menu">
-              <MenuItem checked={details} onClick={() => { setDetails((v) => !v); setMenu(false); }}>Show details</MenuItem>
-              {!readOnly && !fixed && <MenuItem danger onClick={remove}>Remove</MenuItem>}
+              {onOpenRecord
+                ? <MenuItem onClick={() => { setMenu(false); onOpenRecord(item.id, { details: true }); }}>Show details</MenuItem>
+                : <MenuItem checked={details} kind="checkbox" onClick={() => { setDetails((v) => !v); setMenu(false); }}>Show details</MenuItem>}
+              {!readOnly && !keep && <MenuItem danger onClick={remove}>Remove</MenuItem>}
               {fixed && <MenuItem disabled hint="Change it through a variation.">Part of the signed contract</MenuItem>}
+              {onPortal && <MenuItem disabled testId={`other-on-portal-${item.id}`}>On the client portal — withdraw it first</MenuItem>}
             </div>
           </Popover>
         </span>
       </div>
-      {details && (
+      {details && !onOpenRecord && (
         <div className="mt-1 rounded-lg border border-hairline bg-page p-2">
-          <PromptRow question={questionById(resolvePromptId(item.promptKey)) || null} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
-            onChange={(partial) => updateItem(item.id, partial)} onDelete={!readOnly && !fixed ? () => { deleteItem(item.id); onRemoved(item); } : null}
+          <PromptRow office question={null} item={item} actor={actor} readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState} actionFlag={false}
+            onChange={(partial) => updateItem(item.id, partial)}
             onPortal={onPortalItem ? (action, ev) => onPortalItem(item, action, ev) : null} />
         </div>
       )}
@@ -231,10 +253,14 @@ function OtherRow({ reg, room, item, actor, saveState, updateItem, deleteItem, o
 }
 
 /** "Other things recorded here (n) ▸": shown only when a record of the room has no row of its own. */
-export function OtherRecorded({ reg, room, items, actor, saveState, updateItem, deleteItem, addItem, onPortalItem, readOnly, onToast }) {
+export function OtherRecorded({ reg, room, items, actor, saveState, updateItem, deleteItem, addItem, onPortalItem, readOnly, onToast, onOpenRecord }) {
   const [open, setOpen] = useState(false);
+  // Undo reads the register as it is when tapped: a delete the server refused has put the record back under its own id,
+  // and re-adding a copy then would list it twice.
+  const latest = useRef(reg);
+  latest.current = reg;
   if (!items.length) return null;
-  const onRemoved = (item) => onToast?.("Removed.", addItem ? () => addItem(readdable(item)) : null);
+  const onRemoved = (item) => onToast?.("Removed.", addItem ? () => { const back = readdIfGone(latest.current, item); if (back) addItem(back); } : null);
   return (
     <section className="rounded-card border border-hairline bg-surface" data-testid="other-recorded">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={`${disclosure} text-muted`}>
@@ -243,7 +269,7 @@ export function OtherRecorded({ reg, room, items, actor, saveState, updateItem, 
       {open && (
         <ul className="border-t border-hairline">
           {items.map((i) => <OtherRow key={i.id} reg={reg} room={room} item={i} actor={actor} saveState={saveState} updateItem={updateItem} deleteItem={deleteItem}
-            onPortalItem={onPortalItem} readOnly={readOnly} onRemoved={onRemoved} />)}
+            onPortalItem={onPortalItem} readOnly={readOnly} onRemoved={onRemoved} onOpenRecord={onOpenRecord} />)}
         </ul>
       )}
     </section>

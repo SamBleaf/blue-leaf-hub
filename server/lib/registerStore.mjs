@@ -20,7 +20,7 @@
  */
 import {
   readRegister, writeRegister, emptyMeta, makeItem, isClientSelection, roomLabel, categoryLabel,
-  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION, answerSummary, answerMaterialChanged, stableStringify,
+  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION, answerSummary, answerMaterialChanged, stableStringify, approvalWords,
 } from "../../src/lib/register.js";
 import { notifyClient } from "./portalNotify.mjs";
 
@@ -220,6 +220,7 @@ function metaForCanonical(meta) {
   return {
     version: 2, planRev: m.planRev, occupancy: m.occupancy, renovationOverlay: m.renovationOverlay,
     scopeAreas: m.scopeAreas, rooms: m.rooms, lastRoomId: m.lastRoomId, lastStep: m.lastStep, baseline: m.baseline,
+    floors: m.floors,   // floors added on the Rooms list before any room is on them (P7)
     libraryVersion: QUESTION_LIBRARY_VERSION,
   };
 }
@@ -426,15 +427,35 @@ function certainlyStale(sent, stored) {
  */
 function answerGuardReason(before, after, rawSync) {
   if (certainlyStale(rawSync.version, before.sync.version)) return null;     // register_apply answers: stale
-  if (!answerMaterialChanged(before.answer, after.answer)) return null;      // notes, assumptions stay editable
   const scopeStore = before.sync.table === RSI;
-  if (scopeStore && before.sync.baselined) return "baseline_locked";
-  if (before.sync.locked) return "post_contract_locked";
+  const answerMoved = answerMaterialChanged(before.answer, after.answer);
+  // register_apply compares a scope row's words only for a baseline (it refuses those itself): an approved requirement or
+  // scope record whose words change would otherwise keep "client-approved" beside words the client never agreed (B3).
+  const wordsMoved = scopeStore && !before.sync.baselined && wordsOutrunApproval(before, after);
+  if (!answerMoved && !wordsMoved) return null;                              // notes, assumptions stay editable
+  if (answerMoved && scopeStore && before.sync.baselined) return "baseline_locked";
+  if (answerMoved && before.sync.locked) return "post_contract_locked";
   const approved = scopeStore ? before.certainty === "client_approved" : APPROVED_STATUSES.includes(before.sync.status);
   if (!approved || after.certainty !== "client_approved") return null;
+  return freshApproval(before, after) ? null : "reapproval_required";
+}
+
+/**
+ * The approval rule both save paths share (the screen applies it first, register.editOutrunsApproval, stepping the
+ * record back to Proposed): what the client approved is a selection's answer, and the words of a requirement, scope or
+ * action as well as its answer. Kept "client-approved" while that changes, an item needs fresh evidence of the client's
+ * re-approval, or the save is refused. Only a stale or foreign screen reaches this.
+ */
+const wordsOutrunApproval = (before, after) => before.itemKind !== "selection" && approvalWords(before.description) !== approvalWords(after.description);
+const freshApproval = (before, after) => {
   const ev = after.evidence;
-  const fresh = ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence);
-  return fresh ? null : "reapproval_required";
+  return !!(ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence));
+};
+/** Lead mode (the scratchpad): the same rule, read from the items themselves. */
+export function leadApprovalReason(before, after) {
+  if (!before || before.certainty !== "client_approved" || after?.certainty !== "client_approved") return null;
+  if (!answerMaterialChanged(before.answer, after.answer) && !wordsOutrunApproval(before, after)) return null;
+  return freshApproval(before, after) ? null : "reapproval_required";
 }
 
 /**
@@ -464,12 +485,18 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
       const baseVersion = ch.sync?.version || null;
       if (existing && baseVersion && existing.updatedAt !== baseVersion) conflicts.push({ itemId: ch.id, reason: "stale", current: existing });
       else if (!existing && baseVersion) conflicts.push({ itemId: ch.id, reason: "missing" });
+      else if (existing) {
+        // An approval covers what the client agreed (B3): changed and still "client-approved" needs a re-approval.
+        const reason = leadApprovalReason(existing, makeItem(carryAnswer(ch, existing)));
+        if (reason) conflicts.push({ itemId: ch.id, reason });
+      }
     }
     for (const del of deletes) {
       const existing = byId.get(del.id);
       if (existing && del.sync?.version && existing.updatedAt !== del.sync.version) conflicts.push({ itemId: del.id, reason: "stale", current: existing });
     }
-    if (conflicts.length) throw new RegisterError(409, "Some items were changed elsewhere.", "CONFLICT", { conflicts });
+    if (conflicts.length) throw new RegisterError(409, conflicts.some((c) => c.reason === "reapproval_required") ? conflictMessage(conflicts.filter((c) => c.reason === "reapproval_required"))
+      : "Some items were changed elsewhere.", "CONFLICT", { conflicts });
 
     for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(ch, byId.get(ch.id)), updatedAt: now, sync: null }));
     for (const del of deletes) byId.delete(del.id);
