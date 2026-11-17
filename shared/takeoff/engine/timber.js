@@ -637,7 +637,10 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
       headMm = studLengthMm;
     }
     if (headMm <= sillMm + EPS_MM || headMm > studLengthMm + EPS_MM) fail(`${name}: sill and head must sit within the stud height, sill below head.`, "openings");
-    return { id, name, label, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null };
+    // HUB 031: the opening rules (openingRules.js) say how many full-height studs each side and how thick the jack stack is
+    const sides = o.sides && typeof o.sides === "object" ? { left: num(o.sides.left, `${name} studs on the left`, { min: 0, integer: true }), right: num(o.sides.right, `${name} studs on the right`, { min: 0, integer: true }) } : null;
+    const jack = o.jackMm && typeof o.jackMm === "object" ? { left: num(o.jackMm.left, `${name} jack stack on the left`, { min: 0 }), right: num(o.jackMm.right, `${name} jack stack on the right`, { min: 0 }) } : null;
+    return { id, name, label, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null, ...(sides ? { sides } : {}), ...(jack ? { jack } : {}) };
   });
   // only openings in the stud frame can clash (an opening wholly above the studs is never framed)
   const byX = out.filter((o) => !o.aboveStuds).sort((a, b) => a.xLeftMm - b.xLeftMm);
@@ -760,21 +763,41 @@ function framedStations(ctx, stations, run, openings, side, wallId) {
   });
   const inWall = (x) => x >= -EPS_MM && x <= L + EPS_MM;
   const byX = [...openings].sort((a, b) => a.xLeftMm - b.xLeftMm); // never overlapping (wallOpenings)
+  // HUB 031: the jack stack (jacks stand inside the kings, against the opening) widens the opening the side studs sit
+  // outside of; any grid stud that falls in the stack is one of the jacks, so it is not counted again. Nothing changes
+  // without a jack stack (the 2-each-side Walls rule and Studs).
+  const ext = (o) => ({ l: o.xLeftMm - (o.jack?.left || 0), r: o.xRightMm + (o.jack?.right || 0) });
+  for (const o of byX) {
+    const e = ext(o);
+    if (e.l === o.xLeftMm && e.r === o.xRightMm) continue;
+    for (let k = cands.length - 1; k >= 0; k--) {
+      const c = cands[k];
+      if (c.kind !== "centre") continue;
+      // inclusive of the opening's own edge: a grid stud standing on the edge is half inside the opening, so it is a jack too
+      if ((o.jack?.left > 0 && c.x >= e.l - EPS_MM && c.x <= o.xLeftMm + EPS_MM) || (o.jack?.right > 0 && c.x >= o.xRightMm - EPS_MM && c.x <= e.r + EPS_MM)) {
+        ctx.explain.push(`The stud at ${fmt(c.x)} falls in ${o.name}'s jack stack, so it is one of the jacks`);
+        cands.splice(k, 1);
+      }
+    }
+  }
   byX.forEach((o, i) => {
     const prev = byX[i - 1];
     const next = byX[i + 1];
-    const left = prev && o.xLeftMm - w / 2 < prev.xRightMm - EPS_MM ? { x: (prev.xRightMm + o.xLeftMm) / 2, shared: true } : { x: o.xLeftMm - w / 2 };
-    const right = next && o.xRightMm + w / 2 > next.xLeftMm + EPS_MM ? { x: (o.xRightMm + next.xLeftMm) / 2, shared: true } : { x: o.xRightMm + w / 2 };
-    if (right.shared) ctx.explain.push(`${o.name} and ${next.name} are ${fmt(next.xLeftMm - o.xRightMm)} mm apart, so they share one stud at ${fmt(right.x)}`);
-    for (const s of [left, right]) cands.push({ x: Math.min(L, Math.max(0, s.x)), kind: "side", order: 1, beside: [o.id], shared: !!s.shared });
-    for (let k = 2; k <= perSide; k++) {
+    const e = ext(o), pe = prev && ext(prev), ne = next && ext(next);
+    const perL = o.sides ? o.sides.left : perSide, perR = o.sides ? o.sides.right : perSide;
+    const left = prev && e.l - w / 2 < pe.r - EPS_MM ? { x: (pe.r + e.l) / 2, shared: true } : { x: e.l - w / 2 };
+    const right = next && e.r + w / 2 > ne.l + EPS_MM ? { x: (e.r + ne.l) / 2, shared: true } : { x: e.r + w / 2 };
+    if (right.shared) ctx.explain.push(`${o.name} and ${next.name} are ${fmt(ne.l - e.r)} mm apart, so they share one stud at ${fmt(right.x)}`);
+    if (perL >= 1) cands.push({ x: Math.min(L, Math.max(0, left.x)), kind: "side", order: 1, beside: [o.id], shared: !!left.shared });
+    if (perR >= 1) cands.push({ x: Math.min(L, Math.max(0, right.x)), kind: "side", order: 1, beside: [o.id], shared: !!right.shared });
+    for (let k = 2; k <= Math.max(perL, perR); k++) {
       const off = ((2 * k - 1) * w) / 2;
-      const lx = o.xLeftMm - off;
-      const rx = o.xRightMm + off;
+      const lx = e.l - off;
+      const rx = e.r + off;
       // a further stud goes in only where it sits wholly outside the neighbouring opening (its far face at or past the
       // neighbour's edge), so between two openings there are never more studs than fit in the gap
-      if (!left.shared && inWall(lx) && !(prev && lx - w / 2 < prev.xRightMm - EPS_MM)) cands.push({ x: lx, kind: "side", order: k, beside: [o.id] });
-      if (!right.shared && inWall(rx) && !(next && rx + w / 2 > next.xLeftMm + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
+      if (k <= perL && !left.shared && inWall(lx) && !(prev && lx - w / 2 < pe.r - EPS_MM)) cands.push({ x: lx, kind: "side", order: k, beside: [o.id] });
+      if (k <= perR && !right.shared && inWall(rx) && !(next && rx + w / 2 > ne.l + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
     }
   });
   const accepted = [];

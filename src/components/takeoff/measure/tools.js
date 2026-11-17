@@ -422,6 +422,7 @@ export function wallCladdingText(t) {
 export function wallFramingTotals(result, wallId = null) {
   const lays = (result?.layouts || []).filter((l) => l?.method === "wall_framing@1" && l.totals && (wallId == null || l.wallMeasurementId === wallId));
   if (!lays.length) return null;
+  const rules = { openings: 0, lintels: 0, lintelsToSize: 0, noFit: 0 };
   const t = { walls: lays.length, studs: 0, studsByHeight: [], bottomPlateMm: 0, topPlateMm: 0, secondTopPlateMm: null, noggins: 0, rows: [] };
   const byH = new Map();
   // HUB 031: the walls with a centres setting of their own (wet areas at 450): { 450: 3 }. Only for the whole item.
@@ -435,8 +436,10 @@ export function wallFramingTotals(result, wallId = null) {
     t.topPlateMm += x.topPlateMm || 0;
     if (x.secondTopPlateMm != null) t.secondTopPlateMm = (t.secondTopPlateMm || 0) + x.secondTopPlateMm;
     t.noggins += x.noggins || 0;
+    if (x.openingRules) for (const k of Object.keys(rules)) rules[k] += x.openingRules[k] || 0;
     if (Number.isFinite(x.nogginRows) && !t.rows.includes(x.nogginRows)) t.rows.push(x.nogginRows);
   }
+  if (rules.openings) t.openingRules = rules;
   t.studsByHeight = [...byH].sort((a, b) => a[0] - b[0]);
   t.rows.sort((a, b) => a - b);
   return t;
@@ -477,7 +480,10 @@ export function wallFramingText(t, label = null, notCounted = []) {
   // HUB 031: "· 3 walls at 450" only when some wall has its own centres; otherwise the line reads exactly as before
   const ownEntries = Object.entries(t.ownCentres || {}).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
   const own = ownEntries.length ? [ownEntries.map(([c, q], i) => `${i ? "" : `${n(q)} wall${q === 1 ? "" : "s"} at `}${i ? `${n(q)} at ` : ""}${n(c)}`).join(", ")] : [];
-  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...own, ...(out ? [out] : [])].join(" · ");
+  // HUB 031: the lintels the opening rules sized, and the ones still to size ("· 2 lintels, 1 to size")
+  const r = t.openingRules;
+  const heads = r && (r.lintels || r.lintelsToSize) ? [[r.lintels ? `${n(r.lintels)} lintel${r.lintels === 1 ? "" : "s"}` : null, r.lintelsToSize ? `${n(r.lintelsToSize)} to size` : null, r.noFit ? `${n(r.noFit)} won't fit` : null].filter(Boolean).join(", ")] : [];
+  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
   return label ? `${label}: ${body}` : body;
 }
 
@@ -543,6 +549,8 @@ export function wallFramingNotes(result, wallId, spec) {
     const over = wallLongPlateOverText(spec);
     out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
   }
+  // HUB 031: each ruled opening's framing in one plain line ("W1: kings 1, jacks 1 each side · lintel 190 x 45 · sill trimmer 1")
+  for (const o of lay?.openings || []) if (o.rule) out.push(openingRuleText(o));
   const names = [...new Set((result?.problems || []).filter((p) => p.code === "opening_framing_not_counted")
     .flatMap((p) => (p.refs || []).filter((r) => r?.measurementId === wallId).map((r) => r.openingLabel || r.openingId)).filter(Boolean))];
   if (names.length) out.push(`Lintels, jacks and trimmers at ${names.join(", ")} aren't counted.`);
@@ -578,6 +586,22 @@ export function wetWallsOf(measurements, contributions, materialId) {
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────
+
+/** One ruled opening's framing in plain words, for the wall page and the opening sheet. */
+export function openingRuleText(o) {
+  const r = o.rule;
+  if (!r) return "";
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const parts = [];
+  const kj = (side) => `${r.kings[side]} king${r.kings[side] === 1 ? "" : "s"}${r.jacks[side] ? ` + ${r.jacks[side]} jack${r.jacks[side] === 1 ? "" : "s"}` : ""}`;
+  parts.push(r.kings.left === r.kings.right && r.jacks.left === r.jacks.right ? `${kj("left")} each side` : `left ${kj("left")}, right ${kj("right")}`);
+  const l = r.lintel;
+  if (l.status === "sized" || l.status === "typed") parts.push(`lintel ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  else if (l.status === "unsized" || l.status === "engineer") parts.push(`lintel not sized (${l.reason})`);
+  if (r.trimmers.head) parts.push(`head trimmer × ${r.trimmers.head}`);
+  if (r.trimmers.sill) parts.push(`sill trimmer × ${r.trimmers.sill}`);
+  return `${o.label || o.id}: ${parts.join(" · ")}.`;
+}
 
 /** The next free label for an opening on ONE wall: W1, W2 … for windows, D1 … for doors, O1 … for others. */
 export function nextOpeningLabel(labels, type) {

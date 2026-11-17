@@ -33,6 +33,7 @@ import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
+import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, ROOF_SPACINGS_MM } from "../../../shared/takeoff/standards/index.js";
 import { FixContext } from "./fixContext.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
@@ -1388,6 +1389,32 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
         </label>
       </div>
       {line && <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink" data-walls-card-line="">{line}</p>}
+      {/* HUB 031 (Sam, 17 Nov 2026): the framing around each window and door is worked out for you; the office tells it about the roof
+          once, here, so the lintels and jambs come from the span tables. Nothing here is guessed: a blank stays "needs roof information". */}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-roof="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Roof and openings{r.carriesRoof === true ? " · walls carry the roof" : r.carriesRoof === false ? " · walls don't carry the roof" : ""}</summary>
+        <div className="space-y-3 pb-2">
+          <label className="flex min-h-[44px] items-center gap-2 text-sm font-medium text-ink" data-walls-opening-framing="">
+            <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={r.openingFraming !== false} onChange={(e) => d.patch({ rules: { openingFraming: e.target.checked ? undefined : false } })} />
+            Work out the framing at windows and doors
+          </label>
+          <p className="text-[11px] text-muted">Kings, jacks, cripples above and below at the wall&apos;s centres, trimmers and the lintel. A framing detail typed on an opening always wins. Heights are from the floor.</p>
+          <Chips label="Do these walls carry the roof?" name="carriesRoof" value={r.carriesRoof === true ? "yes" : r.carriesRoof === false ? "no" : "unset"}
+            options={[["yes", "Yes"], ["no", "No"], ["unset", "Not set"]]} onChange={(v) => d.patch({ rules: { carriesRoof: v === "yes" ? true : v === "no" ? false : undefined } })} />
+          <p className="text-[11px] text-muted">One wall can differ: Select the wall and tap Carries the roof.</p>
+          <Chips label="Roof covering" name="roofMass" value={r.roofMass || "unset"} options={[["sheet", "Sheet"], ["tile", "Tile"], ["unset", "Not set"]]}
+            onChange={(v) => d.patch({ rules: { roofMass: v === "unset" ? undefined : v } })} />
+          <Chips label="Roof width these walls carry (about half the roof span plus the eaves, mm)" name="rlwMm" value={r.rlwMm ?? "unset"}
+            options={[...ROOF_LOAD_WIDTHS_MM.map((v) => [v, String(v)]), ["unset", "Not sure"]]} onChange={(v) => d.patch({ rules: { rlwMm: v === "unset" ? undefined : v } })} />
+          <Chips label="Rafter or truss spacing (mm)" name="rafterSpacingMm" value={r.rafterSpacingMm ?? "unset"}
+            options={[...ROOF_SPACINGS_MM.map((v) => [v, String(v)]), ["unset", "Not set"]]} onChange={(v) => d.patch({ rules: { rafterSpacingMm: v === "unset" ? undefined : v } })} />
+          <Chips label="Wind class (AS 4055)" name="windClass" value={r.windClass || "unset"} options={[...WIND_CLASSES.map((v) => [v, v]), ["unset", "Not set"]]}
+            onChange={(v) => d.patch({ rules: { windClass: v === "unset" ? undefined : v } })} />
+          <Chips label="Lintels from" name="lintelProduct" value={r.lintelProduct || LINTEL_PRODUCTS[0][0]} options={LINTEL_PRODUCTS.map(([v, t]) => [v, t])}
+            onChange={(v) => d.patch({ rules: { lintelProduct: v } })} />
+          <p className="text-[11px] text-muted">Single or upper storey only; a lower storey, N5 and C wind classes need an engineer or the supplier. Where a table can&apos;t size it, the opening says so and you type the size.</p>
+        </div>
+      </details>
       {blocked.length > 0 && <ul className="space-y-0.5 text-xs text-amber-800" data-walls-card-problems="">{blocked.map((m) => <li key={m}>{m}</li>)}</ul>}
       <details className="rounded-lg border border-hairline px-2 py-1" data-walls-parts="">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Studs, plates, noggins</summary>

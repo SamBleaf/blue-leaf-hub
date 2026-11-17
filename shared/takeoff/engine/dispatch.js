@@ -25,6 +25,8 @@ import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
+import { expandOpening } from "./openingRules.js";
+import { openingSelectors } from "./openingSelectors.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
 import { FOLLOWERS_VERSION, FOLLOWER_KINDS, FOLLOWER_TEXT, FOAM_TAPE, followerNote, followerRule, wallFollowers } from "./followers.js";
@@ -166,12 +168,15 @@ function resolveWall(m, ctx) {
     const heightMm = fullHeight && kind === "rect" && H > 0 && x.sillMm >= 0 && x.sillMm < H ? H - x.sillMm : x.heightMm;
     return { id: o.id, label: x.label || null, type: x.type || "window", xMm: x.xMm, sillMm: x.sillMm, widthMm: x.widthMm, heightMm,
       x0: x.xMm, y0: x.sillMm, x1: x.xMm + x.widthMm, y1: x.sillMm + heightMm, detail: x.detail || null,
-      fullHeight, cavityLeafMm: Number(x.cavityLeafMm) > 0 ? Number(x.cavityLeafMm) : null, cavityPocket: x.cavityPocket === "left" || x.cavityPocket === "right" ? x.cavityPocket : null };
+      fullHeight, cavityLeafMm: Number(x.cavityLeafMm) > 0 ? Number(x.cavityLeafMm) : null, cavityPocket: x.cavityPocket === "left" || x.cavityPocket === "right" ? x.cavityPocket : null,
+      lintel: x.lintel && Number(x.lintel.depthMm) > 0 && Number(x.lintel.breadthMm) > 0 ? x.lintel : null, loadRlwMm: Number(x.loadRlwMm) > 0 ? Number(x.loadRlwMm) : null };
   });
   const wall = { id: m.id, kind, widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
     // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
-    studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null };
+    studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null,
+    // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
+    loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null };
   return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", missing, problems };
 }
 
@@ -396,6 +401,12 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const longPlates = { identity: wallPartIdentity(parts.longPlates, "longPlates"), lengthsMm: longPlateStockLengths(parts.longPlates, wallPinePlateMaxMm(parts.plates)), label: WALL_PART_LABELS.longPlates };
   const studW = parts.studs.section?.widthMm; // the stud's thickness along the wall (45 for a 90 × 45)
   const itemCentresMm = rules.centresMm ?? WALL_FRAMING_RULES.centresMm;
+  const autoFraming = rules.openingFraming !== false;
+  // the bottom plate's thickness (laid flat: the section's width) is what the floor sits below the stud base by, and the thickness of a trimmer
+  const plateThick = Number(parts.plates.section?.widthMm) || 0;
+  const ruleCtx = { studLengthMm: 0, bottomPlateMm: plateThick, trimmerMm: plateThick, studWidthMm: studW,
+    plateIdentity: wallPartIdentity(parts.plates, "plates"), plateStock: timberStock(parts.plates), lintelTreatment: String(parts.plates.treatment || "").trim() || null,
+    lintelStock: { maxMm: null, unavailableMm: [] } };
   const results = [];
   // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
   const seen = new Set();
@@ -438,8 +449,23 @@ function runWallFraming(mat, n, items, ctx, sink) {
     });
     // "Wall 2 W1: its head …" when the note starts with an opening, else "Wall 2: …"
     const onWall = (msg) => ([...names].some((nm) => msg.startsWith(`${nm}:`) || msg.startsWith(`${nm} `)) ? `${tag} ${msg}` : `${tag}: ${msg}`);
+    // HUB 031 (Sam, 17 Nov 2026): the framing around each opening is worked out for you (kings, jacks, cripples above and
+    // below at this wall's centres, trimmers, the lintel). An opening with a framing detail of its own keeps it: manual wins.
+    const wallCarries = w.wall.loadBearing ?? (typeof rules.carriesRoof === "boolean" ? rules.carriesRoof : null);
+    const ruled = new Map();
+    const ruleNotes = [];
+    const framed = autoFraming && plateThick > 0 ? openings.map((o) => {
+      if (o.detail) return o;
+      const src = w.openings.find((x) => x.id === o.id) || {};
+      const e = expandOpening({ ctx: { ...ruleCtx, studLengthMm: H, loadBearing: wallCarries, ...openingSelectors({ rules, parts, wall: { heightMm: H, loadBearing: wallCarries }, opening: src }) },
+        opening: { id: o.id, label: o.label, type: src.type, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: src.sillMm, headMm: src.sillMm + src.heightMm,
+          fullHeight: !!src.fullHeight, cavity: src.cavityLeafMm ? { leafMm: src.cavityLeafMm, pocket: src.cavityPocket || "right" } : null, lintel: src.lintel || null } });
+      ruled.set(o.id, e.rule);
+      ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
+      return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };
+    }) : openings;
     const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
-      openings, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true });
+      openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true });
     const refused = studs.problems.filter((p) => p.code === "invalid_input");
     if (refused.length) {
       // e.g. overlapping openings: this wall gets no quantities, the other walls keep theirs, and the block holds every
@@ -481,10 +507,15 @@ function runWallFraming(mat, n, items, ctx, sink) {
       if (once(q)) problems.push(q);
     }
     for (const id of here) notCounted.push({ name: nameOf.get(id) ?? id, tag, measurementId: m.id, openingId: id });
+    // HUB 031: what the opening rules used or couldn't do, in plain words (notes, never blocking; said once for the item)
+    for (const n of ruleNotes) {
+      const q = { code: n.code, message: n.code === "jambs_minimum_used" || n.code === "trimmer_stack_default" ? n.message : onWall(n.message), blocking: false, refs: [{ measurementId: m.id, openingId: n.openingId, openingLabel: nameOf.get(n.openingId) }] };
+      if (once(q)) problems.push(q);
+    }
     // an explicit framing detail adds its own members (kings …) on top of the studs beside the opening
     for (const lo of studs.layout.openings) {
       const det = openings.find((o) => o.id === lo.id)?.detail;
-      if (!lo.complete || !Array.isArray(det?.members) || !det.members.length) continue;
+      if (!lo.complete || !Array.isArray(det?.members) || !det.members.length || det.generated) continue;   // the rules' own members are never a "check" note
       const nm = lo.label || lo.id;
       const q = { code: "framing_detail_members", message: `${tag} ${nm}: its framing detail adds its own members. Check the studs beside ${nm} aren't counted twice.`, blocking: false };
       if (once(q)) problems.push(q);
@@ -500,14 +531,19 @@ function runWallFraming(mat, n, items, ctx, sink) {
     results.push({
       demands,
       // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
-      layout: { ...studs.layout, method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item",
+      layout: { ...studs.layout, openings: studs.layout.openings.map((lo) => (ruled.has(lo.id) ? { ...lo, rule: ruled.get(lo.id) } : lo)),
+        method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item", loadBearing: wallCarries,
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,
         totals: { studs: counted.length, studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
           secondTopPlateMm: layers.some((l) => l.tag === "top-2") ? layerMm("top-2") : null,
           longPlateMm: layers.reduce((a, l) => a + (l.longPiecesMm || []).reduce((s, x) => s + x, 0), 0),
-          noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null } },
+          noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null,
+          // HUB 031: the framing the opening rules worked out (only when some opening was ruled)
+          ...(ruled.size ? { openingRules: { openings: ruled.size, lintels: [...ruled.values()].filter((r) => ["sized", "typed"].includes(r.lintel.status)).length,
+            lintelsToSize: [...ruled.values()].filter((r) => ["unsized", "engineer"].includes(r.lintel.status)).length,
+            noFit: [...ruled.values()].filter((r) => r.lintel.noFit).length } } : {}) } },
       problems,
       status: { quantity: three.every((r) => r.status.quantity === "calculated") ? "calculated" : "incomplete", installation: studs.status.installation, procurement: "draft" },
       explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],

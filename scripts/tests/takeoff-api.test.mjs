@@ -1693,7 +1693,7 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
     spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP10", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
   const spec = wallFramingDefaults([prod("studs"), prod("plates"), prod("noggins", 35)]);
   const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
-    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false } }] },
+    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false, openingFraming: false } }] },   // HUB 031: the pre-rules item (the rules have their own tests)
     measurements: { upsert: [
       { id: w1, kind: "wall", inputs: { kind: "rect", widthMm: 6000, heightMm: 2700, name: "Wall 1" } },
       { id: w2, kind: "wall", inputs: { kind: "rect", widthMm: 4000, heightMm: 2700, name: "Wall 2" } },
@@ -1771,7 +1771,7 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   const spec = { ...base, components: { ...base.components,
     plates: { ...base.components.plates, treatment: "H2" },
     noggins: { ...base.components.noggins, treatment: "H2", stock: { maxMm: 5400, unavailableMm: [4800] } } } };
-  const mat = { id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: true }, profile: null };
+  const mat = { id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: true, openingFraming: false }, profile: null };
   // one Line run A → B → C (Wall 1 6,000 at 2,700, Wall 2 4,000 at 3,000), saved in ONE commit with its run and order
   const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
   const wall = (mid, pts, heightMm, seq) => ({ id: mid, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: pts,
@@ -1794,7 +1794,7 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   assert.deepEqual(kept.spec.components, spec.components, "every part as sent, its stock too");
   assert.deepEqual(kept.spec.components.noggins.stock, { maxMm: 5400, unavailableMm: [4800] });
   assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.studs.stock.maxMm], [6000, 11000, null]);
-  assert.deepEqual([kept.name, kept.methodKey, kept.methodVersion, kept.rules], ["Walls", "wall_framing", 1, { centresMm: 600, doubleTopPlate: true }]);
+  assert.deepEqual([kept.name, kept.methodKey, kept.methodVersion, kept.rules], ["Walls", "wall_framing", 1, { centresMm: 600, doubleTopPlate: true, openingFraming: false }]);
   const back = again.snapshot.measurements.filter((m) => m.inputs?.runId === run).sort((a, b) => a.inputs.seq - b.inputs.seq);
   assert.deepEqual(back.map((m) => [m.id, m.kind, m.inputs.seq, m.inputs.heightMm, m.inputs.name, m.calibrationId]), [[w1, "wall", 1, 2700, "Wall 1", cal], [w2, "wall", 2, 3000, "Wall 2", cal]]);
   assert.deepEqual(back.map((m) => m.points), [meas[0].points, meas[1].points], "the traced points, the corner shared exactly");

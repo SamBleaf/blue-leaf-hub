@@ -231,7 +231,9 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       // save time, so seq is what brings a run back in order. Kept only as a valid pair; otherwise the wall stands alone.
       ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}),
       // HUB 031 (Sam, 17 Nov 2026): this wall's own stud centres (wet areas at 450). Absent = the Walls item's centres.
-      ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }) } : {}) };
+      ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }) } : {}),
+      // HUB 031: does this wall carry the roof (true / false); absent = the Walls item's answer
+      ...(i.loadBearing === true || i.loadBearing === false ? { loadBearing: i.loadBearing } : {}) };
     // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
     // incomplete; values that ARE present must be coherent
     if (wk === "gable") { const gp = gableInputProblem(out, out.widthMm); must(!gp, gp?.message); }   // HUB 017: present values only

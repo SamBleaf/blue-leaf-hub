@@ -5,9 +5,10 @@
 import assert from "node:assert/strict";
 import { CALCULATION_VERSION, CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
+import { OPENING_JAMBS_MIN, TRIMMER_STACK_RULE, expandOpening, trimmerStackCount } from "../../shared/takeoff/engine/openingRules.js";
 import { fixedWidthOpening } from "../../src/components/takeoff/measure/geometry.js";
 import { NOTE_CODES } from "../../shared/takeoff/fixes.js";
-import { cavityConvert, fullHeightFollowers, fullHeightMm, lastOpeningSizes, itemCentresMm, toggleWetWall, wallFramingNotes, wallFramingText, wallFramingTotals, wetWallsOf, withWallCentres } from "../../src/components/takeoff/measure/tools.js";
+import { openingRuleText, cavityConvert, fullHeightFollowers, fullHeightMm, lastOpeningSizes, itemCentresMm, toggleWetWall, wallFramingNotes, wallFramingText, wallFramingTotals, wetWallsOf, withWallCentres } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 4).join("\n    ")}`); } }
@@ -225,6 +226,126 @@ t("server whitelist: fullHeight is kept only as true", () => {
   const base = { xMm: 0, sillMm: 0, widthMm: 820, heightMm: 2400, label: "D1", type: "door" };
   assert.equal(cleanMeasurementInputs("opening", { ...base, fullHeight: true }, null).fullHeight, true);
   for (const v of ["true", 1, false, null]) assert.ok(!("fullHeight" in cleanMeasurementInputs("opening", { ...base, fullHeight: v }, null)));
+});
+
+// ══ Step 4: automatic opening framing ═══════════════════════════════════════════════════════════════════════════
+/** A Walls item with the opening rules ON (the default), through the real computeWorkspace. */
+const ruled = (measurements, rules = {}) => wf(measurements, { rules: { ...WALL_FRAMING_RULES, ...rules } });
+const dem = (c, re) => WR(c).demands.filter((d) => re.test(d.label)).map((d) => [d.label.replace(/^Wall \d+ /, ""), d.quantity, d.lengthMm]);
+const codesOf = (c) => WR(c).problems.map((p) => p.code);
+// Sam's wall: 3,955 × 2,700, W1 3,430 × 600 at 450, sill 2,000 from the floor
+const SAM = () => [wm("w", 3955, 2700, "Wall 1"), om("o", "w", "W1", "window", 450, 3430, 600, 2000)];
+
+t("the rules are on by default: kings, jacks and trimmers are counted, and the old 'aren't counted' note is gone", () => {
+  const c = ruled(SAM(), { carriesRoof: true });
+  assert.ok(!codesOf(c).includes("opening_framing_not_counted"));
+  assert.ok(WR(c).layouts[0].openings[0].rule, "the layout says how the opening was framed");
+  const off = wf(SAM());
+  assert.ok(codesOf(off).includes("opening_framing_not_counted"), "switched off, the Walls item is exactly as before");
+});
+
+t("Sam's wall: levels are from the FLOOR (a 45 plate under the studs), cripples under the sill at the wall's centres, a jack each side, stacked sill trimmers", () => {
+  const c = ruled(SAM(), { carriesRoof: true });
+  const l = wl(c, "Wall 1");
+  nearAll(st(l), [0, 382.5, 3955]);   // the left king 1 jack (45) off the opening; the right king is the end stud
+  assert.deepEqual(l.ticks.filter((x) => x.state === "removed").map((x) => x.positionMm), [600, 1200, 1800, 2400, 3000, 3600]);
+  assert.deepEqual(dem(c, /below-sill/), [600, 1200, 1800, 2400, 3000, 3600].map((x) => [`W1 below-sill @ ${x.toLocaleString("en-AU")}`, 1, 1820]),
+    "sill 2,000 from the floor − 45 plate = 1,955 − 3 stacked sill trimmers (135) = 1,820");
+  assert.deepEqual(dem(c, /jack/), [["W1 jack × 2 @ 2,555 mm", 2, 2555]], "head 2,600 from the floor − 45 plate");
+  assert.deepEqual(dem(c, /sill trimmer/), [["W1 sill trimmer × 3 @ 3,430 mm", 3, 3430]]);
+  assert.deepEqual(dem(c, /above-head/), [], "no lintel size, so no cripples above");
+  const r = l.openings[0].rule;
+  assert.deepEqual([r.kings, r.jacks, r.jambsPerSide, r.jackLengthMm, r.sillFromStudBaseMm], [{ left: 1, right: 1 }, { left: 1, right: 1 }, 2, 2555, 1955]);
+});
+
+t("the jamb count includes the king and the stud under the lintel: 2 each side = 1 king + 1 jack; never fewer than 2", () => {
+  assert.equal(OPENING_JAMBS_MIN, 2);
+  const fake = (jambsPerSide) => ({ jambs: () => ({ outcome: "ok", jambsPerSide, basis: "test" }), lintels: () => ({ outcome: "needs_roof", reasons: ["x"] }) });
+  const base = { studLengthMm: 2400, bottomPlateMm: 45, trimmerMm: 45, studWidthMm: 35, loadBearing: true, plateIdentity: {}, plateStock: {} };
+  const o = { id: "o", label: "W1", type: "window", xLeftMm: 1000, xRightMm: 2200, sillMm: 900, headMm: 2100 };
+  const three = expandOpening({ opening: o, ctx: { ...base, ...fake(3) } });
+  assert.deepEqual([three.sides, three.jackMm, three.detail.members.find((m) => m.id === "jack").quantity], [{ left: 1, right: 1 }, { left: 70, right: 70 }, 4], "3 jambs = king + 2 jacks each side");
+  const one = expandOpening({ opening: o, ctx: { ...base, ...fake(1) } });
+  assert.equal(one.rule.jambsPerSide, 2, "a table count of 1 is lifted to the 2 a king and a jack make");
+});
+
+t("a window's levels: sill and head from the floor, one trimmer under 1,500 wide, cripples below = sill − plate − trimmer", () => {
+  const c = ruled([wm("w", 4000, 2400, "Wall 1"), om("o", "w", "W1", "window", 1200, 1200, 1200, 900)], { carriesRoof: false });
+  // 900 from the floor − 45 plate − 1 sill trimmer (45) = 810 at the stations inside 1,200–2,400: 1,800 (1,200 and 2,400 are on the edges)
+  assert.deepEqual(dem(c, /below-sill/), [["W1 below-sill @ 1,800", 1, 810]]);
+  // head 2,100 − 45 = 2,055 stud-base; the stud cut is 2,400, so 345 above; a non-loadbearing head trimmer (45) leaves 300 for cripples
+  assert.deepEqual(dem(c, /above-head/), [["W1 above-head @ 1,800", 1, 300]]);
+  assert.deepEqual(dem(c, /trimmer/).map((x) => x.slice(1)), [[1, 1290], [1, 1200]], "head trimmer between the kings (1,200 + a 45 jack each side), sill trimmer between the jacks");
+});
+
+t("a wall that doesn't carry the roof frames its head with trimmers (no lintel); one that does needs a lintel", () => {
+  const no = ruled(SAM(), { carriesRoof: false });
+  assert.deepEqual(dem(no, /head trimmer/).map((x) => x[1]), [3]);
+  assert.ok(!codesOf(no).includes("lintel_not_sized"));
+  const yes = ruled(SAM(), { carriesRoof: true });
+  assert.deepEqual(dem(yes, /head trimmer/), []);
+  assert.ok(codesOf(yes).includes("lintel_not_sized"));
+  // a wall's own setting beats the item's
+  const own = ruled([wm("w", 3955, 2700, "Wall 1", { loadBearing: false }), SAM()[1]], { carriesRoof: true });
+  assert.deepEqual(dem(own, /head trimmer/).map((x) => x[1]), [3]);
+  // nothing said at all: treated as carrying (never fewer studs than a loadbearing wall), and the lintel is asked for
+  const unknown = ruled(SAM());
+  assert.ok(codesOf(unknown).includes("lintel_not_sized"));
+});
+
+t("trimmers stack with the opening's width (a Blue Leaf default until Sam sets it from AS 1684), and the item says so once", () => {
+  assert.deepEqual(TRIMMER_STACK_RULE.map((r) => [r.upToMm, r.count]), [[1500, 1], [2700, 2], [Infinity, 3]]);
+  assert.deepEqual([900, 1500, 1501, 2700, 2701, 5000].map(trimmerStackCount), [1, 1, 2, 2, 3, 3]);
+  const c = ruled([wm("w", 6000, 2400, "Wall 1"), om("a", "w", "W1", "window", 300, 3000, 900, 900), om("b", "w", "W2", "window", 3600, 2000, 900, 900)], { carriesRoof: false });
+  assert.equal(WR(c).problems.filter((p) => p.code === "trimmer_stack_default").length, 1);
+});
+
+t("a framing detail typed on an opening wins: the rules leave it alone and the note to check the studs stays", () => {
+  const detail = { source: "explicit", ref: "Sam", belowSill: { required: false }, aboveHead: { required: false }, members: [{ id: "k", role: "king", quantity: 2, lengthFrom: "stud", sameAsStud: true }] };
+  const c = ruled([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2040, 0, { detail })], { carriesRoof: true });
+  assert.equal(wl(c, "Wall 1").openings[0].rule, undefined);
+  assert.ok(codesOf(c).includes("framing_detail_members"));
+  assert.deepEqual(dem(c, /jack|trimmer|lintel/), []);
+  // the 2-each-side studs of today are unchanged for it
+  assert.equal(st(wl(c, "Wall 1")).length, st(wl(wf([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2040, 0, { detail })]), "Wall 1")).length);
+});
+
+t("a door: no sill trimmer, no cripples below, jacks to the head; a full-height door in a wall that doesn't carry the roof has no head, no cripples", () => {
+  const door = ruled([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2040, 0)], { carriesRoof: false });
+  assert.deepEqual(dem(door, /sill trimmer|below-sill/), []);
+  assert.deepEqual(dem(door, /jack/), [["D1 jack × 2 @ 1,995 mm", 2, 1995]]);
+  const full = ruled([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2400, 0, { fullHeight: true })], { carriesRoof: false });
+  assert.deepEqual(dem(full, /head trimmer|above-head|lintel/), []);
+  assert.deepEqual(dem(full, /jack/), [["D1 jack × 2 @ 2,400 mm", 2, 2400]], "full-height jacks");
+  const lbw = ruled([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2400, 0, { fullHeight: true })], { carriesRoof: true });
+  assert.ok(codesOf(lbw).includes("lintel_not_sized"));
+  assert.match(WR(lbw).problems.find((p) => p.code === "lintel_not_sized").message, /engineered beam/);
+});
+
+t("a cavity slider: jamb studs at the doorway end (king + jack), 2 full studs at the pocket end, head trim over the whole opening; pocket side flips it", () => {
+  const slider = (pocket) => ruled([wm("w", 3600, 2400, "Wall 1"), om("o", "w", "D1", "door", 600, 1860, 2040, 0, { cavityLeafMm: 920, cavityPocket: pocket })], { carriesRoof: false });
+  const right = slider("right");
+  const r = wl(right, "Wall 1").openings[0].rule;
+  assert.deepEqual([r.kings, r.jacks, r.cavity], [{ left: 1, right: 2 }, { left: 1, right: 0 }, { leafMm: 920, pocket: "right" }]);
+  nearAll(st(wl(right, "Wall 1")), [0, 532.5, 2482.5, 2527.5, 3000, 3600]);
+  assert.deepEqual(dem(right, /jack/), [["D1 jack × 1 @ 1,995 mm", 1, 1995]]);
+  assert.deepEqual(dem(right, /head trimmer/), [["D1 head trimmer × 2 @ 1,905 mm", 2, 1905]], "2 stacked over 1,860, between the king side jack and the pocket studs");
+  const left = wl(slider("left"), "Wall 1").openings[0].rule;
+  assert.deepEqual([left.kings, left.jacks], [{ left: 2, right: 1 }, { left: 0, right: 1 }]);
+  assert.deepEqual(st(wl(slider("left"), "Wall 1")).filter((x) => x > 600 && x < 2460), [], "nothing stands in the pocket");
+});
+
+t("a slider's lintel is asked for even in a wall that doesn't carry the roof (no span table applies: type the head size)", () => {
+  const c = ruled([wm("w", 3600, 2400, "Wall 1"), om("o", "w", "D1", "door", 600, 1860, 2040, 0, { cavityLeafMm: 920, cavityPocket: "right" })], { carriesRoof: false });
+  assert.match(WR(c).problems.find((p) => p.code === "lintel_not_sized").message, /doesn't carry the roof, so there is no span table/);
+});
+
+t("the Walls line and wall notes say what was framed (lintels to size, plain words)", () => {
+  const c = ruled(SAM(), { carriesRoof: true });
+  assert.match(wallFramingText(wallFramingTotals(WR(c)), "Walls"), /1 to size/);
+  const lay = WR(c).layouts[0];
+  assert.match(openingRuleText(lay.openings[0]), /^W1: 1 king \+ 1 jack each side · lintel not sized \(needs roof information\) · sill trimmer × 3\.$/);
+  assert.ok(wallFramingNotes(WR(c), "w", null).some((x) => x.startsWith("W1: 1 king")));
 });
 
 console.log(`takeoff-tc-hub031: ${pass} passed, ${fail} failed`);

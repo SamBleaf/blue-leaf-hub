@@ -569,7 +569,9 @@ t("grid: timber placed on the old 600 mm steps is 'placed, no longer in the take
 });
 
 // ── the Walls material ────────────────────────────────────────────────────────
-const walls = (spec, rules = { ...WALL_FRAMING_RULES }) => ({ id: "walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules });
+// HUB 031: these suites are the Walls item as it was before the opening rules (kings, jacks, trimmers, lintels worked out for you):
+// they run with the rules OFF (rules.openingFraming: false). The rules are in takeoff-tc-hub031.test.mjs.
+const walls = (spec, rules = { ...WALL_FRAMING_RULES }) => ({ id: "walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { ...rules, openingFraming: false } });
 const product = (id, purpose, over = {}) => ({ id, name: id, isActive: true, methodKey: "linear_stock", methodVersion: 1, rules: {},
   spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", species: null, supplierName: "Yard A", productCode: null, stock: { maxMm: null, unavailableMm: [] }, ...over } });
 const partOf = (spec, k) => spec.components[k];

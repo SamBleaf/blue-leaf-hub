@@ -44,7 +44,7 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -1697,6 +1697,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const hitItems = elements.items.filter((it) => it.hit !== false);
   const selItem = sel?.kind === "item" ? hitItems.find((it) => it.id === sel.id) || null : null;
   const selOpening = sel?.kind === "opening" ? openings.find((o) => o.id === sel.id) || null : null;
+  const ruleLayout = selOpening ? (studEntry?.layout?.openings || []).find((o) => o.id === selOpening.id && o.rule) || null : null;
   // the automatic battens read "Batten" in the legend (a support layer set up by hand stays "Support")
   const legend = (LEGEND[tab] || []).filter(([state]) => elements.items.some((it) => it.state === state))
     .map(([state, text, cls]) => [state, state === "support" && elements.items.filter((it) => it.state === "support").every((it) => it.auto) ? "Batten" : text, cls]);
@@ -2222,6 +2223,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
+              {ruleLayout && <p className="text-xs text-ink" data-opening-rule="">Framing worked out: {openingRuleText(ruleLayout)} A framing detail typed below replaces it.</p>}
               {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}
             </div>

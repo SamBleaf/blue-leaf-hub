@@ -574,7 +574,7 @@ t("fixes: wallsText says an item's walls in one short phrase", () => {
 t("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, needs nothing, and its 35 mm studs set the side studs, merges and noggin bays", () => {
   const spec = wallFramingDefaults([]);
   const mk = methodFor(spec);
-  const walls = { id: "walls", name: "Walls", methodKey: mk.key, methodVersion: mk.version, spec, rules: { ...WALL_FRAMING_RULES } };
+  const walls = { id: "walls", name: "Walls", methodKey: mk.key, methodVersion: mk.version, spec, rules: { ...WALL_FRAMING_RULES, openingFraming: false } };   // HUB 031: the pre-rules item (rules: takeoff-tc-hub031)
   // the HUB 028 worked example: Wall 1 6,000 with D1 820 wide at 1,000; Wall 2 4,000 with W1 1,800 wide at 1,200, sill 900
   const ms = [rect("w1", 6000, 2700, "Wall 1"), rect("w2", 4000, 2700, "Wall 2"),
     { id: "d1", kind: "opening", parentId: "w1", inputs: { xMm: 1000, sillMm: 0, widthMm: 820, heightMm: 2040, label: "D1", type: "door" } },
