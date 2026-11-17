@@ -39,6 +39,7 @@ import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm 
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
 import { cavityOpeningWidth, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { ROOF_LOAD_WIDTHS_MM } from "../../../shared/takeoff/standards/index.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
@@ -810,7 +811,7 @@ function StatusSummary({ view, material, result, computedError, canEdit, onSetup
   );
 }
 
-function OpeningForm({ value, onField, canEdit, focusToken }) {
+export function OpeningForm({ value, onField, canEdit, focusToken }) {
   const ref = useRef(null);
   // after a TAP on the elevation, iOS fires compatibility mouse events that would steal focus straight back to the
   // drawing — focus Width once they have passed, so the keyboard opens on the field
@@ -848,7 +849,7 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
  * Full height and Cavity slider on an opening already drawn (HUB 031, Sam 17 Nov 2026). A door up to 1,200 wide asks which
  * side it slides into (left is the wall start); a wider one is read as the whole opening. One tap each, one Undo.
  */
-function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
+export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
   const [asking, setAsking] = useState(false);
   const chip = (on, extra = "") => `min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"} ${extra}`;
   const slider = opening.cavityLeafMm > 0;
@@ -871,6 +872,49 @@ function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
         </div>
       )}
       {slider && <p className="text-[11px] text-muted">No studs or noggins in the pocket. The pocket slides {opening.cavityPocket === "left" ? "left (towards the wall start)" : "right"}.</p>}
+    </div>
+  );
+}
+
+/**
+ * The lintel the opening rules found for an opening, with "tap to add load information" (HUB 031, Sam 17 Nov 2026): the roof
+ * width this opening carries (chips from the tables' own columns), or a lintel size typed by hand that the tables never
+ * overwrite. A lintel that doesn't fit, or can't be sized, says why in plain words.
+ */
+export function LintelLoad({ opening, rule, onSet }) {
+  const [open, setOpen] = useState(false);
+  const inputs = opening.rec.inputs || {};
+  const l = rule.lintel;
+  const typed = inputs.lintel || null;
+  const [dim, setDim] = useState({ depthMm: typed?.depthMm ?? null, breadthMm: typed?.breadthMm ?? 45, plies: typed?.plies ?? 1 });
+  const text = l.status === "sized" || l.status === "typed" ? `${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}`
+    : l.status === "not_needed" ? "none (this wall doesn't carry the roof; the head is framed with trimmers)" : `not sized (${l.reason})`;
+  const save = (next) => onSet(next);
+  return (
+    <div className="space-y-1" data-opening-lintel="">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-[44px] w-full items-center justify-between rounded-lg border border-hairline bg-white px-3 text-left text-sm focus-ring">
+        <span><span className="text-xs text-muted">Lintel</span><br /><span className="font-medium text-ink" data-lintel-text="">{text}</span></span>
+        <span aria-hidden="true">{open ? "▾" : "›"}</span>
+      </button>
+      {l.noFit && <p className="text-xs font-semibold text-red-700" data-lintel-nofit="">Won&apos;t fit: it is {Math.round(l.noFit.neededMm)} deep and only {Math.round(l.noFit.freeMm)} mm is free above the head. Lower the {opening.type === "door" ? "door" : "window"}, or confirm the lintel sits in the top plate.</p>}
+      {l.basis && <p className="text-[11px] text-muted" data-lintel-basis="">{l.basis}</p>}
+      {open && (
+        <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-load="">
+          <Chips label="Roof width this opening carries (mm)" value={inputs.loadRlwMm ?? "item"} options={[["item", "Same as the item"], ...ROOF_LOAD_WIDTHS_MM.map((v) => [v, String(v)])]}
+            onChange={(v) => { const next = { ...inputs }; if (v === "item") delete next.loadRlwMm; else next.loadRlwMm = v; save(next); }} />
+          <p className="text-[11px] text-muted">About half the roof span over it plus the eaves. Only this opening changes.</p>
+          <div className="grid grid-cols-3 gap-2">
+            <NumberField label="Depth" value={dim.depthMm} min={40} max={600} optional onCommit={(n) => setDim((d) => ({ ...d, depthMm: n }))} />
+            <NumberField label="Thickness" value={dim.breadthMm} min={18} max={200} optional onCommit={(n) => setDim((d) => ({ ...d, breadthMm: n }))} />
+            <NumberField label="Pieces" value={dim.plies} min={1} max={4} optional onCommit={(n) => setDim((d) => ({ ...d, plies: n || 1 }))} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade ? { grade: l.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
+            {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; save(next); }}>Use the table</Btn>}
+          </div>
+          <p className="text-[11px] text-muted">A size you type is used as it is: it isn&apos;t checked against a span table.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -2224,6 +2268,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
               {ruleLayout && <p className="text-xs text-ink" data-opening-rule="">Framing worked out: {openingRuleText(ruleLayout)} A framing detail typed below replaces it.</p>}
+              {ruleLayout && canEdit && <LintelLoad key={`lintel-${selOpening.id}-${draftReset}`} opening={selOpening} rule={ruleLayout.rule} onSet={(next) => act.setOpeningInputs(selOpening.rec, next)} />}
               {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}
             </div>

@@ -94,7 +94,7 @@ export function expandOpening({ opening: o, ctx }) {
     } else if (loadBearing === false && cavity) {
       lintel = { status: "unsized", reason: "this wall doesn't carry the roof, so there is no span table to use: type the head size" };
     } else {
-      const r = ctx.lintels({ spanMm: W, opening: o });
+      const r = ctx.lintels({ spanMm: W, maxDepthMm: H - headSB, opening: o });
       if (r.outcome === "ok") pick = { source: "table", section: r.section, depthMm: r.depthMm, breadthMm: r.breadthMm, plies: r.plies || 1, grade: r.grade, basis: r.basis, extraBearingMm: r.extraBearingMm || 0 };
       else lintel = { status: r.outcome === "engineer" ? "engineer" : "unsized", reason: r.reasons?.[0] || r.basis || "needs roof information" };
     }

@@ -1,10 +1,19 @@
 // =============================================================================
-// engine/openingSelectors.js — HUB 031: what the opening rules ask the span tables (jambs per side, lintel size).
-// Step 4 shipped without tables (every opening says "needs roof information"); the cited tables come in step 5.
+// engine/openingSelectors.js — HUB 031: what the opening rules ask the span tables (jamb studs per side, lintel size),
+// with the roof the office described on the Walls card (rules.roofMass, rlwMm, rafterSpacingMm, windClass, storey,
+// lintelProduct) and, for one opening, the roof width it carries if the office tapped the lintel and changed it.
+// Nothing is defaulted: a blank is passed on as blank and the selectors say "needs roof information".
 // =============================================================================
+import { selectJambs, selectLintel } from "../standards/index.js";
 
 /** @returns {{ jambs:(q:object)=>object, lintels:(q:object)=>object }} */
-export function openingSelectors() {
-  const needs = { outcome: "needs_roof", jambsPerSide: null, reasons: ["The roof isn't described yet, so no span table was used."], basis: "" };
-  return { jambs: () => needs, lintels: () => ({ ...needs, reasons: ["needs roof information"] }) };
+export function openingSelectors({ rules, parts, opening }) {
+  const r = rules || {};
+  const roof = { roofMass: r.roofMass, rlwMm: opening?.loadRlwMm || r.rlwMm, spacingMm: r.rafterSpacingMm, windClass: r.windClass, storey: r.storey === "lower" ? "lower" : "single_upper" };
+  const s = parts?.studs?.section || {};
+  const stud = { depthMm: Number(s.depthMm), widthMm: Number(s.widthMm), grade: parts?.studs?.grade };
+  return {
+    jambs: (q) => selectJambs({ stud, ...roof, jambHeightMm: q.jambHeightMm, openingWidthMm: q.openingWidthMm }),
+    lintels: (q) => selectLintel({ product: r.lintelProduct === "MGP10" ? "MGP10" : "SmartLVL13", ...roof, spanMm: q.spanMm, maxThicknessMm: stud.depthMm, maxDepthMm: q.maxDepthMm }),
+  };
 }

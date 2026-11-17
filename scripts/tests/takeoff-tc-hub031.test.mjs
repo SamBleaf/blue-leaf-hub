@@ -4,10 +4,14 @@
 //   node scripts/tests/takeoff-tc-hub031.test.mjs
 import assert from "node:assert/strict";
 import { CALCULATION_VERSION, CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
-import { cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
+import { cleanMaterialContent, cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
 import { OPENING_JAMBS_MIN, TRIMMER_STACK_RULE, expandOpening, trimmerStackCount } from "../../shared/takeoff/engine/openingRules.js";
 import { fixedWidthOpening } from "../../src/components/takeoff/measure/geometry.js";
 import { NOTE_CODES } from "../../shared/takeoff/fixes.js";
+import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, selectJambs, selectLintel, tableRecord } from "../../shared/takeoff/standards/index.js";
+import MGP10 from "../../shared/takeoff/standards/data/as1684-mgp10-n1n2.js";
+import SMART10 from "../../shared/takeoff/standards/data/smart10-2024.js";
+import L13 from "../../shared/takeoff/standards/data/smartlvl13-e1-2021.js";
 import { openingRuleText, cavityConvert, fullHeightFollowers, fullHeightMm, lastOpeningSizes, itemCentresMm, toggleWetWall, wallFramingNotes, wallFramingText, wallFramingTotals, wetWallsOf, withWallCentres } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
@@ -344,8 +348,179 @@ t("the Walls line and wall notes say what was framed (lintels to size, plain wor
   const c = ruled(SAM(), { carriesRoof: true });
   assert.match(wallFramingText(wallFramingTotals(WR(c)), "Walls"), /1 to size/);
   const lay = WR(c).layouts[0];
-  assert.match(openingRuleText(lay.openings[0]), /^W1: 1 king \+ 1 jack each side · lintel not sized \(needs roof information\) · sill trimmer × 3\.$/);
+  assert.match(openingRuleText(lay.openings[0]), /^W1: 1 king \+ 1 jack each side · lintel not sized \(the wind class isn't set\) · sill trimmer × 3\.$/);
   assert.ok(wallFramingNotes(WR(c), "w", null).some((x) => x.startsWith("W1: 1 king")));
+});
+
+// ══ Steps 5 and 6: lintels and jambs from cited span tables (MGP10 + the LVL guides) ════════════════════════════
+t("the tables carry their source, edition and page, and the cells read straight off the PDFs match (spot checks by eye, whole lintel tables by script)", () => {
+  const rec = Object.fromEntries(tableRecord().map((r) => [r.id, r]));
+  assert.deepEqual([rec.T17.page, rec.T18.page, rec.T47.page, rec.T48.page, rec.T11.page, rec.T7.page, rec.T36.page], [22, 23, 50, 51, 14, 11, 41]);
+  assert.equal(rec["L13-LINTEL"].edition, "E1 2021");
+  assert.deepEqual(rec["L13-LINTEL"].page, [22, 23]);
+  assert.equal(rec["S10-JAMB"].edition, "Mar 2024");
+  assert.equal(rec["S10-JAMB"].page, 11);
+  assert.equal(rec["S10-JAMB"].guidePage, 9);
+  assert.equal(rec["L13-LINTEL"].rows, 60);
+  assert.equal(rec["S10-JAMB"].rows, 28);
+  // SmartLVL13 p. 19 of the guide (PDF 22), read from the rendered page: 300x45 sheet roof, RLW 4500 at 600 = 4000 with 5 mm more bearing
+  const row = (size, mass) => L13.tables["L13-LINTEL"].rows.find((r) => r.size === size && r.massKgM2 === mass);
+  const col = (rlw, sp) => L13.tables["L13-LINTEL"].columns.findIndex((c) => c.rlwMm === rlw && c.spacingMm === sp);
+  assert.deepEqual([row("300x45", 40).spansMm[col(4500, 600)], row("300x45", 40).extraBearingMm[col(4500, 600)]], [4000, 5]);
+  assert.deepEqual([row("400x45", 90).spansMm[col(7500, 1200)], row("400x45", 90).extraBearingMm[col(7500, 1200)]], [3600, 25]);
+  assert.deepEqual([row("90x45", 90).spansMm[col(4500, 1200)], row("90x45", 40).spansMm[col(1500, 600)]], [null, 2000], "NS reads as null");
+  assert.deepEqual(row("2/400x45", 90).spansMm, [6200, 6200, 5300, 5300, 4900, 4800, 4500, 4500, 4300, 4300]);
+  // Smart10 guide p. 9 (PDF 11): 2/90x35 at 2,700 high, sheet roof
+  const j = SMART10.tables["S10-JAMB"].rows.find((r) => r.config === "2/90x35" && r.heightMm === 2700);
+  assert.deepEqual(j.maxOpeningMm, [3600, 3600, 3200, 2500, 2200, 3600, 3300, 2700, 2200, 1800]);
+  // AS 1684.2 Supp 4 T17: 190x45
+  assert.deepEqual(MGP10.tables.T17.rows.find((r) => r.size === "190x45").maxSpanMm, [3600, 3500, 3000, 3000, 2700, 2700, 2400, 2400, 2200, 2200]);
+  assert.equal(MGP10.tables.T11.verified, true);
+});
+
+t("the SmartLVL 13 guide's own worked example: N4, sheet roof, spacing 600, 3,500 span, roof width 3,900 → 300 × 45 with 5 mm extra bearing", () => {
+  const r = selectLintel({ product: "SmartLVL13", roofMass: "sheet", rlwMm: 3900, spacingMm: 600, windClass: "N4", spanMm: 3500 });
+  assert.deepEqual([r.outcome, r.section, r.plies, r.extraBearingMm, r.grade], ["ok", "300x45", 1, 5, "LVL13"]);
+  assert.match(r.basis, /SmartLVL 13 Design Guide \(E1 2021\), L13-LINTEL, page 22 and 23/);
+});
+
+t("the Smart10 guide's own worked example: sheet roof, 1,800 opening, 2,700 jambs, roof width 4,100 → 2/90 × 35 (two jamb studs a side)", () => {
+  const r = selectJambs({ stud: { depthMm: 90, widthMm: 35, grade: "LVL Smart 10" }, roofMass: "sheet", rlwMm: 4100, windClass: "N3", jambHeightMm: 2700, openingWidthMm: 1800 });
+  assert.deepEqual([r.outcome, r.jambsPerSide, r.section, r.table], ["ok", 2, "90x35", "S10-JAMB"]);
+  assert.match(r.basis, /Smart10 LVL Stud Design Guide \(Mar 2024\), S10-JAMB, page 11 \(guide p\. 9\), sheet roof, roof width 4500/);
+});
+
+t("a pine MGP10 stud reads the AS 1684.2 N1/N2 jamb table (T11); a wider opening or a heavier roof asks for more studs", () => {
+  const q = { stud: { depthMm: 90, widthMm: 45, grade: "MGP10" }, roofMass: "sheet", rlwMm: 3000, windClass: "N2", jambHeightMm: 2400 };
+  const small = selectJambs({ ...q, openingWidthMm: 900 });
+  const big = selectJambs({ ...q, openingWidthMm: 3000 });
+  assert.equal(small.outcome, "ok");
+  assert.ok(big.outcome !== "ok" || big.jambsPerSide >= small.jambsPerSide);
+  assert.match(small.basis, /AS 1684\.2 N1\/N2 Supplement 4 \(2006\), T11, page 14/);
+});
+
+t("fail closed: anything missing is 'needs roof information', anything outside a table is 'engineer', never a default or a nearest size", () => {
+  const ok = { product: "SmartLVL13", roofMass: "sheet", rlwMm: 3000, spacingMm: 600, windClass: "N2", spanMm: 1800 };
+  assert.equal(selectLintel(ok).outcome, "ok");
+  for (const k of ["roofMass", "rlwMm", "spacingMm", "windClass"]) assert.equal(selectLintel({ ...ok, [k]: undefined }).outcome, "needs_roof", k);
+  assert.match(selectLintel({ ...ok, windClass: undefined }).reasons[0], /wind class/);
+  assert.equal(selectLintel({ ...ok, windClass: "N5" }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, windClass: "C2" }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, product: "MGP10", windClass: "N3" }).outcome, "engineer", "the pine tables are N1 and N2 only");
+  assert.equal(selectLintel({ ...ok, storey: "lower" }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, rlwMm: 7501 }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, spacingMm: 1201 }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, spanMm: 9000 }).outcome, "engineer");
+  assert.equal(selectLintel({ ...ok, roofMass: "slate" }).outcome, "needs_roof");
+  assert.equal(selectJambs({ stud: { depthMm: 90, widthMm: 35, grade: "F7" }, roofMass: "sheet", rlwMm: 3000, windClass: "N2", jambHeightMm: 2400, openingWidthMm: 900 }).outcome, "not_in_table");
+  assert.equal(selectJambs({ stud: { depthMm: 90, widthMm: 35, grade: "LVL Smart 10" }, roofMass: "sheet", rlwMm: 3000, windClass: "N2", jambHeightMm: 3300, openingWidthMm: 900 }).outcome, "engineer", "taller than any tabulated jamb");
+  assert.equal(selectJambs({ stud: { depthMm: 140, widthMm: 35, grade: "LVL Smart 10" }, roofMass: "sheet", rlwMm: 3000, windClass: "N2", jambHeightMm: 2400, openingWidthMm: 900 }).outcome, "not_in_table");
+  assert.deepEqual(ROOF_LOAD_WIDTHS_MM, [1500, 3000, 4500, 6000, 7500]);
+  assert.equal(LINTEL_PRODUCTS[0][0], "SmartLVL13");
+});
+
+t("roof width and spacing round UP to the next column (the conservative way)", () => {
+  const base = { product: "SmartLVL13", roofMass: "sheet", windClass: "N2", spanMm: 2000 };
+  const a = selectLintel({ ...base, rlwMm: 3001, spacingMm: 601 });
+  const b = selectLintel({ ...base, rlwMm: 4500, spacingMm: 1200 });
+  assert.equal(a.section, b.section);
+  assert.match(a.basis, /roof width 4500, spacing 1200/);
+});
+
+t("a lintel never wider than the wall: a 2 × 63 (126) isn't offered in a 90 wall", () => {
+  const r = selectLintel({ product: "SmartLVL13", roofMass: "sheet", rlwMm: 1500, spacingMm: 600, windClass: "N2", spanMm: 2050, maxThicknessMm: 90 });
+  assert.ok(r.breadthMm * r.plies <= 90, JSON.stringify(r));
+});
+
+const FULL_ROOF = { carriesRoof: true, roofMass: "sheet", rlwMm: 3000, rafterSpacingMm: 600, windClass: "N2" };
+const sam = () => wallFramingDefaults([product("p-plate", "plates"), product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 } })]);
+const withRoof = (measurements, over = {}) => wf(measurements, { spec: sam(), rules: { ...WALL_FRAMING_RULES, ...FULL_ROOF, ...over } });
+
+t("Sam's wall with a roof described: the lintel comes from the table (240 × 45 LVL13 for 3,430 at roof width 3,000), it doesn't fit under a 2,600 head, and says so", () => {
+  const c = withRoof(SAM());
+  const r = wl(c, "Wall 1").openings[0].rule;
+  assert.deepEqual([r.lintel.status, r.lintel.section, r.lintel.grade, r.lintel.plies], ["sized", "240x45", "LVL13", 1]);
+  assert.deepEqual(r.lintel.noFit, { neededMm: 240, freeMm: 145 }, "2,700 stud − 2,555 head from the stud base");
+  assert.match(WR(c).problems.find((p) => p.code === "lintel_no_fit").message, /240 deep lintel won't fit\. Only 145 mm is free above the head/);
+  assert.deepEqual(dem(c, /lintel/), [["W1 lintel × 1 @ 3,500 mm", 1, 3500]], "cut = 3,430 + a 35 jack each side");
+  assert.deepEqual(dem(c, /above-head/), [], "no room above the lintel");
+  assert.match(wallFramingText(wallFramingTotals(WR(c)), "Walls"), /1 lintel, 1 won't fit/);
+});
+
+t("jambs from the Smart10 table for Sam's 90 × 35 LVL studs: 2 a side at 3,000 roof width for a 3,430 opening, three at a heavier roof", () => {
+  const c = withRoof(SAM());
+  assert.equal(wl(c, "Wall 1").openings[0].rule.jambTable.jambsPerSide, 2);
+  assert.match(wl(c, "Wall 1").openings[0].rule.jambTable.basis, /Smart10 LVL Stud Design Guide \(Mar 2024\), S10-JAMB/);
+  const heavy = withRoof(SAM(), { rlwMm: 7500, roofMass: "tile" });
+  const hr = wl(heavy, "Wall 1").openings[0].rule;
+  assert.ok(hr.jambsPerSide >= 3 || hr.jambTable.outcome === "engineer", JSON.stringify(hr.jambTable));
+});
+
+t("a window that fits: the lintel is counted with its cut length, cripples above it are counted from its depth, in the item's own product", () => {
+  const ms = [wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)];
+  const c = withRoof(ms);
+  const r = wl(c, "Wall 1").openings[0].rule;
+  assert.equal(r.lintel.status, "sized");
+  const depth = r.lintel.depthMm;
+  // head 2,100 − 45 plate = 2,055 stud-base; cripples above = 2,700 − 2,055 − lintel depth, at the stations inside 1,000–2,200: 1,200 / 1,800
+  assert.deepEqual(dem(c, /above-head/).map((x) => x[2]), [2700 - 2055 - depth, 2700 - 2055 - depth]);
+  assert.equal(dem(c, /lintel/)[0][2], 1200 + 2 * 35, "cut = the opening + a 35 jack (Sam's 90 × 35 studs) each side");
+  assert.ok(WR(c).demands.some((d) => /lintel/.test(d.label) && d.identity.grade === "LVL13" && d.identity.treatment === "H2"));
+});
+
+t("a typed lintel on the opening beats the table; 'Pine MGP10' reads the AS 1684 lintel tables for N1/N2 only", () => {
+  const typed = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900, { lintel: { depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" } })]);
+  const r = wl(typed, "Wall 1").openings[0].rule;
+  assert.deepEqual([r.lintel.status, r.lintel.section, r.lintel.plies], ["typed", "190x45", 2]);
+  assert.deepEqual(dem(typed, /lintel/).map((x) => x[1]), [2], "2/190x45: two pieces");
+  const pine = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)], { lintelProduct: "MGP10" });
+  assert.equal(wl(pine, "Wall 1").openings[0].rule.lintel.grade, "MGP10");
+  assert.match(wl(pine, "Wall 1").openings[0].rule.lintel.basis, /AS 1684\.2 N1\/N2 Supplement 4 \(2006\), T17, page 22/);
+  const n3 = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)], { lintelProduct: "MGP10", windClass: "N3" });
+  assert.equal(wl(n3, "Wall 1").openings[0].rule.lintel.status, "engineer");
+});
+
+t("tap the lintel to add load information: a bigger roof width on one opening gives a deeper lintel for that opening only", () => {
+  const ms = [wm("w", 6000, 2700, "Wall 1"), om("a", "w", "W1", "window", 500, 1800, 1200, 900), om("b", "w", "W2", "window", 3000, 1800, 1200, 900, { loadRlwMm: 7500 })];
+  const c = withRoof(ms);
+  const [a, b] = wl(c, "Wall 1").openings.map((o) => o.rule.lintel);
+  assert.ok(b.depthMm > a.depthMm, `${a.section} vs ${b.section}`);
+  assert.match(b.basis, /roof width 7500/);
+});
+
+t("a wide slider in a wall that carries the roof: the lintel comes from the table, over the whole 1,860, with its head trim", () => {
+  const ms = [wm("w", 3600, 2700, "Wall 1"), om("o", "w", "D1", "door", 600, 1860, 2040, 0, { cavityLeafMm: 920, cavityPocket: "right" })];
+  const c = withRoof(ms);
+  const r = wl(c, "Wall 1").openings[0].rule;
+  assert.equal(r.lintel.status, "sized");
+  assert.equal(dem(c, /lintel/)[0][2], 1860 + 35, "1,860 + the doorway end's 35 jack (the pocket end is 2 full studs)");
+  assert.deepEqual(dem(c, /head trimmer/).map((x) => x[1]), [2]);
+});
+
+t("the Walls item reads the same through the real computeWorkspace: orders carry the lintel as its own line (the item's product, not 'studs')", () => {
+  const c = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)]);
+  assert.ok(c.scheduleLines.some((l) => /LVL13/.test(l.item.description) && /45/.test(l.item.description)), JSON.stringify(c.scheduleLines.map((l) => l.item.description)));
+  assert.ok(!WR(c).problems.some((p) => p.blocking), JSON.stringify(WR(c).problems.filter((p) => p.blocking)));
+});
+
+t("server whitelist: a typed lintel (section, pieces, grade), the roof width an opening carries, a wall's loadBearing and the item's roof answers are kept; nonsense is refused plainly", () => {
+  const base = { xMm: 0, sillMm: 900, widthMm: 1200, heightMm: 1200, label: "W1", type: "window" };
+  const ok = cleanMeasurementInputs("opening", { ...base, lintel: { depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13", junk: 1 }, loadRlwMm: 4500 }, null);
+  assert.deepEqual([ok.lintel, ok.loadRlwMm], [{ depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" }, 4500]);
+  assert.throws(() => cleanMeasurementInputs("opening", { ...base, lintel: { depthMm: 10, breadthMm: 45 } }, null), /Lintel depth must be between 40 and 600 mm/);
+  assert.throws(() => cleanMeasurementInputs("opening", { ...base, lintel: { depthMm: 190, breadthMm: 45, plies: 9 } }, null), /1 to 4 pieces/);
+  assert.ok(!("lintel" in cleanMeasurementInputs("opening", base, null)));
+  const wallBase = { kind: "rect", widthMm: 3000, heightMm: 2400, name: "W" };
+  assert.equal(cleanMeasurementInputs("wall", { ...wallBase, loadBearing: false }, null).loadBearing, false);
+  assert.ok(!("loadBearing" in cleanMeasurementInputs("wall", { ...wallBase, loadBearing: "yes" }, null)));
+  const spec = wallFramingDefaults([]);
+  const m = cleanMaterialContent({ name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec,
+    rules: { centresMm: 600, carriesRoof: true, roofMass: "sheet", rlwMm: 3000, rafterSpacingMm: 600, windClass: "N2", lintelProduct: "MGP10", openingFraming: false } });
+  assert.deepEqual([m.rules.carriesRoof, m.rules.roofMass, m.rules.rlwMm, m.rules.rafterSpacingMm, m.rules.windClass, m.rules.lintelProduct, m.rules.openingFraming], [true, "sheet", 3000, 600, "N2", "MGP10", false]);
+});
+
+t("NOTE_CODES: the opening rules' notes are notes (never a fix row)", () => {
+  for (const c of ["jambs_minimum_used", "trimmer_stack_default", "lintel_not_sized", "lintel_no_fit", "lintel_bearing"]) assert.ok(NOTE_CODES.includes(c), c);
 });
 
 console.log(`takeoff-tc-hub031: ${pass} passed, ${fail} failed`);

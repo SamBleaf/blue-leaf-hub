@@ -219,6 +219,14 @@ const MM = (v, label, { min = 0, max = 100000, allowNull = true } = {}) => {
   must(isFiniteNumber(n) && n >= min && n <= max, `${label} must be between ${min} and ${max.toLocaleString("en-AU")} mm.`);
   return Math.round(n * 1000) / 1000;
 };
+/** A lintel typed on an opening (HUB 031): section, laminations and grade, bounded; the span tables never overwrite it. */
+function cleanLintel(l) {
+  must(l && typeof l === "object" && !Array.isArray(l), "The lintel is invalid.");
+  const plies = Number(l.plies ?? 1);
+  must(Number.isInteger(plies) && plies >= 1 && plies <= 4, "A lintel can be 1 to 4 pieces.");
+  return { depthMm: MM(l.depthMm, "Lintel depth", { min: 40, max: 600, allowNull: false }), breadthMm: MM(l.breadthMm, "Lintel thickness", { min: 18, max: 200, allowNull: false }),
+    plies, ...(optStr(l.grade, 30) ? { grade: optStr(l.grade, 30) } : {}) };
+}
 function cleanInputs(kind, inp, tracedLengthMm) {
   const i = inp || {};
   if (kind === "wall") {
@@ -252,6 +260,9 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       ...(i.fullHeight === true ? { fullHeight: true } : {}),
       ...(i.type === "door" && i.cavityLeafMm != null && i.cavityLeafMm !== "" ? { cavityLeafMm: MM(i.cavityLeafMm, "Door width", { min: 300, max: 1500 }),
         ...(i.cavityPocket === "left" || i.cavityPocket === "right" ? { cavityPocket: i.cavityPocket } : {}) } : {}),
+      // HUB 031: a lintel the office typed on this opening (beats the span table), and the roof width this opening carries
+      ...(i.lintel != null ? { lintel: cleanLintel(i.lintel) } : {}),
+      ...(i.loadRlwMm != null && i.loadRlwMm !== "" ? { loadRlwMm: MM(i.loadRlwMm, "Roof width", { min: 100, max: 20000 }) } : {}),
       ...(i.detail != null ? { detail: cleanOpeningDetail(i.detail) } : {}) };
   }
   if (kind === "offcut") {
