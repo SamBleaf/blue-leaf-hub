@@ -431,6 +431,7 @@ export function wallFramingTotals(result, wallId = null) {
   if (Object.keys(own).length) t.ownCentres = own;
   for (const { totals: x } of lays) {
     t.studs += x.studs || 0;
+    if (x.junctionStuds) t.junctionStuds = (t.junctionStuds || 0) + x.junctionStuds;
     if (x.studs) byH.set(x.studLengthMm, (byH.get(x.studLengthMm) || 0) + x.studs);
     t.bottomPlateMm += x.bottomPlateMm || 0;
     t.topPlateMm += x.topPlateMm || 0;
@@ -473,6 +474,8 @@ export function wallFramingText(t, label = null, notCounted = []) {
   const m = (mm) => `${(mm / 1000).toFixed(2)} m`;
   const hs = t.studsByHeight || [];
   const studs = `${n(t.studs)} stud${t.studs === 1 ? "" : "s"}${hs.length === 1 ? ` at ${n(hs[0][0])}` : hs.length > 1 ? ` (${hs.map(([h, q]) => `${n(q)} at ${n(h)}`).join(", ")})` : ""}`;
+  // wall junctions: the studs added either side of a wall butting into another, said apart from the counted studs
+  const jn = (t.junctionStuds || 0) > 0 ? ` + ${n(t.junctionStuds)} junction stud${t.junctionStuds === 1 ? "" : "s"}` : "";
   const two = t.secondTopPlateMm;
   const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
   const rows = t.rows || [];
@@ -483,7 +486,7 @@ export function wallFramingText(t, label = null, notCounted = []) {
   // HUB 031: the lintels the opening rules sized, and the ones still to size ("· 2 lintels, 1 to size")
   const r = t.openingRules;
   const heads = r && (r.lintels || r.lintelsToSize) ? [[r.lintels ? `${n(r.lintels)} lintel${r.lintels === 1 ? "" : "s"}` : null, r.lintelsToSize ? `${n(r.lintelsToSize)} to size` : null, r.noFit ? `${n(r.noFit)} won't fit` : null].filter(Boolean).join(", ")] : [];
-  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
+  const body = [studs + jn, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
   return label ? `${label}: ${body}` : body;
 }
 
@@ -536,6 +539,15 @@ export function wallPartText(part) {
   return [sec, ...words].join(" ");
 }
 
+/** "Wall 2 butts in at 3,200: studs at 3,132.5 and 3,267.5" / "…: not counted (removed)" / merged / in an opening. */
+export function junctionText(j) {
+  const n = (v) => Math.round(v * 10) / 10 === Math.round(v) ? Math.round(v).toLocaleString("en-AU") : (Math.round(v * 10) / 10).toLocaleString("en-AU");
+  const head = `${j.buttingLabel} butts in at ${n(j.stationMm)}`;
+  if (j.off) return `${head}: junction studs removed by hand.`;
+  const bits = j.studs.map((s) => (s.state === "added" ? `stud at ${n(s.positionMm)}` : s.state === "merged" ? `${n(s.positionMm)} served by the stud at ${n(s.mergedWithMm)}` : s.state === "inOpening" ? `${n(s.positionMm)} falls in an opening, not counted` : `${n(s.positionMm)} is past the wall's end, not counted`));
+  return `${head}: ${bits.join("; ")}.`;
+}
+
 /**
  * A wall page's own notes for a Walls item (HUB 028), under its Walls line: "Plates: 90 × 45 LVL (over 6.0 m)" when a
  * plate on this wall is a long (LVL) plate (Sam's round 3), and "Lintels, jacks and trimmers at D1 aren't counted."
@@ -549,6 +561,8 @@ export function wallFramingNotes(result, wallId, spec) {
     const over = wallLongPlateOverText(spec);
     out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
   }
+  // wall junctions (each butting wall's own line is shown by the wall page, with its Remove button)
+  if (lay?.junctionCorners) out.push(`${lay.junctionCorners} corner${lay.junctionCorners === 1 ? "" : "s"} on this wall: each wall keeps its own end stud, no extra studs.`);
   // HUB 031: each ruled opening's framing in one plain line ("W1: kings 1, jacks 1 each side · lintel 190 x 45 · sill trimmer 1")
   for (const o of lay?.openings || []) if (o.rule) out.push(openingRuleText(o));
   const names = [...new Set((result?.problems || []).filter((p) => p.code === "opening_framing_not_counted")

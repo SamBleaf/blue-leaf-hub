@@ -917,6 +917,33 @@ export function computeStudWall(input) {
       }
     }
     demands.push(...framing);
+    // Wall junctions (docs/takeoff/WALL_JUNCTIONS_PLAN.md): extra studs either side of a wall butting into this one. Each is
+    // merged into a counted stud within one stud width, and skipped inside an opening or past the wall's ends.
+    const junctionTicks = [];
+    const junctionReport = [];
+    if (side !== null && Array.isArray(input.junctionStuds) && input.junctionStuds.length) {
+      const taken = kept.map((s) => s.x);
+      const sw = side.w;
+      for (const j of [...input.junctionStuds].sort((a, b) => a.positionMm - b.positionMm)) {
+        const x = num(j.positionMm, "Junction stud position", { min: -Infinity });
+        let state = "added", mergedWithMm = null;
+        if (x < sw / 2 - EPS_MM || x > run.runMm - sw / 2 + EPS_MM) state = "pastEnd";
+        else if (openings.some((o) => x > o.xLeftMm + EPS_MM && x < o.xRightMm - EPS_MM)) state = "inOpening";
+        else {
+          const near = taken.find((t) => Math.abs(t - x) < sw - EPS_MM);
+          if (near !== undefined) { state = "merged"; mergedWithMm = near; }
+        }
+        junctionReport.push({ junctionId: j.id, positionMm: x, state, ...(mergedWithMm !== null ? { mergedWithMm } : {}) });
+        if (state !== "added") continue;
+        taken.push(x);
+        const stationId = demandId(wallId, posKey(x));
+        junctionTicks.push({ stationId, positionMm: x, state: "junction", openingId: null, reconciledWith: null, junctionId: j.id, junctionLabel: j.label || null });
+        demands.push(piece(ctx, {
+          id: demandId(ctx.materialId, "junction-stud", stationId), role: "junction stud", lengthMm: height.studLengthMm + allowanceMm,
+          label: `Junction stud @ ${fmt(x)}${j.label ? ` (${j.label})` : ""}`, sourceRefs: [{ ...ref, station: x, role: "junction stud", junctionId: j.id }],
+        }));
+      }
+    }
     let additionsComplete = true;
     const extras = list(input.extras, "Wall additions");
     const extraIds = new Set();
@@ -933,7 +960,7 @@ export function computeStudWall(input) {
     ctx.explain.push(`${kept.length} ${side === null ? "common " : ""}stud station(s) × ${plies}${allowanceMm ? ` at ${fmt(height.studLengthMm)} + ${fmt(allowanceMm)} allowance` : ""}`
       + `${side === null ? "" : `, ${sideCount} of them beside openings (${side.perSide > 1 ? `${side.perSide} each side, the first with its face on the opening edge` : "face on the opening edge"})`}`
       + `${w.reconciled.size ? `; ${w.reconciled.size} serve as kings (detail permits)` : ""}`,
-    `Corners, T-junctions, brace panels, point loads and hold-downs are explicit additions only (${extras.length} entered)`);
+    `Corners, brace panels, point loads and hold-downs are explicit additions only (${extras.length} entered); T-junction studs come from the walls' positions${junctionTicks.length ? ` (${junctionTicks.length} added)` : ""}`);
     const scope = openingsComplete ? (openings.length ? "studs with explicit opening framing" : "base studs") : OPENING_FRAMING_INCOMPLETE;
     if (!openingsComplete) ctx.explain.push(cap(OPENING_FRAMING_INCOMPLETE));
     const ticks = side === null
@@ -946,13 +973,14 @@ export function computeStudWall(input) {
       : [...kept.map((s) => ({
         stationId: s.stationId, positionMm: s.x, state: s.kind === "side" ? "side" : "full", openingId: null,
         reconciledWith: w.reconciled.get(s.stationId) ?? null, besideOpeningIds: s.beside, mergedMm: s.merged,
-      })), ...stations.filter((s) => s.opening).map((s) => ({
+      })), ...junctionTicks, ...stations.filter((s) => s.opening).map((s) => ({
         stationId: s.stationId, positionMm: s.x, state: "removed", openingId: s.opening.id, reconciledWith: null,
       }))].sort((a, b) => a.positionMm - b.positionMm);
     return result(ctx, demands, {
       kind: "studWall", wallId, wallLengthMm: run.runMm, studLengthMm: height.studLengthMm, plies, scope,
       ...(side === null ? {} : { studWidthMm: side.w, ...(side.perSide > 1 ? { sideStudsEachSide: side.perSide } : {}) }),
       ticks,
+      ...(junctionReport.length ? { junctionStuds: junctionReport } : {}),
       openings: openingLayout,
       // HUB 028 clipOpeningLevels: openings wholly above the studs, which frame nothing here (only when there are some)
       ...(aboveStuds.length ? { openingsAboveStuds: aboveStuds.map((o) => ({ id: o.id, ...(o.label ? { label: o.label } : {}), xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })) } : {}),

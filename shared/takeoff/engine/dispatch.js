@@ -28,6 +28,7 @@ import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { expandOpening } from "./openingRules.js";
+import { findJunctions } from "./junctions.js";
 import { openingSelectors } from "./openingSelectors.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
@@ -358,6 +359,29 @@ function runTimber(mat, n, items, ctx, sink) {
 
 // ── HUB 028 Walls: one traced run → studs, plates and noggins together ─────────
 
+/**
+ * Junctions of a Walls item's traced walls: each wall's two points to real mm (its own calibration), grouped by
+ * (document, page, calibration) so only walls drawn at one scale on one page are compared. Pure.
+ */
+export function wallJunctionPlan(wallMeasurements, ctx, opts) {
+  const groups = new Map();
+  for (const m of wallMeasurements) {
+    if (m.inputs?.kind === "polygon" || !Array.isArray(m.points) || m.points.length !== 2 || !m.calibrationId) continue;
+    const cal = ctx.calibrationsById?.get(m.calibrationId);
+    if (!cal) continue;
+    const key = `${m.documentId}|${m.pageIndex}|${m.calibrationId}`;
+    const o = { x: 0, y: 0 };
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ id: m.id, a: pointToMm(cal, o, m.points[0]), b: pointToMm(cal, o, m.points[1]) });
+  }
+  const out = { junctions: [], corners: [], crossings: [] };
+  for (const g of groups.values()) {
+    const r = findJunctions(g, opts);
+    out.junctions.push(...r.junctions); out.corners.push(...r.corners); out.crossings.push(...r.crossings);
+  }
+  return out;
+}
+
 /** A Walls part's procurement identity, tagged with its part so each part buys on its own lines and cut list. */
 const wallPartIdentity = (p, part) => timberIdentity({ section: sectionText(p), grade: p.grade, treatment: p.treatment, species: p.species, supplier: p.supplierName, component: part });
 /**
@@ -427,6 +451,10 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // wall is "not counted" (never 0.00 m of plates). familyProblems already blocks with the part's need, once ("Studs:
   // enter the timber section", "Plates: the longest length must be at least 1,200 mm.")
   const stockOk = ["studs", "plates", "noggins"].every((k) => wallPartLongestOk(parts[k]));
+  // Wall junctions: found from where the traced walls start and finish (same page, same scale), worked out afresh each time
+  const jPlan = studW && stockOk && rules.junctionStuds !== false ? wallJunctionPlan(walls.map((x) => x.m), ctx, { thicknessMm: Number(parts.studs.section?.depthMm) || 90, studWidthMm: studW, toleranceMm: Number(rules.junctionToleranceMm) > 0 ? Number(rules.junctionToleranceMm) : undefined }) : { junctions: [], corners: [], crossings: [] };
+  const jOff = new Set(Array.isArray(rules.junctionsOff) ? rules.junctionsOff : []);
+  const jWallName = (id) => { const x = walls.find((q) => q.m.id === id); return x ? tagOf(x) : "a wall"; };
   for (const { m } of studW && stockOk ? walls : []) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
@@ -470,8 +498,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
       ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
       return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };
     }) : openings;
+    // the junctions where this wall is the continuous one: two studs each (unless removed by hand), cut at THIS wall's height
+    const myJ = jPlan.junctions.filter((j) => j.continuousId === m.id);
+    const jStuds = myJ.filter((j) => !jOff.has(j.nodeId)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: x, label: `butts ${jWallName(j.buttingId)}` })));
     const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
-      openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true });
+      openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true, junctionStuds: jStuds });
     const refused = studs.problems.filter((p) => p.code === "invalid_input");
     if (refused.length) {
       // e.g. overlapping openings: this wall gets no quantities, the other walls keep theirs, and the block holds every
@@ -479,7 +510,14 @@ function runWallFraming(mat, n, items, ctx, sink) {
       for (const p of refused) block("invalid_input", onWall(p.message));
       continue;
     }
-    const counted = studs.layout.ticks.filter((t) => t.state !== "removed");
+    const counted = studs.layout.ticks.filter((t) => t.state !== "removed" && t.state !== "junction");
+    const jTicks = studs.layout.ticks.filter((t) => t.state === "junction");
+    const jRep = new Map((studs.layout.junctionStuds || []).map((r) => [r.junctionId, r]));
+    // what the wall page lists: every junction on this wall, counted or not (off = removed by hand)
+    const junctionLayout = myJ.map((j) => ({ id: j.id, nodeId: j.nodeId, buttingId: j.buttingId, buttingLabel: jWallName(j.buttingId), stationMm: j.stationMm, angleDeg: j.angleDeg, split: j.split,
+      off: jOff.has(j.nodeId), studs: j.studsAtMm.map((x, i) => ({ positionMm: x, state: jOff.has(j.nodeId) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) })) }));
+    const myCorners = jPlan.corners.filter((c) => c.wallIds.includes(m.id)).length;
+    const myCrossings = jPlan.crossings.filter((c) => c.wallIds.includes(m.id));
     const centres = counted.map((t) => t.positionMm);
     const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
       layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
@@ -526,6 +564,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
       const q = { code: "framing_detail_members", message: `${tag} ${nm}: its framing detail adds its own members. Check the studs beside ${nm} aren't counted twice.`, blocking: false };
       if (once(q)) problems.push(q);
     }
+    for (const c of myCrossings) {
+      if (c.wallIds[0] !== m.id) continue;
+      const q = { code: "wall_crossing", message: `${tag} crosses ${jWallName(c.wallIds[1])}: two walls crossing each other. No junction studs are counted for a crossing. Check it on the plan.`, blocking: false, refs: [{ measurementId: m.id }] };
+      if (once(q)) problems.push(q);
+    }
     const demands = three.flatMap((r) => r.demands);
     for (const d of demands) {
       if (d.identity?.component) d.itemDescription = wallPartText(d.identity, parts[d.identity.component]);
@@ -567,7 +610,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,
-        totals: { studs: counted.length, studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
+        junctions: junctionLayout, junctionCorners: myCorners, junctionTicks: jTicks.length,
+        totals: { studs: counted.length, ...(jTicks.length ? { junctionStuds: jTicks.length } : {}), studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
           secondTopPlateMm: layers.some((l) => l.tag === "top-2") ? layerMm("top-2") : null,
           longPlateMm: layers.reduce((a, l) => a + (l.longPiecesMm || []).reduce((s, x) => s + x, 0), 0),
           noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null,

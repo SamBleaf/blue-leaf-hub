@@ -71,7 +71,7 @@ export const isInstallationNote = (p) => !!p && p.axis === "installation" && p.b
 /** Codes the engine only ever raises as notes (blocking: false): never a fix row. The guard test keeps this honest. */
 export const NOTE_CODES = Object.freeze([
   "nothing_measured", "opening_clipped", "stock_max_unset", "final_bay_tiny", "opening_framing_incomplete", "opening_framing_not_counted",
-  "framing_detail_members", "walls_counted_twice", "wall_centres_ignored",
+  "framing_detail_members", "walls_counted_twice", "wall_centres_ignored", "wall_crossing",
   // HUB 031 opening rules: what they used or could not do (never blocking)
   "jambs_minimum_used", "trimmer_stack_default", "lintel_not_sized", "lintel_no_fit", "lintel_bearing", "noggins_not_shared", "component_not_selected", "offcut_other_product", "followers_hand_made",
   "followers_pooled", "joint_product_missing", "auto_joint_lowered", "overlap_ignored", "component_unresolved", "component_not_applicable",

@@ -46,7 +46,7 @@ import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } f
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
-import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -597,10 +597,10 @@ function supportElements(entries, bbox, polygon) {
         const beside = (t.besideOpeningIds || []).map((id) => e.openingLabel(id));
         const span = spanAtX(polygon, t.positionMm) || { lo: bbox.y0, hi: bbox.y1 };
         items.push({
-          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : "full",
+          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : t.state === "junction" ? "junction" : "full",
           a: { x: t.positionMm, y: span.lo }, b: { x: t.positionMm, y: span.hi },
           info: {
-            title: `Stud @ ${fmtMm(t.positionMm)} mm${beside.length ? ` (beside ${beside.join(", ")})` : ""}`,
+            title: t.state === "junction" ? `Junction stud @ ${fmtMm(t.positionMm)} mm${t.junctionLabel ? ` (${t.junctionLabel})` : ""}` : `Stud @ ${fmtMm(t.positionMm)} mm${beside.length ? ` (beside ${beside.join(", ")})` : ""}`,
             rows: t.state === "removed" ? [["Status", `Removed — inside ${opening || "an opening"}`]]
               : [["Cut length", `${fmtMm(d?.lengthMm ?? l.studLengthMm)} mm`], ["Stock", a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `${fmtMm(a.stockLengthMm)} mm length` : "—"], ...(l.plies > 1 ? [["Plies", String(l.plies)]] : [])],
             note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
@@ -609,7 +609,7 @@ function supportElements(entries, bbox, polygon) {
       }
       // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More. A Walls
       // item (HUB 028) never says "opening framing incomplete": its one plain lintels note, on the wall's line, says it
-      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed").length, "stud")} at ${fmtMm(l.studLengthMm)} mm.`);
+      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed" && t.state !== "junction").length, "stud")} at ${fmtMm(l.studLengthMm)} mm${(l.ticks || []).some((t) => t.state === "junction") ? `, plus ${plural((l.ticks || []).filter((t) => t.state === "junction").length, "junction stud")}` : ""}.`);
       if (l.scope && l.method !== "wall_framing@1") about.push(`${e.material.name}: ${l.scope}.`);
     } else if (l.kind === "plates") {
       notes.push(`${e.material.name}: ${(l.layers || []).map((x) => `${x.tag} plate ${x.piecesMm.map((p) => fmtMm(p)).join(" + ")} mm`).join("; ")}.`);
@@ -708,7 +708,7 @@ function accessoryElements(polygon, openings, claddingEntries) {
 const LEGEND = {
   cladding: [["occupied", "In use", "bg-blue-100 border-[#006c9b]"], ["cut", "Cut strip", "bg-amber-100 border-amber-700"], ["narrow", "Narrow — review", "bg-red-200 border-red-700"],
     ["blocked", "No stock fits", "bg-red-300 border-red-800"], ["empty", "Empty — none used", "bg-white border-slate-400 border-dashed"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
-  supports: [["support", "Support", "bg-teal-700 border-teal-700"], ["existing", "Existing (not bought)", "bg-slate-400 border-slate-500 border-dashed"], ["full", "Stud", "bg-amber-800 border-amber-800"], ["removed", "Removed stud", "bg-slate-300 border-slate-400 border-dashed"]],
+  supports: [["support", "Support", "bg-teal-700 border-teal-700"], ["existing", "Existing (not bought)", "bg-slate-400 border-slate-500 border-dashed"], ["full", "Stud", "bg-amber-800 border-amber-800"], ["junction", "Junction stud", "bg-cyan-700 border-cyan-700"], ["removed", "Removed stud", "bg-slate-300 border-slate-400 border-dashed"]],
   accessories: [["edge", "Base / opening edge", "bg-orange-600 border-orange-600"], ["end", "Wall end", "bg-sky-700 border-sky-700"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
 };
 
@@ -1845,7 +1845,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const framingLines = framingEntries.map((e) => {
     const text = wallFramingText(wallFramingTotals(e.result, wall.id));
     return { id: e.material.id, name: e.material.name, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet"),
-      notes: wallFramingNotes(e.result, wall.id, e.material.spec) };
+      notes: wallFramingNotes(e.result, wall.id, e.material.spec),
+      junctions: ((e.result?.layouts || []).find((q) => q?.method === "wall_framing@1" && q.wallMeasurementId === wall.id)?.junctions) || [] };
   });
 
   // ── handlers ──
@@ -2029,6 +2030,21 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                 <div key={l.id} data-wall-line={l.id} data-wall-framing="">
                   <p><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>
                   {l.notes.length > 0 && <ul className="mt-0.5 space-y-0.5 text-xs text-muted" data-wall-line-notes="">{l.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
+                  {l.junctions.length > 0 && (
+                    <ul className="mt-1 space-y-1" data-wall-junctions="">
+                      {l.junctions.map((j) => (
+                        <li key={j.id} className="flex items-center gap-2 text-xs text-muted" data-wall-junction={j.id}>
+                          <span className="min-w-0 flex-1">{junctionText(j)}</span>
+                          {canEdit && (
+                            <button type="button" className="min-h-[44px] shrink-0 rounded-lg border border-hairline px-3 text-xs font-medium text-ink"
+                              onClick={() => { const off = new Set(material?.rules?.junctionsOff || []); if (j.off) off.delete(j.nodeId); else off.add(j.nodeId); act.updateRules({ junctionsOff: [...off] }, off.size ? [] : ["junctionsOff"]); }}>
+                              {j.off ? "Count" : "Remove"}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ))}
               {wallLines.map((l) => <p key={l.id} data-wall-line={l.id}><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>)}
