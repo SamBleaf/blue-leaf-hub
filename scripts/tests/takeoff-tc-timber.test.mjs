@@ -22,7 +22,8 @@ const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, `${msg ?? ""} ${a
 const codes = (r) => r.problems.map((p) => p.code);
 const throwsValidation = (fn, re) => assert.throws(fn, (e) => e instanceof TakeoffValidationError && (!re || re.test(e.message)));
 
-const PINE = { section: "90x45", grade: "MGP10", treatment: "H2", species: "Radiata pine" };
+// MGP15 here (any grade but MGP10): these cases test the owner 1,200 + 300n grid, which every grade EXCEPT MGP10 buys on (MGP10 = 600 mm steps, takeoff-tc-hub032)
+const PINE = { section: "90x45", grade: "MGP15", treatment: "H2", species: "Radiata pine" };
 const rafters = (over = {}) => computeRepeatedMembers({
   materialId: "m-raft", purpose: "rafter", identity: PINE, segments: [{ id: "dist1", runMm: 10000 }], centresMm: 600,
   member: { measurementId: "mem1", mode: "projected", lengthMm: 4500, pitchDeg: 30, allowanceMm: 100 }, stock: { maxMm: 7200 }, ...over,
@@ -276,7 +277,7 @@ t("T3 same timber settings at two suppliers yield the same 1200/300 grid", () =>
 t("TIM03 grade / treatment / section / species / supplier changes change identity; equal specs share it", () => {
   const key = (p) => identityKey(rafters({ identity: p }).demands[0].identity);
   const base = key(PINE);
-  assert.equal(key({ ...PINE, section: "90 × 45", grade: "mgp10", treatment: " h2 " }), base, "formatting is not identity");
+  assert.equal(key({ ...PINE, section: "90 × 45", grade: "mgp15", treatment: " h2 " }), base, "formatting is not identity");
   for (const change of [{ grade: "MGP12" }, { treatment: "H3" }, { section: "70x45" }, { species: "Douglas fir" }, { supplier: "Supplier A" }]) {
     assert.notEqual(key({ ...PINE, ...change }), base, JSON.stringify(change));
   }
@@ -322,7 +323,7 @@ const fullDetail = (over = {}) => ({
   members: [
     { id: "K", role: "king", quantity: 2, lengthFrom: "stud", sameAsStud: true },
     { id: "J", role: "jack", quantity: 2, lengthFrom: "headLevel", sameAsStud: true },
-    { id: "L", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 180, identity: { section: "190x45", grade: "MGP10", treatment: "H2" }, stock: { maxMm: 6000 } },
+    { id: "L", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 180, identity: { section: "190x45", grade: "MGP15", treatment: "H2" }, stock: { maxMm: 6000 } },
     { id: "S", role: "sill-trimmer", quantity: 1, lengthFrom: "openingWidth", sameAsStud: true },
   ],
   ...over,

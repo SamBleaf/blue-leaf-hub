@@ -29,10 +29,12 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { DEFAULT_HOOP_ROLL_M, HOOP_IRON_PRODUCTS, hoopIronProduct } from "../../../shared/takeoff/hoopIron.js";
 import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
-  familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
+  familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, isMgp10Grade, onTimberGrid, timberPresetLabel, timberStockRuleText, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
+import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, ROOF_SPACINGS_MM } from "../../../shared/takeoff/standards/index.js";
 import { FixContext } from "./fixContext.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
@@ -152,6 +154,7 @@ const SOURCES = Object.freeze({
   F02: ["Rendex downloads (system + coating documents)", "guide", "https://www.rendex.com.au/downloads"],
   "OWNER-2026-10-14": ["Blue Leaf owner decision, 14 Oct 2026", "owner", null],
   "OWNER-2026-10-25": ["Blue Leaf owner decision, 25 Oct 2026 (timber in 300 mm steps)", "owner", null],
+  "OWNER-2026-11-18": ["Blue Leaf owner decision, 18 Nov 2026 (MGP10 stock lengths)", "owner", null],
 });
 const KIND_TEXT = { product: "product facts", guide: "installation guide — rows not reviewed", gap: "not readable — not used as authority", owner: "company setting", other: "entered reference" };
 
@@ -1248,12 +1251,12 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
       )}
       <fieldset className="rounded-lg border border-hairline p-2">
         <legend className="px-1 text-xs font-semibold text-ink">Stock</legend>
-        <p className="text-sm text-ink">1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier.</p>
+        <p className="text-sm text-ink" data-stock-rule="">{timberStockRuleText(s.grade)}</p>
         <NumberField label="Longest available length (optional)" value={s.stock?.maxMm} onCommit={(n) => set({ spec: { stock: { ...s.stock, maxMm: n } } })} help="Longer members are flagged unavailable — never clamped or joined." />
         <LengthList label="Grid lengths this supplier doesn't stock (optional)" values={s.stock?.unavailableMm} placeholder="e.g. 6600"
-          validate={(v) => (v.some((l) => !onTimberGrid(l)) ? "Only grid lengths (1200, 1500, 1800 …) can be marked unavailable — off-grid sizes are never added." : null)}
+          validate={(v) => (v.some((l) => !onTimberGrid(l, s.grade)) ? "Only grid lengths (1200, 1500, 1800 … ; for MGP10 its own stock lengths) can be marked unavailable — off-grid sizes are never added." : null)}
           onCommit={(v) => set({ spec: { stock: { ...s.stock, unavailableMm: v } } })} help="A member that needs one of these moves up to the next available grid length." />
-        <SourceRefs refs={["OWNER-2026-10-14", TIMBER_GRID_SOURCE]} label="Stock rule" />
+        <SourceRefs refs={["OWNER-2026-10-14", TIMBER_GRID_SOURCE, ...(isMgp10Grade(s.grade) ? ["OWNER-2026-11-18"] : [])]} label="Stock rule" />
       </fieldset>
       <details className="rounded-lg border border-hairline px-2 py-1">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">More (offsets, allowance, ends, plies, supplier)</summary>
@@ -1339,6 +1342,7 @@ function WallPart({ d, part, presets }) {
         <CommitText label="Treatment (e.g. H3)" value={p.treatment} maxLength={40} onCommit={(t) => set({ treatment: t })} />
       </div>
       <NumberField label="Longest length" value={p.stock?.maxMm} {...PART_LONGEST_MM} onCommit={(n) => set({ stock: { ...(p.stock || {}), maxMm: n } })} />
+      {isMgp10Grade(p.grade) && <p className="text-[11px] text-muted" data-wall-part-stock-rule="">{timberStockRuleText(p.grade)}</p>}
       {notStocked.length > 0 && <p className="text-[11px] text-muted" data-wall-part-not-stocked="">Not stocked: {notStocked.map((l) => `${Math.round(l).toLocaleString("en-AU")}`).join(", ")} mm</p>}
     </fieldset>
   );
@@ -1388,12 +1392,51 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
         </label>
       </div>
       {line && <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink" data-walls-card-line="">{line}</p>}
+      {/* HUB 031 (Sam, 17 Nov 2026): the framing around each window and door is worked out for you; the office tells it about the roof
+          once, here, so the lintels and jambs come from the span tables. Nothing here is guessed: a blank stays "needs roof information". */}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-roof="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Roof and openings{r.carriesRoof === true ? " · walls carry the roof" : r.carriesRoof === false ? " · walls don't carry the roof" : ""}</summary>
+        <div className="space-y-3 pb-2">
+          <label className="flex min-h-[44px] items-center gap-2 text-sm font-medium text-ink" data-walls-opening-framing="">
+            <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={r.openingFraming !== false} onChange={(e) => d.patch({ rules: { openingFraming: e.target.checked ? undefined : false } })} />
+            Work out the framing at windows and doors
+          </label>
+          <p className="text-[11px] text-muted">Kings, jacks, cripples above and below at the wall&apos;s centres, trimmers and the lintel. A framing detail typed on an opening always wins. Heights are from the floor.</p>
+          <Chips label="Do these walls carry the roof?" name="carriesRoof" value={r.carriesRoof === true ? "yes" : r.carriesRoof === false ? "no" : "unset"}
+            options={[["yes", "Yes"], ["no", "No"], ["unset", "Not set"]]} onChange={(v) => d.patch({ rules: { carriesRoof: v === "yes" ? true : v === "no" ? false : undefined } })} />
+          <p className="text-[11px] text-muted">One wall can differ: Select the wall and tap Carries the roof.</p>
+          <Chips label="Roof covering" name="roofMass" value={r.roofMass || "unset"} options={[["sheet", "Sheet"], ["tile", "Tile"], ["unset", "Not set"]]}
+            onChange={(v) => d.patch({ rules: { roofMass: v === "unset" ? undefined : v } })} />
+          <Chips label="Roof width these walls carry (about half the roof span plus the eaves, mm)" name="rlwMm" value={r.rlwMm ?? "unset"}
+            options={[...ROOF_LOAD_WIDTHS_MM.map((v) => [v, String(v)]), ["unset", "Not sure"]]} onChange={(v) => d.patch({ rules: { rlwMm: v === "unset" ? undefined : v } })} />
+          <Chips label="Rafter or truss spacing (mm)" name="rafterSpacingMm" value={r.rafterSpacingMm ?? "unset"}
+            options={[...ROOF_SPACINGS_MM.map((v) => [v, String(v)]), ["unset", "Not set"]]} onChange={(v) => d.patch({ rules: { rafterSpacingMm: v === "unset" ? undefined : v } })} />
+          <Chips label="Wind class (AS 4055)" name="windClass" value={r.windClass || "unset"} options={[...WIND_CLASSES.map((v) => [v, v]), ["unset", "Not set"]]}
+            onChange={(v) => d.patch({ rules: { windClass: v === "unset" ? undefined : v } })} />
+          <Chips label="Lintels from" name="lintelProduct" value={r.lintelProduct || LINTEL_PRODUCTS[0][0]} options={LINTEL_PRODUCTS.map(([v, t]) => [v, t])}
+            onChange={(v) => d.patch({ rules: { lintelProduct: v } })} />
+          <p className="text-[11px] text-muted">Single or upper storey only; a lower storey, N5 and C wind classes need an engineer or the supplier. Where a table can&apos;t size it, the opening says so and you type the size.</p>
+        </div>
+      </details>
       {blocked.length > 0 && <ul className="space-y-0.5 text-xs text-amber-800" data-walls-card-problems="">{blocked.map((m) => <li key={m}>{m}</li>)}</ul>}
       <details className="rounded-lg border border-hairline px-2 py-1" data-walls-parts="">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Studs, plates, noggins</summary>
         <div className="space-y-3 pb-2">
           <p className="text-[11px] text-muted">Size: <b>manual selection</b>. The app does not check structural adequacy.</p>
           {WALL_PARTS.map((part) => <WallPart key={part} d={d} part={part} presets={presets} />)}
+        </div>
+      </details>
+      {/* Sam, 18 Nov 2026: hoop iron, 2 straps of 0.7 m for every 1,200 mm of wall, on for every wall (switch it off per wall on the plan) */}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-hoop="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Hoop iron · {hoopIronProduct(r.hoopIronProductId).name}</summary>
+        <div className="space-y-3 pb-2">
+          <p className="text-[11px] text-muted">Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm), ordered in 30 m rolls. Turn it off for one wall by selecting the wall on the plan. Cross braces from Add bracing join the same rolls. {hoopIronProduct(r.hoopIronProductId).defaultToConfirm ? "The product is a default: confirm the size with your supplier." : ""}</p>
+          <label className="block text-sm text-ink">Product
+            <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={hoopIronProduct(r.hoopIronProductId).id} data-walls-hoop-product=""
+              onChange={(e) => d.patch({ rules: { hoopIronProductId: e.target.value } })}>
+              {HOOP_IRON_PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+          <NumberField label="Roll length" unit="m" optional value={r.hoopIronRollM ?? DEFAULT_HOOP_ROLL_M} min={1} max={1000} help="Hoop iron is ordered in rolls (EA). Wall straps and cross braces add up to one line."
+            onCommit={(n) => d.patch({ rules: { hoopIronRollM: n ?? undefined } })} />
         </div>
       </details>
       {d.error && <Banner tone="error">{d.error}</Banner>}

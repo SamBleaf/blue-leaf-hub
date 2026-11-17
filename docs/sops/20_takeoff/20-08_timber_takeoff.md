@@ -1,7 +1,7 @@
 ---
-sop_version: 1.6
-last_reviewed: 2026-10-26
-app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
+sop_version: 1.9
+last_reviewed: 2026-11-18
+app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -17,6 +17,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
 
 > **Walls (HUB 028, 25 October 2026):** built on branch `takeoff-r03` and NOT deployed yet. It waits for the Director's "deploy" and an iPhone check. It needs no migration. Sections 5D, 7, 8, 11, 12 and TC-15 to TC-18 describe it.
+
+> **Walls openings, wet areas and lintels (HUB 031, 17 to 18 November 2026):** built on branch `takeoff/wet-walls-cavity-doors` and NOT deployed or pushed. It needs no migration and waits for the Director's "deploy" and an iPhone check. Per-wall 450 centres, the Cavity slider and Full height in **+ Door** and **+ Window**, framing worked out at every opening and lintels from the span tables. Sections 5D, 7, 8, 11 and 12 and TC-19 to TC-24 describe it. Where it conflicts with the older Walls words, this banner wins. Sam's answers of 17 November 2026 (`docs/takeoff/OWNER_ANSWERS_17NOV.md`) override the plans.
 
 > **Read this first:** the timber takeoff counts and lengths timber **for ordering only**. Every section size is a **manual selection** — the app never checks spans, loads, bracing, lintels or any other structural question, and nothing it shows is a structural or engineering approval.
 
@@ -84,7 +86,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
    - **Measure projection** (rafters only) — you measure the rafter **in plan**; enter the **Pitch** (°). The true length = plan length ÷ cos(pitch).
    - **Measure true length** (rafters) / **Measure length** (joists, battens) — you measure the real member length (e.g. on a section). Pitch is never applied again.
    - **Enter cut length** — type the **Cut length**; no member line is needed.
-8. **Stock** (fixed): "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier." Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
+8. **Stock** (fixed): "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier." **Exception: MGP10 (Sam, 18 Nov 2026).** The shortest MGP10 length is 1200; it steps by 300 up to 3000 (1200, 1500 … 2700, 3000) and above 3 m it is only sold in 600 mm steps (3600, 4200, 4800, 5400, 6000 …), so a 3,300 cut buys 3,600 and a 2,700 cut stays 2,700. Pieces under 1,200 (noggins, cripples, short trimmers) are cut out of the longer lengths and share them, never bought as short pieces. The setup card says this rule when the grade is MGP10. LVL and other grades keep the 1200 then 300 mm steps.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
 9. **More (offsets, allowance, ends, plies, supplier)** — **Start offset**, **End offset**, **End allowance (true length)** (0 unless you set one — no hidden allowance), **Plies**, **First member** / **Last member** (Included / Excluded), **Supplier**, **Size reference (schedule/drawing)** (records where the size came from, e.g. "S-101 engineer schedule"), **Availability**.
 10. Read the bottom of the card: **Needs…** (what is still missing before it can be ordered — you can keep measuring), **On the order now (this job)** and the three statuses **Quantity / Installation / Procurement**. With nothing measured, Quantity reads **Not measured yet**.
 11. Tap **Measure members**. Rafters / joists / battens / trim / other open the plan; studs / plates / noggins open the **Walls** screen.
@@ -140,7 +142,36 @@ This is the normal way to take off wall framing (HUB 028). One **Walls** item gi
 11. **Done** on the plan goes back to the overview. The Walls row has **Setup** (the Walls card), **Walls** (the wall list) and **More** › **Remove**. It has no **Add lengths** and no **Save as standard**.
 12. Extra members such as trimmers, lintels or jacks go on a **separate Timber item** (**Add timber**, purpose **Other member**, with **Add lengths**), because a Walls item takes traced walls only.
 
-> 💡 **Tip:** trace wet-area walls as their own Walls item at 450 centres. Tap **Add walls** again, set **Stud centres** to 450 and trace the wet-area walls on it. One Stud centres value covers every wall of a Walls item, so don't change the main one. Don't keep those walls on the main Walls item too: a wall on two Walls items is counted on both. If you traced them on the main item first, take them off it (**Materials on this wall**). Both items then say "Wall 2 is also on Walls 2, so its framing may be counted twice." until you do.
+#### Wet-area walls at 450 (HUB 031)
+
+Each wall has its own **Stud centres**. The Walls item's number is what a wall uses unless you change that wall.
+
+1. Tap **Select** (with nothing selected).
+2. Tap **Wet-area walls at 450**.
+3. Tap each wet-area wall. It turns blue and its label says "450 ctrs". Tap it again to put it back to the item's centres.
+4. Tap **Done**.
+5. One wall only: **Select** the wall, then tap **450** under **Stud centres**.
+
+> 💡 **Tip:** 450 changes the stud spacing only. Noggins and plate joins follow the studs. Blocking for vanities, grab rails and taps is not added: count it on a Timber item. The button isn't there when the Walls item is already at 450. A Studs, Plates or Noggins item ignores a wall's own centres and says so.
+
+#### Windows and doors: framing worked out for you (HUB 031)
+
+When a window or door is on a Walls wall, the app works out its framing. You tap nothing extra.
+
+1. Open the Walls card (**Details ›**) and open **Roof and openings**. The office fills it in once: **Do these walls carry the roof?**, **Roof covering** (sheet or tile), **Roof width these walls carry**, **Rafter or truss spacing**, **Wind class**, and **Lintels from** (SmartLVL 13 or pine MGP10). A blank stays blank: the opening says "needs roof information". Nothing is guessed.
+2. One wall can differ: **Select** the wall and tap **Yes** or **No** under **Carries the roof**.
+3. Each opening then has a king and jacks each side, cripples above and below at that wall's centres, trimmers, and a lintel where the wall carries the roof. Tap the opening on its wall page: **Framing worked out: …** says what it counted.
+4. Tap the **Lintel** row to add load information (the roof width that opening carries) or to type a size. A size you type is used as it is. **Use the table** puts it back.
+5. A lintel that can't fit under the head says so: "a 240 deep lintel won't fit. Only 145 mm is free above the head."
+6. A framing detail typed on an opening (Section 5F) replaces all of this for that opening. Untick **Work out the framing at windows and doors** to turn it off for the whole item.
+
+#### + Door and + Window: Cavity slider and Full height (HUB 031)
+
+1. Tap **+ Door**. Tap **Cavity slider**, type the **Door width** once (920). The opening is always 2 × the door + 20 (1,860).
+2. Tap the doorway end of the slider on the wall, then tap towards the pocket. The second tap only gives the direction, so it chooses the pocket side. If the opening runs 100 mm or less past the wall end it is slid back and the card says so. More than that, or running into another opening, is refused and the first tap is kept.
+3. **Full height** (door or window): nothing to type. The opening runs to the top of the wall and stays there if the wall's height changes later. A window keeps its Sill.
+4. Both chips start off every time you tap **+ Door** or **+ Window**. The next slider takes 2 taps and remembers the door width.
+5. A door already drawn: **Select** the wall, **Open elevation**, tap the door, then tap **Cavity slider** and choose **◀ Left** or **Right ▶** (the wall start is left). A door over 1,200 wide is read as the whole opening. **Full height** is on the same sheet.
 
 [insert screenshot: Line panel on a Walls item: Wall height, Stud centres, Double top plate, the Walls line and Details: 3 to fix ›]
 [insert screenshot: Walls card: needs, the lintels note, the Walls line and the closed Studs, plates, noggins fold]
@@ -201,13 +232,17 @@ Use these only for an exception. Normal wall framing is **Add walls** (Section 5
 | Tracing a wall from the other end and expecting the same studs | Set-out starts at the first point of each wall | Studs set out from where each wall was traced from: the start of the run, then each corner |
 | Missing a nib or return | Short walls are easy to skip | Trace every nib and return, especially wet-area nibs |
 | Tracing a shared wall twice | Two rooms share it | Don't trace a shared wall twice. Every wall you trace is counted |
-| Changing the whole Walls item to 450 centres for the wet areas | One Stud centres covers every wall of a Walls item | Trace wet-area walls as their own Walls item at 450 centres |
-| Keeping the wet-area walls on the main Walls item as well as on the 450 one | The walls were traced on the main item first | Take them off the main item (**Materials on this wall**). A wall on two Walls items is counted on both |
+| Changing the whole Walls item to 450 centres for the wet areas | The item's Stud centres covers every wall without its own | Use **Select** then **Wet-area walls at 450**, or **Select** the wall and tap **450** |
+| Setting up a second Walls item for the wet areas (the old method) | It was the only way before 18 Nov 2026 | Use **Wet-area walls at 450** on the one Walls item. An older job with a Walls 2 still works, with the counted-twice note if a wall is on both |
+| Typing 1,860 for a 920 cavity slider | The opening is wider than the door | Tap **Cavity slider** and type the door width, 920. The opening is worked out |
+| Turning on Cavity slider for a door drawn at its whole opening (1,860) | It would double | Over 1,200 wide it is read as the whole opening: Door width fills in as 920 |
 | Opening a cladding wall from **Other walls** and tapping **Use here** on Walls | The wall is already traced for the cladding | Walls reads the wall's height as the stud length. A cladding height (e.g. 2,745) buys 3,000 studs and can add a second noggin row. The **Use here** banner says the height it would use. Trace the framing fresh at the stud length instead |
 | Typing the longest length in metres (6 for 6 m) | Lengths elsewhere read in metres | Lengths are in mm: type 6000. Under 1,200 is refused at the field |
 | Expecting the bottom plate to stop at each doorway | The plan shows the doorway | The bottom plate is ordered full length. Cut the doorway out of the bottom plate after standing the frame |
 | Putting Studs, Plates or Noggins on walls that already have Walls | Older jobs used three items | Don't. Both are counted, and Walls shows a note if you do |
-| Expecting Walls to count lintels, jacks and trimmers | They are on the framing detail | Walls says "Lintels, jacks and trimmers at D1 aren't counted." Add them on a separate Timber item |
+| Lintel "not sized" on every window | The roof isn't described yet | Open **Roof and openings** on the Walls card. Fill in covering, roof width, spacing and wind class. Or tap the lintel and type a size |
+| Expecting a lintel the span tables can't size | The span is past the table, the wind class is N5 or C, or it's a lower storey | The opening says "needs an engineer or the supplier". Tap the lintel and type the size you were given |
+| Expecting the sill height to be from the bottom plate | Heights on the elevation are from the floor | The app takes the bottom plate off (45) when it works out cripples and jacks. Type heights from the floor |
 
 ---
 
@@ -234,7 +269,15 @@ Use these only for an exception. Normal wall framing is **Add walls** (Section 5
 | Tick label says "(preview)" | Member length not known yet | Draw the member line, enter the pitch or the cut length |
 | "Not saved: One or more values are not valid for this field." on a member/distribution/wall | Migration 207 missing on that database | Apply migration 207 to that (non-production) database; production waits for the Director |
 | **Details: 3 to fix ›** on the Line panel, or "Walls: 3 parts need setup (studs, plates and noggins)." on a wall page | A Walls item saved before Blue Leaf's default framing (26 Oct 2026): its parts have no grade or treatment yet | Tap **Details**, open **Studs, plates, noggins** and pick or type the product for those parts. Or ask the office to save company products once (SOP 20-12) |
-| "Lintels, jacks and trimmers at D1, W1 aren't counted." | Expected, not a fault. Walls never counts them | Add them on a separate Timber item from the framing detail |
+| "Lintels, jacks and trimmers at D1, W1 aren't counted." | **Work out the framing at windows and doors** is switched off on the Walls card (or the job is older and the box is unticked) | Tick it. Or type a framing detail on each opening |
+| "W1: lintel not sized (the wind class isn't set)." | A roof answer is missing (it names which) | Fill it in under **Roof and openings**, or type the lintel size on the opening |
+| "W1: a 240 deep lintel won't fit. Only 145 mm is free above the head." | The head is close to the top of the studs | Lower the window, or confirm the lintel sits in the top plate. The lintel is still counted |
+| "Jambs are 2 each side (a king and one jack, the minimum). …" | No roof described, or a stud section the jamb table doesn't list | Describe the roof, or leave it: 2 each side is never fewer than a normal opening |
+| "Wall 3 is set to 450 centres, but Studs uses its own centres (600) for every wall." | The wall is on a Studs item (older jobs) | Use a Walls item for a wall with its own centres |
+| "A 1,860 opening doesn't fit on Wall 4 (1,500 long). Tap a longer wall." | The slider is wider than that wall | Tap a longer wall |
+| "From there, the 1,860 opening runs 300 past the end of Wall 4." | The doorway end is too near the wall end | Tap towards the pocket from a point further in, or Undo this end |
+| "A 1,860 opening runs into W1." | The slider would overlap another opening | Move W1 first, or place the slider elsewhere |
+| "Wall 4 has no height yet. Select it and type its height, or turn off Full height." | Full height needs the wall's height | Select the wall and type its Wall height |
 | The Walls line ends "· Wall 1 not counted" | That wall can't be worked out. The reason is straight under the line | Fix what it says (the rows below). The other walls still show their quantities |
 | "Wall 1: enter the Wall height." | The wall was traced with no height | **Select** the wall and type its **Wall height** |
 | "Wall 1 is sloped or traced as an outline. Walls only works out straight walls of one height." | A sloping, gable or outline wall is on Walls | Trace it with **Line** as straight walls of one height |
@@ -299,10 +342,10 @@ Use these only for an exception. Normal wall framing is **Add walls** (Section 5
 - The rules, each with its source. [Sam] = Sam's answer (24 and 25 October 2026). [doc] = the review doc or an existing engine rule. [Default, needs Sam] = what the build does until Sam says otherwise.
   - **Studs.** [Sam] Studs at the Stud centres along each wall (0, c, 2c … plus the wall end: ceil(L ÷ c) + 1 before openings), and a stud at each wall end. Walls never uses offsets. [Default, needs Sam] Set-out starts at each wall's first traced point (the start of the run, then each corner); openings are measured from the same point. [Default, needs Sam] One Stud centres value per Walls item; Wall height is per wall.
   - **Corners.** [Sam] 2 studs at a corner, one from each wall (a closed run too). No third corner stud, and nothing at a T-junction (separate runs aren't linked).
-  - **Openings.** [Sam, round 2] 2 full-length studs each side of every opening (window, door, other), labelled "Wall 1 stud @ 932.5 (beside D1)", never "king". The first stud's face sits on the opening edge (centre at the edge ∓ w/2), the second against it (∓ 3w/2), w = the stud thickness along the wall (45). A side stud never sits outside the wall. [Default, needs Sam] Between two openings g apart there are floor(g ÷ 45) side studs, 1 to 4; openings closer than half a stud share one. [doc] Centre studs strictly inside an opening come out, and nothing is added under sills or above heads. [Default, needs Sam] A sill or head above the studs is clipped into the stud height with a note, never a block. [doc] Overlapping openings block that wall.
+  - **Openings.** [Sam, round 2; with the opening rules off, or a typed framing detail] 2 full-length studs each side of every opening (window, door, other), labelled "Wall 1 stud @ 932.5 (beside D1)", never "king". The first stud's face sits on the opening edge (centre at the edge ∓ w/2), the second against it (∓ 3w/2), w = the stud thickness along the wall (45). A side stud never sits outside the wall. [Default, needs Sam] Between two openings g apart there are floor(g ÷ 45) side studs, 1 to 4; openings closer than half a stud share one. [doc] Centre studs strictly inside an opening come out, and nothing is added under sills or above heads. [Default, needs Sam] A sill or head above the studs is clipped into the stud height with a note, never a block. [doc] Overlapping openings block that wall.
   - **Merge.** [Sam, round 2] Studs whose centres are closer than one stud thickness are one stud: an end stud beats a side stud, a side stud beats a centre stud, a first side stud beats a second. Touching studs are both kept.
   - **Stud length.** [Sam] Stud cut length = that wall's own Wall height. The item-wide stud height is never read, and Double top plate never changes the cut.
-  - **Framing details.** [doc] An explicit framing detail on an opening still adds its own members, with the note "Check the studs beside D1 aren't counted twice.". Without one, one plain line that doesn't block: "Lintels, jacks and trimmers at D1, W1 aren't counted." (quantity status stays "incomplete").
+  - **Framing details.** [doc] An explicit framing detail on an opening still adds its own members, with the note "Check the studs beside D1 aren't counted twice.". [Sam, HUB 031] Without one, the opening rules work its framing out (see below). Only with the Walls card's **Work out the framing at windows and doors** off does the old line return: "Lintels, jacks and trimmers at D1, W1 aren't counted."
   - **Shapes.** [Default, needs Sam] Straight walls of one height only. A sloped, gable or outline wall, or one with no height, gets one blocking line naming it. Rectangle and Area aren't offered for Walls.
   - **Plates.** [doc] One bottom and one top plate per wall. Double top plate adds a second top plate (layer `top-2`) the full length of every wall. [Sam, round 2] The bottom plate is bought the full wall length (no door gaps): the crew cuts the doorway out after standing the frame. [Sam, as read] Top plates run continuous over openings, one piece per wall per layer. [Default, needs Sam] Plate length = traced wall length, with no corner deduction.
   - **Long plates.** [Sam, round 3] A plate piece longer than the pine plates' longest length (6,000 by default; a saved plate product's own wins) is one 90 × 45 LVL length from the Long plates part, on its own "Plates 90 × 45 LVL" line and "Long plates cut list". [Default, needs Sam] LVL is bought in 300 mm steps from the first step over the pine plates' longest length (6,300 over the 6,000 default, 5,100 over a saved 4,800 plate product), with 11,000 allowed. [Sam, round 3] Only a plate over 11,000 is joined over a stud, at the furthest stud centre that keeps the piece within 11,000. [Default, needs Sam] Each piece after a join is LVL if over 6,000, else pine. If no stud centre fits, that wall is blocked, naming it, and it adds nothing to the totals ("· Wall 1 not counted").
@@ -314,11 +357,19 @@ Use these only for an exception. Normal wall framing is **Add walls** (Section 5
   - **Two items on one wall.** [Default, needs Sam] A wall also on a Studs, Plates or Noggins item, or on another Walls item, gets one note on each Walls item that doesn't block. Both are still counted.
   - **Use here.** [Default, needs Sam] A Walls item takes a wall's own height as the stud length, so Use here of a cladding wall uses the cladded height. The **Use here** banner says so ("Its height, 2,745, would be the stud length."), and an empty Walls list doesn't point to **Other walls**.
   - **Blocks.** [doc] Any blocking problem goes on every line of the Walls item, studs and noggins included. The other walls still show their quantities.
-  - **Never counted.** [doc] Kings, jacks, trimmers, lintels, cripples, sill trimmers, tie-downs, bracing and blocking. Walls never says a frame is structurally adequate.
+  - **Never counted.** [doc] Tie-downs, bracing and blocking. Walls never says a frame is structurally adequate.
+  - **Stud centres per wall (HUB 031).** [Sam, 17 Nov 2026] A wall's own `inputs.studCentresMm` (the app writes only 450; the server keeps 100 to 1,200) beats the item's Stud centres. Clearing it deletes the key. Plate joins and noggin bays follow the counted studs. [Sam] This replaces the old "Walls 2 at 450" method.
+  - **Opening framing (HUB 031).** [Sam, 17 Nov 2026] Worked out by `engine/openingRules.js` for every opening with no framing detail of its own; a typed detail always wins. Heights are measured from the FLOOR: the stud cut sits on a bottom plate (the Plates part's thickness, 45), so levels from the stud base are the elevation's levels minus the plate. Cripples above and below are counted at the wall's own stud centres. The jamb count per side includes the king and the stud under the lintel: jacks = jambs − 1, and never fewer than 2 a side. [Default, needs Sam] Jacks are as long as the head; a lintel or head trimmer is as long as the opening plus the jack stack each side; trimmers are cut from the Plates part's product; the lintel is H2 (the Plates part's treatment). [Default, needs Sam] Trimmers stack by clear width: 1 up to 1,500, 2 up to 2,700, 3 over. Sam's PDFs are span tables only and don't carry the AS 1684 stacking clause, so these breakpoints are a stand-in. The item says so once. A wall that doesn't carry the roof gets head trimmers and no lintel; a window with a sill gets sill trimmers; a door gets none. Unknown "carries the roof" is treated as carrying (never fewer studs than a loadbearing wall) and asks for the lintel.
+  - **Cavity slider (HUB 031).** [Sam, 17 Nov 2026] The opening is 2 × the door + 20, stored as a door with `cavityLeafMm`, `cavityPocket` (the side the door slides into) and `widthMm` = the whole opening. Framing: king + jacks at the doorway end, 2 full studs at the pocket end, no stud or noggin in the pocket, a lintel over the whole opening and head trim (stacked by width). [Default, needs Sam] The pocket end bears the lintel on its full studs (no jack); the head trim's thickness isn't taken off the cripples above.
+  - **Full height (HUB 031).** [Sam] `inputs.fullHeight` on the opening: its height is the wall's height minus the sill, worked out every time. The stored height is only a snapshot, rewritten in the same edit when the wall's height or the sill changes. The head is the underside of the top plate: no cripples above. In a wall that carries the roof a full-height opening needs an engineered beam (no table covers it): the opening says so and counts the rest.
+  - **Lintels and jambs from tables (HUB 031).** [Sam] Suggested from cited span tables for the roof the office described (`engine/openingSelectors.js`, `standards/index.js`). Fail closed: a missing answer is "needs roof information"; a wind class outside the table (pine: N1, N2; SmartLVL 13 and Smart10: N1 to N4), a lower storey, a roof width over 7,500, a spacing over 1,200 or a span past the table is "engineer"; never a default or nearest size. The roof width and spacing round UP to the next column. Choice: x45 sections first, one member before a laminated pair, the shallowest, and the first that fits under the head. A lintel is never wider than the wall (2 × 63 isn't offered in a 90 wall). Where a table asks for more than the 35 mm minimum bearing and the jacks give less, a note says so. Tap the lintel to give that opening its own roof width, or type a size (used as typed, not checked). Jamb studs per side: the Smart10 jamb table for LVL Smart 10 studs (Sam's default), AS 1684.2 T11 for MGP10 studs; any other stud grade or section the table doesn't list says "not in table".
+  - **Tables mapped (HUB 031).** Every table is in `shared/takeoff/standards/data/` with its source, edition and page, generated by `scripts/takeoff/standards/`. AS 1684.2 N1/N2 Supplement 4 (2006), MGP10: T17, T18 (lintels, pdf pages 22, 23), T47, T48 (lower-storey lintels, 50, 51), T11 (jamb studs, 14), T7 (studs, 11), T36 (lower-storey studs, 41), ported from Bestimator's verified tables; the four lintel tables were re-read from Sam's PDF by script (92 rows match). Smart10 LVL Stud Design Guide (Mar 2024): jamb studs (pdf p. 11, guide p. 9), common studs un-notched (pdf 7) and 20 mm notched (pdf 9), lintels (pdf 17, N1 to N4 block). SmartLVL 13 Design Guide (E1 2021): single span lintels, single/upper storey N1 to N4 (pdf 22, 23, guide pp. 19, 20), with the extra-bearing subscripts. Not mapped yet: C1 to C3 pages, lower-storey LVL lintels, concentrated-load tables, and SmartLVL 13's floor, rafter, beam and other member tables. Smart10 is for internal, fully protected walls (guide p. 3): outside walls need the supplier's say. These are Sam's licensed extracts and the manufacturers' guides: they are for the private Hub only and are never redistributed.
 
 ---
 
 ## 12. Edge cases and limits
+
+- **HUB 031.** A wall on two Walls items keeps its own 450 on both. An old cached app (before the update) shows 600-centre numbers on screen while orders and exports use 450 (the server works them out). Existing Walls items have the opening rules ON, so an older job's Walls line changes (more studs, jacks, trimmers, cripples) the next time it is opened: untick **Work out the framing at windows and doors** to keep the old counts. Saved order lines are stale after this release (`CALCULATION_VERSION` takeoff-calc@5). One lower storey, N5, N6 and C wind classes, a roof width over 7,500 and a concentrated load are an engineer's or the supplier's: the opening says so. Sloped, gable and outline walls aren't framed by Walls.
 
 - **Size and grade list (HUB 027, Sam's choices 21 Oct 2026):** studs 90 × 35, 90 × 45, 120 × 35 and 120 × 45, all MGP10; noggins 90 × 35; plates 90 × 45; battens 90 × 35, 70 × 35, 90 × 45 and 70 × 45. Rafters, joists, trim and other members have no built-in sizes.
 - **Still to confirm with Sam:** a grade for noggins, plates and battens (none was stated, so those rows fill the size only); whether 120 × 35 and 120 × 45 studs are MGP10 (built as MGP10); which LVL products and treatments to save; a treatment for battens ("as applicable" was stated, so no row sets one).
@@ -369,7 +420,7 @@ Next review date: 2027-04-14
 - [ ] "Expected record" in UI Review Mode = the fake server's copy. In the page console: `await (await fetch("/api/takeoff/workspaces/ws-1")).json()` → `snapshot.materials / measurements / contributions`; `window.__takeoffReviewState()` → `{ revision, commits, measurements }`. A full page reload re-seeds the fake data.
 - [ ] Plan positions: PDF point for (x mm, y mm) on page 1 = `{ x: 120 + x × 0.0283464567, y: 150 + y × 0.0283464567 }`; screen position = `document.querySelector("[data-takeoff-viewport]").takeoffViewport.toScreen(pt)` + the viewport's bounding rect; zoom with `.takeoffViewport.zoomOn(pt, factor)`. Taps land on whole pixels — zoom in before drawing and allow ±40 mm on drawn lengths.
 - [ ] Optional live-stack run (local only, isolated test DB with migrations **206 and 207**, `TAKEOFF_ENABLED=true`, `BLH TEST` job) for the DB checks marked "Live DB".
-- [ ] **Walls (TC-15 to TC-18):** open `http://localhost:<PORT>/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding` (page 1 is scaled). `&takeoffSeed=walls` adds one Walls item with nothing traced (overview → **Measure** opens it); `&takeoffSeed=walls-products` saves one company product per Walls part. The worked example's run on page 1: A (2000, 3000) → B (8000, 3000) → C (8000, 7000), so Wall 1 is 6,000 and Wall 2 is 4,000. D1's edges are (3000, 3000) and (3820, 3000). W1's edges are (8000, 4200) and (8000, 6000). Zoom right in on each point before tapping it (`zoomOn(pt, 40)`), and wait about half a second between taps on the same spot of the screen, or two taps read as a double-tap.
+- [ ] **Walls (TC-15 to TC-24):** open `http://localhost:<PORT>/carpentry/cjb-1/takeoff?reviewRole=admin&section=timber_cladding` (page 1 is scaled). `&takeoffSeed=walls` adds one Walls item with nothing traced (overview → **Measure** opens it); `&takeoffSeed=walls-products` saves one company product per Walls part. The worked example's run on page 1: A (2000, 3000) → B (8000, 3000) → C (8000, 7000), so Wall 1 is 6,000 and Wall 2 is 4,000. D1's edges are (3000, 3000) and (3820, 3000). W1's edges are (8000, 4200) and (8000, 6000). Zoom right in on each point before tapping it (`zoomOn(pt, 40)`), and wait about half a second between taps on the same spot of the screen, or two taps read as a double-tap.
 - [ ] **Reload in UI Review Mode** = leave the takeoff and come back inside the app, because a browser reload re-seeds the fake data: in the console `history.pushState({}, "", "/carpentry/cjb-1?reviewRole=admin"); dispatchEvent(new PopStateEvent("popstate"))`, then the same with the takeoff URL. The real server's reload is covered by `scripts/tests/takeoff-api.test.mjs` ("HUB 028 step 6") and the real-stack journey WF (`e2e/ui-review/tc-journeys-sandbox.spec.js`).
 
 ### Test cases
@@ -525,6 +576,75 @@ Next review date: 2027-04-14
 5. Expected: on Walls 2 the note "Wall 1 is also on Walls, so its framing may be counted twice."; on Walls (its card's notes) "Wall 1 is also on Walls 2, so its framing may be counted twice.". Neither blocks. Take Wall 1 off Walls 2 (**Materials on this wall**) and both notes go.
 6. Expected (cut lists, Section 5G): the "Studs cut list" labels run along each wall in order: "Wall 1 stud @ 0", "@ 600", … "@ 6,000", never "@ 6,000" before "@ 600".
 7. Screen tests: e2e/ui-review/tc-hub028.spec.js "final review: …" and "the fold: …"; node: scripts/tests/takeoff-tc-hub028.test.mjs "final review: …".
+- [ ] Pass  [ ] Fail
+
+**TC-19 — Walls (HUB 031): Wet-area walls at 450, bulk and one wall**
+1. Open the Walls URL with `&takeoffSeed=walls` → **Measure**. Type `2400` in **Wall height** and trace three walls A → B → C → D (each 3,600 long). Expected: "Walls: 21 studs at 2,400 · …" with no "walls at 450".
+2. Tap **Select**, then **Wet-area walls at 450**. Expected: a panel "Wet-area walls · Walls", "No walls at 450 yet.", a **Done** button.
+3. Tap Wall 1 and Wall 2. Expected: both turn blue (`#0e7490`), their labels end "· 450 ctrs", the panel reads "2 walls at 450: Wall 1, Wall 2", and "Wall 2 now at 450. Undo puts it back.". Record: those two walls' `inputs.studCentresMm` 450; Wall 3 has none.
+4. Expected: the Walls line ends "· 2 walls at 450" and has 9 studs on each of Walls 1 and 2 (7 at 600).
+5. Tap Wall 2 again. Expected: "Wall 2 back to 600", it turns back, and its `studCentresMm` key is **gone** (not null, not 600).
+6. Tap **Undo** once. Expected: Wall 2 is at 450 again. Tap **Done**, then **Select** Wall 3 and tap **450** under **Stud centres**. Expected: 2 taps, and **Undo** puts it back.
+7. Reload (pre-test setup). Expected: the blue walls are still blue and the line still says walls at 450.
+8. With the item's own **Stud centres** at 450 the **Wet-area walls at 450** button is not offered.
+9. Node: scripts/tests/takeoff-tc-hub031.test.mjs "a wall's own 450 beats the item's 600", "toggling 450 on and off …".
+- [ ] Pass  [ ] Fail
+
+**TC-20 — Walls (HUB 031): a Studs item ignores a wall's own centres, and says so**
+1. On a job with an older Studs item (frame method) and a wall that has its own 450, open the Studs wall page.
+2. Expected: the non-blocking note "Wall 3 is set to 450 centres, but Studs uses its own centres (600) for every wall." and the studs are laid out at 600.
+3. Node: scripts/tests/takeoff-tc-hub031.test.mjs "a Studs item (wall_frame) keeps its own centres …".
+- [ ] Pass  [ ] Fail
+
+**TC-21 — Cavity slider on the plan (HUB 031)**
+1. On a Walls item with a 3,600 wall (Wall height 2400), tap **+ Door** → **Cavity slider**. Expected: a **Door width** field and "Opening: 2 × door + 20." and the hint "Type the door width, then tap the doorway end of the slider.".
+2. Type `920`. Expected: "Opening 1,860 (2 × 920 + 20)." and the hint "Tap the doorway end on the wall, then tap towards the pocket. It's always 1,860 long.".
+3. Tap the wall at 600 from its start, then tap further along it. Expected: the card "D1 in Wall 1 · cavity slider · 1,860 opening". Record the opening: `xMm` 600, `widthMm` 1860, `cavityLeafMm` 920, `cavityPocket` "right", `heightMm` as typed.
+4. Expected: the studs have none in the pocket and 2 full studs at the pocket end; "D1 jack × 1", "D1 head trimmer × 2" in the cut lists.
+5. Place the next slider on another wall: **2 taps** and the door width is remembered. Tap towards the wall start instead: `cavityPocket` "left".
+6. Edge: a slider 40 mm past the wall end is slid back and the card says "ran 40 past the end"; 300 past is refused with "From there, the 1,860 opening runs 300 past the end of Wall 1. Tap towards the other end, or Undo this end."; on a 1,500 wall: "A 1,860 opening doesn't fit on Wall 4 (1,500 long). Tap a longer wall."; into D1: "runs into D1".
+7. Existing door: **Select** the wall → **Open elevation** → the door → **Cavity slider** → **◀ Left** or **Right ▶**. Expected: width 1,860, Door width 920, one **Undo** puts it back. A door already 1,860 wide saves at once with Door width 920.
+8. Node: scripts/tests/takeoff-tc-hub031.test.mjs "placing a slider …", "an existing door → cavity slider …", "framing: a 1,860 slider at 600 …".
+- [ ] Pass  [ ] Fail
+
+**TC-22 — Full height (HUB 031)**
+1. **+ Door** → **Full height** (nothing to type) → tap both ends on a 2,400 wall. Expected: "Height: the wall's height." in the panel, the opening has `fullHeight: true` and `heightMm` 2400.
+2. **Select** the wall and change **Wall height** to 2700. Expected: the door's stored `heightMm` becomes 2700 in the same edit; one **Undo** puts both back.
+3. **+ Window** → **Full height**: the sill is set to 0; type a sill for a window that runs from a sill to the top. Expected: height = wall height − sill.
+4. A wall with no height: "Wall 4 has no height yet. Select it and type its height, or turn off Full height."
+5. Expected: no cripples above a full-height opening, and in a wall that carries the roof, "a full-height opening … needs an engineered beam".
+6. Node: scripts/tests/takeoff-tc-hub031.test.mjs "full height: …".
+- [ ] Pass  [ ] Fail
+
+**TC-23 — Opening framing and the lintel (HUB 031)**
+1. On a Walls item with a 3,955 wall at 2,700 and a window W1 3,430 wide, 600 high, sill 2,000 at 450. Open the Walls card → **Roof and openings** and tick **Yes** under **Do these walls carry the roof?** only.
+2. Expected (Review walls, the wall page): "W1: 1 king + 1 jack each side · lintel not sized (the wind class isn't set) · sill trimmer × 3.", the Walls line "… · 1 to size", the note "Jambs are 2 each side (a king and one jack, the minimum). …", and 6 below-sill cripples of 1,820 (2,000 from the floor − 45 plate − 3 sill trimmers of 45).
+3. Set **Sheet**, **3000**, **600**, **N2**. Expected: "lintel 240 × 45 LVL13", "won't fit (145 free)", the note "a 240 deep lintel won't fit. Only 145 mm is free above the head. …", and "W1 lintel × 1 @ 3,500 mm" (3,430 + a 35 jack each side).
+4. Tap the opening, then the **Lintel** row. Expected: the source "SmartLVL 13 Design Guide (E1 2021), L13-LINTEL, page 22 and 23 …", chips 1500 to 7500 for the roof width this opening carries, and **Depth / Thickness / Pieces** with **Use this size**.
+5. A narrower window that fits (1,200 wide, sill 900, head 2,100 at Wall height 2,700): the lintel is counted and "W1 above-head @ 1,200" cripples are 2,700 − 2,055 − the lintel's depth.
+6. Select the wall → **Carries the roof: No**. Expected: no lintel and no lintel note; "head trimmer × 3" instead.
+7. Type a framing detail on an opening (Section 5F). Expected: the rules leave it alone and the old note "its framing detail adds its own members …" returns.
+8. Node: scripts/tests/takeoff-tc-hub031.test.mjs "Sam's wall: levels are from the FLOOR …", "the jamb count includes the king …", "a window's levels …"; render: scripts/tests/takeoff-tc-hub031-render.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-24 — Lintels fail closed (HUB 031)**
+1. Set the wind class to **N5**, or the roof width to something over 7,500 by tapping an opening's lintel (not offered: the chips stop at 7,500), or **Lintels from: Pine MGP10** with **N3**. Expected: "lintel not sized (a N3 isn't in the AS 1684.2 N1/N2 Supplement 4 tables (N1, N2 only): needs an engineer or the supplier)"; the studs, trimmers and cripples are still counted.
+2. Clear **Roof covering** to **Not set**. Expected: "lintel not sized (the roof covering (sheet or tile) isn't set)". Never a default.
+3. Type a lintel on the opening (190 × 45, 2 pieces). Expected: "lintel 2/190 × 45 (typed)", quantity 2 and the pieces counted; **Use the table** removes it.
+4. Node: scripts/tests/takeoff-tc-hub031.test.mjs "fail closed: …", "the SmartLVL 13 guide's own worked example …", "the Smart10 guide's own worked example …"; PDF cross-check: `node scripts/takeoff/standards/verify-lintels-vs-pdf.mjs` (92 rows match).
+- [ ] Pass  [ ] Fail
+
+**TC-25 — Hoop iron on a wall, and short MGP10 pieces (HUB 033)**
+1. Walls card > **Hoop iron**: the product (HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL), as the supplier prints it) and the **Roll length** (30 m). Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm). In **Select**, tap a wall and **Hoop iron on this wall: Off** to leave it out; **On** puts it back (one Undo each).
+2. Expected on a 9,000 wall: 16 straps, 11.2 m, which orders as 1 roll (30 m rolls, counted EA, printed under BRACING). Node: scripts/tests/takeoff-tc-hub033.test.mjs.
+3. Short MGP10 pieces (noggins, cripples, short trimmers under 1.2 m) are cut from the same product's stud/plate lengths: first from what is left over on the lengths bought for the longer pieces, then shared between themselves. Studs and plates stay one length each. An MGP10 product with no longest length set uses 6,000 mm and the card still asks you to confirm it.
+- [ ] Pass  [ ] Fail
+
+**TC-26 — Add bracing: ply sheets and hoop iron cross braces (HUB 034)**
+1. Select a Walls item, **Select** with nothing picked, tap **Add bracing**. **Ply sheet**: tap along a wall where each 1,200 mm sheet goes (the sheet is centred on your tap and kept inside the wall; a sheet that would overlap another is refused). Its length follows the wall height: the smallest stocked sheet that covers it, 2,745 or 3,050 (BRACE OS H2 6X1200X2745MM / 6X1200X3050MM, seeds flagged to confirm). A wall taller than 3,050 or with no height says so and is not counted: add those sheets by hand. **Hoop iron cross**: set the span (default 2,700) and tap where each goes.
+2. Hoop iron per cross brace is two diagonals: each = square root of (span squared + wall height squared), so a 2,700 span on a 2,700 wall is 2 x 3.818 = 7.64 m; on 2,400 it is 7.23 m. Tensioners: 2 per cross (one per diagonal), "TENSIONER SET HEX HEAD (PCE)". Sam's rule of thumb (2.7 x 1.6 x 2 = 8.64 m) is higher than the geometry, so the geometry is what is ordered (no allowance for laps or fixing ends); AS 1684.2 Section 8 is the reference for strap (tension) bracing, but the bracing design (how many, where, what angle) stays with the bracing plan. A cross brace flatter than 30 or steeper than 60 degrees is flagged. The cross braces' hoop iron and the walls' own straps are added together and ordered as one rolls line.
+3. The same on the wall's elevation: in the wall page **Bracing** card tap **Add ply sheet** or **Add cross brace**, then tap the elevation (stays on until **Done**). Marks show on the elevation (green panel = ply, purple X = cross brace). **Remove** is on each row (and in Select, tap a wall, **Bracing on this wall**); every add and remove is one Undo.
+4. Temporary bracing and screws are **not** calculated: use **+ Add bracing** on the order and pick **TEMP BR** (PINE 90x35 MGP10 P/M, `10/4.8`) or **SB SCREW** (COACHSCREW 10X75 GALV (PK 10), `1 EA`). Node: scripts/tests/takeoff-tc-hub034.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

@@ -35,7 +35,7 @@ import { TIMBER_STOCK_GRID, timberStockPolicy } from "../../shared/takeoff/engin
 import { selectStock } from "../../shared/takeoff/engine/stock.js";
 import {
   CALCULATION_VERSION, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PRESETS, TIMBER_PURPOSES, WALLS_PURPOSE, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT,
-  WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_DEFAULTS_SOURCE, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
+  WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_DEFAULTS_SOURCE, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace as computeWorkspaceRaw, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
   longPlateStockLengths, methodFor, methodReads, normaliseFamilySpec, onTimberGrid, orderLineState, orderStatus, productionMethods, stockIdentityKey, timberProductFill,
   wallFramingDefaults, wallPartFill, wallPartProducts, WALL_STUDS_EACH_SIDE, applyTimberPreset, matchTimberChoice, timberPresetsFor,
 } from "../../shared/takeoff/index.js";
@@ -46,6 +46,8 @@ import { cleanMaterialContent } from "../../server/lib/takeoff/takeoffService.mj
 import { isWallsItem, lastWallHeight, lineStartHeight, toolsFor, usesWalls, wallFramingNotes, wallFramingText, wallFramingTotals, wallLongPlateOverMm, wallLongPlateOverText, wallPartText,
   wallPartsNeedText, wallPartsToFix, wallsNotCounted } from "../../src/components/takeoff/measure/tools.js";
 
+// HUB 033: hoop iron is on by default for every wall; these framing tests are about studs, plates and noggins, so its line is left out here (takeoff-tc-hub033 covers it)
+const computeWorkspace = (w) => { const c = computeWorkspaceRaw(w); return { ...c, scheduleLines: c.scheduleLines.filter((l) => !l.hoop) }; };
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); } }
 
@@ -54,10 +56,11 @@ const nearAll = (a, b, msg = "") => { assert.equal(a.length, b.length, `${msg} $
 const codes = (r) => r.problems.map((p) => p.code);
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 
-// the Walls parts (built-in defaults with a treatment so nothing is "missing product")
-const STUDS = { section: "90x45", grade: "MGP10", treatment: "H2", component: "studs" };
-const PLATES = { section: "90x45", grade: "MGP10", treatment: "H2", component: "plates" };
-const NOGGINS = { section: "90x35", grade: "MGP10", treatment: "H2", component: "noggins" };
+// the Walls parts (built-in defaults with a treatment so nothing is "missing product"). MGP15 stands in for any grade but
+// MGP10: these engine cases test the owner 1,200 + 300n grid; MGP10 (600 mm steps) is tested in takeoff-tc-hub032
+const STUDS = { section: "90x45", grade: "MGP15", treatment: "H2", component: "studs" };
+const PLATES = { section: "90x45", grade: "MGP15", treatment: "H2", component: "plates" };
+const NOGGINS = { section: "90x35", grade: "MGP15", treatment: "H2", component: "noggins" };
 const W = 45; // stud thickness along the wall (90 × 45)
 
 const D1 = { id: "D1", xLeftMm: 1000, xRightMm: 1820, sillMm: 0, headMm: 2040 };
@@ -457,7 +460,7 @@ t("label names the part in its identity problem ('Studs: …'); the stock note i
 const tSnap = (materials, measurements, contributions) => ({ workspace: { id: "w", name: "t", revision: 1, state: "active", owner: { carpentryJobId: "j" } },
   documents: [], calibrations: [], materials, measurements, contributions });
 const tMat = (id, methodKey, purpose, rules = {}, stock = {}) => ({ id, name: id, methodKey, methodVersion: 1,
-  spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock }, rules });
+  spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP15", treatment: "H2", stock }, rules });   // MGP15: any grade but MGP10 (takeoff-tc-hub032)
 const tRows = (c, id) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes(id)).map((l) => [l.quantity, l.finishedLengthMm]).sort((a, b) => a[1] - b[1]);
 
 t("grid: one owner timber grid, 1,200 then 300 mm steps (Sam, 25 Oct 2026), in families.js, timber.js and the product seed", () => {
@@ -467,7 +470,7 @@ t("grid: one owner timber grid, 1,200 then 300 mm steps (Sam, 25 Oct 2026), in f
   assert.equal(TIMBER_GRID_SOURCE, "OWNER-2026-10-25");
   assert.deepEqual([TIMBER_ORDERING_POLICY.minLengthMm, TIMBER_ORDERING_POLICY.incrementMm, TIMBER_ORDERING_POLICY.scope], [1200, 300, "all-suppliers-timber"]);
   assert.deepEqual(TIMBER_ORDERING_POLICY.sourceRefs, ["OWNER-2026-10-14", "OWNER-2026-10-25"]);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@4$/, "a behaviour change is stamped into exports");
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@7$/, "a behaviour change is stamped into exports");
   const p = timberStockPolicy({});
   assert.deepEqual([p.kind, p.minMm, p.incrementMm], ["grid", 1200, 300]);
   for (const [need, buy] of [[2700, 2700], [4000, 4200], [1000, 1200], [6000, 6000], [1200.1, 1500], [4180, 4200], [5196.2, 5400], [2701, 3000]]) {
@@ -569,9 +572,11 @@ t("grid: timber placed on the old 600 mm steps is 'placed, no longer in the take
 });
 
 // ── the Walls material ────────────────────────────────────────────────────────
-const walls = (spec, rules = { ...WALL_FRAMING_RULES }) => ({ id: "walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules });
+// HUB 031: these suites are the Walls item as it was before the opening rules (kings, jacks, trimmers, lintels worked out for you):
+// they run with the rules OFF (rules.openingFraming: false). The rules are in takeoff-tc-hub031.test.mjs.
+const walls = (spec, rules = { ...WALL_FRAMING_RULES }) => ({ id: "walls", name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { ...rules, openingFraming: false } });
 const product = (id, purpose, over = {}) => ({ id, name: id, isActive: true, methodKey: "linear_stock", methodVersion: 1, rules: {},
-  spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", species: null, supplierName: "Yard A", productCode: null, stock: { maxMm: null, unavailableMm: [] }, ...over } });
+  spec: { family: "timber", purpose, section: { depthMm: 90, widthMm: 45 }, grade: "MGP15", treatment: "H2", species: null, supplierName: "Yard A", productCode: null, stock: { maxMm: null, unavailableMm: [] }, ...over } });
 const partOf = (spec, k) => spec.components[k];
 const brief = (p) => [p.section.depthMm, p.section.widthMm, p.grade, p.treatment, p.stock.maxMm];
 /** HUB 029/030 (Sam's decision 6, 25 Oct): a Walls item added BEFORE Sam's default products, saved as it was (the
@@ -636,19 +641,19 @@ t("defaults with company products: exactly one per part fills it (its stock too)
   const nog = product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 }, stock: { maxMm: 5400, unavailableMm: [] } });
   const ignored = [product("p-old", "studs", { grade: "MGP12" }), product("p-std", "studs", {})].map((p, i) => (i ? { ...p, rules: { companyDefault: true } } : { ...p, isActive: false }));
   const d = wallFramingDefaults([stud, pine, lvl, nog, product("p-bat", "battens"), ...ignored]);
-  assert.deepEqual(brief(partOf(d, "studs")), [90, 45, "MGP10", "H2", 4800]);
+  assert.deepEqual(brief(partOf(d, "studs")), [90, 45, "MGP15", "H2", 4800]);
   assert.deepEqual(partOf(d, "studs").stock, { maxMm: 4800, unavailableMm: [3600] });
   assert.deepEqual(brief(partOf(d, "plates")), [90, 45, "MGP12", "H3", 6000], "the pine plate product; Sam's 6,000 as it states none");
   assert.deepEqual(partOf(d, "longPlates"), { section: { depthMm: 90, widthMm: 45 }, grade: "LVL13", treatment: "H2-S", species: "LVL", supplierName: "Yard B", productCode: "LVL9045",
     stock: { maxMm: 10800, unavailableMm: [9000] } }, "the LVL plate product fills Long plates");
-  assert.deepEqual(brief(partOf(d, "noggins")), [90, 35, "MGP10", "H2", 5400], "the noggin product's own longest length wins over 6,000");
+  assert.deepEqual(brief(partOf(d, "noggins")), [90, 35, "MGP15", "H2", 5400], "the noggin product's own longest length wins over 6,000");
   assert.deepEqual(wallPartProducts([stud, pine, lvl, nog], "plates").map((p) => p.id), ["p-plate"]);
   assert.deepEqual(wallPartProducts([stud, pine, lvl, nog], "longPlates").map((p) => p.id), ["p-lvl"]);
   assert.deepEqual([isLvlTimber(lvl.spec), isLvlTimber({ grade: "LVL" }), isLvlTimber({ species: "Hyspan lvl" }), isLvlTimber(pine.spec), isLvlTimber({ grade: "GL17" })], [true, true, true, false, false]);
   // two stud products: the built-in row (the products are one pick away); the other parts still fill
   const two = wallFramingDefaults([stud, product("p-stud2", "studs", { section: { depthMm: 90, widthMm: 35 } }), nog]);
   assert.deepEqual(brief(partOf(two, "studs")), [90, 35, "LVL Smart 10", "H2", null], "Sam's default studs");
-  assert.deepEqual(brief(partOf(two, "noggins")), [90, 35, "MGP10", "H2", 5400]);
+  assert.deepEqual(brief(partOf(two, "noggins")), [90, 35, "MGP15", "H2", 5400]);
   assert.deepEqual(brief(partOf(two, "plates")), [90, 45, "MGP10", "H2", 6000], "no plate product: Sam's default plates, nothing copied from the studs");
   assert.deepEqual(brief(partOf(two, "longPlates")), [90, 45, "LVL Smart 10", "H2", 11000]);
   assert.deepEqual(normaliseFamilySpec(d), d);
@@ -756,7 +761,7 @@ t("describe: 'Studs 90 × 35 LVL Smart 10 H2 · plates 90 × 45 MGP10 H2 · long
     installation: "Size: manual selection (not structurally checked)" });
   assert.equal(describeFamilySpec(BEFORE_D6()).line, "Studs 90 × 45 MGP10 · plates 90 × 45 · long plates 90 × 45 LVL · noggins 90 × 35", "a Walls item saved before reads as saved");
   const filled = wallFramingDefaults([product("a", "studs"), product("l", "plates", { grade: "LVL13", species: "LVL", treatment: "H2-S" })]);
-  assert.equal(describeFamilySpec(filled).line, "Studs 90 × 45 MGP10 H2 · plates 90 × 45 MGP10 H2 · long plates 90 × 45 LVL13 LVL H2-S · noggins 90 × 35 MGP10 untreated");
+  assert.equal(describeFamilySpec(filled).line, "Studs 90 × 45 MGP15 H2 · plates 90 × 45 MGP10 H2 · long plates 90 × 45 LVL13 LVL H2-S · noggins 90 × 35 MGP10 untreated");
   assert.equal(describeFamilySpec({ family: "timber", purpose: "walls" }).line, "Studs section? · plates section? · long plates section? · noggins section?");
 });
 
@@ -776,7 +781,9 @@ t("Long plates stock: 300 mm steps from 6,300 up to 11,000, plus 11,000 itself; 
 // Sam's round 2: 2 full-length studs each side of every opening, the bottom plate bought full length; round 3: a plate
 // piece over the pine plates' longest length (6,000) is ONE 90 × 45 LVL length, joined over a stud only past 11,000.
 const READY = () => wallFramingDefaults([product("p-stud", "studs"), product("p-plate", "plates"), product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 } })]);
-const LVL_READY = () => wallFramingDefaults([product("p-stud", "studs"), product("p-plate", "plates"), product("p-lvl", "plates", { grade: "LVL", treatment: "H2" }),
+// the pine plates here are MGP15 (any grade but MGP10): these cases are about the 300 mm steps and the pine/LVL boundary;
+// MGP10 plates buy on 600 mm steps (takeoff-tc-hub032)
+const LVL_READY = () => wallFramingDefaults([product("p-stud", "studs"), product("p-plate", "plates", { grade: "MGP15" }), product("p-lvl", "plates", { grade: "LVL", treatment: "H2" }),
   product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 } })]);
 const withPart = (spec, k, over) => ({ ...spec, components: { ...spec.components, [k]: { ...spec.components[k], ...over } } });
 const wm = (id, widthMm, heightMm, name, over = {}) => ({ id, kind: "wall", inputs: { kind: "rect", widthMm, heightMm, name, ...over } });
@@ -852,11 +859,11 @@ t("Walls, the 2,700 example (round 2): 21 studs × 2,700, plates 2 × 6,000 + 2 
   assert.deepEqual(wl(c, "Wall 2").totals, { studs: 8, studLengthMm: 2700, bottomPlateMm: 4000, topPlateMm: 4000, secondTopPlateMm: null, longPlateMm: 0, noggins: 4, nogginRows: 1 });
   // the order: studs, then plates, then noggins, each named by its part
   assert.deepEqual(c.scheduleLines.map((l) => [l.component, l.item.component, l.item.description]), [
-    ["studs", "studs", "Studs 90 × 45 MGP10 H2 — 2,700 mm length"],
-    ["plates", "plates", "Plates 90 × 45 MGP10 H2 — 6,000 mm length"], ["plates", "plates", "Plates 90 × 45 MGP10 H2 — 4,200 mm length"],
-    ["noggins", "noggins", "Noggins 90 × 35 MGP10 H2 — 4,800 mm length"], ["noggins", "noggins", "Noggins 90 × 35 MGP10 H2 — 1,800 mm length"]]);
+    ["studs", "studs", "Studs 90 × 45 MGP15 H2 — 2,700 mm length"],
+    ["plates", "plates", "Plates 90 × 45 MGP15 H2 — 6,000 mm length"], ["plates", "plates", "Plates 90 × 45 MGP15 H2 — 4,200 mm length"],
+    ["noggins", "noggins", "Noggins 90 × 35 MGP15 H2 — 4,800 mm length"], ["noggins", "noggins", "Noggins 90 × 35 MGP15 H2 — 1,800 mm length"]]);
   // never a king, jack, trimmer or lintel; one plain "aren't counted" note, which doesn't block (quantity stays incomplete, as Studs)
-  assert.deepEqual([...new Set(r.demands.map((d) => d.role))].sort(), ["bottom-plate", "noggin", "stud", "top-plate"]);
+  assert.deepEqual([...new Set(r.demands.map((d) => d.role))].filter((x) => x !== "hoop iron").sort(), ["bottom-plate", "noggin", "stud", "top-plate"]);
   assert.ok(!r.demands.some((d) => /king|jack|trimmer|lintel/i.test(`${d.role} ${d.label}`)));
   assert.deepEqual(msgs(c), [["opening_framing_not_counted", false, NOT_COUNTED], ["stock_max_unset", false, STUDS_NO_MAX]]);
   assert.deepEqual([wl(c, "Wall 1").openingsNotCounted, wl(c, "Wall 2").openingsNotCounted], [["d1"], ["o1"]]);
@@ -1104,14 +1111,14 @@ t("an explicit framing detail on an opening still adds its own members, with a n
   assert.ok(!WR(wf([wm("w1", 6000, 2700, "Wall 1"), om("d1", "w1", "D1", "door", 1000, 820, 2040, 0)])).demands.some((d) => d.role === "lintel"));
 });
 
-t("studs and plates of the same 90 × 45 MGP10 H2 stay on separate lines and cut lists, named by part; an order line is only offered its own part", () => {
+t("studs and plates of the same 90 × 45 MGP15 H2 stay on separate lines and cut lists, named by part; an order line is only offered its own part", () => {
   const c = wf([wm("w", 4000, 4200, "Wall 1")]);
   const stud = partLines(c, "studs"), plate = partLines(c, "plates");
   assert.deepEqual([stud.map((l) => [l.quantity, l.finishedLengthMm]), plate.map((l) => [l.quantity, l.finishedLengthMm])], [[[8, 4200]], [[2, 4200]]]);
   assert.notEqual(stud[0].bucketKey, plate[0].bucketKey);
   assert.equal(stud[0].materialKey, plate[0].materialKey, "one material");
   assert.deepEqual([stud[0].item.component, plate[0].item.component, stud[0].item.description, plate[0].item.description],
-    ["studs", "plates", "Studs 90 × 45 MGP10 H2 — 4,200 mm length", "Plates 90 × 45 MGP10 H2 — 4,200 mm length"]);
+    ["studs", "plates", "Studs 90 × 45 MGP15 H2 — 4,200 mm length", "Plates 90 × 45 MGP15 H2 — 4,200 mm length"]);
   assert.deepEqual(WR(c).appendix.timber.map((x) => x.title), ["Studs cut list", "Plates cut list", "Noggins cut list"]);
   assert.deepEqual(cutList(c, "Studs cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm]), [[8, 4200, 4200]]);
   assert.deepEqual(cutList(c, "Plates cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm]), [[2, 4000, 4200]]);
@@ -1409,7 +1416,8 @@ t("Long plates 'over 6.0 m' is the longest pine plate the calculation buys: the 
   const spec = (stock) => withPart(wallFramingDefaults([]), "plates", { stock });
   assert.equal(wallLongPlateOverMm(wallFramingDefaults([])), 6000);
   assert.equal(wallLongPlateOverText(wallFramingDefaults([])), "over 6.0 m");
-  assert.equal(wallLongPlateOverMm(spec({ maxMm: 6000, unavailableMm: [6000] })), 5700);
+  // the default plates are MGP10 (600 mm steps above 3 m, 18 Nov 2026), so with 6,000 not stocked pine stops at 5,400
+  assert.equal(wallLongPlateOverMm(spec({ maxMm: 6000, unavailableMm: [6000] })), 5400);
   assert.equal(wallLongPlateOverMm(spec({ maxMm: 6100, unavailableMm: [] })), 6000, "an off-grid longest length buys the grid length under it");
   assert.equal(wallLongPlateOverMm(spec({ maxMm: 5400, unavailableMm: [] })), 5400);
   assert.equal(wallLongPlateOverMm(spec({ maxMm: null, unavailableMm: [] })), null, "no longest length: no plate is a long plate");
@@ -1461,7 +1469,7 @@ t("a wall page names a part as the supplier reads it, each word once: '90 × 45 
   assert.deepEqual(WALL_PARTS.map((k) => wallPartText(wallFramingDefaults([]).components[k])), ["90 × 35 LVL Smart 10 H2", "90 × 45 MGP10 H2", "90 × 45 LVL Smart 10 H2", "90 × 35 MGP10 untreated"]);
   assert.equal(wallPartText({ section: { depthMm: 90, widthMm: 45 }, grade: "LVL", species: "lvl", treatment: "H2" }), "90 × 45 LVL H2");
   assert.equal(wallPartText({ section: { depthMm: 90, widthMm: 45 }, grade: "LVL13", species: "LVL", treatment: "H2-S" }), "90 × 45 LVL13 LVL H2-S");
-  assert.equal(wallPartText(READY().components.noggins), "90 × 35 MGP10 H2");
+  assert.equal(wallPartText(READY().components.noggins), "90 × 35 MGP15 H2");
   assert.equal(wallPartText({ section: { depthMm: null, widthMm: null } }), "section?");
 });
 
@@ -1489,7 +1497,7 @@ t("the Walls card's part writes are normaliser fixed points: a built-in row, a c
   const nog = product("p-nog", "noggins", { section: { depthMm: 90, widthMm: 35 }, stock: { maxMm: 5400, unavailableMm: [4800] } });
   const c = asPart(base, "noggins", (p) => wallPartFill(p, nog.spec, "noggins"));
   fixed(c); others(c, base, "noggins");
-  assert.deepEqual([...brief(c.components.noggins), c.components.noggins.supplierName, c.components.noggins.stock.unavailableMm], [90, 35, "MGP10", "H2", 5400, "Yard A", [4800]]);
+  assert.deepEqual([...brief(c.components.noggins), c.components.noggins.supplierName, c.components.noggins.stock.unavailableMm], [90, 35, "MGP15", "H2", 5400, "Yard A", [4800]]);
   assert.equal(matchTimberChoice({ ...c.components.noggins, purpose: "noggins" }, timberPresetsFor("noggins"), wallPartProducts([nog], "noggins")), "p-nog", "the list then shows the product");
   // a product with no longest length leaves the part's default (6,000 for plates), never none
   const plate = product("p-plate", "plates");

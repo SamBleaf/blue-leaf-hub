@@ -33,7 +33,7 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
-import { TIMBER_GRID } from "./families.js";
+import { MGP10_DEFAULT_MAX_MM, TIMBER_GRID, isMgp10Grade, onGrid as onGridFor, timberGridFor } from "./families.js";
 
 /** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
 const GEOM_TOL_MM = 0.001;
@@ -42,6 +42,7 @@ const GEOM_TOL_MM = 0.001;
  *  Not configurable. The same object as engine/families.js TIMBER_GRID, its one definition. */
 export const TIMBER_STOCK_GRID = TIMBER_GRID;
 /** "1,200 mm then 300 mm steps" — how the grid reads in a message. */
+const MGP10_TEXT = "1,200 mm then 300 mm steps up to 3,000 mm, then 600 mm steps above 3 m (3,600, 4,200 …)";
 const GRID_TEXT = `${formatMm(TIMBER_GRID.minMm, 0)} mm then ${formatMm(TIMBER_GRID.incrementMm, 0)} mm steps`;
 
 /** Proposed safeguard (06): generated members per wall or item. Excess is rejected, never truncated. */
@@ -63,7 +64,7 @@ const DETAIL_SOURCES = ["reviewed-detail", "explicit"];
 // even when two parts are the same product, as `follower` keeps automatic battens apart.
 const OPTIONAL_IDENTITY = ["supplier", "manufacturer", "sku", "moisture", "endCondition", "finish", "profile", "component"];
 // Stock settings timber accepts: the fixed grid, its product restrictions and the allocator's cutting-loss fields.
-const STOCK_KEYS = new Set(["kind", "minMm", "incrementMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
+const STOCK_KEYS = new Set(["grade", "kind", "minMm", "incrementMm", "aboveMm", "incrementAboveMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
   "endTrimMm", "finalEndAcceptable", "minRetainedOffcutMm"]);
 const CUTTING_LENGTHS = [["kerfMm", "Saw kerf"], ["endTrimMm", "End trim"], ["minRetainedOffcutMm", "Keep offcuts from"]];
 const CUTTING_FLAGS = [["kerfConfirmed", "Kerf confirmed"], ["finalEndAcceptable", "Final stock end acceptable"]];
@@ -241,10 +242,7 @@ export function timberIdentity(product = {}) {
   return Object.freeze(id);
 }
 
-const onGrid = (l) => {
-  const steps = (l - TIMBER_STOCK_GRID.minMm) / TIMBER_STOCK_GRID.incrementMm;
-  return steps >= 0 && Math.abs(steps - Math.round(steps)) < 1e-9;
-};
+const onGrid = (l, grade = null) => onGridFor(l, timberGridFor(grade));
 
 /**
  * T3 stock policy for new timber (allocated by engine/allocator.js, not here). The 1200/300 grid is fixed;
@@ -261,22 +259,29 @@ export function timberStockPolicy(opts = {}) {
   if (!opts || typeof opts !== "object" || Array.isArray(opts)) fail("Stock settings are invalid.", "stock");
   const unknown = Object.keys(opts).filter((k) => !STOCK_KEYS.has(k) && opts[k] !== undefined);
   if (unknown.length) fail(`Timber stock has no “${unknown.join("”, “")}” setting — it is ${GRID_TEXT}, restricted only by the product maximum and unavailable lengths.`, "stock");
-  const { kind, minMm, incrementMm, unavailableMm } = opts;
-  if ((kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
-    || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm)) {
+  // MGP10 (Sam, 18 Nov 2026) buys on its own 600 mm grid; the grade picks the grid, so the 1,200 + 300n a saved spec
+  // carries is simply replaced for MGP10, never refused. Every other grade must still state the owner grid.
+  const grid = timberGridFor(opts.grade);
+  const mgp = isMgp10Grade(opts.grade);
+  const { kind, minMm, incrementMm, unavailableMm, aboveMm, incrementAboveMm } = opts;
+  if (!mgp && ((aboveMm != null || incrementAboveMm != null) || (kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
+    || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm))) {
     fail(`Timber stock is ${GRID_TEXT} for every supplier — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   }
-  const maxMm = opts.maxMm ?? null;
-  if (maxMm !== null) num(maxMm, "Longest stock", { min: TIMBER_STOCK_GRID.minMm });
-  const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").map((l) => {
-    num(l, "Unavailable length", { min: TIMBER_STOCK_GRID.minMm });
-    if (!onGrid(l)) fail(`${fmt(l)} mm is not a timber stock length (${GRID_TEXT}).`, "unavailableMm");
-    return l;
+  if (mgp && kind !== undefined && kind !== grid.kind) fail(`MGP10 stock is ${MGP10_TEXT} — restrict it with the product maximum or unavailable lengths instead.`, "stock");
+  // Sam, 18 Nov 2026: an MGP10 product with no longest length set defaults to the top of its grid so short pieces can share its lengths
+  const maxMm = opts.maxMm ?? (mgp ? MGP10_DEFAULT_MAX_MM : null);
+  if (maxMm !== null) num(maxMm, "Longest stock", { min: grid.minMm });
+  const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").flatMap((l) => {
+    num(l, "Unavailable length", { min: grid.minMm });
+    if (onGrid(l, opts.grade)) return [l];
+    if (mgp && onGrid(l)) return [];   // a 1,500 / 2,700 mark left from the 300 grid: MGP10 is never bought at it anyway
+    fail(`${fmt(l)} mm is not a timber stock length (${mgp ? MGP10_TEXT : GRID_TEXT}).`, "unavailableMm");
   }))].sort((x, y) => x - y);
   const cutting = {};
   for (const [k, label] of CUTTING_LENGTHS) if (opts[k] !== undefined && opts[k] !== null) cutting[k] = num(opts[k], label);
   for (const [k, label] of CUTTING_FLAGS) if (opts[k] !== undefined && opts[k] !== null) cutting[k] = flag(opts[k], label);
-  return Object.freeze({ ...TIMBER_STOCK_GRID, maxMm, unavailableMm: Object.freeze(unavailable), ...cutting, sharePieces: flag(opts.sharePieces, "Cut allocation", false) });
+  return Object.freeze({ ...grid, maxMm, unavailableMm: Object.freeze(unavailable), ...cutting, sharePieces: flag(opts.sharePieces, "Cut allocation", false) });
 }
 
 /**
@@ -313,15 +318,17 @@ function setup(input, role) {
   const sizing = resolveSizing({ section: identity.section, sizing: input.sizing });
   const share = [input.cutAllocation, input.stock?.sharePieces].filter((v) => v !== undefined && v !== null);
   if (share.length === 2 && share[0] !== share[1]) fail("Cut allocation is set two different ways — choose one.", "cutAllocation");
-  const stockPolicy = timberStockPolicy({ ...(input.stock || {}), sharePieces: flag(share[0], "Cut allocation", SHARED_STOCK_BY_DEFAULT.has(role)) });
+  const stockPolicy = timberStockPolicy({ ...(input.stock || {}), grade: identity.grade, sharePieces: flag(share[0], "Cut allocation", SHARED_STOCK_BY_DEFAULT.has(role)) });
   const ctx = { materialId, identity, stockPolicy, installation: sizing.installation, problems: [], explain: [...sizing.explain] };
   // HUB 028: a Walls part names itself in its identity problem ("Studs: …"); everything else keeps the plain
   // "Timber" wording. The stock note is never labelled (a Walls item says it once, naming the parts without one).
   checkIdentity(ctx, identity, role, text(input.label) || "Timber");
-  if (stockPolicy.maxMm === null) {
+  // an MGP10 product with no longest length uses the grid's 6,000 (an assumed default): still said, so it is confirmed before ordering
+  const maxAssumed = isMgp10Grade(identity.grade) && (input.stock?.maxMm ?? null) === null;
+  if (stockPolicy.maxMm === null || maxAssumed) {
     ctx.problems.push(problem("stock_max_unset", STOCK_MAX_UNSET_NOTE, { blocking: false }));
   }
-  ctx.explain.push(`Stock: ${GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
+  ctx.explain.push(`Stock: ${isMgp10Grade(identity.grade) ? MGP10_TEXT : GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm${maxAssumed ? " (assumed: not set)" : ""}`}`
     + `${stockPolicy.unavailableMm.length ? `, unavailable ${stockPolicy.unavailableMm.map(fmt).join("/")} mm` : ""}`
     + `${stockPolicy.kerfMm !== undefined ? `, kerf ${fmt(stockPolicy.kerfMm)} mm${stockPolicy.kerfConfirmed ? "" : " (unconfirmed)"}` : ""}`
     + `${stockPolicy.endTrimMm !== undefined ? `, end trim ${fmt(stockPolicy.endTrimMm)} mm` : ""}; `
@@ -331,6 +338,11 @@ function setup(input, role) {
 
 function piece(ctx, { id, role, lengthMm, quantity = 1, label, sourceRefs, provenance = "calculated", identity = ctx.identity,
   materialId = ctx.materialId, stockPolicy = ctx.stockPolicy, noSplice = true, lengthKind = LENGTH_KINDS.CUT }) {
+  // Sam, 18 Nov 2026: MGP10 is never bought as a short piece (1,200 is the shortest length), so a piece shorter than that
+  // (a noggin, a cripple, a short trimmer) is cut out of a longer stock length and shares it with the others (the allocator
+  // packs them). Needs the longest length (a grid with no maximum cannot be packed; that note already says so).
+  if (stockPolicy && stockPolicy.kind === "grid" && !stockPolicy.sharePieces && isMgp10Grade(identity?.grade) && stockPolicy.maxMm != null
+    && lengthMm < stockPolicy.minMm - 1e-9) stockPolicy = Object.freeze({ ...stockPolicy, sharePieces: true });
   return {
     id, materialId, role, kind: "linear", unit: "piece", lengthMm, quantity, lengthKind, identity,
     ...(stockPolicy ? { stockPolicy } : {}), noSplice, label, sourceRefs, provenance,
@@ -395,8 +407,8 @@ function explicitMember(ctx, m, { owner, lengths, allowanceMm, idParts, sourceRe
   } else return { missing: `${id} product (section, grade, treatment)` };
   if (m.stock !== undefined && (typeof m.stock !== "object" || m.stock === null)) fail(`${owner} ${id}: stock settings are invalid.`, "members");
   const stockPolicy = !m.stock && identityKey(identity) === identityKey(ctx.identity) ? ctx.stockPolicy
-    : timberStockPolicy({ sharePieces: false, ...(m.stock || {}) });
-  if (stockPolicy !== ctx.stockPolicy && stockPolicy.maxMm === null) {
+    : timberStockPolicy({ sharePieces: false, ...(m.stock || {}), grade: identity.grade });
+  if (stockPolicy !== ctx.stockPolicy && (stockPolicy.maxMm === null || (isMgp10Grade(identity.grade) && (m.stock?.maxMm ?? null) === null))) {
     ctx.problems.push(problem("stock_max_unset", `${owner} ${id}: the longest available stock isn't set for this product — confirm it before ordering.`, { blocking: false }));
   }
   const materialId = text(m.materialId) || ctx.materialId;
@@ -622,6 +634,8 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
     if (xRightMm <= xLeftMm + EPS_MM || xRightMm > wallLengthMm + EPS_MM) fail(`${name} must lie within the wall, right edge after left edge.`, "openings");
     const sillMm = Math.max(0, num(o.sillMm, `${name} sill level`) - datumMm);
     let headMm = num(o.headMm, `${name} head level`, { above: true }) - datumMm;
+    // HUB 031: a full-height opening's head is the underside of the top plate (the top of the studs), never clipped
+    if (o.fullHeight === true && sillMm < studLengthMm - EPS_MM) headMm = studLengthMm;
     // HUB 028 clipOpeningLevels [Default, needs Sam]: sill and head are clipped into the stud height with a note
     // instead of blocking. A head above the studs is taken to the top of the studs. An opening wholly above the
     // studs (sill at or above them) has no height left in the stud frame, so it doesn't change this wall's framing.
@@ -635,7 +649,10 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
       headMm = studLengthMm;
     }
     if (headMm <= sillMm + EPS_MM || headMm > studLengthMm + EPS_MM) fail(`${name}: sill and head must sit within the stud height, sill below head.`, "openings");
-    return { id, name, label, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null };
+    // HUB 031: the opening rules (openingRules.js) say how many full-height studs each side and how thick the jack stack is
+    const sides = o.sides && typeof o.sides === "object" ? { left: num(o.sides.left, `${name} studs on the left`, { min: 0, integer: true }), right: num(o.sides.right, `${name} studs on the right`, { min: 0, integer: true }) } : null;
+    const jack = o.jackMm && typeof o.jackMm === "object" ? { left: num(o.jackMm.left, `${name} jack stack on the left`, { min: 0 }), right: num(o.jackMm.right, `${name} jack stack on the right`, { min: 0 }) } : null;
+    return { id, name, label, xLeftMm, xRightMm, sillMm, headMm, detail: o.detail ?? null, ...(sides ? { sides } : {}), ...(jack ? { jack } : {}) };
   });
   // only openings in the stud frame can clash (an opening wholly above the studs is never framed)
   const byX = out.filter((o) => !o.aboveStuds).sort((a, b) => a.xLeftMm - b.xLeftMm);
@@ -758,21 +775,41 @@ function framedStations(ctx, stations, run, openings, side, wallId) {
   });
   const inWall = (x) => x >= -EPS_MM && x <= L + EPS_MM;
   const byX = [...openings].sort((a, b) => a.xLeftMm - b.xLeftMm); // never overlapping (wallOpenings)
+  // HUB 031: the jack stack (jacks stand inside the kings, against the opening) widens the opening the side studs sit
+  // outside of; any grid stud that falls in the stack is one of the jacks, so it is not counted again. Nothing changes
+  // without a jack stack (the 2-each-side Walls rule and Studs).
+  const ext = (o) => ({ l: o.xLeftMm - (o.jack?.left || 0), r: o.xRightMm + (o.jack?.right || 0) });
+  for (const o of byX) {
+    const e = ext(o);
+    if (e.l === o.xLeftMm && e.r === o.xRightMm) continue;
+    for (let k = cands.length - 1; k >= 0; k--) {
+      const c = cands[k];
+      if (c.kind !== "centre") continue;
+      // inclusive of the opening's own edge: a grid stud standing on the edge is half inside the opening, so it is a jack too
+      if ((o.jack?.left > 0 && c.x >= e.l - EPS_MM && c.x <= o.xLeftMm + EPS_MM) || (o.jack?.right > 0 && c.x >= o.xRightMm - EPS_MM && c.x <= e.r + EPS_MM)) {
+        ctx.explain.push(`The stud at ${fmt(c.x)} falls in ${o.name}'s jack stack, so it is one of the jacks`);
+        cands.splice(k, 1);
+      }
+    }
+  }
   byX.forEach((o, i) => {
     const prev = byX[i - 1];
     const next = byX[i + 1];
-    const left = prev && o.xLeftMm - w / 2 < prev.xRightMm - EPS_MM ? { x: (prev.xRightMm + o.xLeftMm) / 2, shared: true } : { x: o.xLeftMm - w / 2 };
-    const right = next && o.xRightMm + w / 2 > next.xLeftMm + EPS_MM ? { x: (o.xRightMm + next.xLeftMm) / 2, shared: true } : { x: o.xRightMm + w / 2 };
-    if (right.shared) ctx.explain.push(`${o.name} and ${next.name} are ${fmt(next.xLeftMm - o.xRightMm)} mm apart, so they share one stud at ${fmt(right.x)}`);
-    for (const s of [left, right]) cands.push({ x: Math.min(L, Math.max(0, s.x)), kind: "side", order: 1, beside: [o.id], shared: !!s.shared });
-    for (let k = 2; k <= perSide; k++) {
+    const e = ext(o), pe = prev && ext(prev), ne = next && ext(next);
+    const perL = o.sides ? o.sides.left : perSide, perR = o.sides ? o.sides.right : perSide;
+    const left = prev && e.l - w / 2 < pe.r - EPS_MM ? { x: (pe.r + e.l) / 2, shared: true } : { x: e.l - w / 2 };
+    const right = next && e.r + w / 2 > ne.l + EPS_MM ? { x: (e.r + ne.l) / 2, shared: true } : { x: e.r + w / 2 };
+    if (right.shared) ctx.explain.push(`${o.name} and ${next.name} are ${fmt(ne.l - e.r)} mm apart, so they share one stud at ${fmt(right.x)}`);
+    if (perL >= 1) cands.push({ x: Math.min(L, Math.max(0, left.x)), kind: "side", order: 1, beside: [o.id], shared: !!left.shared });
+    if (perR >= 1) cands.push({ x: Math.min(L, Math.max(0, right.x)), kind: "side", order: 1, beside: [o.id], shared: !!right.shared });
+    for (let k = 2; k <= Math.max(perL, perR); k++) {
       const off = ((2 * k - 1) * w) / 2;
-      const lx = o.xLeftMm - off;
-      const rx = o.xRightMm + off;
+      const lx = e.l - off;
+      const rx = e.r + off;
       // a further stud goes in only where it sits wholly outside the neighbouring opening (its far face at or past the
       // neighbour's edge), so between two openings there are never more studs than fit in the gap
-      if (!left.shared && inWall(lx) && !(prev && lx - w / 2 < prev.xRightMm - EPS_MM)) cands.push({ x: lx, kind: "side", order: k, beside: [o.id] });
-      if (!right.shared && inWall(rx) && !(next && rx + w / 2 > next.xLeftMm + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
+      if (k <= perL && !left.shared && inWall(lx) && !(prev && lx - w / 2 < pe.r - EPS_MM)) cands.push({ x: lx, kind: "side", order: k, beside: [o.id] });
+      if (k <= perR && !right.shared && inWall(rx) && !(next && rx + w / 2 > ne.l + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
     }
   });
   const accepted = [];

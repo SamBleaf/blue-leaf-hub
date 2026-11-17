@@ -28,9 +28,11 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import {
   BLUE_LEAF_SHEET_JOINT, FAMILY_NEED_FIELDS, FIX_APPLY_ACTIONS, FIX_CARD_FIELDS, FIX_ROUTES, FIX_TARGETS, FIX_TARGET_KINDS, FIX_WALL_FIELDS, INSTALLATION_STATUS, NOTE_CODES,
-  PROBLEM_TEXT, PROCUREMENT_STATUS, QUANTITY_STATUS, WALL_FRAMING_RULES, buildCalibration, computeWorkspace, familyProblems, fixEntryFor, fixTargetKey, fixesFor, gableInputProblem,
+  PROBLEM_TEXT, PROCUREMENT_STATUS, QUANTITY_STATUS, WALL_FRAMING_RULES, buildCalibration, computeWorkspace as computeWorkspaceRaw, familyProblems, fixEntryFor, fixTargetKey, fixesFor, gableInputProblem,
   isInstallationNote, methodFor, rescaleCandidates, starterProfile, verifyCalibration, wallFramingDefaults, wallIncompleteText, wallsText,
 } from "../../shared/takeoff/index.js";
+// HUB 033: hoop iron is on by default for every wall; these framing tests are about studs, plates and noggins, so its line is left out here (takeoff-tc-hub033 covers it)
+const computeWorkspace = (w) => { const c = computeWorkspaceRaw(w); return { ...c, scheduleLines: c.scheduleLines.filter((l) => !l.hoop) }; };
 import { productGroups, specFromGroup } from "../../shared/takeoff/products/index.js";
 
 let pass = 0, fail = 0;
@@ -574,7 +576,7 @@ t("fixes: wallsText says an item's walls in one short phrase", () => {
 t("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, needs nothing, and its 35 mm studs set the side studs, merges and noggin bays", () => {
   const spec = wallFramingDefaults([]);
   const mk = methodFor(spec);
-  const walls = { id: "walls", name: "Walls", methodKey: mk.key, methodVersion: mk.version, spec, rules: { ...WALL_FRAMING_RULES } };
+  const walls = { id: "walls", name: "Walls", methodKey: mk.key, methodVersion: mk.version, spec, rules: { ...WALL_FRAMING_RULES, openingFraming: false } };   // HUB 031: the pre-rules item (rules: takeoff-tc-hub031)
   // the HUB 028 worked example: Wall 1 6,000 with D1 820 wide at 1,000; Wall 2 4,000 with W1 1,800 wide at 1,200, sill 900
   const ms = [rect("w1", 6000, 2700, "Wall 1"), rect("w2", 4000, 2700, "Wall 2"),
     { id: "d1", kind: "opening", parentId: "w1", inputs: { xMm: 1000, sillMm: 0, widthMm: 820, heightMm: 2040, label: "D1", type: "door" } },
@@ -586,7 +588,7 @@ t("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, needs 
   assert.deepEqual([r.status.procurement, c.orderReady, fixesFor(c, w)], ["ready", true, []]);
   assert.deepEqual(c.scheduleLines.map((l) => [l.quantity, l.item.description]), [
     [21, "Studs 90 × 35 LVL Smart 10 H2 — 2,700 mm length"], [2, "Plates 90 × 45 MGP10 H2 — 6,000 mm length"], [2, "Plates 90 × 45 MGP10 H2 — 4,200 mm length"],
-    [1, "Noggins 90 × 35 MGP10 untreated — 4,200 mm length"], [1, "Noggins 90 × 35 MGP10 untreated — 2,700 mm length"]]);
+    [1, "Noggins 90 × 35 MGP10 untreated — 4,200 mm length"], [1, "Noggins 90 × 35 MGP10 untreated — 2,700 mm length"]]);   // MGP10 (18 Nov 2026): 300 steps to 3,000, 600 above: 6,525 mm of noggins shares 4,200 + 2,700
   // 2 studs each side of an opening, 35 apart, the first half a stud (17.5) off its edge; a grid stud within 35 merges
   const at = (id) => r.layouts.find((l) => l.wallMeasurementId === id).ticks.filter((x) => x.state !== "removed").map((x) => x.positionMm);
   assert.deepEqual(at("w1"), [0, 600, 947.5, 982.5, 1837.5, 1872.5, 2400, 3000, 3600, 4200, 4800, 5400, 6000]);

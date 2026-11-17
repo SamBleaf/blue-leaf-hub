@@ -19,7 +19,7 @@
 // =============================================================================
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { GROUP_LABEL, ITEM_STALE_TEXT, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
+import { BRACING_SUGGESTIONS, MANUAL_HEADING_PRODUCTS, GROUP_LABEL, HOOP_IRON_PRODUCTS, ITEM_STALE_TEXT, MANUAL_HEADINGS, buildSupplierGroups, normaliseManualLines, parseManualEntry, productText, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { AccessoryScopeReview, StatusChips } from "./ScheduleScreen.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -51,6 +51,97 @@ function withGenericSuggestion(state, computed) {
   const same = (computed?.scheduleLines || []).filter((x) => x.generic && x.bucketKey !== l.bucketKey && x.jobMaterialIds.includes(l.jobMaterialId) && (x.unit || "piece") === (l.unit || "piece")
     && (x.item?.component ?? null) === (l.item?.component ?? null));
   return same.length === 1 ? { ...state, suggestion: same[0] } : state;
+}
+
+/**
+ * HUB 032: the Timber order the way the supplier PDF prints it (shared/takeoff/supplierOrder.js, the same function): a heading per
+ * member role, a row per product, the cut list as count/length in metres (longest first) and the total in LM, or a count in EA
+ * for precut studs. Read from what is on THIS order (the quantities typed below), so it moves as they change.
+ */
+export function TimberTakeoff({ groups, onEditManual = null, onRemoveManual = null }) {
+  if (!groups.length) return null;
+  const totalLm = Number(groups.reduce((a, g) => a + g.totalLm, 0).toFixed(2));
+  const totalEa = groups.reduce((a, g) => a + g.totalEa, 0);
+  return (
+    <div className="mb-2 rounded-lg border border-hairline" data-testid="timber-takeoff">
+      <p className="border-b border-hairline px-2 py-1.5 text-[11px] text-muted">Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each. Bracing (hoop iron rolls, tensioners, brace sheets) is counted EA.</p>
+      {groups.map((g) => (
+        <section key={g.key} data-takeoff-group={g.key} aria-label={g.heading}>
+          <h4 className="bg-sky-50 px-2 py-1 text-xs font-bold tracking-wide text-ink">{g.heading}</h4>
+          <ul className="divide-y divide-hairline">
+            {g.rows.map((r) => (
+              <li key={r.manual ? `manual|${r.id}` : `${r.product}|${r.unit}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-2 py-1.5 text-sm" data-takeoff-row={r.unit} data-manual-row={r.manual ? r.id : undefined}>
+                <span className={`min-w-0 basis-full break-words sm:basis-2/5 ${r.problem ? "text-amber-800" : "text-ink"}`}>{r.product}
+                  {r.manual && <span className="ml-1 inline-block rounded bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800">added by hand</span>}</span>
+                <span className="min-w-0 flex-1 break-words text-xs text-muted" data-takeoff-cuts="">{r.unit === "EA" && !r.cutText ? "" : r.cutText}</span>
+                <span className="font-semibold text-ink">{r.totalText || (r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`)}</span>
+                {r.manual && onEditManual && <span className="flex basis-full justify-end gap-2">
+                  <Btn kind="ghost" onClick={() => onEditManual(r.id)}>Edit</Btn><Btn kind="ghost" onClick={() => onRemoveManual(r.id)}>Remove</Btn></span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p className="px-2 py-1.5 text-right text-xs font-semibold text-ink" data-takeoff-total="">Timber: {[totalLm ? `${totalLm.toFixed(2)} LM` : null, totalEa ? `${totalEa} EA` : null].filter(Boolean).join(" · ")}</p>
+    </div>
+  );
+}
+
+/**
+ * Sam, 18 Nov 2026: "+ Add member" / "+ Add bracing": a hand-added line. Pick the heading (preset for bracing), the product (the
+ * catalogue picker, or type one), and the counts/lengths in metres ("4/3.6") or a number of EA. Nothing is guessed: an entry
+ * that can't be read says why and isn't saved.
+ */
+function ManualLineForm({ initial, bracing, choices, onSave, onCancel }) {
+  const [heading, setHeading] = useState(initial?.heading || (bracing ? "bracing" : "studs"));
+  const [pick, setPick] = useState(initial ? (choices.includes(initial.product) ? initial.product : "__typed") : "");
+  const [typed, setTyped] = useState(initial && !choices.includes(initial.product) ? initial.product : "");
+  const [entry, setEntry] = useState(initial?.entry || "");
+  const [error, setError] = useState(null);
+  const product = pick === "__typed" || !pick ? typed.trim() : pick;
+  function save() {
+    if (!product) { setError("Choose or type the product."); return; }
+    const p = parseManualEntry(entry);
+    if (!p.ok) { setError(p.error); return; }
+    onSave({ id: initial?.id || newId(), heading, product, entry: entry.trim() });
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-primary/40 bg-white p-2" data-testid="manual-line-form">
+      <p className="text-sm font-semibold text-ink">{initial ? "Edit" : bracing ? "Add bracing" : "Add member"} <span className="text-[11px] font-normal text-muted">(added by hand: it is never recalculated)</span></p>
+      {!bracing && <label className="block text-sm text-ink">Heading
+        <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={heading} onChange={(e) => setHeading(e.target.value)} data-manual-heading="">
+          {MANUAL_HEADINGS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>}
+      {bracing && (
+        <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Heading" data-manual-heading-chips="">
+          {[["bracing", "Bracing"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"]].map(([k, t]) => (
+            <button key={k} type="button" role="radio" aria-checked={heading === k} onClick={() => setHeading(k)}
+              className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${heading === k ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{t}</button>))}
+        </div>)}
+      <label className="block text-sm text-ink">Product
+        <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={pick} onChange={(e) => setPick(e.target.value)} data-manual-product="">
+          <option value="">Choose…</option>
+          {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="__typed">{bracing ? "Other (type it)" : "Not in the list (type it)"}</option></select></label>
+      {pick === "__typed" && <TextField label="Product name" value={typed} onChange={setTyped} placeholder={bracing ? "e.g. Let-in bracing" : "e.g. 90 x 45 MGP10 H2"} />}
+      {bracing && <div className="flex flex-wrap gap-1">{(heading === "bracing" ? BRACING_SUGGESTIONS.filter((x) => !(MANUAL_HEADING_PRODUCTS.tempbr.includes(x) || MANUAL_HEADING_PRODUCTS.sbscrew.includes(x))) : MANUAL_HEADING_PRODUCTS[heading] || []).map((x) => <Btn key={x} kind="ghost" onClick={() => { setPick("__typed"); setTyped(x); }}>{x}</Btn>)}</div>}
+      <TextField label="Counts and lengths (metres) or EA" value={entry} onChange={setEntry} placeholder="4/3.6, 2/2.4   or   10 EA" />
+      {error && <p className="text-xs text-amber-800" role="alert">{error}</p>}
+      <div className="flex gap-2"><Btn onClick={save}>{initial ? "Update line" : "Add line"}</Btn><Btn kind="ghost" onClick={onCancel}>Cancel</Btn></div>
+    </div>
+  );
+}
+
+/** The catalogue the "product" picker offers: the timber products set up on this job (Walls parts and plain timber items) and the hoop iron catalogue. */
+function manualProductChoices(materials, bracing) {
+  const out = new Set();
+  const add = (p) => { const t = productText({ section: p.section?.depthMm && p.section?.widthMm ? `${p.section.depthMm}x${p.section.widthMm}` : null, grade: p.grade, treatment: p.treatment, species: p.species }); if (t && !/^TIMBER P\/M$/.test(t) && p.section?.depthMm) out.add(t); };
+  if (!bracing) for (const m of materials || []) {
+    const sp = m.spec || {};
+    if (sp.family !== "timber") continue;
+    if (sp.components) Object.values(sp.components).forEach(add); else add(sp);
+  }
+  for (const h of HOOP_IRON_PRODUCTS) out.add(h.name);
+  return [...out];
 }
 
 // unsaved order-form changes are kept on THIS device (a reload or a dropped PWA never loses typed quantities);
@@ -282,10 +373,13 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     .filter(([k, n]) => Number.isInteger(n) && n >= 0 && (k in saved.qty || (data.scheduleLines || []).some((l) => l.bucketKey === k))))));
   // the material each saved line was chosen for (kept on save; a changed material = stale, never relinked silently)
   const [chosen, setChosen] = useState(start.chosen || saved.chosen);
+  // Sam, 18 Nov 2026: hand-added lines ("+ Add member" / "+ Add bracing"), saved with the order and never recalculated
+  const [manualLines, setManualLines] = useState(() => (Array.isArray(start.manualLines) ? start.manualLines : order.manualLines || []).map(({ id, heading, product, entry }) => ({ id, heading, product, entry })));
+  const [manualForm, setManualForm] = useState(null); // null | { bracing, initial }
   // lines the user explicitly UPDATED: re-taken from the current schedule on save (a kept line is never relinked silently)
   const [refresh, setRefresh] = useState(() => new Set());
   const discardRestored = () => {
-    setSupplierId(saved.supplierId); setDelivery(saved.delivery); setNotes(saved.notes); setQty(saved.qty); setChosen(saved.chosen);
+    setSupplierId(saved.supplierId); setDelivery(saved.delivery); setNotes(saved.notes); setQty(saved.qty); setChosen(saved.chosen); setManualLines((order.manualLines || []).map(({ id, heading, product, entry }) => ({ id, heading, product, entry })));
     writeOrderDraft(order.id, null); setRestored(null);
   };
   const mats = useMemo(() => new Map((ws.view?.materials || []).map((m) => [m.id, m])), [ws.view]);
@@ -366,6 +460,17 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     const rank = (id) => { const i = seq.indexOf(id); return i < 0 ? 1e9 : i; };
     return [...g.values()].sort((a, b) => rank(a.id) - rank(b.id));
   }, [lines, mats, ws.view]);
+  // HUB 032: the timber on this order laid out as the supplier take-off. Only when every timber line carries the roles it was
+  // bought for (an order built before that keeps its length table below).
+  const timberTakeoff = useMemo(() => {
+    const tg = genericGroups.filter((g) => materialGroup(g.mat) === "timber");
+    const ls = tg.flatMap((g) => g.lines);
+    const manual = normaliseManualLines(manualLines).lines || [];
+    if (!(ls.length && ls.every((l) => l.roles)) && !manual.length) return [];
+    const useLines = ls.length > 0 && ls.every((l) => l.roles);
+    return buildSupplierGroups(useLines ? tg.map((g) => ({ lines: g.lines.filter((l) => (qty[l.bucketKey] ?? 0) > 0).map((l) => ({ unit: l.unit, quantity: qty[l.bucketKey], stockLengthMm: l.item?.stockLengthMm ?? null,
+      roles: l.roles, product: l.product || null, hoop: l.hoop || null, bracing: l.bracing || null, description: l.item?.description, problem: l.problems.length > 0 })) })) : [], manual);
+  }, [genericGroups, qty, manualLines]);
   // what is on this order, per unit — flashing pieces/LM and every other unit kept apart
   const orderTotals = useMemo(() => {
     const info = new Map(lines.map((l) => [l.bucketKey, l]));
@@ -443,7 +548,8 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     setBusy(true); setMsg(null);
     const q0 = over.qty || qty, c0 = over.chosen || chosen, r0 = over.refresh || refresh;
     const body = { expectedRevision: order.revision, supplierId: (over.supplierId ?? supplierId) || null, delivery: over.delivery || delivery, notes,
-      lines: Object.entries(q0).filter(([, n]) => n > 0).map(([bucketKey, quantity]) => ({ bucketKey, quantity, jobMaterialId: c0[bucketKey] || undefined, ...(r0.has(bucketKey) ? { refresh: true } : {}) })) };
+      lines: Object.entries(q0).filter(([, n]) => n > 0).map(([bucketKey, quantity]) => ({ bucketKey, quantity, jobMaterialId: c0[bucketKey] || undefined, ...(r0.has(bucketKey) ? { refresh: true } : {}) })),
+      manualLines: over.manualLines || manualLines };
     const r = await api.saveOrder(order.id, body);
     if (!r.ok) setMsg(r.status === 409 ? "Someone else changed this order — it has been reloaded." : r.error);
     else { writeOrderDraft(order.id, null); setRefresh(new Set()); if (over.note) setMsg({ tone: "ok", text: over.note }); } // saved: nothing left to recover on this device
@@ -461,13 +567,13 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     setBusy(false);
   }
 
-  const dirtyForm = refresh.size > 0 || supplierId !== (order.supplierId || "") || JSON.stringify(delivery) !== JSON.stringify(order.delivery || {}) || notes !== (order.notes || "")
+  const dirtyForm = refresh.size > 0 || JSON.stringify(manualLines) !== JSON.stringify((order.manualLines || []).map(({ id, heading, product, entry }) => ({ id, heading, product, entry }))) || supplierId !== (order.supplierId || "") || JSON.stringify(delivery) !== JSON.stringify(order.delivery || {}) || notes !== (order.notes || "")
     || Object.keys({ ...qty, ...Object.fromEntries(order.lines.map((l) => [l.bucketKey, 1])) }).some((k) => (qty[k] || 0) !== (order.lines.find((x) => x.bucketKey === k)?.quantity || 0)
       || (chosen[k] || null) !== (order.lines.find((x) => x.bucketKey === k)?.jobMaterialId || null));
   // keep unsaved changes on this device until they are saved (or undone back to the saved order)
   useEffect(() => {
-    writeOrderDraft(order.id, dirtyForm ? { revision: order.revision, supplierId, delivery, notes, qty, chosen } : null);
-  }, [dirtyForm, supplierId, delivery, notes, qty, chosen, order.id, order.revision]);
+    writeOrderDraft(order.id, dirtyForm ? { revision: order.revision, supplierId, delivery, notes, qty, chosen, manualLines } : null);
+  }, [dirtyForm, supplierId, delivery, notes, qty, chosen, manualLines, order.id, order.revision]);
 
   // explicit reconcile of a stale line: switch it to what its material supplies now, or drop it
   // keeps EVERY piece the line covered (R04b R2): what other materials still supply stays on the old length
@@ -639,11 +745,14 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
                   ? `${x.line.item?.description || "A material line"} — ${qtyText(qty[x.line.bucketKey], x.line.unit)}`
                   : `${fmtMm(x.line.finishedLengthMm)} mm × ${qty[x.line.bucketKey]}`} — needs updating</p>
                 <p className="text-xs">{(isGenericLine(x.line) && GENERIC_STALE[x.problem]) || PROBLEM_TEXT[x.problem]}{x.current ? ` It is still listed as: ${labelFor(x.current)}.` : ""}</p>
+                {x.lengthChange && (
+                  <p className="text-xs" data-length-change="">The same timber is now bought as {fmtMm(x.lengthChange.toMm)} mm lengths instead of {fmtMm(x.lengthChange.fromMm)} mm (the supplier stock lengths changed). Update the line to the new length and keep your quantity.</p>
+                )}
                 {x.suggestion && (isGenericLine(x.suggestion)
                   ? <p className="text-xs">The takeoff now needs: {qtyText(x.suggestion.quantity, x.suggestion.unit)} — {x.suggestion.item?.description || unitWord(x.suggestion.unit, 2)} ({mats.get(x.suggestion.jobMaterialIds[0])?.name || "this material"}).</p>
                   : <p className="text-xs">Its material is now: {labelFor(x.suggestion)}.</p>)}
                 <div className="mt-1 flex flex-wrap gap-2">
-                  {x.suggestion && <Btn kind="secondary" onClick={() => updateLine(x)}>{isGenericLine(x.line) ? "Update to what's needed now" : "Update to current material"}</Btn>}
+                  {x.suggestion && <Btn kind="secondary" onClick={() => updateLine(x)}>{x.lengthChange ? "Update to the new length" : isGenericLine(x.line) ? "Update to what's needed now" : "Update to current material"}</Btn>}
                   {x.problem === "line_stale_quantity" && <Btn kind="secondary" onClick={() => setQty((q) => ({ ...q, [x.line.bucketKey]: x.current.quantity }))}>Set to {isGenericLine(x.line) ? qtyText(x.current.quantity, x.line.unit) : x.current.quantity}</Btn>}
                   <Btn kind="secondary" onClick={() => removeLine(x)}>Remove line</Btn>
                 </div>
@@ -687,6 +796,18 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
             ))}
           </div>
         )}
+        {section === SECTIONS.TIMBER_CLADDING && (
+          <div className="mt-3 space-y-2" data-testid="manual-lines">
+            {!genericGroups.some((g) => materialGroup(g.mat) === "timber") && timberTakeoff.length > 0 && <TimberTakeoff groups={timberTakeoff}
+              onEditManual={(id) => setManualForm({ bracing: false, initial: manualLines.find((x) => x.id === id) })} onRemoveManual={(id) => setManualLines((l) => l.filter((x) => x.id !== id))} />}
+            {manualForm ? <ManualLineForm key={manualForm.initial?.id || "new"} initial={manualForm.initial} bracing={manualForm.bracing} choices={manualProductChoices(ws.view?.materials, manualForm.bracing)}
+              onCancel={() => setManualForm(null)}
+              onSave={(line) => { setManualLines((l) => (l.some((x) => x.id === line.id) ? l.map((x) => (x.id === line.id ? line : x)) : [...l, line])); setManualForm(null); }} />
+              : <div className="flex flex-wrap gap-2"><Btn kind="secondary" onClick={() => setManualForm({ bracing: false, initial: null })} data-testid="add-member">+ Add member</Btn>
+                <Btn kind="secondary" onClick={() => setManualForm({ bracing: true, initial: null })} data-testid="add-bracing">+ Add bracing</Btn></div>}
+            {manualLines.length > 0 && <p className="text-[11px] text-muted">Lines added by hand are saved with the order and never recalculated. Tap Save order details to keep them.</p>}
+          </div>
+        )}
         {genericGroups.length > 0 && <p className="mb-1 mt-3 text-xs font-medium text-muted">Materials on this order</p>}
         {/* HUB 007: one timber-and-cladding order, in two parts */}
         {["timber", "cladding"].map((part) => {
@@ -694,6 +815,10 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
           return gs.length > 0 && (
             <div key={part} className="mt-2" data-order-part={part}>
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{GROUP_LABEL[part]}</p>
+              {part === "timber" && timberTakeoff.length > 0 && <>
+                <TimberTakeoff groups={timberTakeoff} onEditManual={(id) => setManualForm({ bracing: false, initial: manualLines.find((x) => x.id === id) })} onRemoveManual={(id) => setManualLines((l) => l.filter((x) => x.id !== id))} />
+                <p className="mb-1 text-[11px] text-muted">Change quantities by length here:</p>
+              </>}
               <div className="space-y-2">
                 {gs.map((g) => (
                   <div key={g.id} className="rounded-lg border border-hairline" data-order-group={g.id}>

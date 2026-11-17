@@ -16,7 +16,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
-export const RENDERER_VERSION = "takeoff-pdf@4"; // @3: generic purchase lines + site appendix; @4: supplier address, Timber / Cladding parts
+export const RENDERER_VERSION = "takeoff-pdf@5"; // @3: generic purchase lines + site appendix; @4: supplier address, Timber / Cladding parts; @5: timber printed as the supplier take-off (grouped by member role, count/length cut lists, LM and EA)
 const BRAND = "#006c9b";
 const INK = "#1A1A2E";
 const MUTED = "#64748b";
@@ -412,7 +412,40 @@ function draw(doc, snap, opts) {
 
   // generic purchase lines (TC-R04): one table per material — quantity, unit and what to supply
   let part = null; // HUB 007: a timber-and-cladding order prints its Timber part, then its Cladding part
-  for (const g of snap.items || []) {
+  // the timber in the supplier's own take-off layout: a heading per member role, a row per product, "count/length" cuts
+  // longest first, total LM (P/M per metre) or EA (precut studs). Snapshots from before @5 have no supplierGroups.
+  if ((snap.supplierGroups || []).length) {
+    need(60);
+    doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T((snap.supplierGroups.some((g) => g.rows.some((r) => !r.manual && !r.supplierEa)) ? "TIMBER" : "ORDER")), M, y, { width: CW });
+    y = doc.y + 4;
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each."), M, y, { width: CW });
+    y = doc.y + 6;
+    part = "Timber";
+    for (const g of snap.supplierGroups) {
+      need(60);
+      doc.save().rect(M, y, CW, 18).fill("#eef5f9").restore();
+      doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(g.heading), M + 6, y + 4, { width: CW - 12, lineBreak: false });
+      y += 22;
+      for (const r of g.rows) {
+        const prodW = CW * 0.36, cutX = M + prodW + 8, cutW = CW - prodW - 8 - (r.totalText ? 134 : 70);
+        doc.font(fonts.regular).fontSize(9);
+        const cutText = r.unit === "EA" && !r.cutText ? "" : r.cutText || "";
+        const totalText = r.totalText || (r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`);
+        const prodText = r.manual ? `${r.product} (added by hand)` : r.product;
+        const h = Math.max(15, doc.heightOfString(T(prodText), { width: prodW }) + 5, doc.heightOfString(T(cutText || " "), { width: cutW }) + 5);
+        need(h);
+        doc.fillColor(r.problem ? "#b45309" : INK).text(T(prodText), M + 4, y + 3, { width: prodW });
+        if (cutText) doc.fillColor(INK).text(T(cutText), cutX, y + 3, { width: cutW });
+        doc.font(fonts.bold).fillColor(INK).text(T(totalText), M + CW - (r.totalText ? 130 : 66), y + 3, { width: r.totalText ? 130 : 66, align: "right", lineBreak: false });
+        doc.save().moveTo(M, y + h).lineTo(M + CW, y + h).lineWidth(0.4).strokeColor(HAIR).stroke().restore();
+        y += h;
+      }
+      y += 8;
+    }
+    doc.font(fonts.bold).fontSize(9).fillColor(INK).text(T(`Timber: ${[...(snap.supplierGroups.reduce((a, g) => a + g.totalLm, 0) ? [`${snap.supplierGroups.reduce((a, g) => a + g.totalLm, 0).toFixed(2)} LM`] : []), ...(snap.supplierGroups.reduce((a, g) => a + g.totalEa, 0) ? [`${snap.supplierGroups.reduce((a, g) => a + g.totalEa, 0)} EA`] : [])].join(" · ")}`), M, y, { width: CW, align: "right" });
+    y = doc.y + 14;
+  }
+  for (const g of (snap.items || []).filter((x) => !x.inSupplierGroups)) {
     const rowH = 15;
     need(Math.min(bottom() - 120, 60 + Math.min(g.lines.length, 12) * rowH) + (g.groupLabel && g.groupLabel !== part ? 26 : 0));
     if (g.groupLabel && g.groupLabel !== part) {

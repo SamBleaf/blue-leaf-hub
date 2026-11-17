@@ -71,10 +71,14 @@ export const isInstallationNote = (p) => !!p && p.axis === "installation" && p.b
 /** Codes the engine only ever raises as notes (blocking: false): never a fix row. The guard test keeps this honest. */
 export const NOTE_CODES = Object.freeze([
   "nothing_measured", "opening_clipped", "stock_max_unset", "final_bay_tiny", "opening_framing_incomplete", "opening_framing_not_counted",
-  "framing_detail_members", "walls_counted_twice", "noggins_not_shared", "component_not_selected", "offcut_other_product", "followers_hand_made",
+  "framing_detail_members", "walls_counted_twice", "wall_centres_ignored",
+  // HUB 031 opening rules: what they used or could not do (never blocking)
+  "jambs_minimum_used", "trimmer_stack_default", "lintel_not_sized", "lintel_no_fit", "lintel_bearing", "noggins_not_shared", "component_not_selected", "offcut_other_product", "followers_hand_made",
   "followers_pooled", "joint_product_missing", "auto_joint_lowered", "overlap_ignored", "component_unresolved", "component_not_applicable",
   "manual_component_invalid", "rails_layout_invalid", "rails_unresolved", "coating_yield_unresolved", "phase-not-preserved", "members-overlap",
   "edge-zone-unsourced", "override-difference",
+  // Sam, 18 Nov 2026: bracing marks that cannot be counted (no height, no stocked sheet that long) or look odd (never blocking)
+  "bracing_note",
   // installation notes (cladding.js inst(): axis installation, never blocking)
   "assembly_coverage_unstated", "installation_selectors_missing", "installation_rule_ambiguous", "installation_rule_missing",
   "project_detail_incomplete", "narrow_strip", "cut_panel_needs_review", "component_out_of_scope", "fixing_row_missing",

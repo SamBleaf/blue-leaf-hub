@@ -1,7 +1,7 @@
 ---
-sop_version: 2.7
-last_reviewed: 2026-10-26
-app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
+sop_version: 2.9
+last_reviewed: 2026-11-18
+app_version: takeoff-r03 + HUB 032 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed; renderer takeoff-pdf@5, calc takeoff-calc@6)
 screenshot_status: needs_replacement
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -316,6 +316,14 @@ Everything that still stops the supplier PDF is in one box above **Export suppli
 
 ## 12. Edge cases and limits
 
+- **Timber prints as the supplier take-off (HUB 032, renderer takeoff-pdf@5).** The TIMBER part of the PDF has one heading per member role in this order: **T&B PLATES** (bottom, top, second top), **STUDS** (cripples above and below openings are folded in here: they are stud product cut from stud lengths), **JAMB STUDS** (kings and jacks), **JUNCT. BLK**, **HD & SILL TR** (head and sill trimmers), **LINTELS**, **NOGGINS**. Under each heading is one row per product, for example `PINE 90x45 MGP10 P/M   12/6, 4/5.4, 9/4.8   255.90 LM`. A cut list reads **count/length in metres, longest first**; the total is metres of stock bought to 2 decimals. **P/M** = per metre (random lengths, unit LM). A stud bought at 2.4, 2.7 or 3.0 m is a **precut stud**: its row is a count, unit **EA** (`LVL STUD SMART10 H2 90X35 2.7M   270 EA`). Cladding, aluminium and flashing keep their own tables.
+- The order lines, quantities, "need / ordered / left" and the order identity do not change: each line is still one stock length of one product. The roles only decide where a line prints. If you raise, lower or spare a line, its pieces are shared across the roles in proportion, so the printed pieces always add up to what is on the order.
+- A PDF exported before this change (renderer takeoff-pdf@4 or older) keeps its own per-length table when it is re-opened; only new exports use the take-off layout.
+- **MGP10 stock lengths (Sam, 18 Nov 2026):** the shortest is 1.2 m; up to 3.0 m it steps by 300 mm (1.2, 1.5 … 2.4, 2.7, 3.0); above 3 m it is only sold in 600 mm steps (3.6, 4.2, 4.8, 5.4, 6.0 …). So a 3.3 m piece buys 3.6 m and a 2.7 m piece stays 2.7 m. Pieces shorter than 1.2 m (noggins, cripples, short trimmers) are never bought as short pieces: they are cut out of the longer stud or plate lengths and share them. LVL and every other grade keep 1,200 mm then 300 mm steps (SOP 20-08).
+- **Precut studs print as EA** at 2.4, 2.7, 3.0, 3.3, 3.6 and 4.2 m; any other stud length stays in the per-metre (P/M) row as a cut list. Per-metre rows read `P/M` and a total in LM. A piece with no stock length is never dropped: its row says, for example, "2 with no stock length".
+- **The order screen shows the same layout.** On the Timber part of the order screen, above the quantity steppers, a "Timber order" panel lists the same headings, product rows, count/length cut lists and LM / EA totals as the PDF, worked out from the quantities currently on the order (so it moves as you change them). The steppers below it still set the quantity of each length.
+- **Orders saved before this change (HUB 032 round 2).** If a saved draft line is at a length that is no longer bought (for example a 3.3 m MGP10 line), it shows as out of date with a plain explanation ("The same timber is now bought as 3,600 mm lengths instead of 3,300 mm") and an **Update to the new length** button that keeps the quantity; with more than one out-of-date line, **Update all n lines** does them in one tap. A line with nothing it can move to keeps only **Remove line**. Exports already made are frozen and are not changed.
+
 - One supplier per order; up to 200 lines per order.
 - Exporting never changes "ordered"; only **Record order placed** does.
 - A draft PDF can be exported even when the order isn't ready; the supplier PDF needs every readiness check to pass, no stale line, no invalid quantity, **and** the takeoff must not be **Needs review**.
@@ -523,6 +531,29 @@ Next review date: 2027-04-14
 2. Expected: **Update all N lines** next to **Remove all N out-of-date lines**. Tap it. Expected: "Updated N lines to what the takeoff needs now — saved." with no stale box left and no **Save order details** button.
 - [ ] Pass  [ ] Fail
 
+**TC-28 — Timber order prints as the supplier take-off (HUB 032, API + PDF)**
+1. Local stack or the unit test `node scripts/tests/takeoff-tc-hub032.test.mjs`. Job with a Walls item (default products) and two walls, one with a door; make a Timber and cladding draft and **Export draft PDF**.
+2. Expected: the TIMBER part shows headings **T&B PLATES**, **STUDS**, **NOGGINS** (and **JAMB STUDS** / **HD & SILL TR** when openings are framed), each with product rows like `PINE 90x45 MGP10 P/M` and a cut list such as `2/4.2`, a total in **LM**, and LVL studs at 2.7 m as `… 2.7M   N EA`. No "— 2,700 mm length" rows. Footer shows `takeoff-pdf@5 · takeoff-calc@6`.
+3. Expected: the order screen lines, quantities and "need / ordered / left" are unchanged from before; the frozen snapshot has `orderFormat` "supplier-takeoff@1" and `supplierGroups`.
+- [ ] Pass  [ ] Fail
+
+**TC-29 — MGP10 stock lengths (HUB 032, API)**
+1. Same Walls item. Read the plate and noggin lines (MGP10 by default).
+2. Expected: every MGP10 line length is on the MGP10 list (1.2 to 3.0 m in 300 mm steps, then 3.6, 4.2, 4.8 … in 600 mm steps): a 3.3 m wall's studs buy 3.6 m, 2.7 m studs stay 2.7 m, and no MGP10 length between 3.0 and 3.6 m appears; the LVL studs keep their own lengths. A cut of 2,650 buys 2,700 and one of 6,001 is reported unavailable (never clamped).
+3. Edge: mark 2,700 not stocked on an MGP10 product, a 2,650 cut now buys 3,000; mark 3,600 not stocked and a 3,100 cut buys 4,200. A 3,300 "not stocked" mark left from the old grid is ignored.
+- [ ] Pass  [ ] Fail
+
+**TC-31 — Hoop iron and bracing on the order (HUB 033 + 034, API + PDF)**
+1. Unit tests `node scripts/tests/takeoff-tc-hub033.test.mjs` and `takeoff-tc-hub034.test.mjs`, or open a Walls takeoff with a 9 m wall, a 1.2 m wall and some **Add bracing** marks and **Review order**.
+2. Expected: one **BRACING** heading in the Timber part (screen and PDF), in the supplier's wording, each row a count then "N.00 EA": `HOOP IRON PUNCHED 0.8X30MM 30MT (ROLL) — 5 — 5.00 EA`, `TENSIONER SET HEX HEAD (PCE) — 30 — 30.00 EA`, `BRACE OS H2 6X1200X2745MM — 10 — 10.00 EA`, `BRACE OS H2 6X1200X3050MM — 18 — 18.00 EA`. Hoop iron is one rolls row: the walls' straps (9 m = 16 straps, 1.2 m = 2 straps, 18 x 0.7 m = 12.6 m) plus the cross braces' metres, rounded up to whole 30 m rolls. The line's note gives the metres. A wall with its hoop iron switched off adds no straps. There is no separate HOOP IRON heading.
+- [ ] Pass  [ ] Fail
+
+**TC-32 — + Add member and + Add bracing (HUB 033, UI Review + API)**
+1. On a Timber and cladding order tap **+ Add member**. Pick the heading (T&B plates, Studs, Jamb studs, Junction blocks, Head & sill trimmers, Lintels, Noggins, Bracing, TEMP BR, SB SCREW, Other), pick the product (job products and hoop iron, or type one) and enter `4/3.6` (4 pieces at 3.6 m) or `10 EA`. Tap **Add line**, then **Save order details**.
+2. Expected: the line shows in its heading marked **added by hand**, with **Edit** and **Remove**. Entering `abc` or `4/` says why and does not save. Reload: it is still there. Change the takeoff: the line does not change or disappear. Export: it prints in its group (marked "(added by hand)") and an order with only hand-added lines can be exported.
+3. Tap **+ Add bracing**: choose **Bracing**, **TEMP BR** or **SB SCREW**; tap a quick pick (TEMP BR: `PINE 90x35 MGP10 P/M` with `10/4.8` = 48.00 LM; SB SCREW: `COACHSCREW 10X75 GALV (PK 10)` with `1 EA`) or type a product. Same entry rules. Temporary bracing and screws are never calculated.
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] All test cases passed
 - [ ] No console errors observed during testing
@@ -530,3 +561,9 @@ Next review date: 2027-04-14
 - [ ] Database records created with correct field values
 - [ ] Update `test_status` in frontmatter to `passed` or `failed`
 - [ ] Add an entry to SOP_CHANGELOG.md noting test date and result
+
+**TC-30 — Open an order saved before the stock change, update in one tap (HUB 032 round 2)**
+1. Unit test `node scripts/tests/takeoff-tc-hub032b.test.mjs` (or a local draft order made before this build with an MGP10 line at a length that is no longer bought, e.g. 3,300).
+2. Expected: the line shows "needs updating" with the plain sentence about the new length and **Update to the new length**; tapping it moves the quantity to the new length and the readiness list clears. With several such lines **Update all n lines** does them all and saves. A line longer than anything now bought has only **Remove line**.
+3. Expected: the Timber part shows the "Timber order" panel (headings, product rows, count/length cut lists, LM / EA) above the steppers, matching the PDF.
+- [ ] Pass  [ ] Fail

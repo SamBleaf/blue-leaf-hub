@@ -122,7 +122,7 @@ const uniqSorted = (arr) => [...new Set(arr)].sort((a, b) => a - b);
 
 /** Canonical policy: grouping key + the values the allocator applies (unset kerf stays null = unconfirmed 0). */
 function normalisePolicy(p) {
-  const stock = p.kind === "grid" ? { kind: "grid", minMm: p.minMm, incrementMm: p.incrementMm, maxMm: p.maxMm ?? null, unavailableMm: uniqSorted(p.unavailableMm || []) }
+  const stock = p.kind === "grid" ? { kind: "grid", minMm: p.minMm, incrementMm: p.incrementMm, ...(p.aboveMm != null ? { aboveMm: p.aboveMm, incrementAboveMm: p.incrementAboveMm } : {}), maxMm: p.maxMm ?? null, unavailableMm: uniqSorted(p.unavailableMm || []) }
     : p.kind === "list" ? { kind: "list", lengthsMm: uniqSorted(p.lengthsMm) } : { kind: "fixed", lengthMm: p.lengthMm };
   return { ...stock, kerfMm: p.kerfMm ?? null, kerfConfirmed: p.kerfConfirmed === true, endTrimMm: p.endTrimMm ?? 0,
     finalEndAcceptable: p.finalEndAcceptable === true, minRetainedOffcutMm: p.minRetainedOffcutMm ?? null, sharePieces: p.sharePieces === true };

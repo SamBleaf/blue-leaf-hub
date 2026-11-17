@@ -22,4 +22,8 @@ export { gableInputProblem } from "./engine/wall.js";
 export { methodReads, wallIncompleteText } from "./engine/dispatch.js";
 
 /** Bumped when any calculation in this package changes behaviour; frozen into exports. */
-export const CALCULATION_VERSION = "takeoff-calc@4"; // @4: all timber bought in 300 mm steps from 1,200 (Sam, 25 Oct 2026; HUB 028); @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits
+export const CALCULATION_VERSION = "takeoff-calc@7"; // @7: Add bracing (ply brace sheets by wall height, hoop iron cross braces, tensioners; hoop iron now 30 m rolls, one BRACING line; Sam, 18 Nov 2026); @6: hoop iron per wall (2 straps of 0.7 m per 1,200 mm, Sam 18 Nov 2026), short MGP10 pieces cut from the product's own stud/plate lengths, MGP10 with no longest length uses 6,000; MGP10 buys 1,200 then 300 mm steps to 3,000 and 600 mm steps above 3 m, short pieces cut from longer lengths (Sam, 18 Nov 2026), order lines carry the member roles the supplier take-off groups by; @5: per-wall stud centres, full-height openings, cavity sliders, automatic opening framing (HUB 031, Sam 17 Nov 2026); @4: all timber bought in 300 mm steps from 1,200 (Sam, 25 Oct 2026; HUB 028); @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits
+
+export * from "./supplierOrder.js";
+export * from "./hoopIron.js";
+export * from "./bracing.js";

@@ -50,7 +50,8 @@ t("fills section and grade together; treatment, plies, sizing and stock unchange
   assert.deepEqual(before.section, {}, "the input is not mutated");
   const n = normaliseFamilySpec(after);
   assert.equal(n.sizing.provenance, "manual");
-  assert.deepEqual([n.stock.kind, n.stock.minMm, n.stock.incrementMm], ["grid", 1200, 300]);
+  // MGP10 (18 Nov 2026): 1,200 + 300 steps to 3,000, then 600 steps above 3 m
+  assert.deepEqual([n.stock.kind, n.stock.minMm, n.stock.incrementMm, n.stock.aboveMm, n.stock.incrementAboveMm], ["grid", 1200, 300, 3000, 600]);
   assert.deepEqual(TIMBER_GRID, { kind: "grid", minMm: 1200, incrementMm: 300 });
   // straight from Add timber: the only thing still missing to order is the treatment (never filled by a built-in row)
   const fresh = applyTimberPreset(addTimber("studs"), preset("studs", "90 × 45 MGP10"));
@@ -151,8 +152,8 @@ t("existing measurements and the 1200 + 300n grid are unchanged by a pick; only 
   const rows = (c) => c.scheduleLines.filter((l) => l.jobMaterialIds.includes("st")).map((l) => [l.quantity, l.unit, l.finishedLengthMm]);
   assert.ok(rows(before).length > 0, "the wall produces studs");
   assert.deepEqual(rows(after), rows(before));
-  for (const [, , len] of rows(after)) assert.ok(len >= 1200 && (len - 1200) % 300 === 0, `${len} on the 1200 + 300n grid`);
-  assert.deepEqual(rows(after), [[9, "piece", 2700]], "4,800 wall @600 → 9 studs of 2,700, each bought as a 2,700 length");
+  for (const [, , len] of rows(after)) assert.ok(len >= 1200 && (len <= 3000 ? (len - 1200) % 300 === 0 : len % 600 === 0), `${len} on the MGP10 grid`);
+  assert.deepEqual(rows(after), [[9, "piece", 2700]], "4,800 wall @600 → 9 studs of 2,700, each bought as a 2,700 length (300 steps up to 3 m)");
   // the identity (what is bought) is the only change
   const key = (c) => c.scheduleLines.find((l) => l.jobMaterialIds.includes("st")).specKey;
   assert.match(key(before), /90x35/);

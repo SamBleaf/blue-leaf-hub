@@ -345,6 +345,21 @@ export function orderLineState(line, computed, materials) {
   const partOf = (x) => x.item?.component ?? null;
   const suggestion = mat ? computed.scheduleLines.find((x) => keyOf(x) === ownKey && x.jobMaterialIds.includes(mat.id) && x.finishedLengthMm === line.finishedLengthMm
     && (x.unit || "piece") === (line.unit || "piece") && partOf(x) === partOf(line)) || null : null;
+  // HUB 032: a line that exists no longer but whose same product is still bought, only at a different stock length (the
+  // MGP10 stock rule changed, or a length is now unstocked): offer that line. The bucket key is the material, unit, length
+  // and product, so the line and the candidate match when everything but the length matches. The length that now covers
+  // the old one comes first (the smallest at least as long), otherwise the only one.
+  const lengthSuggestion = (() => {
+    if (!mat || sl || !(line.generic || line.item) || !Number.isFinite(line.finishedLengthMm)) return null;
+    const family = (k, unit, len) => (typeof k === "string" && k.includes(`|${unit}|${len}|`) ? k.replace(`|${unit}|${len}|`, `|${unit}|*|`) : null);
+    const mine = family(line.bucketKey, line.unit || "piece", line.finishedLengthMm);
+    if (!mine) return null;
+    const same = computed.scheduleLines.filter((x) => x.generic && keyOf(x) === ownKey && x.jobMaterialIds.includes(mat.id) && (x.unit || "piece") === (line.unit || "piece")
+      && partOf(x) === partOf(line) && Number.isFinite(x.finishedLengthMm) && x.finishedLengthMm !== line.finishedLengthMm
+      && family(x.bucketKey, x.unit || "piece", x.finishedLengthMm) === mine);
+    if (!same.length) return null;
+    return same.filter((x) => x.finishedLengthMm >= line.finishedLengthMm).sort((a, b) => a.finishedLengthMm - b.finishedLengthMm)[0] || (same.length === 1 ? same[0] : null);
+  })();
   let problem = null;
   if (!sl) problem = "line_stale_missing";
   else if (line.jobMaterialId && (!mat || ownKey !== keyOf(sl) || !sl.jobMaterialIds.includes(mat.id))) problem = "line_stale_material";
@@ -353,8 +368,9 @@ export function orderLineState(line, computed, materials) {
   // totals come out the same — the line is updated explicitly (same bucket), never silently
   else if (sl.generic && line.item?.dependencyKey && sl.dependencyKey && line.item.dependencyKey !== sl.dependencyKey) problem = "line_stale_inputs";
   else if (line.quantity > sl.quantity) problem = "line_stale_quantity";
-  return { stale: !!problem, problem, current: sl,
-    suggestion: problem === "line_stale_inputs" ? sl : suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : null };
+  const chosen = problem === "line_stale_inputs" ? sl : suggestion && suggestion.bucketKey !== line.bucketKey ? suggestion : lengthSuggestion;
+  return { stale: !!problem, problem, current: sl, suggestion: chosen,
+    ...(chosen && chosen === lengthSuggestion ? { lengthChange: { fromMm: line.finishedLengthMm, toMm: chosen.finishedLengthMm } } : {}) };
 }
 
 /**

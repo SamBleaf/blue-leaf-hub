@@ -28,6 +28,7 @@ Contract-only (tested, not shipped as working UI): `repeated_members@1`, `sheet_
 
 - Rebuilding Bestimator, its scope/element engines or estimating.
 - Structural sizing / span tables (no table cells are copied; Bestimator T48 `9005` stays flagged upstream).
+  **Amended 18 Nov 2026 (HUB 031, Sam's decision of 17 Nov): cited span tables ARE now used, but only to SUGGEST a lintel size and a jamb count, fail closed.** Every size shows its table, edition and page; a missing roof answer is "needs roof information", anything outside a table is "engineer" (never a default or nearest size); the office can always type a size, which is used as typed. The tables are Sam's licensed AS 1684.2 N1/N2 Supplement 4 (2006) MGP10 extracts and the SmartLVL 13 (E1 2021) and Smart10 (Mar 2024) design guides, held in `shared/takeoff/standards/data/` for the private Hub only. The app still never certifies a frame: Walls says it is quantities for ordering, not a structural check.
 - Pricing, supplier sending, Buildxact PO push or procurement automation.
 
 ## Consequences

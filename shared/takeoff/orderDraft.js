@@ -98,10 +98,13 @@ export function flashingOrderGroups(qty, scheduleLines, materialsById, keep = ne
   });
 }
 
-/** Strip the server-kept refresh basis from an order's delivery (never shown, never frozen into an export). */
+/** Strip the server-kept parts of an order's delivery (the refresh basis and the hand-added lines): never shown as delivery, never frozen into an export as delivery. */
 export function withoutBasis(delivery) {
-  if (!delivery || typeof delivery !== "object" || !("basis" in delivery)) return delivery || {};
-  const { basis: _basis, ...rest } = delivery;
-  void _basis;
+  if (!delivery || typeof delivery !== "object" || !("basis" in delivery || "manualLines" in delivery)) return delivery || {};
+  const { basis: _basis, manualLines: _manual, ...rest } = delivery;
+  void _basis; void _manual;
   return rest;
 }
+
+/** The hand-added lines kept on an order (Sam, 18 Nov 2026), as saved: [] when none. */
+export const manualLinesOf = (delivery) => (Array.isArray(delivery?.manualLines) ? delivery.manualLines : []);

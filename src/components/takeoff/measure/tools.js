@@ -25,13 +25,15 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { WALLS_PURPOSE, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
+import { CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
   flashing: "#006c9b", overflow: "#dc2626", handling: "#b45309", draft: "#64748b", count: "#16a34a", selected: "#f59e0b",
   halo: "#7dd3fc", wall: "#9a3412", member: "#7c3aed", distribution: "#0d9488", trim: "#006c9b", split: "#0f172a", removed: "#94a3b8",
   window: "#0284c7", door: "#4f46e5",
+  // HUB 031: a wet-area wall (its own stud centres), cyan-700 (5.4:1 on white); its label also says "ctrs", so colour is never the only cue
+  wetWall: "#0e7490",
 });
 
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
@@ -420,8 +422,13 @@ export function wallCladdingText(t) {
 export function wallFramingTotals(result, wallId = null) {
   const lays = (result?.layouts || []).filter((l) => l?.method === "wall_framing@1" && l.totals && (wallId == null || l.wallMeasurementId === wallId));
   if (!lays.length) return null;
+  const rules = { openings: 0, lintels: 0, lintelsToSize: 0, noFit: 0 };
   const t = { walls: lays.length, studs: 0, studsByHeight: [], bottomPlateMm: 0, topPlateMm: 0, secondTopPlateMm: null, noggins: 0, rows: [] };
   const byH = new Map();
+  // HUB 031: the walls with a centres setting of their own (wet areas at 450): { 450: 3 }. Only for the whole item.
+  const own = {};
+  if (wallId == null) for (const l of lays) if (l.centresFrom === "wall" && l.centresMm > 0) own[l.centresMm] = (own[l.centresMm] || 0) + 1;
+  if (Object.keys(own).length) t.ownCentres = own;
   for (const { totals: x } of lays) {
     t.studs += x.studs || 0;
     if (x.studs) byH.set(x.studLengthMm, (byH.get(x.studLengthMm) || 0) + x.studs);
@@ -429,8 +436,10 @@ export function wallFramingTotals(result, wallId = null) {
     t.topPlateMm += x.topPlateMm || 0;
     if (x.secondTopPlateMm != null) t.secondTopPlateMm = (t.secondTopPlateMm || 0) + x.secondTopPlateMm;
     t.noggins += x.noggins || 0;
+    if (x.openingRules) for (const k of Object.keys(rules)) rules[k] += x.openingRules[k] || 0;
     if (Number.isFinite(x.nogginRows) && !t.rows.includes(x.nogginRows)) t.rows.push(x.nogginRows);
   }
+  if (rules.openings) t.openingRules = rules;
   t.studsByHeight = [...byH].sort((a, b) => a[0] - b[0]);
   t.rows.sort((a, b) => a - b);
   return t;
@@ -468,7 +477,13 @@ export function wallFramingText(t, label = null, notCounted = []) {
   const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
   const rows = t.rows || [];
   const rowText = !rows.length ? "" : rows.length === 1 ? ` (${rows[0]} row${rows[0] === 1 ? "" : "s"})` : ` (${rows[0]}–${rows[rows.length - 1]} rows)`;
-  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...(out ? [out] : [])].join(" · ");
+  // HUB 031: "· 3 walls at 450" only when some wall has its own centres; otherwise the line reads exactly as before
+  const ownEntries = Object.entries(t.ownCentres || {}).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const own = ownEntries.length ? [ownEntries.map(([c, q], i) => `${i ? "" : `${n(q)} wall${q === 1 ? "" : "s"} at `}${i ? `${n(q)} at ` : ""}${n(c)}`).join(", ")] : [];
+  // HUB 031: the lintels the opening rules sized, and the ones still to size ("· 2 lintels, 1 to size")
+  const r = t.openingRules;
+  const heads = r && (r.lintels || r.lintelsToSize) ? [[r.lintels ? `${n(r.lintels)} lintel${r.lintels === 1 ? "" : "s"}` : null, r.lintelsToSize ? `${n(r.lintelsToSize)} to size` : null, r.noFit ? `${n(r.noFit)} won't fit` : null].filter(Boolean).join(", ")] : [];
+  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
   return label ? `${label}: ${body}` : body;
 }
 
@@ -529,17 +544,64 @@ export function wallPartText(part) {
 export function wallFramingNotes(result, wallId, spec) {
   const out = [];
   const lay = (result?.layouts || []).find((l) => l?.method === "wall_framing@1" && l.totals && l.wallMeasurementId === wallId);
+  if (lay?.centresFrom === "wall") out.push(`Studs at ${Math.round(lay.centresMm).toLocaleString("en-AU")} centres on this wall (its own setting).`);
   if (lay && lay.totals.longPlateMm > 0) {
     const over = wallLongPlateOverText(spec);
     out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
   }
+  // HUB 031: each ruled opening's framing in one plain line ("W1: kings 1, jacks 1 each side · lintel 190 x 45 · sill trimmer 1")
+  for (const o of lay?.openings || []) if (o.rule) out.push(openingRuleText(o));
   const names = [...new Set((result?.problems || []).filter((p) => p.code === "opening_framing_not_counted")
     .flatMap((p) => (p.refs || []).filter((r) => r?.measurementId === wallId).map((r) => r.openingLabel || r.openingId)).filter(Boolean))];
   if (names.length) out.push(`Lintels, jacks and trimmers at ${names.join(", ")} aren't counted.`);
   return out;
 }
 
+// ── wet-area walls: a wall's own stud centres (HUB 031, Sam 17 Nov 2026) ─────────────────────────────────────
+
+/** The Walls item's own stud centres (what a wall without its own setting uses). */
+export const itemCentresMm = (material) => (Number(material?.rules?.centresMm) > 0 ? Number(material.rules.centresMm) : WALL_FRAMING_RULES.centresMm);
+/** This wall's own centres (null = the item's). */
+export const wallOwnCentresMm = (wall) => (Number(wall?.inputs?.studCentresMm) > 0 ? Number(wall.inputs.studCentresMm) : null);
+/**
+ * A wall's inputs with the wet-area setting flipped: off → 450; on (any own centres) → the key is DELETED, so
+ * switching 450 on and off leaves the inputs exactly as they were (never null, never the item's number written in).
+ */
+export function toggleWetWall(inputs) {
+  const { studCentresMm: own, ...rest } = inputs || {};
+  return Number(own) > 0 ? rest : { ...rest, studCentresMm: WET_WALL_CENTRES_MM };
+}
+/** Set a wall's own centres to `mm`, or back to the item's (null). Same rule: clearing deletes the key. */
+export function withWallCentres(inputs, mm) {
+  const rest = { ...(inputs || {}) };
+  delete rest.studCentresMm;
+  return Number(mm) > 0 ? { ...rest, studCentresMm: Number(mm) } : rest;
+}
+/** The traced walls of one material with their own centres: [{ id, name, centresMm }], in name order. */
+export function wetWallsOf(measurements, contributions, materialId) {
+  const mine = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId).map((c) => c.measurementId));
+  return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && wallOwnCentresMm(m))
+    .map((m) => ({ id: m.id, name: m.inputs?.name || "Wall", centresMm: wallOwnCentresMm(m) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+}
+
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────
+
+/** One ruled opening's framing in plain words, for the wall page and the opening sheet. */
+export function openingRuleText(o) {
+  const r = o.rule;
+  if (!r) return "";
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const parts = [];
+  const kj = (side) => `${r.kings[side]} king${r.kings[side] === 1 ? "" : "s"}${r.jacks[side] ? ` + ${r.jacks[side]} jack${r.jacks[side] === 1 ? "" : "s"}` : ""}`;
+  parts.push(r.kings.left === r.kings.right && r.jacks.left === r.jacks.right ? `${kj("left")} each side` : `left ${kj("left")}, right ${kj("right")}`);
+  const l = r.lintel;
+  if (l.status === "sized" || l.status === "typed") parts.push(`lintel ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  else if (l.status === "unsized" || l.status === "engineer") parts.push(`lintel not sized (${l.reason})`);
+  if (r.trimmers.head) parts.push(`head trimmer × ${r.trimmers.head}`);
+  if (r.trimmers.sill) parts.push(`sill trimmer × ${r.trimmers.sill}`);
+  return `${o.label || o.id}: ${parts.join(" · ")}.`;
+}
 
 /** The next free label for an opening on ONE wall: W1, W2 … for windows, D1 … for doors, O1 … for others. */
 export function nextOpeningLabel(labels, type) {
@@ -564,16 +626,65 @@ export function openingRecord(id, wallId, inputs) {
  * with no wall (aluminium windows by size, sill 0 as a placeholder) never set them.
  */
 export function lastOpeningSizes(measurements) {
-  let win = { heightMm: null, sillMm: null }, door = { heightMm: null };
+  let win = { heightMm: null, sillMm: null }, door = { heightMm: null }, leafMm = null;
   const walls = new Set((measurements || []).filter((m) => m.kind === "wall").map((m) => m.id));
   for (const m of measurements || []) {
     if (m.kind !== "opening" || m.archived || !walls.has(m.parentId)) continue;
     const x = m.inputs || {};
+    // HUB 031: the last cavity slider's door width is remembered for the next one
+    if (x.type === "door" && finite(x.cavityLeafMm) && x.cavityLeafMm > 0) leafMm = x.cavityLeafMm;
     if (!(finite(x.heightMm) && x.heightMm > 0)) continue;
+    // a full-height opening follows its wall: its height must never become the next ordinary door's or window's
+    if (x.fullHeight === true) continue;
     if (x.type === "door") door = { heightMm: x.heightMm };
     else if ((x.type || "window") === "window") win = { heightMm: x.heightMm, sillMm: finite(x.sillMm) && x.sillMm >= 0 ? x.sillMm : null };
   }
-  return { window: win, door };
+  return { window: win, door: leafMm != null ? { ...door, leafMm } : door };
+}
+
+/**
+ * A full-height opening's stored height, kept as a snapshot of wall height − sill (the engine works it out afresh from
+ * the wall's height every time, so a wall's later height edit can never leave it short). Null when the wall has no
+ * usable height or the sill is at or above the top.
+ */
+export function fullHeightMm(wallInputs, sillMm) {
+  const H = Number(wallInputs?.heightMm), s = Number(sillMm) || 0;
+  return (wallInputs?.kind || "rect") === "rect" && H > 0 && s >= 0 && s < H ? H - s : null;
+}
+/**
+ * The full-height openings of a wall whose stored height must change in the SAME edit as the wall's height (so Undo
+ * puts both back): [{ before, next }].
+ */
+export function fullHeightFollowers(openings, nextWallInputs) {
+  const out = [];
+  for (const o of openings || []) {
+    if (o.archived || o.inputs?.fullHeight !== true) continue;
+    const h = fullHeightMm(nextWallInputs, o.inputs?.sillMm);
+    if (h != null && h !== o.inputs.heightMm) out.push({ before: o, next: { ...o, inputs: { ...o.inputs, heightMm: h } } });
+  }
+  return out;
+}
+/**
+ * Elevation sheet → Cavity slider on a door already drawn (HUB 031). Returns the new inputs, or { error }.
+ *  - a door wider than CAVITY_LEAF_WIDE_MM is read as the whole slider opening (its width stays, the door is (w − 20) ÷ 2);
+ *  - otherwise `side` ("left" | "right", the wall's start is left) is where the door slides: the width becomes
+ *    2 × w + 20, and for left the offset moves so the shut edge stays put.
+ * `others` = the wall's other openings [{ x0, x1, label }]; running off the wall or into one is refused.
+ */
+export function cavityConvert(inputs, side, wallLenMm, others = []) {
+  const w = Number(inputs?.widthMm), x = Number(inputs?.xMm);
+  if (!(w > 0)) return { error: "Enter the door width first." };
+  if (w > CAVITY_LEAF_WIDE_MM) {
+    const leaf = cavityLeafFromOpening(w);
+    return { inputs: { ...inputs, cavityLeafMm: leaf, cavityPocket: side === "left" || side === "right" ? side : (inputs.cavityPocket || "right") }, wide: true };
+  }
+  if (side !== "left" && side !== "right") return { error: "Choose the side the door slides into." };
+  const W = cavityOpeningWidth(w);
+  const x0 = side === "right" ? x : x - (w + CAVITY_SLIDER_EXTRA_MM);
+  if (x0 < 0 || x0 + W > wallLenMm + 1e-6) return { error: `A ${W.toLocaleString("en-AU")} opening runs past the end of this wall. Move it first.` };
+  const hit = others.find((o) => x0 < o.x1 - 1e-6 && x0 + W > o.x0 + 1e-6);
+  if (hit) return { error: `A ${W.toLocaleString("en-AU")} opening runs into ${hit.label || "another opening"}.` };
+  return { inputs: { ...inputs, xMm: x0, widthMm: W, cavityLeafMm: w, cavityPocket: side }, wide: false };
 }
 
 /**

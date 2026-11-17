@@ -71,3 +71,10 @@ Branch `takeoff-r03` (from `portal-v2` @ `022202a`, clean tree at start, 2026-10
 - Independent-review ZIP assembled in ~/Takeoff-Review/ (acceptance matrix with adversarial verification, PII scan).
 - Remaining owner/device gates: real iPhone 20-minute gate; apply 206 in production; enable TAKEOFF_ENABLED; commit the
   CI workflow with a workflow-scoped token.
+
+
+## HUB 031 (18 Nov 2026): wet walls, cavity sliders, full height, opening framing, lintels
+Branch `takeoff/wet-walls-cavity-doors` (worktree blh-takeoff-walls.nosync), local commits only, nothing pushed or deployed. Sam's answers (`OWNER_ANSWERS_17NOV.md`) override the two plans.
+- Step 1 per-wall `studCentresMm` (Select tools). Steps 2 and 3 cavity slider (2 x leaf + 20) and full height. Step 4 `engine/openingRules.js` (kings, jacks, counted cripples, trimmers, heights from the floor, manual detail wins). Steps 5 and 6 `standards/` (lintel and jamb tables, fail closed) and the LVL guide mapping.
+- Tests: `npm run test:takeoff` (incl. `takeoff-tc-hub031` and `takeoff-tc-hub031-render`), lint 0 warnings, `npm run build`.
+- Open: trimmer stacking breakpoints are a Blue Leaf default (Sam to set from AS 1684); owner/iPhone check; ui-review Playwright spec for the new screens not written (static render tests cover them); roof card is the office's.

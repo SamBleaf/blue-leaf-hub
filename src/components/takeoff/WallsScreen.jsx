@@ -38,13 +38,15 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
-import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { cavityOpeningWidth, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { ROOF_LOAD_WIDTHS_MM } from "../../../shared/takeoff/standards/index.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
+import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -810,7 +812,7 @@ function StatusSummary({ view, material, result, computedError, canEdit, onSetup
   );
 }
 
-function OpeningForm({ value, onField, canEdit, focusToken }) {
+export function OpeningForm({ value, onField, canEdit, focusToken }) {
   const ref = useRef(null);
   // after a TAP on the elevation, iOS fires compatibility mouse events that would steal focus straight back to the
   // drawing — focus Width once they have passed, so the keyboard opens on the field
@@ -826,8 +828,12 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
   return (
     <div ref={ref} className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <div data-field="widthMm"><NumberField label="Width" value={value.widthMm} min={1} max={MAX_MM} onCommit={(n) => onField("widthMm", n)} /></div>
-        <div data-field="heightMm"><NumberField label="Height" value={value.heightMm} min={1} max={MAX_MM} onCommit={(n) => onField("heightMm", n)} /></div>
+        {value.cavityLeafMm > 0
+          ? <div data-field="cavityLeafMm"><NumberField label="Door width" value={value.cavityLeafMm} min={300} max={1500} onCommit={(n) => onField("cavityLeafMm", n)} help={`Opening ${fmtMm(value.widthMm)} (2 × ${fmtMm(value.cavityLeafMm)} + 20)`} /></div>
+          : <div data-field="widthMm"><NumberField label="Width" value={value.widthMm} min={1} max={MAX_MM} onCommit={(n) => onField("widthMm", n)} /></div>}
+        {value.fullHeight
+          ? <p className="flex items-center text-[12px] text-muted" data-field-fullheight="">Height: to the top of the wall ({fmtMm(value.heightMm)}).</p>
+          : <div data-field="heightMm"><NumberField label="Height" value={value.heightMm} min={1} max={MAX_MM} onCommit={(n) => onField("heightMm", n)} /></div>}
         <div data-field="sillMm"><NumberField label="Sill height" value={value.sillMm} min={0} max={MAX_MM} onCommit={(n) => onField("sillMm", n)} /></div>
         <div data-field="xMm"><NumberField label="Offset from wall start" value={value.xMm} min={0} max={MAX_MM} onCommit={(n) => onField("xMm", n)} /></div>
       </div>
@@ -836,6 +842,80 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
         <CommitText label="Label" value={value.label} maxLength={40} onCommit={(v) => onField("label", v)} />
         <Chips label="Type" value={value.type} options={OPENING_TYPES} onChange={(v) => onField("type", v)} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Full height and Cavity slider on an opening already drawn (HUB 031, Sam 17 Nov 2026). A door up to 1,200 wide asks which
+ * side it slides into (left is the wall start); a wider one is read as the whole opening. One tap each, one Undo.
+ */
+export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
+  const [asking, setAsking] = useState(false);
+  const chip = (on, extra = "") => `min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"} ${extra}`;
+  const slider = opening.cavityLeafMm > 0;
+  const canSlider = opening.type === "door" && timberWalls;
+  return (
+    <div className="mt-2 space-y-2" data-opening-flags="">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={opening.fullHeight} disabled={!wallHeightOk} onClick={() => onFlag("fullHeight")} data-opening-fullheight="" className={chip(opening.fullHeight, !wallHeightOk ? "opacity-50" : "")}>Full height</button>
+        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity=""
+          onClick={() => { if (slider) { onFlag("cavity"); setAsking(false); } else if (opening.widthMm > 1200) onFlag("cavity") ; else setAsking((a) => !a); }} className={chip(slider)}>Cavity slider</button>}
+      </div>
+      {!wallHeightOk && <p className="text-[11px] text-muted">Full height only works on a wall of one height.</p>}
+      {canSlider && asking && !slider && (
+        <div className="space-y-1" data-opening-pocket="">
+          <p className="text-sm text-ink">Which side does the door slide into?</p>
+          <div className="flex gap-2">
+            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "left"); }}>◀ Left</button>
+            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "right"); }}>Right ▶</button>
+          </div>
+        </div>
+      )}
+      {slider && <p className="text-[11px] text-muted">No studs or noggins in the pocket. The pocket slides {opening.cavityPocket === "left" ? "left (towards the wall start)" : "right"}.</p>}
+    </div>
+  );
+}
+
+/**
+ * The lintel the opening rules found for an opening, with "tap to add load information" (HUB 031, Sam 17 Nov 2026): the roof
+ * width this opening carries (chips from the tables' own columns), or a lintel size typed by hand that the tables never
+ * overwrite. A lintel that doesn't fit, or can't be sized, says why in plain words.
+ */
+export function LintelLoad({ opening, rule, onSet }) {
+  const [open, setOpen] = useState(false);
+  const inputs = opening.rec.inputs || {};
+  const l = rule.lintel;
+  const typed = inputs.lintel || null;
+  const [dim, setDim] = useState({ depthMm: typed?.depthMm ?? null, breadthMm: typed?.breadthMm ?? 45, plies: typed?.plies ?? 1 });
+  const text = l.status === "sized" || l.status === "typed" ? `${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}`
+    : l.status === "not_needed" ? "none (this wall doesn't carry the roof; the head is framed with trimmers)" : `not sized (${l.reason})`;
+  const save = (next) => onSet(next);
+  return (
+    <div className="space-y-1" data-opening-lintel="">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-[44px] w-full items-center justify-between rounded-lg border border-hairline bg-white px-3 text-left text-sm focus-ring">
+        <span><span className="text-xs text-muted">Lintel</span><br /><span className="font-medium text-ink" data-lintel-text="">{text}</span></span>
+        <span aria-hidden="true">{open ? "▾" : "›"}</span>
+      </button>
+      {l.noFit && <p className="text-xs font-semibold text-red-700" data-lintel-nofit="">Won&apos;t fit: it is {Math.round(l.noFit.neededMm)} deep and only {Math.round(l.noFit.freeMm)} mm is free above the head. Lower the {opening.type === "door" ? "door" : "window"}, or confirm the lintel sits in the top plate.</p>}
+      {l.basis && <p className="text-[11px] text-muted" data-lintel-basis="">{l.basis}</p>}
+      {open && (
+        <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-load="">
+          <Chips label="Roof width this opening carries (mm)" value={inputs.loadRlwMm ?? "item"} options={[["item", "Same as the item"], ...ROOF_LOAD_WIDTHS_MM.map((v) => [v, String(v)])]}
+            onChange={(v) => { const next = { ...inputs }; if (v === "item") delete next.loadRlwMm; else next.loadRlwMm = v; save(next); }} />
+          <p className="text-[11px] text-muted">About half the roof span over it plus the eaves. Only this opening changes.</p>
+          <div className="grid grid-cols-3 gap-2">
+            <NumberField label="Depth" value={dim.depthMm} min={40} max={600} optional onCommit={(n) => setDim((d) => ({ ...d, depthMm: n }))} />
+            <NumberField label="Thickness" value={dim.breadthMm} min={18} max={200} optional onCommit={(n) => setDim((d) => ({ ...d, breadthMm: n }))} />
+            <NumberField label="Pieces" value={dim.plies} min={1} max={4} optional onCommit={(n) => setDim((d) => ({ ...d, plies: n || 1 }))} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade ? { grade: l.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
+            {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; save(next); }}>Use the table</Btn>}
+          </div>
+          <p className="text-[11px] text-muted">A size you type is used as it is: it isn&apos;t checked against a span table.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1340,7 +1420,10 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     updateWall(w, patch) {
       const latest = latestView.current.measurements.find((m) => m.id === w.id) || w;
       const before = mRec(latest);
-      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(latest.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+      const nextInputs = { ...(latest.inputs || {}), ...patch };
+      // HUB 031: a wall whose height changes takes its full-height openings with it, in the SAME edit (one Undo)
+      const fol = "heightMm" in patch ? fullHeightFollowers(latestView.current.measurements.filter((m) => m.kind === "opening" && m.parentId === w.id && !m.archived), nextInputs) : [];
+      record({ redo: partial({ measurements: [{ ...before, inputs: nextInputs }, ...fol.map((f) => mRec(f.next))] }), undo: partial({ measurements: [before, ...fol.map((f) => mRec(f.before))] }) });
     },
     removeWall(w) {
       const ops = openingsOf(w.id);
@@ -1371,6 +1454,11 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     updateOpening(o, patch) {
       const before = mRec(o);
       record({ redo: partial({ measurements: [{ ...before, inputs: { ...(o.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+    },
+    /** Replace an opening's inputs whole (a key can be taken away, e.g. Full height off): one edit, one Undo. */
+    setOpeningInputs(o, inputs) {
+      const before = mRec(o);
+      record({ redo: partial({ measurements: [{ ...before, inputs }] }), undo: partial({ measurements: [before] }) });
     },
     removeOpening(o) {
       const cons = view.contributions.filter((c) => c.measurementId === o.id && !c.archived);
@@ -1589,7 +1677,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const [pick, setPick] = useState(null);
   const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
   const [placing, setPlacing] = useState(false);
+  const [braceAdd, setBraceAdd] = useState(null);     // Sam, 18 Nov 2026: "ply" | "cross" while Add bracing is armed on this wall's elevation
+  const [braceSel, setBraceSel] = useState(null);     // the bracing mark picked on the drawing
+  const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
+  const [braceNote, setBraceNote] = useState(null);
   const [draft, setDraft] = useState(null);       // new opening before it is valid
+  const [opNote, setOpNote] = useState(null);        // HUB 031: a plain word about the last Full height / Cavity slider change
   const [drag, setDrag] = useState(null);         // { id, xMm, sillMm } live preview while dragging
   const [focusToken, setFocusToken] = useState(0);
   const [datumChange, setDatumChange] = useState(null); // { before, datumMm, key } — shown only while still true
@@ -1606,7 +1699,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const openings = openingsRaw.map((o) => {
     const x = o.inputs || {};
     const d = drag && drag.id === o.id ? drag : null;
-    return { id: o.id, xMm: d ? d.xMm : x.xMm, sillMm: d ? d.sillMm : x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm, label: x.label || "", type: x.type || "window", rec: o };
+    return { id: o.id, xMm: d ? d.xMm : x.xMm, sillMm: d ? d.sillMm : x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm, label: x.label || "", type: x.type || "window", rec: o,
+      fullHeight: x.fullHeight === true, cavityLeafMm: x.cavityLeafMm > 0 ? x.cavityLeafMm : null, cavityPocket: x.cavityPocket || null };
   });
   const contribs = view.contributions.filter((c) => c.measurementId === wall.id && !c.archived);
   const onWall = [...new Set(contribs.map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
@@ -1652,6 +1746,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const hitItems = elements.items.filter((it) => it.hit !== false);
   const selItem = sel?.kind === "item" ? hitItems.find((it) => it.id === sel.id) || null : null;
   const selOpening = sel?.kind === "opening" ? openings.find((o) => o.id === sel.id) || null : null;
+  const ruleLayout = selOpening ? (studEntry?.layout?.openings || []).find((o) => o.id === selOpening.id && o.rule) || null : null;
   // the automatic battens read "Batten" in the legend (a support layer set up by hand stays "Support")
   const legend = (LEGEND[tab] || []).filter(([state]) => elements.items.some((it) => it.state === state))
     .map(([state, text, cls]) => [state, state === "support" && elements.items.filter((it) => it.state === "support").every((it) => it.auto) ? "Batten" : text, cls]);
@@ -1766,6 +1861,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     return { label: d.label, type: d.type, widthMm: w, heightMm: h, xMm, sillMm };
   };
   function startAddOpening() {
+    setBraceAdd(null);
     setDraft({ label: nextLabel("window"), labelAuto: true, type: "window" });
     setSel({ kind: "newOpening" });
     if (polygon) { setPlacing(true); showDrawing(); } else setFocusToken((n) => n + 1);
@@ -1791,9 +1887,66 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   function onOpeningField(o, field, v) {
     const cur = o.rec.inputs || {};
     if (cur[field] === v || (field === "label" && (cur.label || "") === v)) return;
-    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v });
+    // HUB 031: a cavity slider's Door width rewrites the whole opening (2 × door + 20), keeping its left edge; refused if it won't fit
+    if (field === "cavityLeafMm") {
+      const W = cavityOpeningWidth(v);
+      const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      if (!(lengthMm > 0) || cur.xMm + W > lengthMm + 1e-6) { setOpNote(`A ${fmtMm(W)} opening runs past the end of this wall. Move it first.`); return; }
+      const hit = others.find((x) => cur.xMm < x.x1 - 1e-6 && cur.xMm + W > x.x0 + 1e-6);
+      if (hit) { setOpNote(`A ${fmtMm(W)} opening runs into ${hit.label || "another opening"}.`); return; }
+      setOpNote(null);
+      act.updateOpening(o.rec, { cavityLeafMm: v, widthMm: W });
+      return;
+    }
+    // a full-height opening keeps its stored height at wall height − sill in the same edit
+    if (field === "sillMm" && cur.fullHeight === true) {
+      const h = fullHeightMm(inputs, v);
+      if (h == null) { setOpNote("The sill is at or above the top of this wall. Check the sill."); return; }
+      act.updateOpening(o.rec, { sillMm: v, heightMm: h });
+      return;
+    }
+    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v, ...(field === "type" && v !== "door" ? { cavityLeafMm: undefined, cavityPocket: undefined } : {}) });
+  }
+  /** The opening sheet's Full height / Cavity slider chips. */
+  function onOpeningFlag(o, flag, arg) {
+    const cur = { ...(o.rec.inputs || {}) };
+    setOpNote(null);
+    if (flag === "fullHeight") {
+      if (cur.fullHeight === true) { delete cur.fullHeight; act.setOpeningInputs(o.rec, cur); return; }
+      const h = fullHeightMm(inputs, cur.sillMm);
+      if (h == null) { setOpNote(inputs.heightMm > 0 ? "The sill is at or above the top of this wall. Check the sill." : "Full height only works on a wall of one height. Using the height you typed."); return; }
+      act.setOpeningInputs(o.rec, { ...cur, fullHeight: true, heightMm: h });
+      return;
+    }
+    if (flag === "cavity") {
+      if (cur.cavityLeafMm > 0) { delete cur.cavityLeafMm; delete cur.cavityPocket; act.setOpeningInputs(o.rec, cur); setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(cur.widthMm)} opening. Undo to go back.`); return; }
+      const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      const r = cavityConvert(cur, arg, lengthMm, others);
+      if (r.error) { setOpNote(r.error); return; }
+      act.setOpeningInputs(o.rec, r.inputs);
+      if (r.wide) setOpNote(`${o.label || "This door"} is ${fmtMm(cur.widthMm)} wide, so it's taken as the whole opening: a ${fmtMm(r.inputs.cavityLeafMm)} door and its pocket. Change Door width if that's wrong.`);
+    }
+  }
+  const wallsMat = !!material && isWallsItem(material);
+  const braceMarks = wallsMat ? bracingOf(inputs) : [];
+  const braceHeight = bracingHeightMm(inputs);
+  const braceCheck = braceMarks.length ? bracingForWall(braceMarks, braceHeight, lengthMm) : null;
+  function braceTap(xMm) {
+    const r = addBracingMark(inputs, { type: braceAdd, atMm: xMm, lengthMm, spanMm: braceSpan });
+    if (!r.ok) { setBraceNote(r.error); return; }
+    act.updateWall(wall, { bracing: r.inputs.bracing });
+    setBraceSel(r.mark.id);
+    setBraceNote(`${bracingMarkText(r.mark, braceHeight)}. Undo takes it off.`);
+  }
+  function braceRemove(id) {
+    const next = removeBracingMark(inputs, id);
+    act.updateWall(wall, { bracing: next.bracing });
+    setBraceSel(null);
+    setBraceNote("Removed. Undo puts it back.");
   }
   function onTap({ xMm, yMm, hit }) {
+    if (braceAdd && !placing) { braceTap(xMm); return; }
+    if (hit?.kind === "bracing") { setBraceSel(hit.id); return; }
     if (placing) {
       setDraft((d) => ({ ...(d || { label: nextLabel("window"), labelAuto: true, type: "window" }), tapX: snap(xMm), tapY: snap(yMm) }));
       setSel({ kind: "newOpening" });
@@ -1809,7 +1962,10 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     if (!commit) { setDrag({ id, ...pos }); return; }
     setDrag(null);
     const o = openingsRaw.find((x) => x.id === id);
-    if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm });
+    if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) {
+      const h = o.inputs?.fullHeight === true ? fullHeightMm(inputs, pos.sillMm) : null;
+      act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm, ...(h != null ? { heightMm: h } : {}) });
+    }
   }
   const selectOpening = (id) => { setPlacing(false); setDraft(null); setSel({ kind: "opening", id }); showDrawing(); };
 
@@ -1894,7 +2050,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
             )}
             {polygon ? (
               <div ref={drawingRef} className="scroll-mt-1">
-              <WallElevation polygon={polygon} openings={drawnOpenings} items={elements.items} guides={elements.guides} selectedId={selItem?.id || null}
+              <WallElevation polygon={polygon} openings={drawnOpenings} bracing={braceMarks} bracingHit={tab !== "cladding"} selectedBracingId={braceSel} items={elements.items} guides={elements.guides} selectedId={selItem?.id || null}
                 selectedOpeningId={selOpening?.id || null} placing={placing} draft={shownDraft} editable={canEdit} maxHeightPx={maxH}
                 onTap={onTap} onDragOpening={onDragOpening}
                 ariaLabel={`${wallName(wall)} elevation, ${tab} view — ${openings.length} opening(s). Tap an element for details.`} />
@@ -2051,6 +2207,33 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
 
           {dims}
 
+          {wallsMat && (canEdit || braceMarks.length > 0) && (
+            <section aria-label="Bracing" className="space-y-2 rounded-card border border-hairline bg-white p-3" data-wall-bracing-section="">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="flex-1 text-sm font-semibold text-ink">Bracing <span className="font-normal text-muted">({braceMarks.length})</span></h3>
+                {canEdit && !braceAdd && <>
+                  <Btn kind="primary" onClick={() => { setBraceAdd("ply"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="ply">Add ply sheet</Btn>
+                  <Btn kind="primary" onClick={() => { setBraceAdd("cross"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="cross">Add cross brace</Btn></>}
+              </div>
+              {braceAdd && (
+                <Banner tone="info" action={<Btn onClick={() => setBraceAdd(null)}>Done</Btn>}>
+                  {braceAdd === "ply" ? "Tap the elevation where each 1,200 mm ply sheet goes. Its length follows the wall height." : `Tap the elevation where each cross brace goes (two hoop iron diagonals, 2 tensioners).`}
+                </Banner>
+              )}
+              {braceAdd === "cross" && <div className="w-48" data-brace-span=""><NumberField label="Cross brace span" unit="mm" value={braceSpan} min={BRACING_RULE.crossSpanMinMm} max={20000} onCommit={(n) => setBraceSpan(n ?? BRACING_RULE.crossSpanDefaultMm)} /></div>}
+              {braceNote && <p className="text-xs text-muted" data-brace-note="">{braceNote}</p>}
+              {!braceMarks.length && <p className="text-sm text-muted">No bracing on this wall. Temporary bracing and screws are added by hand on the order.</p>}
+              <ul className="divide-y divide-hairline">
+                {braceMarks.map((x) => (
+                  <li key={x.id} data-bracing-row={x.id} className={`flex min-h-[48px] items-center gap-2 px-1 text-sm ${braceSel === x.id ? "bg-amber-50" : ""}`}>
+                    <button type="button" className="min-w-0 flex-1 text-left text-ink" onClick={() => setBraceSel(x.id)}>{bracingMarkText(x, braceHeight)}</button>
+                    {canEdit && <Btn kind="ghost" onClick={() => braceRemove(x.id)} aria-label={`Remove ${bracingMarkText(x, braceHeight)}`}>Remove</Btn>}
+                  </li>))}
+              </ul>
+              {(braceCheck?.notes || []).map((t) => <p key={t} className="text-xs text-amber-800">{t}</p>)}
+            </section>
+          )}
+
           <section aria-label="Openings" className="space-y-2 rounded-card border border-hairline bg-white p-3">
             <div className="flex items-center gap-2">
               <h3 className="flex-1 text-sm font-semibold text-ink">Openings <span className="font-normal text-muted">({openings.length})</span></h3>
@@ -2121,8 +2304,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
         <Sheet key="opening-sheet" title={sel.kind === "newOpening" ? "New opening" : `Opening ${selOpening.label || ""}`.trim()} onClose={() => (sel.kind === "newOpening" ? cancelAdd() : setSel(null))} initialFocus={false}>
           <KeyboardSafe>
           <OpeningForm key={`opening-form-${draftReset}`} canEdit={canEdit} focusToken={focusToken}
-            value={sel.kind === "newOpening" ? dv : { label: selOpening.label, type: selOpening.type, widthMm: selOpening.widthMm, heightMm: selOpening.heightMm, sillMm: selOpening.sillMm, xMm: selOpening.xMm }}
+            value={sel.kind === "newOpening" ? dv : { label: selOpening.label, type: selOpening.type, widthMm: selOpening.widthMm, heightMm: selOpening.heightMm, sillMm: selOpening.sillMm, xMm: selOpening.xMm,
+              fullHeight: selOpening.fullHeight, cavityLeafMm: selOpening.cavityLeafMm, cavityPocket: selOpening.cavityPocket }}
             onField={(f, v) => (sel.kind === "newOpening" ? onDraftField(f, v) : onOpeningField(selOpening, f, v))} />
+          {sel.kind === "opening" && canEdit && (
+            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)} />
+          )}
+          {opNote && sel.kind === "opening" && <p className="mt-1 text-[11px] text-amber-800" data-opening-notice="">{opNote}</p>}
           {sel.kind === "newOpening" ? (
             <p className="mt-2 text-xs text-muted" data-opening-hint="">{placing && !Number.isFinite(draft?.tapX) ? "Tap its approximate position on the elevation, then enter the width and height." : "Enter the width and height — the opening is added as soon as its numbers are complete."}</p>
           ) : (
@@ -2131,6 +2319,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
+              {ruleLayout && <p className="text-xs text-ink" data-opening-rule="">Framing worked out: {openingRuleText(ruleLayout)} A framing detail typed below replaces it.</p>}
+              {ruleLayout && canEdit && <LintelLoad key={`lintel-${selOpening.id}-${draftReset}`} opening={selOpening} rule={ruleLayout.rule} onSet={(next) => act.setOpeningInputs(selOpening.rec, next)} />}
               {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}
             </div>

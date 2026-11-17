@@ -25,11 +25,48 @@ export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "pla
  *  The ONE definition: engine/timber.js, dispatch.js and the app read it from here. */
 export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300 });
 export const TIMBER_GRID_SOURCE = "OWNER-2026-10-25";
-/** Is this a length on the timber grid (1,200, 1,500, 1,800 …)? Only these can be marked "not stocked". */
-export function onTimberGrid(mm) {
-  const n = Number(mm);
-  return isFiniteNumber(n) && n >= TIMBER_GRID.minMm && (n - TIMBER_GRID.minMm) % TIMBER_GRID.incrementMm === 0;
+/**
+ * MGP10 stock (Sam, 18 Nov 2026, second answer): 1,200 mm minimum, 300 mm steps up to 3,000 (1,200, 1,500 … 2,700, 3,000),
+ * then ONLY 600 mm steps above 3 m (3,600, 4,200, 4,800 …). So 3,300 buys 3,600 and 2,700 stays 2,700. Short pieces
+ * (noggins, cripples, short trimmers) are cut out of stud/plate lengths by the allocator, never bought as short pieces.
+ * Applies to ANY product whose grade is MGP10 (any supplier, any part). LVL and every other grade keep TIMBER_GRID.
+ * (First answer the same day was "600, 1,200, 1,800 …"; replaced.)
+ */
+export const MGP10_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300, aboveMm: 3000, incrementAboveMm: 600 });
+export const MGP10_GRID_SOURCE = "OWNER-2026-11-18";
+/** Sam, 18 Nov 2026: an MGP10 product with no longest length set uses the top of its grid, 6,000 mm (the longest MGP10 stud/plate length
+ *  Blue Leaf buys, 6.0 m), so short pieces can be cut from the product's own stock lengths. A default to confirm: the order says so. */
+export const MGP10_DEFAULT_MAX_MM = 6000;
+/** Every length of a grid up to maxMm, ascending (the stepped MGP10 grid steps wider above its aboveMm). */
+export function gridLengthsUpTo(grid, maxMm) {
+  const out = [];
+  for (let l = grid.minMm; l <= maxMm + 1e-9; l += (grid.aboveMm != null && l >= grid.aboveMm ? grid.incrementAboveMm : grid.incrementMm)) out.push(l);
+  return out;
 }
+/** Is mm a length on this grid? */
+export function onGrid(mm, grid) {
+  const n = Number(mm);
+  if (!isFiniteNumber(n) || n < grid.minMm) return false;
+  const lowEnd = grid.aboveMm != null ? Math.min(n, grid.aboveMm) : n;
+  const k = (lowEnd - grid.minMm) / grid.incrementMm;
+  if (Math.abs(k - Math.round(k)) > 1e-9) return false;
+  if (grid.aboveMm == null || n <= grid.aboveMm) return true;
+  const j = (n - grid.aboveMm) / grid.incrementAboveMm;
+  return Math.abs(j - Math.round(j)) < 1e-9;
+}
+const MGP10_RE = /\bMGP\s*-?\s*10\b/i;
+/** Is this timber grade MGP10 ("MGP10", "MGP 10", "mgp10")? Not MGP12, not LVL Smart 10. */
+export const isMgp10Grade = (grade) => MGP10_RE.test(String(grade ?? ""));
+/** The stock grid a grade buys on: the stepped MGP10 grid, or the owner's 1,200 + 300n for everything else. */
+export const timberGridFor = (grade) => (isMgp10Grade(grade) ? MGP10_GRID : TIMBER_GRID);
+/** Is this a length on the timber grid (1,200, 1,500, 1,800 …; for MGP10 300 mm steps to 3,000 then 600 mm steps)? Only these can be marked "not stocked". */
+export function onTimberGrid(mm, grade = null) {
+  return onGrid(mm, timberGridFor(grade));
+}
+/** The stock rule in words for an editor: what lengths this grade is bought in (MGP10 differs above 3 m). */
+export const timberStockRuleText = (grade) => (isMgp10Grade(grade)
+  ? "MGP10: 1200 mm, then every 300 mm up to 3000 (1500, 1800 … 2700, 3000), then only every 600 mm above 3 m (3600, 4200, 4800 …) — same at every supplier. Short pieces are cut from the longer lengths."
+  : "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier.");
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
 /**
  * HUB 030 (Sam, 25 Oct 2026): "we NEVER use the hardies cavity batten - we always use 90 x 35 pine for battens"; in
@@ -163,6 +200,16 @@ export const WALL_LVL_STOCK_MIN_MM = 6300;
 export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate: false });
 /** Sam, round 2 (25 Oct 2026): 2 full-length studs each side of every opening on Walls (windows, doors and other). */
 export const WALL_STUDS_EACH_SIDE = 2;
+/** Sam, 17 Nov 2026 (HUB 031): wet-area walls go to 450 stud centres. The only per-wall value the screens write; the server keeps 100–1,200. */
+export const WET_WALL_CENTRES_MM = 450;
+/** Sam, 17 Nov 2026 (HUB 031): a cavity slider's framing opening is 2 × the door leaf + 20 mm (920 → 1,860). One value for every slider. */
+export const CAVITY_SLIDER_EXTRA_MM = 20;
+/** The framing opening of a cavity slider whose door leaf is `leafMm` wide. */
+export const cavityOpeningWidth = (leafMm) => 2 * leafMm + CAVITY_SLIDER_EXTRA_MM;
+/** A door already drawn this wide (or wider) is read as the WHOLE slider opening when Cavity slider is turned on [Default, needs Sam]. */
+export const CAVITY_LEAF_WIDE_MM = 1200;
+/** The door leaf of a slider opening of `widthMm`, to the nearest 10. */
+export const cavityLeafFromOpening = (widthMm) => Math.round((widthMm - CAVITY_SLIDER_EXTRA_MM) / 2 / 10) * 10;
 
 const LVL_RE = /\blvl/i;
 /** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */
@@ -229,11 +276,11 @@ export function wallFramingDefaults(presets = []) {
 export function wallPinePlateMaxMm(platesPart) {
   const s = platesPart?.stock || {};
   const max = Number(s.maxMm);
-  if (s.maxMm == null || s.maxMm === "" || !(max >= TIMBER_GRID.minMm)) return null;
+  const g = timberGridFor(platesPart?.grade);   // MGP10 plates step in 600s above 3 m, so a 5,700 longest means 5,400
+  if (s.maxMm == null || s.maxMm === "" || !(max >= g.minMm)) return null;
   const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
-  for (let l = TIMBER_GRID.minMm + Math.floor((max - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) * TIMBER_GRID.incrementMm; l >= TIMBER_GRID.minMm; l -= TIMBER_GRID.incrementMm) {
-    if (!off.has(l)) return l;
-  }
+  const lengths = gridLengthsUpTo(g, max);
+  for (let i = lengths.length - 1; i >= 0; i--) if (!off.has(lengths[i])) return lengths[i];
   return null;
 }
 
@@ -261,7 +308,7 @@ export function longPlateStockLengths(part, overMm = WALL_PART_DEFAULT_MAX_MM.pl
 /** Can a Walls part's longest length buy anything? None set is fine (a note); under 1,200 (the grid's shortest) isn't. */
 export function wallPartLongestOk(part) {
   const m = part?.stock?.maxMm;
-  return m == null || m === "" || Number(m) >= TIMBER_GRID.minMm;
+  return m == null || m === "" || Number(m) >= timberGridFor(part?.grade).minMm;
 }
 
 /** Method per family/purpose (versioned keys from 06). */
@@ -310,7 +357,7 @@ function normaliseWallPart(p, label, part) {
     grade: txt(x.grade, 40), treatment: txt(x.treatment, 40), species: txt(x.species, 40),
     supplierName: txt(x.supplierName), productCode: txt(x.productCode, 60),
     stock: { maxMm,
-      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter((l) => onTimberGrid(l) || l === longest) },
+      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter((l) => onTimberGrid(l, x.grade) || l === longest) },
   };
 }
 
@@ -339,7 +386,7 @@ export function normaliseFamilySpec(spec) {
       grade: txt(s.grade, 40), treatment: txt(s.treatment, 40), species: txt(s.species, 40),
       plies: s.plies == null ? 1 : Math.max(1, Math.round(Number(s.plies)) || 1),
       // the owner's grid for ALL timber suppliers; availability may only remove grid lengths, never add off-grid ones
-      stock: { ...TIMBER_GRID, maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter(onTimberGrid) },
+      stock: { ...timberGridFor(s.grade), maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter((l) => onTimberGrid(l, s.grade)) },
       sizing,
       endAllowanceMm: s.endAllowanceMm == null || s.endAllowanceMm === "" ? 0 : num(s.endAllowanceMm, "End allowance", { min: -1e-9 }),
     };

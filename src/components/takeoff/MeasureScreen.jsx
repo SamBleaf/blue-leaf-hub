@@ -62,7 +62,7 @@
 // (existing measurements stay visible for review). Every valid edit applies at once; Undo/Redo cover all of them.
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES } from "../../../shared/takeoff/index.js";
+import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth } from "../../../shared/takeoff/index.js";
 import { addSplit, appendVertex, computeFlashingPath, finishPath, moveSplit, moveSplitToCorner, resolvePathTap, splitAtLimit } from "../../../shared/takeoff/engine/flashingPath.js";
 import { repeatedPositions } from "../../../shared/takeoff/engine/timber.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
@@ -72,8 +72,9 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
-import { COLORS, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
-import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
+import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
+import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
@@ -209,9 +210,18 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // + Window / + Door (HUB 022 step 2): which opening is being placed (on THIS material's walls, in Line only), the
   // sizes in its boxes (they start at the last window / door in the takeoff, then keep what was typed here) and the
   // first end tapped. Handlers read sizes + first end through refs: a tap straight after typing commits the field first.
+  const [wetMat, setWetMat] = useState(null);              // HUB 031: the Walls item whose "Wet-area walls at 450" mode is on (Select only)
+  const wetLast = useRef(null);
+  const [braceMat, setBraceMat] = useState(null);          // Sam, 18 Nov 2026: the Walls item whose "Add bracing" mode is on (Select only)
+  const [braceType, setBraceType] = useState("ply");       // "ply" (1,200 mm sheet) | "cross" (hoop iron cross brace)
+  const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
+  const [braceNote, setBraceNote] = useState(null);
+  const braceLast = useRef(null);
+  const [wetNote, setWetNote] = useState(null);
   const [openMode, setOpenMode] = useState(null);            // { matId, kind: "window" | "door" }
   const openKind = OPENING_TOOLS.has(mode) && canEdit && openMode && openMode.matId === material?.id ? openMode.kind : null;
-  const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm } }
+  const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm, leafMm } }
+  const [openFlags, setOpenFlags] = useState({ cavity: false, fullHeight: false });   // HUB 031: start OFF at every + Door / + Window
   const openSizesRef = useRef(null);
   const sizesNow = () => openSizesRef.current || lastOpeningSizes(view.measurements);
   function setOpenSize(kind, patch) {
@@ -657,6 +667,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (!all.some((w) => w.shown)) { warn(wallsHidden()); return; }
     if (!openSizesRef.current) { openSizesRef.current = lastOpeningSizes(view.measurements); setOpenSizesState(openSizesRef.current); }
     setOpenMode({ matId: material.id, kind });
+    setOpenFlags({ cavity: false, fullHeight: false });
     setOpenStart(null);
   }
   function stopOpening() { setOpenMode(null); setOpenStart(null); setMsg(null); }
@@ -677,25 +688,50 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const onOutline = st0 ? (st0.outline ? outlines.find((w) => w.id === st0.wallId) : null) : outlineAt(outShown, p, sp, toScreen);
     if (onOutline || st0?.outline) { outlineOpeningTap(kind, p, sp, st0, onOutline); return; }
     if (!walls.length) { warn(`Tap one corner of the ${what} on a ${material.name} wall you drew, then the opposite corner.`); return; }
-    if (!(size.heightMm > 0)) { warn(`Type the ${what} height first.`); return; }
+    // HUB 031: Cavity slider (a door whose opening is 2 × the door + 20) and Full height (to the top of the wall)
+    const cavity = kind === "door" && openFlags.cavity, full = openFlags.fullHeight;
+    if (cavity && !(size.leafMm >= 300)) { warn("Type the door width first."); return; }
+    if (!full && !(size.heightMm > 0)) { warn(`Type the ${what} height first.`); return; }
     if (kind === "window" && !(size.sillMm >= 0)) { warn("Type the sill height first."); return; }
     const opts = { pxPerUnit: pxPerUnit() };
     // a tap on one of this material's walls that is hidden on the plan: say so, rather than "no wall here"
     const offWall = () => (nearestWall(all.filter((w) => !w.shown), p, opts) ? `That wall is hidden on this plan. Tap Show all to add windows and doors to it.`
       : `No ${material.name} wall here. Tap on a wall you traced.`);
+    const sillNow = kind === "door" ? 0 : size.sillMm;
     const st = pendingStart();
     if (!st) {
       const n = nearestWall(walls, p, opts);
       if (!n) { warn(offWall()); return; }
       const w = walls.find((x) => x.id === n.wall.id);
+      if (full && fullHeightMm(measNow(w.id)?.inputs, sillNow) == null) {
+        warn(measNow(w.id)?.inputs?.heightMm > 0 ? `The sill is at or above the top of ${wallName(w.id)}. Check the sill.` : `${wallName(w.id)} has no height yet. Select it and type its height, or turn off Full height.`);
+        return;
+      }
+      if (cavity && cavityOpeningWidth(size.leafMm) > n.station.lengthMm + 1e-6) {
+        warn(`A ${fmtMm(cavityOpeningWidth(size.leafMm))} opening doesn't fit on ${wallName(w.id)} (${fmtMm(Math.round(n.station.lengthMm))} long). Tap a longer wall.`);
+        return;
+      }
       const at = safePointAt(w.points, w.cal, n.station.stationMm) || p;   // shown on the wall line
       setOpenStart({ matId: material.id, kind, p, at, wallId: w.id });
       setMsg(null);
       return;
     }
     const s0 = toScreen(st.p);
-    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn("Tap the other end further away. Zoom in for a narrow opening."); return; }
-    const r = planOpening(walls, st.p, p, opts);
+    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn(cavity ? "Tap further along the wall, towards the other end." : "Tap the other end further away. Zoom in for a narrow opening."); return; }
+    let r;
+    if (cavity) {
+      const W = cavityOpeningWidth(size.leafMm);
+      const others = new Map([[st.wallId, (openingsByWall.get(st.wallId) || []).map((o) => ({ x0: o.inputs?.xMm, x1: o.inputs?.xMm + o.inputs?.widthMm, label: o.inputs?.label }))]]);
+      const c = planCavityOpening(walls.filter((w) => w.id === st.wallId), st.p, p, W, others, opts);
+      if (!c.ok) {
+        // the first end stays: tap again towards the other end (or Undo to start over)
+        warn(c.reason === "past_end" ? `From there, the ${fmtMm(W)} opening runs ${fmtMm(c.overMm)} past the end of ${wallName(st.wallId)}. Tap towards the other end, or Undo this end.`
+          : c.reason === "overlap" ? `From there, the ${fmtMm(W)} opening runs into ${c.label}. Tap towards the other end, or Undo this end.`
+            : c.reason === "too_long" ? `A ${fmtMm(W)} opening doesn't fit on ${wallName(st.wallId)}. Tap a longer wall.` : "Tap further along the wall, towards the other end.");
+        return;
+      }
+      r = { ok: true, wallId: c.wallId, xMm: c.xMm, widthMm: c.widthMm, tappedWidthMm: c.widthMm, clipped: null, pocket: c.pocket, movedMm: c.movedMm };
+    } else r = planOpening(walls, st.p, p, opts);
     if (!r.ok) {
       // the first end stays: tap the other end again (or Undo to start over)
       warn(r.reason === "different_walls" ? `Both ends go on the same wall. Tap the other end on ${wallName(r.wallId)}.`
@@ -707,7 +743,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     }
     const wall = measNow(r.wallId);
     const label = nextOpeningLabel((openingsByWall.get(wall.id) || []).map((o) => o.inputs?.label), kind);
-    const inputs = { xMm: r.xMm, sillMm: kind === "door" ? 0 : size.sillMm, widthMm: r.widthMm, heightMm: size.heightMm, label, type: kind };
+    const inputs = { xMm: r.xMm, sillMm: sillNow, widthMm: r.widthMm, heightMm: full ? fullHeightMm(wall.inputs, sillNow) : size.heightMm, label, type: kind,
+      ...(full ? { fullHeight: true } : {}), ...(cavity ? { cavityLeafMm: size.leafMm, cavityPocket: r.pocket } : {}) };
     const rec = openingRecord(newId(), wall.id, inputs);
     const op = { redo: partial({ measurements: [rec] }), undo: partial({ archive: { measurements: [rec.id] } }) };
     record(op);
@@ -716,6 +753,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     // what was cut, kept on the opening's card until the next one is placed (the next tap must not wipe it)
     const name = wallName(wall.id), tapped = fmtMm(r.tappedWidthMm);
     const notes = [];
+    if (r.movedMm > 0) notes.push(`${label} ran ${fmtMm(r.movedMm)} past the end of ${name}, so it's moved back to finish at the end. Undo, or move it on the elevation.`);
     if (r.clipped === "corner") notes.push(`${label} went round the corner, so it's on ${name} only (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
     if (r.clipped === "end") notes.push(`${label} ran past the end of ${name}, so it's cut back to the wall (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
     if (r.clipped === "join") {
@@ -961,7 +999,69 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }
   /** Select → Height on a wall: that wall only (HUB 022). */
   function setWallHeight(m, n) {
-    record({ redo: partial({ measurements: [{ ...m, inputs: { ...(m.inputs || {}), heightMm: n } }] }), undo: partial({ measurements: [m] }) });
+    const nextInputs = { ...(m.inputs || {}), heightMm: n };
+    // HUB 031: its full-height openings follow in the SAME edit, so one Undo puts the wall and them back
+    const fol = fullHeightFollowers(openingsByWall.get(m.id), nextInputs);
+    record({ redo: partial({ measurements: [{ ...m, inputs: nextInputs }, ...fol.map((f) => f.next)] }), undo: partial({ measurements: [m, ...fol.map((f) => f.before)] }) });
+  }
+  /** Select → Stud centres on a wall (HUB 031): this wall only. Back to the item's centres DELETES the key. One edit, one Undo. */
+  function setWallCentres(m, mm) {
+    record({ redo: partial({ measurements: [{ ...m, inputs: withWallCentres(m.inputs, mm) }] }), undo: partial({ measurements: [m] }) });
+  }
+  /** Select → Carries the roof on a wall (HUB 031): this wall only; matching the item's answer deletes the key. */
+  function setWallCarries(m, v) {
+    const inputs = { ...(m.inputs || {}) };
+    if (typeof v === "boolean") inputs.loadBearing = v; else delete inputs.loadBearing;
+    record({ redo: partial({ measurements: [{ ...m, inputs }] }), undo: partial({ measurements: [m] }) });
+  }
+  /** Select → Hoop iron on a wall (Sam, 18 Nov 2026): on for every wall; this wall's switch turns it off. Back on DELETES the key. */
+  function setWallHoopIron(m, on) {
+    const inputs = { ...(m.inputs || {}) };
+    if (on) delete inputs.noHoopIron; else inputs.noHoopIron = true;
+    record({ redo: partial({ measurements: [{ ...m, inputs }] }), undo: partial({ measurements: [m] }) });
+  }
+  /** A tap in Wet-area walls mode: that wall of THIS Walls item goes to 450, or back to the item's centres. */
+  function wetTap(p) {
+    const walls = materialWalls();
+    const opts = { pxPerUnit: pxPerUnit() };
+    const hit = nearestWall(walls.filter((w) => w.shown), p, opts);
+    if (!hit) {
+      setMsg({ tone: "warn", text: nearestWall(walls.filter((w) => !w.shown), p, opts) ? "That wall is hidden on this plan. Tap Show all to change it." : `No ${material.name} wall here. Tap on a wall you traced.` });
+      return;
+    }
+    const now = performance.now();
+    if (wetLast.current && wetLast.current.id === hit.wall.id && now - wetLast.current.t < BURST_MS) return;   // a double-tap changes it once
+    wetLast.current = { id: hit.wall.id, t: now };
+    const m = measNow(hit.wall.id);
+    if (!m) return;
+    const next = toggleWetWall(m.inputs);
+    record({ redo: partial({ measurements: [{ ...m, inputs: next }] }), undo: partial({ measurements: [m] }) });
+    const on = wallOwnCentresMm({ inputs: next });
+    setWetNote(on ? `${m.inputs?.name || "Wall"} now at ${WET_WALL_CENTRES_MM}` : `${m.inputs?.name || "Wall"} back to ${itemCentresMm(material)}`);
+  }
+  /** A tap in Add bracing mode: a 1,200 mm ply sheet or a hoop iron cross brace is clicked out on that wall. One tap, one Undo. */
+  function braceTap(p) {
+    const walls = materialWalls();
+    const opts = { pxPerUnit: pxPerUnit() };
+    const hit = nearestWall(walls.filter((w) => w.shown), p, opts);
+    if (!hit) {
+      setMsg({ tone: "warn", text: nearestWall(walls.filter((w) => !w.shown), p, opts) ? "That wall is hidden on this plan. Tap Show all to change it." : `No ${material.name} wall here. Tap on a wall you traced.` });
+      return;
+    }
+    const now = performance.now();
+    if (braceLast.current && now - braceLast.current < BURST_MS) return;   // a double-tap adds one mark
+    braceLast.current = now;
+    const m = measNow(hit.wall.id);
+    if (!m) return;
+    const name = m.inputs?.name || "Wall";
+    const r = addBracingMark(m.inputs, { type: braceType, atMm: hit.station.stationMm, lengthMm: hit.station.lengthMm, spanMm: braceSpan });
+    if (!r.ok) { setMsg({ tone: "warn", text: `${name}: ${r.error}` }); return; }
+    record({ redo: partial({ measurements: [{ ...m, inputs: r.inputs }] }), undo: partial({ measurements: [m] }) });
+    setBraceNote(`${name}: ${bracingMarkText(r.mark, bracingHeightMm(r.inputs))}`);
+  }
+  /** Select → a wall → Remove one bracing mark. One Undo puts it back. */
+  function removeBrace(m, id) {
+    record({ redo: partial({ measurements: [{ ...m, inputs: removeBracingMark(m.inputs, id) }] }), undo: partial({ measurements: [m] }) });
   }
   function insertPoint(m, k, p) {
     const r = geometryEdit(m, [...m.points.slice(0, k), p, ...m.points.slice(k)]);
@@ -1094,6 +1194,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (lf && performance.now() - lf.t < BURST_MS && Math.hypot(lf.sp.x - sp.x, lf.sp.y - sp.y) <= DOUBLE_TAP_SLOP_PX + 2 && (PATH_TOOLS.has(mode) || LINE_TOOLS.has(mode) || SHAPE_TOOLS.has(mode))) return;
     setMsg(null);
     if (hl.ids.length) setHl((h) => ({ ...h, ids: [] }));
+    if (mode === "select" && wetOn) { wetTap(p); return; }
+    if (mode === "select" && braceOn) { braceTap(p); return; }
     if (mode === "select") { selectTap(sp); return; }
     if (openKind) { openingTap(p, sp); return; }
     if (PATH_TOOLS.has(mode)) { pathTap(p, sp); return; }
@@ -1136,6 +1238,13 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const results = material && familyOf(material) ? ws.computed?.materialResults?.[material.id] || null : null;
   // HUB 028 Walls: the parts' needs are counted on the Line panel ("Details: n to fix ›") and listed on the Walls card
   const wallsItem = isWallsItem(material);
+  // Wet-area walls mode (HUB 031): Select with nothing picked, on a Walls item, until Done / another tool / another item
+  const wetOn = mode === "select" && canEdit && wallsItem && wetMat === material?.id;
+  useEffect(() => { if (wetMat && (mode !== "select" || wetMat !== material?.id)) setWetMat(null); }, [mode, material?.id, wetMat]);
+  // Add bracing mode (Sam, 18 Nov 2026): Select with nothing picked, on a Walls item, until Done / another tool / another item
+  const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn;
+  useEffect(() => { if (braceMat && (mode !== "select" || braceMat !== material?.id)) setBraceMat(null); }, [mode, material?.id, braceMat]);
+  const wetWalls = wallsItem ? wetWallsOf(view.measurements, view.contributions, material.id) : [];
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
   // a wall the calculation blocked is named on the line ("· Wall 1 not counted"), its reason straight under it
   const wallsText = wallsItem ? wallFramingText(wallFramingTotals(results), material.name, wallsNotCounted(results, view.measurements, view.contributions, material.id)) : "";
@@ -1167,6 +1276,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (!cs.length) return !isHiddenItem(UNASSIGNED);
     return cs.some((c) => !isHiddenItem(c.jobMaterialId));
   };
+  const braceTotals = braceOn ? (() => {
+    let ply = 0, cross = 0, walls = 0;
+    for (const w of materialWalls()) { const m = measNow(w.id); const marks = bracingOf(m?.inputs); if (marks.length) walls += 1; ply += marks.filter((x) => x.type === "ply").length; cross += marks.filter((x) => x.type === "cross").length; }
+    return { ply, cross, walls };
+  })() : null;
   const toggleItem = (id) => setHidden((cur) => {
     // leaving "everything hidden" for a per-item list: every item on this page starts hidden, then this one flips
     const n = cur.has(HIDE_ALL) ? new Set(layerItems.map((it) => it.id)) : new Set(cur);
@@ -1281,8 +1395,15 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (m.kind === "wall" && pts.length >= 2) {
       const wc = calsById.get(m.calibrationId);
       const len = pathLengthMm(pts, wc);
-      const wallLabel = `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}`;
-      const shape = <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={COLORS.wall} selected={isSel} label={wallLabel} />;
+      // HUB 031: on a Walls item a wall with its own centres is drawn cyan and says so ("450 ctrs"): colour is never the only cue
+      const own = isWallsItem(matOf(m)) ? wallOwnCentresMm(m) : null;
+      // a short wall on a phone can't fit "Wall 2 · 4,000 · 450 ctrs": short on screen keeps the name and the centres, the length drops
+      const s0 = toScr(pts[0]), s1 = toScr(pts[pts.length - 1]);
+      const tight = Math.hypot(s1.x - s0.x, s1.y - s0.y) < 150;
+      const wallLabel = tight
+        ? `${m.inputs?.name || "Wall"}${own ? ` · ${fmtMm(own)}` : len ? ` · ${fmtMm(Math.round(len))}` : ""}`
+        : `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}${own ? ` · ${fmtMm(own)} ctrs` : ""}`;
+      const shape = <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={own ? COLORS.wetWall : COLORS.wall} selected={isSel} label={wallLabel} />;
       // its windows and doors (HUB 022 step 2), where they are along the wall from its start, labelled clear of its name
       const ops = pts.length === 2 && m.inputs?.kind !== "polygon" ? openingsByWall.get(m.id) || [] : [];
       if (!ops.length || !wc) return shape;
@@ -1563,34 +1684,62 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             const lx = lo?.inputs || {};
             const loOutline = lo ? isOutline(measNow(lo.parentId)) : false;
             const straight = materialWalls().some((w) => w.shown), drawn = materialOutlines().some((w) => w.shown);
-            const noHeight = !(s.heightMm > 0), noSill = win && !(s.sillMm >= 0);
-            const needSize = straight && (noHeight || noSill);
-            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : "Now tap the other end.")
+            // HUB 031: Cavity slider (+ Door only, a timber walls item) and Full height; both start OFF each time + Door / + Window is pressed
+            const timberWalls = familyOf(material) === "timber";
+            const cavityOn = straight && !win && timberWalls && openFlags.cavity, fullOn = straight && openFlags.fullHeight;
+            const noHeight = !fullOn && !(s.heightMm > 0), noSill = win && !(s.sillMm >= 0);
+            const noLeaf = cavityOn && !(s.leafMm >= 300);
+            const needSize = straight && (noHeight || noSill || noLeaf);
+            const slotW = cavityOn && s.leafMm >= 300 ? cavityOpeningWidth(s.leafMm) : null;
+            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : cavityOn ? "Now tap towards the other end." : "Now tap the other end.")
               : !straight ? `Tap one corner of the ${what} on the wall, then the opposite corner.`
+                : noLeaf ? "Type the door width, then tap one end of the slider."
+                : cavityOn ? `Tap one end on the wall, then tap towards the other end. It's always ${fmtMm(slotW)} long.`
                 : needSize ? (win ? `Type the ${noHeight && noSill ? "height and sill" : noHeight ? "height" : "sill height"}, then tap one end of the window.` : "Type the door height, then tap one end.")
                   : lo && (lx.type || "window") === openKind ? `Tap both ends of the next ${what}.` : `Tap one end of the ${what} on a wall, then the other end.`;
+            const lastCardEl = lo && (
+                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-last-opening={lo.id}>
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate"><b className="text-ink" data-last-opening-label="">{lx.label} in {wallName(lo.parentId)}</b>
+                        <span className="text-muted" data-last-opening-size="">{loOutline ? ` · ${fmtMm(lx.widthMm)} × ${fmtMm(lx.heightMm)}${(lx.type || "window") === "window" ? `, sill ${fmtMm(lx.sillMm)}` : ""}` : lx.cavityLeafMm ? ` · cavity slider · ${fmtMm(lx.widthMm)} opening (${fmtMm(lx.cavityLeafMm)} door)` : ` · ${fmtMm(lx.widthMm)} wide`}</span></p>
+                      {/* the same as ↶: a first end tapped comes off first, then this opening */}
+                      <Btn onClick={undo} aria-label={openStart ? "Undo this end" : `Undo ${lx.label}`}>Undo</Btn>
+                    </div>
+                    {lastOpening.note && <p className="text-[11px] text-amber-800" data-last-opening-note="">{lastOpening.note}</p>}
+                  </div>
+                            );
+            const noteFirst = !!(lo && lastOpening.note);
             return (
               <div className="space-y-2 text-sm" data-opening-panel={openKind}>
+                {noteFirst && lastCardEl}
+                {straight && (
+                  <div className="flex flex-wrap gap-2" data-opening-flags="">
+                    {!win && timberWalls && (
+                      <button type="button" aria-pressed={cavityOn} onClick={() => setOpenFlags((f) => ({ ...f, cavity: !f.cavity }))} data-opening-cavity=""
+                        className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${cavityOn ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Cavity slider</button>
+                    )}
+                    <button type="button" aria-pressed={fullOn} data-opening-fullheight=""
+                      onClick={() => { setOpenFlags((f) => ({ ...f, fullHeight: !f.fullHeight })); if (win && !openFlags.fullHeight) setOpenSize("window", { sillMm: 0 }); }}
+                      className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${fullOn ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Full height</button>
+                  </div>
+                )}
+                {cavityOn && (
+                  <div data-opening-leaf="">
+                    <NumberField label="Door width" value={s.leafMm ?? null} min={300} max={1500} optional onCommit={(n) => setOpenSize("door", { leafMm: n })} help="The door itself, e.g. 920" />
+                    <p className="mt-1 text-[11px] text-muted" data-opening-cavity-width="">{slotW ? `Opening ${fmtMm(slotW)} (2 × ${fmtMm(s.leafMm)} + 20).` : "Opening: 2 × door + 20."}</p>
+                  </div>
+                )}
                 {straight && (
                   <div className="grid grid-cols-2 gap-2">
-                    <div data-opening-height=""><NumberField label="Height" value={s.heightMm ?? null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize(openKind, { heightMm: n })} /></div>
+                    {fullOn ? <p className="flex items-center text-[12px] text-muted" data-opening-fullheight-text="">Height: the wall&apos;s height.</p>
+                      : <div data-opening-height=""><NumberField label="Height" value={s.heightMm ?? null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize(openKind, { heightMm: n })} /></div>}
                     {win && <div data-opening-sill=""><NumberField label="Sill height" value={s.sillMm ?? null} min={0} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize("window", { sillMm: n })} /></div>}
                   </div>
                 )}
                 <p className={needSize ? "text-amber-800" : "text-muted"} data-opening-hint="">{hint}</p>
                 {straight && drawn && !openStart && <p className="text-[11px] text-muted" data-opening-outline-hint="">On a wall you drew on an elevation, tap two opposite corners instead. Nothing to type.</p>}
                 {!win && <p className="text-[11px] text-muted">A door sits on the floor.</p>}
-                {lo && (
-                  <div className="space-y-1 rounded-lg border border-hairline bg-page px-3 py-1" data-last-opening={lo.id}>
-                    <div className="flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate"><b className="text-ink" data-last-opening-label="">{lx.label} in {wallName(lo.parentId)}</b>
-                        <span className="text-muted" data-last-opening-size="">{loOutline ? ` · ${fmtMm(lx.widthMm)} × ${fmtMm(lx.heightMm)}${(lx.type || "window") === "window" ? `, sill ${fmtMm(lx.sillMm)}` : ""}` : ` · ${fmtMm(lx.widthMm)} wide`}</span></p>
-                      {/* the same as ↶: a first end tapped comes off first, then this opening */}
-                      <Btn onClick={undo} aria-label={openStart ? "Undo this end" : `Undo ${lx.label}`}>Undo</Btn>
-                    </div>
-                    {lastOpening.note && <p className="text-[11px] text-amber-800" data-last-opening-note="">{lastOpening.note}</p>}
-                  </div>
-                )}
+                {!noteFirst && lastCardEl}
                 <div className="flex flex-wrap gap-2">
                   <Btn onClick={stopOpening}>{mode === "line" ? "Trace more walls" : "Draw more walls"}</Btn>
                   <Btn kind="ghost" onClick={() => startOpening(win ? "door" : "window")}>{win ? "+ Door" : "+ Window"}</Btn>
@@ -1786,7 +1935,42 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             </div>
           )}
 
-          {mode === "select" && !sel && <p className="text-sm text-muted">Tap a run, line, wall or count mark to select it.{ticksBy.size ? " Tap a tick to change one member." : ""}</p>}
+          {mode === "select" && !sel && !wetOn && !braceOn && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted">Tap a run, line, wall or count mark to select it.{ticksBy.size ? " Tap a tick to change one member." : ""}</p>
+              {wallsItem && canEdit && itemCentresMm(material) !== WET_WALL_CENTRES_MM && (
+                <Btn onClick={() => { setWetMat(material.id); setWetNote(null); wetLast.current = null; setMsg(null); }} data-wet-start="">Wet-area walls at {WET_WALL_CENTRES_MM}</Btn>
+              )}
+              {wallsItem && canEdit && (
+                <Btn onClick={() => { setBraceMat(material.id); setBraceNote(null); braceLast.current = null; setMsg(null); }} data-brace-start="">Add bracing</Btn>
+              )}
+            </div>
+          )}
+          {wetOn && !sel && (
+            <div className="space-y-2 text-sm" data-wet-panel="">
+              <p className="font-medium text-ink">Wet-area walls · {material.name}</p>
+              <p className="text-muted">Tap each wet-area wall. It turns blue and its studs go to {WET_WALL_CENTRES_MM} centres. Tap it again to put it back to {itemCentresMm(material)}.</p>
+              <p data-wet-count="">{wetWalls.length ? `${wetWalls.length} wall${wetWalls.length === 1 ? "" : "s"} at ${WET_WALL_CENTRES_MM}: ${wetWalls.slice(0, 6).map((w) => w.name).join(", ")}${wetWalls.length > 6 ? ` … and ${wetWalls.length - 6} more` : ""}` : `No walls at ${WET_WALL_CENTRES_MM} yet.`}</p>
+              {wetNote && <p className="text-[12px] text-muted" data-wet-last="">{wetNote}. Undo puts it back.</p>}
+              <Btn kind="primary" onClick={() => { setWetMat(null); setWetNote(null); }}>Done</Btn>
+            </div>
+          )}
+
+          {braceOn && !sel && (
+            <div className="space-y-2 text-sm" data-brace-panel="">
+              <p className="font-medium text-ink">Add bracing · {material.name}</p>
+              <div className="flex gap-2" role="radiogroup" aria-label="Bracing type">
+                {[["ply", "Ply sheet"], ["cross", "Hoop iron cross"]].map(([k, text]) => (
+                  <button key={k} type="button" role="radio" aria-checked={braceType === k} onClick={() => setBraceType(k)} data-brace-type={k}
+                    className={`min-h-[44px] flex-1 rounded-lg border px-3 text-sm font-medium focus-ring ${braceType === k ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>))}
+              </div>
+              {braceType === "cross" && <div className="w-48" data-brace-span=""><NumberField label="Cross brace span" unit="mm" value={braceSpan} min={BRACING_RULE.crossSpanMinMm} max={20000} onCommit={(n) => setBraceSpan(n ?? BRACING_RULE.crossSpanDefaultMm)} /></div>}
+              <p className="text-muted">{braceType === "ply" ? "Tap along a wall where each 1,200 mm sheet goes. Its length follows the wall height." : `Tap a wall where each cross brace goes (${braceSpan} mm span, two hoop iron diagonals, 2 tensioners).`} Tap again for the next one.</p>
+              <p data-brace-count="">{braceTotals.ply + braceTotals.cross ? `${braceTotals.ply ? `${braceTotals.ply} ply sheet${braceTotals.ply === 1 ? "" : "s"}` : ""}${braceTotals.ply && braceTotals.cross ? ", " : ""}${braceTotals.cross ? `${braceTotals.cross} cross brace${braceTotals.cross === 1 ? "" : "s"}` : ""} on ${braceTotals.walls} wall${braceTotals.walls === 1 ? "" : "s"}.` : "No bracing yet."}</p>
+              {braceNote && <p className="text-[12px] text-muted" data-brace-last="">{braceNote}. Undo takes it off.</p>}
+              <Btn kind="primary" onClick={() => { setBraceMat(null); setBraceNote(null); }}>Done</Btn>
+            </div>
+          )}
 
           {mode === "select" && sel && selUnfinished && (
             <div className="space-y-2 text-sm">
@@ -1880,6 +2064,56 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               {run && run.walls.length > 1 && <p className="text-[11px] text-muted">{runLabel(run)} · wall {run.walls.findIndex((w) => w.id === sel.id) + 1} of {run.walls.length}</p>}
               {ops.length > 0 && <p className="text-[11px] text-muted" data-wall-openings="">{ops.map((o) => o.inputs?.label || "Opening").join(", ")} in this wall. Change {ops.length === 1 ? "it" : "them"} on the elevation.</p>}
               {/* HUB 022: the height of THIS wall only — the rest of its run keeps theirs */}
+              {rect && canEdit && isWallsItem(selMat) && (
+                <div className="space-y-1" data-wall-centres="">
+                  <p className="text-[11px] text-muted">Stud centres (this wall only)</p>
+                  <div className="flex gap-2">
+                    {[itemCentresMm(selMat), WET_WALL_CENTRES_MM].filter((v, i, a) => a.indexOf(v) === i).map((mm) => {
+                      const own = wallOwnCentresMm(sel);
+                      const on = mm === (own ?? itemCentresMm(selMat));
+                      return <button key={mm} type="button" aria-pressed={on} onClick={() => setWallCentres(sel, mm === itemCentresMm(selMat) ? null : mm)}
+                        className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{mm}</button>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {rect && canEdit && isWallsItem(selMat) && (
+                <div className="space-y-1" data-wall-loadbearing="">
+                  <p className="text-[11px] text-muted">Carries the roof (this wall only)</p>
+                  <div className="flex gap-2">
+                    {[["yes", "Yes", true], ["no", "No", false]].map(([k, text, v]) => {
+                      const own = typeof sel.inputs?.loadBearing === "boolean" ? sel.inputs.loadBearing : (typeof selMat.rules?.carriesRoof === "boolean" ? selMat.rules.carriesRoof : null);
+                      return <button key={k} type="button" aria-pressed={own === v} onClick={() => setWallCarries(sel, v === selMat.rules?.carriesRoof ? null : v)}
+                        className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${own === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {rect && canEdit && isWallsItem(selMat) && (
+                <div className="space-y-1" data-wall-hoopiron="">
+                  <p className="text-[11px] text-muted">Hoop iron on this wall: 2 straps of 0.7 m for every 1,200 mm of wall</p>
+                  <div className="flex gap-2">
+                    {[["on", "On", true], ["off", "Off", false]].map(([k, text, v]) => {
+                      const on = sel.inputs?.noHoopIron !== true;
+                      return <button key={k} type="button" aria-pressed={on === v} onClick={() => setWallHoopIron(sel, v)}
+                        className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {isWallsItem(selMat) && bracingOf(sel.inputs).length > 0 && (() => {
+                const h = bracingHeightMm(sel.inputs);
+                const b = bracingForWall(bracingOf(sel.inputs), h, pathLengthMm(sel.points, calsById.get(sel.calibrationId)));
+                return (
+                  <div className="space-y-1" data-wall-bracing="">
+                    <p className="text-[11px] text-muted">Bracing on this wall</p>
+                    <ul className="space-y-1">{bracingOf(sel.inputs).map((x) => (
+                      <li key={x.id} className="flex items-center gap-2 text-sm text-ink"><span className="min-w-0 flex-1">{bracingMarkText(x, h)}</span>
+                        {canEdit && <Btn kind="ghost" onClick={() => removeBrace(sel, x.id)} aria-label={`Remove ${bracingMarkText(x, h)}`}>Remove</Btn>}</li>))}</ul>
+                    {b.notes.map((t) => <p key={t} className="text-[11px] text-amber-800">{t}</p>)}
+                  </div>
+                );
+              })()}
               {rect && canEdit ? (
                 <div className="w-48" data-wall-height=""><NumberField key={sel.id} label="Wall height" value={sel.inputs?.heightMm ?? null} min={1} max={MAX_WALL_MM} onCommit={(n) => setWallHeight(sel, n)} help="This wall only." /></div>
               ) : (

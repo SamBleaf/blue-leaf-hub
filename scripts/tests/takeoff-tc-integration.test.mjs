@@ -31,7 +31,7 @@ const summary = (ls) => ls.map((l) => `${l.quantity} ${l.unit}${l.finishedLength
 
 // ── J1 timber ─────────────────────────────────────────────────────────────────
 const rafters = (rules = {}) => ({ id: "tim", name: "Rafters 90x45", methodKey: "repeated_members", methodVersion: 2,
-  spec: { family: "timber", purpose: "rafters", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H3", endAllowanceMm: 100 },
+  spec: { family: "timber", purpose: "rafters", section: { depthMm: 90, widthMm: 45 }, grade: "MGP15", treatment: "H3", endAllowanceMm: 100 },
   rules: { centresMm: 600, lengthSource: "projected", pitchDeg: 30, ...rules } });
 const j1 = (rules) => ws({ materials: [rafters(rules)],
   measurements: [line("dist", "distribution", 10000, { startOffsetMm: 0, endOffsetMm: 0, includeStart: true, includeEnd: true, spacing: "fixed", overrides: [] }), line("mem", "member", 4500, { mode: "projected" })],

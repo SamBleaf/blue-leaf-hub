@@ -1690,10 +1690,10 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB028 s3" })).status, 200);
   // three saved company products (one per part, with treatments), so nothing is "missing product"
   const prod = (purpose, widthMm = 45) => ({ id: purpose, isActive: true, rules: {},
-    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP10", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
+    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP15", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
   const spec = wallFramingDefaults([prod("studs"), prod("plates"), prod("noggins", 35)]);
   const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
-    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false } }] },
+    materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false, openingFraming: false } }] },   // HUB 031: the pre-rules item (the rules have their own tests)
     measurements: { upsert: [
       { id: w1, kind: "wall", inputs: { kind: "rect", widthMm: 6000, heightMm: 2700, name: "Wall 1" } },
       { id: w2, kind: "wall", inputs: { kind: "rect", widthMm: 4000, heightMm: 2700, name: "Wall 2" } },
@@ -1712,14 +1712,14 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   const oid = id();
   const o = await SP(`/workspaces/${w}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier });
   assert.equal(o.status, 200, JSON.stringify(o.data));
-  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls));
+  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls) && !l.hoop);   // HUB 033: the hoop iron line has its own tests
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = (await q("SELECT quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY item->>'description'", [oid])).rows;
   assert.deepEqual(stored.map((x) => [x.item.component, x.quantity, Number(x.finished_length_mm), x.item.description]), [
-    ["noggins", 1, 1800, "Noggins 90 × 35 MGP10 H2 — 1,800 mm length"], ["noggins", 1, 4800, "Noggins 90 × 35 MGP10 H2 — 4,800 mm length"],
-    ["plates", 2, 4200, "Plates 90 × 45 MGP10 H2 — 4,200 mm length"], ["plates", 2, 6000, "Plates 90 × 45 MGP10 H2 — 6,000 mm length"],
-    ["studs", 21, 2700, "Studs 90 × 45 MGP10 H2 — 2,700 mm length"]]);
+    ["noggins", 1, 1800, "Noggins 90 × 35 MGP15 H2 — 1,800 mm length"], ["noggins", 1, 4800, "Noggins 90 × 35 MGP15 H2 — 4,800 mm length"],
+    ["plates", 2, 4200, "Plates 90 × 45 MGP15 H2 — 4,200 mm length"], ["plates", 2, 6000, "Plates 90 × 45 MGP15 H2 — 6,000 mm length"],
+    ["studs", 21, 2700, "Studs 90 × 45 MGP15 H2 — 2,700 mm length"]]);
   const lines = (await S(`/workspaces/${w}/orders`)).data.orders.find((x) => x.id === oid).lines;
   assert.deepEqual(lines.map((l) => l.item.component).sort(), ["noggins", "noggins", "plates", "plates", "studs"]);
   // the draft export carries the per-part cut lists in its site appendix
@@ -1771,7 +1771,7 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   const spec = { ...base, components: { ...base.components,
     plates: { ...base.components.plates, treatment: "H2" },
     noggins: { ...base.components.noggins, treatment: "H2", stock: { maxMm: 5400, unavailableMm: [4800] } } } };
-  const mat = { id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: true }, profile: null };
+  const mat = { id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: true, openingFraming: false }, profile: null };
   // one Line run A → B → C (Wall 1 6,000 at 2,700, Wall 2 4,000 at 3,000), saved in ONE commit with its run and order
   const c = (xMm, yMm) => ({ x: 200 + xMm * k, y: 200 + yMm * k });
   const wall = (mid, pts, heightMm, seq) => ({ id: mid, kind: "wall", documentId: doc, pageIndex: 0, calibrationId: cal, points: pts,
@@ -1794,7 +1794,7 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   assert.deepEqual(kept.spec.components, spec.components, "every part as sent, its stock too");
   assert.deepEqual(kept.spec.components.noggins.stock, { maxMm: 5400, unavailableMm: [4800] });
   assert.deepEqual([kept.spec.components.plates.stock.maxMm, kept.spec.components.longPlates.stock.maxMm, kept.spec.components.studs.stock.maxMm], [6000, 11000, null]);
-  assert.deepEqual([kept.name, kept.methodKey, kept.methodVersion, kept.rules], ["Walls", "wall_framing", 1, { centresMm: 600, doubleTopPlate: true }]);
+  assert.deepEqual([kept.name, kept.methodKey, kept.methodVersion, kept.rules], ["Walls", "wall_framing", 1, { centresMm: 600, doubleTopPlate: true, openingFraming: false }]);
   const back = again.snapshot.measurements.filter((m) => m.inputs?.runId === run).sort((a, b) => a.inputs.seq - b.inputs.seq);
   assert.deepEqual(back.map((m) => [m.id, m.kind, m.inputs.seq, m.inputs.heightMm, m.inputs.name, m.calibrationId]), [[w1, "wall", 1, 2700, "Wall 1", cal], [w2, "wall", 2, 3000, "Wall 2", cal]]);
   assert.deepEqual(back.map((m) => m.points), [meas[0].points, meas[1].points], "the traced points, the corner shared exactly");
@@ -1826,6 +1826,32 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   }
   assert.equal(await rev(), before, "nothing saved");
   assert.deepEqual(mine((await S(`/workspaces/${w}`)).data.computed), mine(again.computed), "the lines are unchanged");
+  // HUB 031 (Sam, 17 Nov 2026) through the REAL routes and the local Postgres: a wall's own centres and loadBearing, a door that is a
+  // cavity slider and full height, a typed lintel and the roof width an opening carries all come back; taking them away leaves the
+  // keys ABSENT (never null); a nonsense value is refused plainly with nothing saved
+  const live = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  const wallNow = live.find((m) => m.id === w1), doorNow = live.find((m) => m.id === d1), winNow = live.find((m) => m.id === o1);
+  const sent = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [
+    { ...wallNow, inputs: { ...wallNow.inputs, studCentresMm: 450, loadBearing: false } },
+    { ...doorNow, inputs: { ...doorNow.inputs, widthMm: 1860, heightMm: 2700, fullHeight: true, cavityLeafMm: 920, cavityPocket: "left" } },
+    { ...winNow, inputs: { ...winNow.inputs, cavityLeafMm: 920, lintel: { depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" }, loadRlwMm: 4500 } }] } } });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  const got = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  const gi = (mid) => got.find((m) => m.id === mid).inputs;
+  assert.deepEqual([gi(w1).studCentresMm, gi(w1).loadBearing], [450, false]);
+  assert.deepEqual([gi(d1).fullHeight, gi(d1).cavityLeafMm, gi(d1).cavityPocket, gi(d1).widthMm], [true, 920, "left", 1860]);
+  assert.ok(!("cavityLeafMm" in gi(o1)), "a window drops the slider fields");
+  assert.deepEqual([gi(o1).lintel, gi(o1).loadRlwMm], [{ depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" }, 4500]);
+  const bad31 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [{ ...wallNow, inputs: { ...wallNow.inputs, studCentresMm: 50 } }] } } });
+  assert.equal(bad31.status, 400);
+  assert.match(bad31.data.error, /Stud centres must be between 100 and 1,200 mm/);
+  const cleared = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [
+    { ...wallNow, inputs: Object.fromEntries(Object.entries(wallNow.inputs).filter(([k]) => !["studCentresMm", "loadBearing"].includes(k))) },
+    { ...doorNow, inputs: Object.fromEntries(Object.entries(doorNow.inputs).filter(([k]) => !["fullHeight", "cavityLeafMm", "cavityPocket"].includes(k))) }] } } });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.data));
+  const after = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  for (const k of ["studCentresMm", "loadBearing"]) assert.ok(!(k in after.find((m) => m.id === w1).inputs), `${k} absent`);
+  for (const k of ["fullHeight", "cavityLeafMm", "cavityPocket"]) assert.ok(!(k in after.find((m) => m.id === d1).inputs), `${k} absent`);
 });
 
 await t("HUB 029 step 1: a traced wall on a re-scaled page is held with its cladding and listed by the rescale review with its length; the REAL server keeps the review's re-stamp and refuses the gable the review holds back", async () => {

@@ -33,7 +33,14 @@ const RATIO_EPS = 1e-9; // float noise when stepping k × increment
 const lengthKey = (mm) => Math.round(mm * 1000); // 0.001 mm, as identityKey
 const positive = (v) => isFiniteNumber(v) && v > 0 && v < MAX_LENGTH_MM;
 /** First grid length ≥ needMm: max(min, ceil(L / inc) · inc), noise tolerance EPS_MM in millimetres. */
-const gridBase = (needMm, p) => Math.max(p.minMm, Math.ceil((needMm - EPS_MM) / p.incrementMm) * p.incrementMm);
+// An optional second step (aboveMm + incrementAboveMm): the grid steps by incrementMm up to aboveMm, then by incrementAboveMm
+// (MGP10: 300 mm steps to 3,000, 600 mm steps above). Without it the grid is the plain min + n·increment.
+const stepAt = (len, p) => (p.aboveMm != null && p.incrementAboveMm != null && len >= p.aboveMm - EPS_MM ? p.incrementAboveMm : p.incrementMm);
+const gridBase = (needMm, p) => {
+  const base = Math.max(p.minMm, Math.ceil((needMm - EPS_MM) / p.incrementMm) * p.incrementMm);
+  if (p.aboveMm == null || p.incrementAboveMm == null || base <= p.aboveMm + EPS_MM) return base;
+  return p.aboveMm + Math.ceil((needMm - p.aboveMm - EPS_MM) / p.incrementAboveMm) * p.incrementAboveMm;
+};
 const nonNegativeOrUnset = (v) => v === undefined || v === null || (isFiniteNumber(v) && v >= 0);
 const boolOrUnset = (v) => v === undefined || v === null || typeof v === "boolean"; // unset → false
 const invalid = (message) => ({ code: "invalid-policy", message });
@@ -49,6 +56,11 @@ function selectionProblem(policy) {
       const steps = policy.minMm / policy.incrementMm;
       if (Math.abs(steps - Math.round(steps)) > RATIO_EPS * Math.max(1, steps)) {
         return invalid("The grid minimum must be a whole number of increments (e.g. 1200 with 600 steps) — use a stock list for other lengths.");
+      }
+      if (policy.aboveMm != null || policy.incrementAboveMm != null) {
+        if (!positive(policy.aboveMm) || !positive(policy.incrementAboveMm)) return invalid("A second grid step needs a length and an increment greater than 0.");
+        const k = (policy.aboveMm - policy.minMm) / policy.incrementMm;
+        if (policy.aboveMm < policy.minMm || Math.abs(k - Math.round(k)) > RATIO_EPS * Math.max(1, k)) return invalid("The second grid step must start on a grid length.");
       }
       const max = policy.maxMm;
       if (max !== undefined && max !== null) {
@@ -89,14 +101,13 @@ export function stockPolicyProblem(policy) {
 
 /** Grid lengths ≥ needMm in ascending order (unbounded when maxMm is null, up to the MAX_LENGTH_MM guard). */
 function* gridFrom(needMm, p) {
-  const inc = p.incrementMm;
   const off = new Set((p.unavailableMm || []).map(lengthKey));
   const max = p.maxMm === undefined || p.maxMm === null ? MAX_LENGTH_MM : p.maxMm;
   let len = gridBase(needMm, p);
   for (;;) {
     if (len > max + EPS_MM || len >= MAX_LENGTH_MM) return;
     if (!off.has(lengthKey(len))) yield len;
-    len = Math.max(p.minMm, (Math.floor(len / inc + RATIO_EPS) + 1) * inc);
+    len += stepAt(len, p);
   }
 }
 

@@ -30,7 +30,8 @@ const stockFor = (d) => selectStock(d.lengthMm, d.stockPolicy).stockMm;
 const pieces = (r) => r.demands.reduce((s, d) => s + d.quantity, 0);
 const byRole = (r, role) => r.demands.filter((d) => d.role === role);
 
-const PINE = { section: "90x45", grade: "MGP10", treatment: "H2", species: "Radiata pine" };
+// MGP15 (any grade but MGP10): the 300 grid is every grade but MGP10 (600 mm steps, takeoff-tc-hub032)
+const PINE = { section: "90x45", grade: "MGP15", treatment: "H2", species: "Radiata pine" };
 const rafters = (over = {}) => computeRepeatedMembers({
   materialId: "m-raft", purpose: "rafter", identity: PINE, segments: [{ id: "dist1", runMm: 10000 }], centresMm: 600,
   member: { measurementId: "mem1", mode: "projected", lengthMm: 4500, pitchDeg: 30, allowanceMm: 100 }, stock: { maxMm: 7200 }, ...over,
@@ -46,7 +47,7 @@ const W01 = { id: "W01", xLeftMm: 1150, xRightMm: 2450, sillMm: 900, headMm: 210
 const detail = (over = {}) => ({
   source: "reviewed-detail", ref: "FD-3", belowSill: { required: true, deductionMm: 45 }, aboveHead: { required: true, deductionMm: 190 },
   members: [{ id: "K", role: "king", quantity: 2, lengthFrom: "stud", sameAsStud: true },
-    { id: "L", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 180, identity: { section: "190x45", grade: "MGP10", treatment: "H2" }, stock: { maxMm: 6000 } }],
+    { id: "L", role: "lintel", quantity: 1, lengthFrom: "openingWidth", addMm: 180, identity: { section: "190x45", grade: "MGP15", treatment: "H2" }, stock: { maxMm: 6000 } }],
   ...over,
 });
 
