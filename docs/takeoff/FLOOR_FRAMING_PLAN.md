@@ -37,7 +37,7 @@ From the plan, work out everything to order for the floor frame on a job, plus a
 | 7 | (silent) | Scyon wants joists at least 45 mm nominal width. A 35 mm truss chord does not meet this | **Needs truss manufacturer's confirmation** before Scyon goes on a truss floor. Shown as a warning on the Scyon area, not a block | Scyon guide |
 | 8 | (silent) | Tiled Scyon needs a movement joint where the run exceeds 5.4 m in the sheet direction | Warning on wet areas longer than 5.4 m in the sheet direction | Scyon guide |
 | 9 | Strongback 120 x 35 | Size depends on truss connection: 90 x 35, 120 x 35 or 140 x 35 (F5/P10), 70/90/120 x 35 (F17). 120 x 35 suits the 250 connection in F5/P10 | **Size is a per-job setting, default 120 x 35**, with a note "set from the truss layout" | Pryda floor truss guide (July 2026) |
-| 10 | Mid-span strongbacks (spacing open) | Up to 3.5 m span: none. 3.6 to 6.5 m: one row near midspan. Over 6.5 m: three rows (midspan and quarter points). The job's truss layout states exact positions | Gives the answer to Open Question 1 (section 12) | Pryda guide |
+| 10 | Mid-span strongbacks (spacing open) | Up to 3.5 m span: none. Over 3.5 m up to 6.5 m: one row near midspan. Over 6.5 m: three rows (midspan and quarter points). The job's truss layout states exact positions | Gives the answer to Open Question 1 (section 12) | Pryda guide |
 | 11 | 120 x 35 at truss ends with no beam | Guide shows end trimmers (90 x 35 F5 minimum) with cross bracing; **says nothing** about a 120 x 35 end strongback | Keep Sam's rule (it is his practice), but label it "confirm with truss supplier" in the notes | Pryda guide |
 | 12 | LVL 400 x 63 / 445 x 63 | No manufacturer figure checked | Take as given. Sizes remain a user choice; engineer-specified | Spec only |
 
@@ -54,7 +54,7 @@ Defaults are set once per item, so a normal job is: draw the outline, set direct
 | Add item | Add item, Floor frame (1 tap). Name defaults to "Floor, <level>" | Sheet defaults (below) | Level label |
 | 1 Outline | Pick **Rectangle** (2 taps = 4 corners) or **Outline** (tap each corner, tap the first or Finish to close) | Area, perimeter, plan snapped to the calibrated plan. Needs the page to be calibrated (existing rule, same problem messages) | Edge snapping to wall lines |
 | 2 Openings | **+ Stair void** or **+ Opening**: rectangle or outline, one at a time. Can be skipped ("No openings") | Opening must sit inside the outline (else a warning). Stair voids default to LVL trimmers all round | Mark an opening as "no trimmers" |
-| 3 Truss direction and centres | **Direction:** tap two points along one truss (or tap one of two chips: "Along the long side" / "Along the short side"). **Centres:** one chip row **450 / 600**, default 450 | Direction defaults to span across the SHORT side of the outline (shorter truss, the usual case). Truss lines, count, and sheet direction (perpendicular) all follow from this | Other centres (300, 400, 500, typed); chord depth label |
+| 3 Truss direction and centres | **Direction:** tap two points along one truss (or tap one of two chips: **"Span the short way"** (default) / **"Span the long way"**; "span" is the direction the truss spans). **Centres:** one chip row **450 / 600**, default 450 | Direction defaults to trusses spanning the SHORT way of the outline (shorter truss, the usual case). Truss lines, count, and sheet direction (perpendicular) all follow from this | Other centres (300, 400, 500, typed); chord depth label |
 | 4 Perimeter and ring beams | Screen shows every truss end edge as a line. Tap an edge to toggle **Beam** (LVL ring beam) or leave blank. **Select all ends** is one tap | An edge with no beam gets the 120 x 35 end strongback automatically (shown dashed). Beam size default per section 12 | Beam size per edge |
 | 5 Stair trimmers | For each stair void, one chip: **445 x 63 / 400 x 63** (default 445) | 4 trimmers per void (2 side, 2 end), lengths from the void edges plus bearing allowance | Doubling, custom lengths |
 | 6 Mid-span strongbacks | Nothing to tap by default. Shows "1 row, 4 runs, 21.6 lm" | Rows and positions from the span rule (section 6.5). Runs are cut around voids | Override rows (0 to 3), size |
@@ -62,6 +62,8 @@ Defaults are set once per item, so a normal job is: draw the outline, set direct
 | 8 Substrate | Pick the main material chip: **Structaflor / Hebel** (default Structaflor) | Main area m2 = outline minus voids minus wet; wet m2 separate. Thickness from centres | Sheet width (800/600), thickness override |
 | 9 Layout | Nothing to tap; the layout is drawn and counted. One toggle: **Reuse offcuts** (default on) | Direction, stagger, snaps, row starts, cuts around voids and wet edges | Stagger override per material; waste % |
 | 10 Order | **Add to order** (1 tap). Shows the combined list | Headings, stock lengths, rounding up | Per-line edits (same as Walls order screen) |
+
+Steps with nothing to ask (6 Mid-span strongbacks, 9 Layout) are not separate screens: they show as a summary line and the strip skips them, so a normal job is outline, direction, centres, beams, Add to order. 1 to 10 is the order of the flow, not ten screens.
 
 Warnings use plain English ("This void is outside the outline", "Last truss bay is 150 mm, consider a different centre"). A warning never silently changes numbers.
 
@@ -126,7 +128,7 @@ New pure module `shared/takeoff/engine/floor/` (plain functions, deterministic, 
 
 - First truss line on the outline's minimum X (the first edge), then every `centres`; a last truss is placed at the maximum X edge. Count = `ceil(width / centres) + 1`. If the last bay is under 200 mm, warn "Last bay is N mm".
 - For each truss line, intersect with the outline and subtract voids: the result is one or more spans. Truss length = span length, rounded **up** to the next 10 mm for the supplier (the supplier confirms final lengths; it is their design).
-- A truss line crossing a void is **split** into two shorter trusses only if the outline allows it; by default a truss that would be cut by a void is shown as "truss interrupted, trimmer carries ends" and counted as two pieces ending at the trimmers. These are flagged for the truss supplier ("by supplier layout").
+- A truss line crossing a void is **interrupted**: counted as two shorter trusses, each ending at the void header trimmer ("trimmer carries ends"). These are flagged for the truss supplier ("by supplier layout").
 - Outputs: truss list (length, count by length), total truss area (m2 of floor supported), and the line positions used later by sheets and strongbacks.
 - This module never uses AS1684 tables for trusses. It states "Supplier designs truss layout and spans; counts here are for ordering and checking".
 
@@ -141,7 +143,7 @@ New pure module `shared/takeoff/engine/floor/` (plain functions, deterministic, 
 
 ### 6.5 Mid-span strongback runs
 
-- Rows by **truss span** (the longest truss in the region), following the supplier rule from the facts table: span up to 3.5 m: 0 rows; 3.6 to 6.5 m: 1 row at midspan; over 6.5 m: 3 rows (midspan, quarter points). Both limits are settings, not hard-coded (the supplier layout wins).
+- Rows by **truss span** (the longest truss in the region), following the supplier rule from the facts table: span up to 3.5 m: 0 rows; over 3.5 m up to 6.5 m: 1 row at midspan; over 6.5 m: 3 rows (midspan, quarter points). Both limits are settings, not hard-coded (the supplier layout wins).
 - Each row runs across the trusses perpendicular to them, so its run is the full width of the truss field at that Y, minus voids. A run is broken at a void and at changes of span; each piece is a separate run to cut.
 - Row Y position is placed at the fraction of each truss's own span, so a floor with trusses of different lengths gets a staggered row, following the real midspan. For an irregular outline, rows are split into runs where the span fraction changes by more than 50 mm.
 - Splices: runs longer than the longest stock length overlap two truss spacings (the supplier rule) per splice; added to lm.
@@ -150,7 +152,7 @@ New pure module `shared/takeoff/engine/floor/` (plain functions, deterministic, 
 
 ### 6.6 Stair and opening trimmers
 
-- Each void with `stair = true` (default for "+ Stair void") gets 4 LVL trimmers: 2 along the sides (parallel to trusses, length = void side plus bearing allowance each end, default 45 mm) and 2 across the ends (length = void end plus allowance). Where a void edge sits on a truss line the trimmer replaces the truss for that line (it carries the end of any interrupted truss).
+- Each void with `stair = true` (default for "+ Stair void") gets 4 LVL trimmers. The 2 **end trimmers** (headers, across the trusses) must bear on the trusses beside the void, so length = void width **snapped outward to the truss line each side**. The 2 **side trimmers** (parallel to trusses) = void length plus bearing allowance (default 45 mm) each end, fixed to the headers. Where a void edge sits on a truss line the trimmer replaces the truss for that line (it carries the end of any interrupted truss).
 - Size: 445 x 63 or 400 x 63 LVL per void, default 445 x 63. Doubling is an advanced toggle (default off, not assumed). All three are the engineer's call, so the item shows "Sizes by engineer".
 - Non-stair openings default to **no trimmers** (user toggles one chip) to avoid ordering what was not asked.
 - Quantity: lm per size, through the allocator.
@@ -185,6 +187,7 @@ Candidate offsets, in order, for the start piece of alternate rows:
 
 For one row segment of length `L` starting at X0, joint list `J`:
 
+0. If the row is no longer than one sheet, lay one piece with no start offset (no joint to stagger). Alternating starts apply only to rows longer than a sheet.
 1. Place the start piece (length = offset) then full sheets along X until the remaining length is less than a full sheet.
 2. The last piece is cut to the end, which is the outline edge or the end truss, so it is on a truss. If the end lands off a truss (an outline edge not at a truss, e.g. against a wet area edge), the end is **extended to the next truss line** (the sheet continues over the truss; trim at the wall by the carpenter), and the extra is shown.
 3. If the final piece would be under 300 mm, the previous joint moves back one truss spacing (the last two pieces share) provided the stagger test still passes. This avoids slivers.
@@ -214,7 +217,7 @@ For one row segment of length `L` starting at X0, joint list `J`:
 
 ### 7.7 Worked examples
 
-Room 6.0 x 4.2 m, no voids, trusses span the 4.2 m side (short side). Truss lines are along X at `centres`.
+Room 6.0 x 4.2 m, no voids, trusses span the 4.2 m side (short side). Trusses span Y and are positioned along X at `centres`.
 
 **Trusses.**
 
@@ -223,7 +226,7 @@ Room 6.0 x 4.2 m, no voids, trusses span the 4.2 m side (short side). Truss line
 | 450 | `ceil(6000/450) + 1` = 14 + 1 = **15** | 150 mm (warn) | 4200 |
 | 600 | `ceil(6000/600) + 1` = 10 + 1 = **11** | 600 | 4200 |
 
-Truss area (floor area) = 25.2 m2. Strongbacks: span 4.2 m is 3.6 to 6.5, so **1 row** across the 6.0 m field: **6.0 lm** (plus splice only if above the longest stock length).
+Truss area (floor area) = 25.2 m2. End strongbacks: trusses end on the two 6.0 m edges, so with no beams **2 x 6.0 = 12.0 lm** (0 if both take a beam). Mid-span: span 4.2 m is over 3.5 and up to 6.5, so **1 row** across the 6.0 m field: **6.0 lm** (18.0 lm of 120 x 35 in all) (plus splice only if above the longest stock length).
 
 **Structaflor 3600 x 800 (19 mm at 450, 22 mm at 600).** Rows run along X (6000 long), rows stack along Y (4200): `4200 / 800 = 5.25`, so **5 full rows and one 200 mm ripped row = 6 rows**.
 
@@ -231,16 +234,17 @@ Truss area (floor area) = 25.2 m2. Strongbacks: span 4.2 m is 3.6 to 6.5, so **1
 - Row B (rows 2, 4, and the ripped row 6): 1800 + 3600 + 600. Joints at 1800 and 5400.
 - Joints: A at 3600; B at 1800 and 5400. Stagger = 1800 on each side, above the 600 minimum. All joints are on a truss line at both 450 (multiples 8, 4, 12) and 600 (6, 3, 9). The same layout works at both centres, because 1800 and 3600 are multiples of 450 and 600.
 - Pieces for rows 1 to 5: A (3 rows): 3 x 3600, 3 x 2400. B (2 rows): 2 x 1800, 2 x 3600, 2 x 600. Full sheets used whole: 5.
-- Cut pieces to pack: 3 x 2400, 2 x 1800, 2 x 600. Packing into 3600 stock (5 mm kerf ignored for this illustration): [2400 + 600], [2400 + 600], [2400 + 1200 spare], [1800 + 1800] = **4 sheets**.
+- Cut pieces to pack: 3 x 2400, 2 x 1800, 2 x 600. Packing into 3600 stock (see the kerf rule below): [2400 + 600], [2400 + 600], [2400 + 1200 spare], [1800 + 1800] = **4 sheets**.
+- Kerf rule: n pieces from one stock sheet need n-1 cuts, so exact fits (1800 + 1800, 3 x 600) come up a kerf short. The last piece of a row is cut to fit on site and a few mm short sits inside the joint gap, so a pack is accepted if its shortfall is at most `PACK_FIT_TOLERANCE_MM` (default 10 mm, named constant). The counts here assume this; without it Structaflor would be 11 and Hebel higher (25 at 450 centres). Golden tests must pin the choice.
 - Row 6 is 200 mm wide: strips per sheet = `floor(790 / 200)` = 3. The strip lengths needed are 1800 + 3600 + 600; **1 sheet** supplies them.
 - **Packed count: 5 + 4 + 1 = 10 sheets** (28.8 m2 of sheet for 25.2 m2 of floor). With **Reuse offcuts off: 13** (rows A cost 2 each, B cost 3, ripped row 1).
-- Waste 5% rounded up: 10.5 gives **11 sheets ordered**.
+- Waste 5% rounded up: 10 x 1.05 = 10.5 gives **11 sheets ordered**.
 - Area-based sanity check: 25.2 / 2.88 = 8.75, so 9 is the minimum possible. 10 is the realistic packed count.
 
 **Hebel 1800 x 600.** Rows along X (6000), stack along Y: `4200 / 600 = 7` rows exactly, no rip.
 
 - 450 centres, stagger **900**: Row A (4 rows): 1800 + 1800 + 1800 + 600, joints at 1800, 3600, 5400. Row B (3 rows): 900 + 1800 + 1800 + 1500, joints at 900, 2700, 4500. Minimum stagger 900. All on a 450 truss line (2, 6, 10 and 4, 8, 12).
-  - Full panels: 4 x 3 + 3 x 2 = 18. Pieces: 4 x 600, 3 x 900, 3 x 1500. Pack into 1800: [1500], [1500], [1500], [900 + 900], [900 + 600], [600 + 600 + 600] = **6 panels**. Total **24 panels** (25.92 m2 for 25.2 m2). Without reuse: 18 + 4 + 6 = 28.
+  - Full panels: 4 x 3 + 3 x 2 = 18. Pieces: 4 x 600, 3 x 900, 3 x 1500. Pack into 1800: [1500], [1500], [1500], [900 + 900], [900 + 600], [600 + 600 + 600] = **6 panels** (last uses the kerf tolerance). Total **24 panels** (25.92 m2 for 25.2 m2). Without reuse: 18 + 4 + 6 = 28.
 - 600 centres, stagger **600** (900 is not on a 600 truss line): Row A (4 rows): 1800 x 3 + 600, joints 1800, 3600, 5400. Row B (3 rows): 600 + 1800 x 3, joints 600, 2400, 4200. Minimum stagger 600 (at the 600 and 1800 neighbours), which equals the minimum and passes.
   - Full panels: 4 x 3 + 3 x 3 = 21. Pieces: 7 x 600, packed 3 to a panel: **3 panels**. Total **24 panels**.
 - Waste 5%: 24 x 1.05 = 25.2, **26 ordered** (rounded up).
@@ -249,6 +253,8 @@ Truss area (floor area) = 25.2 m2. Strongbacks: span 4.2 m is 3.6 to 6.5, so **1
 
 - 450 centres: wet edge on X is snapped outward to the next truss line, which is 2700 (6 bays). Row length 2700 = **one full 2700 sheet**. Rows: `1800 / 600 = 3`. **3 sheets** (4.86 m2 of sheet for 4.32 m2 drawn). No joints, so the stagger rule is trivially met.
 - 600 centres: the product is the 2400 x 600 x 22 mm size; 2400 is already a truss line. **3 sheets** of 2400 x 600 (4.32 m2). Order text names the 2400 size.
+
+**Height and edge notes.** Hebel is 75 mm against Scyon at 19 or 22 mm, so Hebel main floor plus a Scyon wet area leaves a step of about 55 mm: warn on that combination. A wet-area edge crossing a main sheet mid-width leaves a cut long edge with no tongue and groove between trusses: warn "needs blocking at this edge" (no quantity added).
 
 **Main floor with the 2.4 x 1.8 wet area cut out.** Main m2 = 25.2 - 4.32 = 20.88 m2 (wet drawn area, not the snap). The layout algorithm lays rows around the wet region (7.4) as separate segments.
 
@@ -305,9 +311,9 @@ One phase at a time. Each phase finishes with a "done + next steps" recap and a 
 
 ## 12. Open questions (Sam's three, with recommendations)
 
-1. **Strongback spacing along the truss span.** **Recommend: take it from the supplier's rule as the default, with override.** Default rows by span (up to 3.5 m: none; 3.6 to 6.5 m: one row near midspan; over 6.5 m: three rows), from the Pryda guide, and the user can type 0 to 3 rows per job. When the supplier's truss layout arrives, the user overrides the rows. The order note says "positions per truss layout".
+1. **Strongback spacing along the truss span.** **Recommend: take it from the supplier's rule as the default, with override.** Default rows by span (up to 3.5 m: none; over 3.5 m up to 6.5 m: one row near midspan; over 6.5 m: three rows), from the Pryda guide, and the user can type 0 to 3 rows per job. When the supplier's truss layout arrives, the user overrides the rows. The order note says "positions per truss layout".
 2. **Ring beam sizes.** **Recommend: one job-wide default, editable, with a per-edge override under "More".** Default to the LVL trimmer family (the same 445 x 63 unless the job says otherwise) because the engineer sizes ring beams; show "Sizes by engineer" next to it. A fixed default hidden from the user would give wrong orders.
-3. **Waste allowance for sheets.** **Recommend: 5% for Structaflor and Scyon, 5% for Hebel, applied after the packed count and rounded up to a whole sheet; editable per job under "More".** Hebel is heavy and expensive, so Sam may want 3% (setting). The packed count already includes offcut reuse; the allowance is for breakage and site error only.
+3. **Waste allowance for sheets.** **Recommend: 5% for all three materials, applied after the packed count and rounded up to a whole sheet; editable per job under "More".** Sam may prefer lower for costly Hebel (setting). The packed count already includes offcut reuse; the allowance is for breakage and site error only.
 
 **New questions (each with a recommendation).**
 
