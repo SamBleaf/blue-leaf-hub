@@ -1244,11 +1244,6 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // Add bracing mode (Sam, 18 Nov 2026): Select with nothing picked, on a Walls item, until Done / another tool / another item
   const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn;
   useEffect(() => { if (braceMat && (mode !== "select" || braceMat !== material?.id)) setBraceMat(null); }, [mode, material?.id, braceMat]);
-  const braceTotals = braceOn ? (() => {
-    let ply = 0, cross = 0, walls = 0;
-    for (const w of materialWalls()) { const m = measNow(w.id); const marks = bracingOf(m?.inputs); if (marks.length) walls += 1; ply += marks.filter((x) => x.type === "ply").length; cross += marks.filter((x) => x.type === "cross").length; }
-    return { ply, cross, walls };
-  })() : null;
   const wetWalls = wallsItem ? wetWallsOf(view.measurements, view.contributions, material.id) : [];
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
   // a wall the calculation blocked is named on the line ("· Wall 1 not counted"), its reason straight under it
@@ -1281,6 +1276,11 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (!cs.length) return !isHiddenItem(UNASSIGNED);
     return cs.some((c) => !isHiddenItem(c.jobMaterialId));
   };
+  const braceTotals = braceOn ? (() => {
+    let ply = 0, cross = 0, walls = 0;
+    for (const w of materialWalls()) { const m = measNow(w.id); const marks = bracingOf(m?.inputs); if (marks.length) walls += 1; ply += marks.filter((x) => x.type === "ply").length; cross += marks.filter((x) => x.type === "cross").length; }
+    return { ply, cross, walls };
+  })() : null;
   const toggleItem = (id) => setHidden((cur) => {
     // leaving "everything hidden" for a per-item list: every item on this page starts hidden, then this one flips
     const n = cur.has(HIDE_ALL) ? new Set(layerItems.map((it) => it.id)) : new Set(cur);
