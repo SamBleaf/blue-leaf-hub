@@ -1,5 +1,5 @@
 ---
-sop_version: 1.8
+sop_version: 1.9
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
@@ -86,7 +86,7 @@ You add a timber material (section, grade, treatment), choose what it is for, an
    - **Measure projection** (rafters only) — you measure the rafter **in plan**; enter the **Pitch** (°). The true length = plan length ÷ cos(pitch).
    - **Measure true length** (rafters) / **Measure length** (joists, battens) — you measure the real member length (e.g. on a section). Pitch is never applied again.
    - **Enter cut length** — type the **Cut length**; no member line is needed.
-8. **Stock** (fixed): "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier." **Exception: MGP10 is only sold in 600 mm lengths** (600, 1200, 1800, 2400, 3000 … 6000), so any product whose grade is MGP10 buys on that grid at every supplier (a 2,650 cut buys 3,000; a 2,700 cut also buys 3,000). LVL and other grades keep the 300 mm steps. Optional: **Longest available length** (longer members are flagged unavailable — never clamped or joined) and **Grid lengths this supplier doesn't stock** (e.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
+8. **Stock** (fixed): "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier." **Exception: MGP10 (Sam, 18 Nov 2026).** The shortest MGP10 length is 1200; it steps by 300 up to 3000 (1200, 1500 … 2700, 3000) and above 3 m it is only sold in 600 mm steps (3600, 4200, 4800, 5400, 6000 …), so a 3,300 cut buys 3,600 and a 2,700 cut stays 2,700. Pieces under 1,200 (noggins, cripples, short trimmers) are cut out of the longer lengths and share them, never bought as short pieces. The setup card says this rule when the grade is MGP10. LVL and other grades keep the 1200 then 300 mm steps.g. 6600 — the next grid length up is used instead; only grid lengths can be entered).
 9. **More (offsets, allowance, ends, plies, supplier)** — **Start offset**, **End offset**, **End allowance (true length)** (0 unless you set one — no hidden allowance), **Plies**, **First member** / **Last member** (Included / Excluded), **Supplier**, **Size reference (schedule/drawing)** (records where the size came from, e.g. "S-101 engineer schedule"), **Availability**.
 10. Read the bottom of the card: **Needs…** (what is still missing before it can be ordered — you can keep measuring), **On the order now (this job)** and the three statuses **Quantity / Installation / Procurement**. With nothing measured, Quantity reads **Not measured yet**.
 11. Tap **Measure members**. Rafters / joists / battens / trim / other open the plan; studs / plates / noggins open the **Walls** screen.

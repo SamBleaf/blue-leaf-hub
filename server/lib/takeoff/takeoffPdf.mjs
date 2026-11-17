@@ -413,12 +413,12 @@ function draw(doc, snap, opts) {
   // generic purchase lines (TC-R04): one table per material — quantity, unit and what to supply
   let part = null; // HUB 007: a timber-and-cladding order prints its Timber part, then its Cladding part
   // the timber in the supplier's own take-off layout: a heading per member role, a row per product, "count/length" cuts
-  // longest first, total LM (P/M random lengths) or EA (precut studs). Snapshots from before @5 have no supplierGroups.
+  // longest first, total LM (P/M per metre) or EA (precut studs). Snapshots from before @5 have no supplierGroups.
   if ((snap.supplierGroups || []).length) {
     need(60);
     doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T("TIMBER"), M, y, { width: CW });
     y = doc.y + 4;
-    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("Cut lists read count/length in metres, longest first. P/M = per metre (random lengths, total LM is stock bought); EA = precut, counted each."), M, y, { width: CW });
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each."), M, y, { width: CW });
     y = doc.y + 6;
     part = "Timber";
     for (const g of snap.supplierGroups) {

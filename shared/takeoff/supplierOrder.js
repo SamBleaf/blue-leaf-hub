@@ -11,7 +11,7 @@
 //     LVL STUD SMART10 H2 90X35 2.7M                                                                270 EA
 //
 // A cut list reads "count/length-in-metres", longest first, comma separated; the row's total is metres of STOCK bought
-// (to 2 dp), unit LM ("P/M" = per metre, random lengths). A precut stud (a stud bought at a standard stud length) is a
+// (to 2 dp), unit LM ("P/M" = per metre). A precut stud (a stud bought at a standard stud length) is a
 // fixed product: its row is a count, unit EA. Pure: no DB, no DOM, no clock. The order's identity is NOT touched — this
 // only re-reads the frozen export lines (bucketKey, quantity, stock length) by the role each line was bought for.
 // =============================================================================
@@ -19,8 +19,8 @@
 /** Stamped on the frozen snapshot (snapshot.orderFormat) so an old export is never re-read as the new layout. */
 export const SUPPLIER_ORDER_FORMAT = "supplier-takeoff@1";
 
-/** Stock lengths a frame supplier sells as a fixed "precut stud" (2.4 m, 2.7 m, 3.0 m). A stud bought at one is an EA row. */
-export const PRECUT_STUD_MM = Object.freeze([2400, 2700, 3000]);
+/** Stock lengths a frame supplier sells as a fixed "precut stud" (Sam, 18 Nov 2026: 2.4, 2.7, 3.0, 3.3, 3.6, 4.2 m). A stud bought at one is an EA row. */
+export const PRECUT_STUD_MM = Object.freeze([2400, 2700, 3000, 3300, 3600, 4200]);
 
 /** Groups in the order Blue Leaf's supplier take-off lists them; anything else follows, alphabetically. */
 const GROUPS = Object.freeze([
@@ -113,13 +113,17 @@ export function splitByRole(roles, quantity) {
 export function buildSupplierGroups(items) {
   const groups = new Map();
   for (const item of items || []) for (const l of item.lines || []) {
-    for (const [role, n] of splitByRole(l.roles, l.quantity)) {
+    // an LM quantity is metres, not a piece count: shared out in proportion, never rounded to whole metres
+    const roleParts = l.unit === "lm"
+      ? (() => { const e = Object.entries(l.roles || {}).filter(([, v]) => v > 0); const tot = e.reduce((a, [, v]) => a + v, 0); return e.length && tot > 0 ? e.map(([r, v]) => [r, (Number(l.quantity) * v) / tot]) : (Number(l.quantity) > 0 ? [["other", Number(l.quantity)]] : []); })()
+      : splitByRole(l.roles, l.quantity);
+    for (const [role, n] of roleParts) {
       const g = memberGroup(role);
       const stud = g.key === "studs" && /^(stud|end stud|side stud|centre stud)/i.test(role);
       const lm = l.unit === "lm";
       const precutMm = stud && l.unit === "piece" && PRECUT_STUD_MM.includes(Number(l.stockLengthMm)) ? Number(l.stockLengthMm) : null;
       const product = productText(l.product, { precutMm }) || l.description || "Timber";
-      const text = lm ? product.replace(/P\/M$/, "P/M (random lengths)") : product;
+      const text = product;
       const grp = groups.get(g.key) || { key: g.key, heading: g.heading, rank: g.rank, rows: new Map() };
       groups.set(g.key, grp);
       const rowKey = `${text}|${precutMm ? "ea" : "lm"}`;
@@ -129,7 +133,7 @@ export function buildSupplierGroups(items) {
       if (precutMm) row.quantity += n;
       else if (lm) row.lmDirect += n;
       else if (Number(l.stockLengthMm) > 0) row.cutsByLength.set(Number(l.stockLengthMm), (row.cutsByLength.get(Number(l.stockLengthMm)) || 0) + n);
-      else row.quantity += n;   // a piece with no stock length: counted, never invented a length
+      else row.quantity += n;   // a piece with no stock length: counted and shown on the row ("3 with no stock length"), never dropped or given an invented length
     }
   }
   return [...groups.values()].sort((a, b) => a.rank - b.rank || (a.heading < b.heading ? -1 : a.heading > b.heading ? 1 : 0)).map((g) => {
@@ -138,7 +142,7 @@ export function buildSupplierGroups(items) {
       const cuts = [...r.cutsByLength.entries()].map(([lengthMm, count]) => ({ count, lengthMm })).sort((a, b) => b.lengthMm - a.lengthMm);
       const mm = cuts.reduce((a, c) => a + c.count * c.lengthMm, 0);
       const totalLm = Number((mm / 1000 + r.lmDirect).toFixed(2));
-      return { product: r.product, unit: "LM", cuts, cutText: cuts.length ? formatCuts(cuts) : "", totalLm, ...(r.quantity ? { uncounted: r.quantity } : {}), problem: r.problem };
+      return { product: r.product, unit: "LM", cuts, cutText: [cuts.length ? formatCuts(cuts) : "", r.quantity ? `${r.quantity} with no stock length` : ""].filter(Boolean).join(", "), totalLm, ...(r.quantity ? { uncounted: r.quantity } : {}), problem: r.problem };
     });
     return { key: g.key, heading: g.heading, rows,
       totalLm: Number(rows.reduce((a, r) => a + (r.unit === "LM" ? r.totalLm : 0), 0).toFixed(2)), totalEa: rows.reduce((a, r) => a + (r.unit === "EA" ? r.quantity : 0), 0) };

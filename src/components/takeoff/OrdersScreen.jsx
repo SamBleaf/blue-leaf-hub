@@ -19,7 +19,7 @@
 // =============================================================================
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { newId } from "../../lib/takeoffApi.js";
-import { GROUP_LABEL, ITEM_STALE_TEXT, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
+import { GROUP_LABEL, ITEM_STALE_TEXT, buildSupplierGroups, accessorySupplierConflict, fixesFor, flashingOrderGroups, isLeftOffProblem, PROBLEM_TEXT, SECTIONS, SECTION_LABEL, describeFamilySpec, describeSpec, lineSection, materialGroup, materialSection, orderLineState, reconcileStaleLine } from "../../../shared/takeoff/index.js";
 import { AsyncState, Banner, Btn, NumberField, TextField } from "./ui.jsx";
 import { AccessoryScopeReview, StatusChips } from "./ScheduleScreen.jsx";
 import { fmtLm, fmtMm } from "./format.js";
@@ -51,6 +51,37 @@ function withGenericSuggestion(state, computed) {
   const same = (computed?.scheduleLines || []).filter((x) => x.generic && x.bucketKey !== l.bucketKey && x.jobMaterialIds.includes(l.jobMaterialId) && (x.unit || "piece") === (l.unit || "piece")
     && (x.item?.component ?? null) === (l.item?.component ?? null));
   return same.length === 1 ? { ...state, suggestion: same[0] } : state;
+}
+
+/**
+ * HUB 032: the Timber order the way the supplier PDF prints it (shared/takeoff/supplierOrder.js, the same function): a heading per
+ * member role, a row per product, the cut list as count/length in metres (longest first) and the total in LM, or a count in EA
+ * for precut studs. Read from what is on THIS order (the quantities typed below), so it moves as they change.
+ */
+export function TimberTakeoff({ groups }) {
+  if (!groups.length) return null;
+  const totalLm = Number(groups.reduce((a, g) => a + g.totalLm, 0).toFixed(2));
+  const totalEa = groups.reduce((a, g) => a + g.totalEa, 0);
+  return (
+    <div className="mb-2 rounded-lg border border-hairline" data-testid="timber-takeoff">
+      <p className="border-b border-hairline px-2 py-1.5 text-[11px] text-muted">Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each.</p>
+      {groups.map((g) => (
+        <section key={g.key} data-takeoff-group={g.key} aria-label={g.heading}>
+          <h4 className="bg-sky-50 px-2 py-1 text-xs font-bold tracking-wide text-ink">{g.heading}</h4>
+          <ul className="divide-y divide-hairline">
+            {g.rows.map((r) => (
+              <li key={`${r.product}|${r.unit}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-2 py-1.5 text-sm" data-takeoff-row={r.unit}>
+                <span className={`min-w-0 basis-full break-words sm:basis-2/5 ${r.problem ? "text-amber-800" : "text-ink"}`}>{r.product}</span>
+                <span className="min-w-0 flex-1 break-words text-xs text-muted" data-takeoff-cuts="">{r.unit === "EA" ? "" : r.cutText}</span>
+                <span className="font-semibold text-ink">{r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p className="px-2 py-1.5 text-right text-xs font-semibold text-ink" data-takeoff-total="">Timber: {[totalLm ? `${totalLm.toFixed(2)} LM` : null, totalEa ? `${totalEa} EA` : null].filter(Boolean).join(" · ")}</p>
+    </div>
+  );
 }
 
 // unsaved order-form changes are kept on THIS device (a reload or a dropped PWA never loses typed quantities);
@@ -366,6 +397,15 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     const rank = (id) => { const i = seq.indexOf(id); return i < 0 ? 1e9 : i; };
     return [...g.values()].sort((a, b) => rank(a.id) - rank(b.id));
   }, [lines, mats, ws.view]);
+  // HUB 032: the timber on this order laid out as the supplier take-off. Only when every timber line carries the roles it was
+  // bought for (an order built before that keeps its length table below).
+  const timberTakeoff = useMemo(() => {
+    const tg = genericGroups.filter((g) => materialGroup(g.mat) === "timber");
+    const ls = tg.flatMap((g) => g.lines);
+    if (!ls.length || !ls.every((l) => l.roles)) return [];
+    return buildSupplierGroups(tg.map((g) => ({ lines: g.lines.filter((l) => (qty[l.bucketKey] ?? 0) > 0).map((l) => ({ unit: l.unit, quantity: qty[l.bucketKey], stockLengthMm: l.item?.stockLengthMm ?? null,
+      roles: l.roles, product: l.product || null, description: l.item?.description, problem: l.problems.length > 0 })) })));
+  }, [genericGroups, qty]);
   // what is on this order, per unit — flashing pieces/LM and every other unit kept apart
   const orderTotals = useMemo(() => {
     const info = new Map(lines.map((l) => [l.bucketKey, l]));
@@ -639,11 +679,14 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
                   ? `${x.line.item?.description || "A material line"} — ${qtyText(qty[x.line.bucketKey], x.line.unit)}`
                   : `${fmtMm(x.line.finishedLengthMm)} mm × ${qty[x.line.bucketKey]}`} — needs updating</p>
                 <p className="text-xs">{(isGenericLine(x.line) && GENERIC_STALE[x.problem]) || PROBLEM_TEXT[x.problem]}{x.current ? ` It is still listed as: ${labelFor(x.current)}.` : ""}</p>
+                {x.lengthChange && (
+                  <p className="text-xs" data-length-change="">The same timber is now bought as {fmtMm(x.lengthChange.toMm)} mm lengths instead of {fmtMm(x.lengthChange.fromMm)} mm (the supplier stock lengths changed). Update the line to the new length and keep your quantity.</p>
+                )}
                 {x.suggestion && (isGenericLine(x.suggestion)
                   ? <p className="text-xs">The takeoff now needs: {qtyText(x.suggestion.quantity, x.suggestion.unit)} — {x.suggestion.item?.description || unitWord(x.suggestion.unit, 2)} ({mats.get(x.suggestion.jobMaterialIds[0])?.name || "this material"}).</p>
                   : <p className="text-xs">Its material is now: {labelFor(x.suggestion)}.</p>)}
                 <div className="mt-1 flex flex-wrap gap-2">
-                  {x.suggestion && <Btn kind="secondary" onClick={() => updateLine(x)}>{isGenericLine(x.line) ? "Update to what's needed now" : "Update to current material"}</Btn>}
+                  {x.suggestion && <Btn kind="secondary" onClick={() => updateLine(x)}>{x.lengthChange ? "Update to the new length" : isGenericLine(x.line) ? "Update to what's needed now" : "Update to current material"}</Btn>}
                   {x.problem === "line_stale_quantity" && <Btn kind="secondary" onClick={() => setQty((q) => ({ ...q, [x.line.bucketKey]: x.current.quantity }))}>Set to {isGenericLine(x.line) ? qtyText(x.current.quantity, x.line.unit) : x.current.quantity}</Btn>}
                   <Btn kind="secondary" onClick={() => removeLine(x)}>Remove line</Btn>
                 </div>
@@ -694,6 +737,10 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
           return gs.length > 0 && (
             <div key={part} className="mt-2" data-order-part={part}>
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{GROUP_LABEL[part]}</p>
+              {part === "timber" && timberTakeoff.length > 0 && <>
+                <TimberTakeoff groups={timberTakeoff} />
+                <p className="mb-1 text-[11px] text-muted">Change quantities by length here:</p>
+              </>}
               <div className="space-y-2">
                 {gs.map((g) => (
                   <div key={g.id} className="rounded-lg border border-hairline" data-order-group={g.id}>

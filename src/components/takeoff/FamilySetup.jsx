@@ -30,7 +30,7 @@
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
-  familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, onTimberGrid, timberPresetLabel, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
+  familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, isMgp10Grade, onTimberGrid, timberPresetLabel, timberStockRuleText, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
 import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, ROOF_SPACINGS_MM } from "../../../shared/takeoff/standards/index.js";
@@ -153,6 +153,7 @@ const SOURCES = Object.freeze({
   F02: ["Rendex downloads (system + coating documents)", "guide", "https://www.rendex.com.au/downloads"],
   "OWNER-2026-10-14": ["Blue Leaf owner decision, 14 Oct 2026", "owner", null],
   "OWNER-2026-10-25": ["Blue Leaf owner decision, 25 Oct 2026 (timber in 300 mm steps)", "owner", null],
+  "OWNER-2026-11-18": ["Blue Leaf owner decision, 18 Nov 2026 (MGP10 stock lengths)", "owner", null],
 });
 const KIND_TEXT = { product: "product facts", guide: "installation guide — rows not reviewed", gap: "not readable — not used as authority", owner: "company setting", other: "entered reference" };
 
@@ -1249,12 +1250,12 @@ export function TimberSetup({ value, onChange, result, lines, presets = null }) 
       )}
       <fieldset className="rounded-lg border border-hairline p-2">
         <legend className="px-1 text-xs font-semibold text-ink">Stock</legend>
-        <p className="text-sm text-ink">1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier.</p>
+        <p className="text-sm text-ink" data-stock-rule="">{timberStockRuleText(s.grade)}</p>
         <NumberField label="Longest available length (optional)" value={s.stock?.maxMm} onCommit={(n) => set({ spec: { stock: { ...s.stock, maxMm: n } } })} help="Longer members are flagged unavailable — never clamped or joined." />
         <LengthList label="Grid lengths this supplier doesn't stock (optional)" values={s.stock?.unavailableMm} placeholder="e.g. 6600"
-          validate={(v) => (v.some((l) => !onTimberGrid(l)) ? "Only grid lengths (1200, 1500, 1800 …) can be marked unavailable — off-grid sizes are never added." : null)}
+          validate={(v) => (v.some((l) => !onTimberGrid(l, s.grade)) ? "Only grid lengths (1200, 1500, 1800 … ; for MGP10 its own stock lengths) can be marked unavailable — off-grid sizes are never added." : null)}
           onCommit={(v) => set({ spec: { stock: { ...s.stock, unavailableMm: v } } })} help="A member that needs one of these moves up to the next available grid length." />
-        <SourceRefs refs={["OWNER-2026-10-14", TIMBER_GRID_SOURCE]} label="Stock rule" />
+        <SourceRefs refs={["OWNER-2026-10-14", TIMBER_GRID_SOURCE, ...(isMgp10Grade(s.grade) ? ["OWNER-2026-11-18"] : [])]} label="Stock rule" />
       </fieldset>
       <details className="rounded-lg border border-hairline px-2 py-1">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">More (offsets, allowance, ends, plies, supplier)</summary>
@@ -1340,6 +1341,7 @@ function WallPart({ d, part, presets }) {
         <CommitText label="Treatment (e.g. H3)" value={p.treatment} maxLength={40} onCommit={(t) => set({ treatment: t })} />
       </div>
       <NumberField label="Longest length" value={p.stock?.maxMm} {...PART_LONGEST_MM} onCommit={(n) => set({ stock: { ...(p.stock || {}), maxMm: n } })} />
+      {isMgp10Grade(p.grade) && <p className="text-[11px] text-muted" data-wall-part-stock-rule="">{timberStockRuleText(p.grade)}</p>}
       {notStocked.length > 0 && <p className="text-[11px] text-muted" data-wall-part-not-stocked="">Not stocked: {notStocked.map((l) => `${Math.round(l).toLocaleString("en-AU")}`).join(", ")} mm</p>}
     </fieldset>
   );

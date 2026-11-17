@@ -1,5 +1,5 @@
 ---
-sop_version: 2.8
+sop_version: 2.9
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 032 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed; renderer takeoff-pdf@5, calc takeoff-calc@6)
 screenshot_status: needs_replacement
@@ -319,7 +319,10 @@ Everything that still stops the supplier PDF is in one box above **Export suppli
 - **Timber prints as the supplier take-off (HUB 032, renderer takeoff-pdf@5).** The TIMBER part of the PDF has one heading per member role in this order: **T&B PLATES** (bottom, top, second top), **STUDS** (cripples above and below openings are folded in here: they are stud product cut from stud lengths), **JAMB STUDS** (kings and jacks), **JUNCT. BLK**, **HD & SILL TR** (head and sill trimmers), **LINTELS**, **NOGGINS**. Under each heading is one row per product, for example `PINE 90x45 MGP10 P/M   12/6, 4/5.4, 9/4.8   255.90 LM`. A cut list reads **count/length in metres, longest first**; the total is metres of stock bought to 2 decimals. **P/M** = per metre (random lengths, unit LM). A stud bought at 2.4, 2.7 or 3.0 m is a **precut stud**: its row is a count, unit **EA** (`LVL STUD SMART10 H2 90X35 2.7M   270 EA`). Cladding, aluminium and flashing keep their own tables.
 - The order lines, quantities, "need / ordered / left" and the order identity do not change: each line is still one stock length of one product. The roles only decide where a line prints. If you raise, lower or spare a line, its pieces are shared across the roles in proportion, so the printed pieces always add up to what is on the order.
 - A PDF exported before this change (renderer takeoff-pdf@4 or older) keeps its own per-length table when it is re-opened; only new exports use the take-off layout.
-- **MGP10 is only orderable in 600 mm lengths** (0.6, 1.2, 1.8, 2.4, 3.0 … 6.0 m): a 2,650 piece buys 3,000 and a 2,700 piece buys 3,000, because 2,700 is not a multiple of 600. LVL and every other grade keep the 1,200 mm then 300 mm steps (SOP 20-08).
+- **MGP10 stock lengths (Sam, 18 Nov 2026):** the shortest is 1.2 m; up to 3.0 m it steps by 300 mm (1.2, 1.5 … 2.4, 2.7, 3.0); above 3 m it is only sold in 600 mm steps (3.6, 4.2, 4.8, 5.4, 6.0 …). So a 3.3 m piece buys 3.6 m and a 2.7 m piece stays 2.7 m. Pieces shorter than 1.2 m (noggins, cripples, short trimmers) are never bought as short pieces: they are cut out of the longer stud or plate lengths and share them. LVL and every other grade keep 1,200 mm then 300 mm steps (SOP 20-08).
+- **Precut studs print as EA** at 2.4, 2.7, 3.0, 3.3, 3.6 and 4.2 m; any other stud length stays in the per-metre (P/M) row as a cut list. Per-metre rows read `P/M` and a total in LM. A piece with no stock length is never dropped: its row says, for example, "2 with no stock length".
+- **The order screen shows the same layout.** On the Timber part of the order screen, above the quantity steppers, a "Timber order" panel lists the same headings, product rows, count/length cut lists and LM / EA totals as the PDF, worked out from the quantities currently on the order (so it moves as you change them). The steppers below it still set the quantity of each length.
+- **Orders saved before this change (HUB 032 round 2).** If a saved draft line is at a length that is no longer bought (for example a 3.3 m MGP10 line), it shows as out of date with a plain explanation ("The same timber is now bought as 3,600 mm lengths instead of 3,300 mm") and an **Update to the new length** button that keeps the quantity; with more than one out-of-date line, **Update all n lines** does them in one tap. A line with nothing it can move to keeps only **Remove line**. Exports already made are frozen and are not changed.
 
 - One supplier per order; up to 200 lines per order.
 - Exporting never changes "ordered"; only **Record order placed** does.
@@ -534,10 +537,10 @@ Next review date: 2027-04-14
 3. Expected: the order screen lines, quantities and "need / ordered / left" are unchanged from before; the frozen snapshot has `orderFormat` "supplier-takeoff@1" and `supplierGroups`.
 - [ ] Pass  [ ] Fail
 
-**TC-29 — MGP10 lengths lock to 600 mm (HUB 032, API)**
+**TC-29 — MGP10 stock lengths (HUB 032, API)**
 1. Same Walls item. Read the plate and noggin lines (MGP10 by default).
-2. Expected: every MGP10 line length is a multiple of 600 (e.g. a 2,700 noggin buys 3,000, never 2,700); the LVL studs still buy 2,700. A cut of 2,650 in MGP10 buys 3,000 and one of 6,001 is reported unavailable (never clamped).
-3. Edge: mark 3,000 not stocked on an MGP10 product, a 2,650 cut now buys 3,600. A 1,500 or 2,700 "not stocked" mark left from the old grid is ignored.
+2. Expected: every MGP10 line length is on the MGP10 list (1.2 to 3.0 m in 300 mm steps, then 3.6, 4.2, 4.8 … in 600 mm steps): a 3.3 m wall's studs buy 3.6 m, 2.7 m studs stay 2.7 m, and no MGP10 length between 3.0 and 3.6 m appears; the LVL studs keep their own lengths. A cut of 2,650 buys 2,700 and one of 6,001 is reported unavailable (never clamped).
+3. Edge: mark 2,700 not stocked on an MGP10 product, a 2,650 cut now buys 3,000; mark 3,600 not stocked and a 3,100 cut buys 4,200. A 3,300 "not stocked" mark left from the old grid is ignored.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
@@ -547,3 +550,9 @@ Next review date: 2027-04-14
 - [ ] Database records created with correct field values
 - [ ] Update `test_status` in frontmatter to `passed` or `failed`
 - [ ] Add an entry to SOP_CHANGELOG.md noting test date and result
+
+**TC-30 — Open an order saved before the stock change, update in one tap (HUB 032 round 2)**
+1. Unit test `node scripts/tests/takeoff-tc-hub032b.test.mjs` (or a local draft order made before this build with an MGP10 line at a length that is no longer bought, e.g. 3,300).
+2. Expected: the line shows "needs updating" with the plain sentence about the new length and **Update to the new length**; tapping it moves the quantity to the new length and the readiness list clears. With several such lines **Update all n lines** does them all and saves. A line longer than anything now bought has only **Remove line**.
+3. Expected: the Timber part shows the "Timber order" panel (headings, product rows, count/length cut lists, LM / EA) above the steppers, matching the PDF.
+- [ ] Pass  [ ] Fail

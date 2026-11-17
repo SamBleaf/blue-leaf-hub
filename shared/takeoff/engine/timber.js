@@ -33,7 +33,7 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
-import { TIMBER_GRID, isMgp10Grade, timberGridFor } from "./families.js";
+import { TIMBER_GRID, isMgp10Grade, onGrid as onGridFor, timberGridFor } from "./families.js";
 
 /** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
 const GEOM_TOL_MM = 0.001;
@@ -42,7 +42,7 @@ const GEOM_TOL_MM = 0.001;
  *  Not configurable. The same object as engine/families.js TIMBER_GRID, its one definition. */
 export const TIMBER_STOCK_GRID = TIMBER_GRID;
 /** "1,200 mm then 300 mm steps" — how the grid reads in a message. */
-const MGP10_TEXT = "600 mm, then 600 mm steps (600, 1,200, 1,800 …)";
+const MGP10_TEXT = "1,200 mm then 300 mm steps up to 3,000 mm, then 600 mm steps above 3 m (3,600, 4,200 …)";
 const GRID_TEXT = `${formatMm(TIMBER_GRID.minMm, 0)} mm then ${formatMm(TIMBER_GRID.incrementMm, 0)} mm steps`;
 
 /** Proposed safeguard (06): generated members per wall or item. Excess is rejected, never truncated. */
@@ -64,7 +64,7 @@ const DETAIL_SOURCES = ["reviewed-detail", "explicit"];
 // even when two parts are the same product, as `follower` keeps automatic battens apart.
 const OPTIONAL_IDENTITY = ["supplier", "manufacturer", "sku", "moisture", "endCondition", "finish", "profile", "component"];
 // Stock settings timber accepts: the fixed grid, its product restrictions and the allocator's cutting-loss fields.
-const STOCK_KEYS = new Set(["grade", "kind", "minMm", "incrementMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
+const STOCK_KEYS = new Set(["grade", "kind", "minMm", "incrementMm", "aboveMm", "incrementAboveMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
   "endTrimMm", "finalEndAcceptable", "minRetainedOffcutMm"]);
 const CUTTING_LENGTHS = [["kerfMm", "Saw kerf"], ["endTrimMm", "End trim"], ["minRetainedOffcutMm", "Keep offcuts from"]];
 const CUTTING_FLAGS = [["kerfConfirmed", "Kerf confirmed"], ["finalEndAcceptable", "Final stock end acceptable"]];
@@ -242,11 +242,7 @@ export function timberIdentity(product = {}) {
   return Object.freeze(id);
 }
 
-const onGrid = (l, grade = null) => {
-  const g = timberGridFor(grade);
-  const steps = (l - g.minMm) / g.incrementMm;
-  return steps >= 0 && Math.abs(steps - Math.round(steps)) < 1e-9;
-};
+const onGrid = (l, grade = null) => onGridFor(l, timberGridFor(grade));
 
 /**
  * T3 stock policy for new timber (allocated by engine/allocator.js, not here). The 1200/300 grid is fixed;
@@ -267,8 +263,8 @@ export function timberStockPolicy(opts = {}) {
   // carries is simply replaced for MGP10, never refused. Every other grade must still state the owner grid.
   const grid = timberGridFor(opts.grade);
   const mgp = isMgp10Grade(opts.grade);
-  const { kind, minMm, incrementMm, unavailableMm } = opts;
-  if (!mgp && ((kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
+  const { kind, minMm, incrementMm, unavailableMm, aboveMm, incrementAboveMm } = opts;
+  if (!mgp && ((aboveMm != null || incrementAboveMm != null) || (kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
     || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm))) {
     fail(`Timber stock is ${GRID_TEXT} for every supplier — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   }
@@ -339,6 +335,11 @@ function setup(input, role) {
 
 function piece(ctx, { id, role, lengthMm, quantity = 1, label, sourceRefs, provenance = "calculated", identity = ctx.identity,
   materialId = ctx.materialId, stockPolicy = ctx.stockPolicy, noSplice = true, lengthKind = LENGTH_KINDS.CUT }) {
+  // Sam, 18 Nov 2026: MGP10 is never bought as a short piece (1,200 is the shortest length), so a piece shorter than that
+  // (a noggin, a cripple, a short trimmer) is cut out of a longer stock length and shares it with the others (the allocator
+  // packs them). Needs the longest length (a grid with no maximum cannot be packed; that note already says so).
+  if (stockPolicy && stockPolicy.kind === "grid" && !stockPolicy.sharePieces && isMgp10Grade(identity?.grade) && stockPolicy.maxMm != null
+    && lengthMm < stockPolicy.minMm - 1e-9) stockPolicy = Object.freeze({ ...stockPolicy, sharePieces: true });
   return {
     id, materialId, role, kind: "linear", unit: "piece", lengthMm, quantity, lengthKind, identity,
     ...(stockPolicy ? { stockPolicy } : {}), noSplice, label, sourceRefs, provenance,

@@ -19,28 +19,35 @@ await t("MGP10 grade detection: MGP10 / MGP 10 / mgp10 only; never MGP12, MGP15 
   for (const g of ["MGP10", "mgp10", "MGP 10", " MGP10 "]) assert.equal(isMgp10Grade(g), true, g);
   for (const g of ["MGP12", "MGP15", "LVL SMART 10", "LVL Smart 10", "F7", "", null, undefined, "MGP100"]) assert.equal(isMgp10Grade(g), false, String(g));
   assert.deepEqual(timberGridFor("MGP10"), MGP10_GRID);
-  assert.deepEqual(MGP10_GRID, { kind: "grid", minMm: 600, incrementMm: 600 });
+  assert.deepEqual(MGP10_GRID, { kind: "grid", minMm: 1200, incrementMm: 300, aboveMm: 3000, incrementAboveMm: 600 });
   assert.deepEqual(timberGridFor("LVL Smart 10"), TIMBER_GRID);
 });
 
-await t("MGP10 600 rule: every cut buys the next multiple of 600 (2,650 → 3,000; 2,700 → 3,000, because 2,700 is not a multiple of 600)", () => {
-  const rows = [[1, 600], [450, 600], [600, 600], [601, 1200], [1199, 1200], [1200, 1200], [1500, 1800], [2400, 2400], [2650, 3000], [2700, 3000], [3000, 3000], [3001, 3600], [3300, 3600], [5400, 5400], [5999, 6000], [6000, 6000]];
+await t("MGP10 stock rule: 1,200 minimum, 300 mm steps up to 3,000, only 600 mm steps above 3 m (3,300 buys 3,600; 2,700 stays 2,700)", () => {
+  const rows = [[1, 1200], [450, 1200], [1200, 1200], [1201, 1500], [1500, 1500], [2400, 2400], [2650, 2700], [2700, 2700], [3000, 3000], [3001, 3600], [3300, 3600], [3600, 3600],
+    [3601, 4200], [4200, 4200], [4201, 4800], [5400, 5400], [5401, 6000], [6000, 6000]];
   for (const [need, want] of rows) assert.equal(buy(need, "MGP10"), want, `${need} → ${want}`);
   assert.equal(buy(6001, "MGP10"), null, "over the longest: unavailable, never clamped or spliced");
   assert.equal(selectStock(6001, stock("MGP10")).reason, "exceeds-max");
+  assert.equal(buy(3300, "MGP10", { maxMm: null }), 3600);
+  assert.equal(buy(9100, "MGP10", { maxMm: null }), 9600, "above 3 m with no longest set: still 600 mm steps");
 });
 
-await t("MGP10 600 rule edge cases: a longest length off the grid, lengths marked not stocked, case and spacing of the grade", () => {
+await t("MGP10 stock rule edge cases: a longest length off the grid, lengths marked not stocked, case and spacing of the grade", () => {
   assert.equal(buy(5500, "MGP10", { maxMm: 5700 }), null, "5,700 is not orderable, so the longest MGP10 is 5,400");
   assert.equal(buy(5400, "MGP10", { maxMm: 5700 }), 5400);
-  assert.equal(buy(2650, "MGP10", { unavailableMm: [3000] }), 3600, "3,000 not stocked → the next 600 step");
-  assert.equal(buy(2650, "MGP10", { unavailableMm: [1500, 2700] }), 3000, "a mark left from the old 300 grid (1,500, 2,700) is ignored, never refused");
-  assert.equal(buy(2650, "mgp 10"), 3000);
-  assert.deepEqual(stock("MGP10", { minMm: 1200, incrementMm: 300 }).minMm, 600, "a saved 1,200 + 300n spec on an MGP10 product is replaced by the 600 grid");
+  assert.equal(buy(2650, "MGP10", { unavailableMm: [2700] }), 3000, "2,700 not stocked → the next 300 step");
+  assert.equal(buy(3100, "MGP10", { unavailableMm: [3600] }), 4200, "3,600 not stocked → the next 600 step");
+  assert.equal(buy(2650, "MGP10", { unavailableMm: [3300] }), 2700, "a mark left from the old 300 grid above 3 m (3,300) is ignored, never refused");
+  assert.equal(buy(2650, "mgp 10"), 2700);
+  assert.equal(stock("MGP10", { minMm: 1200, incrementMm: 300 }).minMm, 1200, "a saved 1,200 + 300n spec on an MGP10 product is replaced by the stepped grid");
+  assert.equal(stock("MGP10", { minMm: 1200, incrementMm: 300 }).incrementAboveMm, 600);
   assert.throws(() => stock("MGP10", { unavailableMm: [3100] }), /not a timber stock length/);
-  assert.equal(onTimberGrid(1800, "MGP10"), true);
-  assert.equal(onTimberGrid(1500, "MGP10"), false);
-  assert.equal(onTimberGrid(1500, "LVL Smart 10"), true);
+  assert.equal(onTimberGrid(2700, "MGP10"), true);
+  assert.equal(onTimberGrid(3300, "MGP10"), false);
+  assert.equal(onTimberGrid(3600, "MGP10"), true);
+  assert.equal(onTimberGrid(3300, "LVL Smart 10"), true);
+  assert.equal(onTimberGrid(900, "MGP10"), false, "1,200 is the shortest");
 });
 
 await t("other grades are untouched: LVL, MGP12 and MGP15 still buy 1,200 then 300 mm steps (2,650 → 2,700)", () => {
@@ -52,9 +59,10 @@ await t("other grades are untouched: LVL, MGP12 and MGP15 still buy 1,200 then 3
   assert.throws(() => timberStockPolicy({ grade: "MGP12", minMm: 600, incrementMm: 600 }), /for every supplier/);
 });
 
-await t("a saved MGP10 spec normalises to the 600 grid; an LVL spec to the 300 grid", () => {
+await t("a saved MGP10 spec normalises to the stepped grid; an LVL spec to the plain 300 grid", () => {
   const spec = (grade) => normaliseFamilySpec({ family: "timber", purpose: "plates", section: { depthMm: 90, widthMm: 45 }, grade, treatment: "H2", stock: { maxMm: 6000, unavailableMm: [1500, 1800] } });
-  assert.deepEqual([spec("MGP10").stock.minMm, spec("MGP10").stock.incrementMm, spec("MGP10").stock.unavailableMm], [600, 600, [1800]]);
+  assert.deepEqual([spec("MGP10").stock.minMm, spec("MGP10").stock.incrementMm, spec("MGP10").stock.aboveMm, spec("MGP10").stock.incrementAboveMm, spec("MGP10").stock.unavailableMm], [1200, 300, 3000, 600, [1500, 1800]]);
+  assert.equal(spec("LVL Smart 10").stock.aboveMm, undefined);
   assert.deepEqual([spec("LVL Smart 10").stock.minMm, spec("LVL Smart 10").stock.incrementMm, spec("LVL Smart 10").stock.unavailableMm], [1200, 300, [1500, 1800]]);
 });
 
@@ -71,11 +79,11 @@ function wallsWorkspace() {
     contributions: [{ id: "a", measurementId: "w1", jobMaterialId: "walls", role: "wall" }, { id: "b", measurementId: "w2", jobMaterialId: "walls", role: "wall" }] };
 }
 
-await t("Walls run: every MGP10 line is a multiple of 600; LVL studs keep their 300 mm lengths (2,700)", () => {
+await t("Walls run: every MGP10 line is on the MGP10 grid (nothing between 3.0 and 3.6 m); LVL studs keep their 300 mm lengths (2,700)", () => {
   const c = computeWorkspace(wallsWorkspace());
   const mgp = c.scheduleLines.filter((l) => isMgp10Grade(l.product?.grade));
   assert.ok(mgp.length >= 3, "plates and noggins are MGP10");
-  for (const l of mgp) assert.equal(l.finishedLengthMm % 600, 0, `${l.item.description}`);
+  for (const l of mgp) assert.ok(onTimberGrid(l.finishedLengthMm, "MGP10"), `${l.item.description}`);
   const studs = c.scheduleLines.filter((l) => l.component === "studs");
   assert.ok(studs.some((l) => l.finishedLengthMm === 2700), "LVL studs still 2,700");
   assert.ok(c.scheduleLines.every((l) => l.roles && Object.keys(l.roles).length), "every timber line carries the roles it was bought for");

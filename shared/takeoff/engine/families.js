@@ -26,24 +26,44 @@ export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "pla
 export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300 });
 export const TIMBER_GRID_SOURCE = "OWNER-2026-10-25";
 /**
- * MGP10 is only orderable in 600 mm lengths: 600, 1,200, 1,800 … (Sam, 18 Nov 2026: "so .6, 1.2, 1.8 and so on. so all
- * MGP10 lengths will have to lock to those lengths"). Applies to ANY product whose grade is MGP10 (any supplier, any
- * part: studs, plates, noggins, jambs, lintels). LVL and every other grade keep TIMBER_GRID. The shortest MGP10
- * length is 600 (Sam named .6); a piece never buys shorter than that.
+ * MGP10 stock (Sam, 18 Nov 2026, second answer): 1,200 mm minimum, 300 mm steps up to 3,000 (1,200, 1,500 … 2,700, 3,000),
+ * then ONLY 600 mm steps above 3 m (3,600, 4,200, 4,800 …). So 3,300 buys 3,600 and 2,700 stays 2,700. Short pieces
+ * (noggins, cripples, short trimmers) are cut out of stud/plate lengths by the allocator, never bought as short pieces.
+ * Applies to ANY product whose grade is MGP10 (any supplier, any part). LVL and every other grade keep TIMBER_GRID.
+ * (First answer the same day was "600, 1,200, 1,800 …"; replaced.)
  */
-export const MGP10_GRID = Object.freeze({ kind: "grid", minMm: 600, incrementMm: 600 });
+export const MGP10_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300, aboveMm: 3000, incrementAboveMm: 600 });
 export const MGP10_GRID_SOURCE = "OWNER-2026-11-18";
+/** Every length of a grid up to maxMm, ascending (the stepped MGP10 grid steps wider above its aboveMm). */
+export function gridLengthsUpTo(grid, maxMm) {
+  const out = [];
+  for (let l = grid.minMm; l <= maxMm + 1e-9; l += (grid.aboveMm != null && l >= grid.aboveMm ? grid.incrementAboveMm : grid.incrementMm)) out.push(l);
+  return out;
+}
+/** Is mm a length on this grid? */
+export function onGrid(mm, grid) {
+  const n = Number(mm);
+  if (!isFiniteNumber(n) || n < grid.minMm) return false;
+  const lowEnd = grid.aboveMm != null ? Math.min(n, grid.aboveMm) : n;
+  const k = (lowEnd - grid.minMm) / grid.incrementMm;
+  if (Math.abs(k - Math.round(k)) > 1e-9) return false;
+  if (grid.aboveMm == null || n <= grid.aboveMm) return true;
+  const j = (n - grid.aboveMm) / grid.incrementAboveMm;
+  return Math.abs(j - Math.round(j)) < 1e-9;
+}
 const MGP10_RE = /\bMGP\s*-?\s*10\b/i;
 /** Is this timber grade MGP10 ("MGP10", "MGP 10", "mgp10")? Not MGP12, not LVL Smart 10. */
 export const isMgp10Grade = (grade) => MGP10_RE.test(String(grade ?? ""));
-/** The stock grid a grade buys on: 600 × n for MGP10, the owner's 1,200 + 300n for everything else. */
+/** The stock grid a grade buys on: the stepped MGP10 grid, or the owner's 1,200 + 300n for everything else. */
 export const timberGridFor = (grade) => (isMgp10Grade(grade) ? MGP10_GRID : TIMBER_GRID);
-/** Is this a length on the timber grid (1,200, 1,500, 1,800 …; 600, 1,200, 1,800 … for MGP10)? Only these can be marked "not stocked". */
+/** Is this a length on the timber grid (1,200, 1,500, 1,800 …; for MGP10 300 mm steps to 3,000 then 600 mm steps)? Only these can be marked "not stocked". */
 export function onTimberGrid(mm, grade = null) {
-  const n = Number(mm);
-  const g = timberGridFor(grade);
-  return isFiniteNumber(n) && n >= g.minMm && Math.abs((n - g.minMm) / g.incrementMm - Math.round((n - g.minMm) / g.incrementMm)) < 1e-9;
+  return onGrid(mm, timberGridFor(grade));
 }
+/** The stock rule in words for an editor: what lengths this grade is bought in (MGP10 differs above 3 m). */
+export const timberStockRuleText = (grade) => (isMgp10Grade(grade)
+  ? "MGP10: 1200 mm, then every 300 mm up to 3000 (1500, 1800 … 2700, 3000), then only every 600 mm above 3 m (3600, 4200, 4800 …) — same at every supplier. Short pieces are cut from the longer lengths."
+  : "1200 mm, then every 300 mm (1500, 1800, 2100 …) — same at every supplier.");
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
 /**
  * HUB 030 (Sam, 25 Oct 2026): "we NEVER use the hardies cavity batten - we always use 90 x 35 pine for battens"; in
@@ -253,12 +273,11 @@ export function wallFramingDefaults(presets = []) {
 export function wallPinePlateMaxMm(platesPart) {
   const s = platesPart?.stock || {};
   const max = Number(s.maxMm);
-  const g = timberGridFor(platesPart?.grade);   // MGP10 plates step in 600s, so a 5,700 longest means 5,400
+  const g = timberGridFor(platesPart?.grade);   // MGP10 plates step in 600s above 3 m, so a 5,700 longest means 5,400
   if (s.maxMm == null || s.maxMm === "" || !(max >= g.minMm)) return null;
   const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
-  for (let l = g.minMm + Math.floor((max - g.minMm) / g.incrementMm + 1e-9) * g.incrementMm; l >= g.minMm; l -= g.incrementMm) {
-    if (!off.has(l)) return l;
-  }
+  const lengths = gridLengthsUpTo(g, max);
+  for (let i = lengths.length - 1; i >= 0; i--) if (!off.has(lengths[i])) return lengths[i];
   return null;
 }
 

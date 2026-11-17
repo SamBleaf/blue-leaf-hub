@@ -17,7 +17,7 @@
 //   onChange  every valid edit (draft content)        onSave(content) — the caller saves a company version
 // =============================================================================
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_PURPOSES, describeFamilySpec, familyProblems, methodFor, normaliseFamilySpec, productionMethods } from "../../../shared/takeoff/index.js";
+import { TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_PURPOSES, describeFamilySpec, familyProblems, methodFor, normaliseFamilySpec, productionMethods, timberStockRuleText } from "../../../shared/takeoff/index.js";
 import { aluminiumPreset, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
 import { AccessoryRecipeEditor, AssemblyName, CarriedFlags, Chips, CommitText, KeyboardSafe, LengthList, NumberField, ProductPicker, ReviewBadge, SourcePicker, SourceRefs, StatusRow,
@@ -364,7 +364,7 @@ export default function CatalogueEditor({ value, onChange, onSave, onCancel, can
           {fam === "timber" ? (
             <fieldset className="space-y-2 rounded-lg border border-hairline p-2">
               <legend className="px-1 text-xs font-semibold text-ink">Stock</legend>
-              <p className="text-sm text-ink">1200 mm, then every 300 mm — the same grid at every supplier (owner setting).</p>
+              <p className="text-sm text-ink" data-stock-rule="">{timberStockRuleText(s.grade)}</p>
               <NumberField label="Longest available length" value={s.stock?.maxMm} onCommit={(n) => setSpec({ stock: { ...s.stock, maxMm: n } })} />
               <LengthList label="Grid lengths this supplier doesn't stock" values={s.stock?.unavailableMm} placeholder="e.g. 6600" onCommit={(v) => setSpec({ stock: { ...s.stock, unavailableMm: v } })}
                 help="Availability can only remove grid lengths — never add off-grid ones." />

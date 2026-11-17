@@ -1166,7 +1166,7 @@ t("needs: a Walls item saved with parts missing their details blocks ordering, n
   assert.ok(c.scheduleLines.every((l) => l.problems.includes("Plates: enter the treatment (or \"untreated\").")));
   assert.equal(c.orderReady, false);
   assert.deepEqual([pieceSum(c, "studs"), partRows(c, "plates"), pieceSum(c, "noggins")], [21, [[2, 6000], [2, 4200]], 13]);
-  assert.deepEqual(partLines(c, "studs")[0].item.description, "Studs 90 × 45 MGP10 — 3,000 mm length");
+  assert.deepEqual(partLines(c, "studs")[0].item.description, "Studs 90 × 45 MGP10 — 2,700 mm length");
   assert.ok(!msgs(c).some(([, , m]) => /choose the .* before ordering/.test(m)), "the part's needs once, never the engine's own wording as well");
 });
 
@@ -1414,7 +1414,7 @@ t("Long plates 'over 6.0 m' is the longest pine plate the calculation buys: the 
   const spec = (stock) => withPart(wallFramingDefaults([]), "plates", { stock });
   assert.equal(wallLongPlateOverMm(wallFramingDefaults([])), 6000);
   assert.equal(wallLongPlateOverText(wallFramingDefaults([])), "over 6.0 m");
-  // the default plates are MGP10 (600 mm steps, 18 Nov 2026), so with 6,000 not stocked pine stops at 5,400
+  // the default plates are MGP10 (600 mm steps above 3 m, 18 Nov 2026), so with 6,000 not stocked pine stops at 5,400
   assert.equal(wallLongPlateOverMm(spec({ maxMm: 6000, unavailableMm: [6000] })), 5400);
   assert.equal(wallLongPlateOverMm(spec({ maxMm: 6100, unavailableMm: [] })), 6000, "an off-grid longest length buys the grid length under it");
   assert.equal(wallLongPlateOverMm(spec({ maxMm: 5400, unavailableMm: [] })), 5400);

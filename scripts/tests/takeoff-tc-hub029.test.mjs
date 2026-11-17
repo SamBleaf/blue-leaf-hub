@@ -586,7 +586,7 @@ t("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, needs 
   assert.deepEqual([r.status.procurement, c.orderReady, fixesFor(c, w)], ["ready", true, []]);
   assert.deepEqual(c.scheduleLines.map((l) => [l.quantity, l.item.description]), [
     [21, "Studs 90 × 35 LVL Smart 10 H2 — 2,700 mm length"], [2, "Plates 90 × 45 MGP10 H2 — 6,000 mm length"], [2, "Plates 90 × 45 MGP10 H2 — 4,200 mm length"],
-    [1, "Noggins 90 × 35 MGP10 untreated — 5,400 mm length"], [1, "Noggins 90 × 35 MGP10 untreated — 1,800 mm length"]]);   // MGP10 is only sold in 600s (18 Nov 2026): 6,525 mm of noggins shares 5,400 + 1,800
+    [1, "Noggins 90 × 35 MGP10 untreated — 4,200 mm length"], [1, "Noggins 90 × 35 MGP10 untreated — 2,700 mm length"]]);   // MGP10 (18 Nov 2026): 300 steps to 3,000, 600 above: 6,525 mm of noggins shares 4,200 + 2,700
   // 2 studs each side of an opening, 35 apart, the first half a stud (17.5) off its edge; a grid stud within 35 merges
   const at = (id) => r.layouts.find((l) => l.wallMeasurementId === id).ticks.filter((x) => x.state !== "removed").map((x) => x.positionMm);
   assert.deepEqual(at("w1"), [0, 600, 947.5, 982.5, 1837.5, 1872.5, 2400, 3000, 3600, 4200, 4800, 5400, 6000]);
