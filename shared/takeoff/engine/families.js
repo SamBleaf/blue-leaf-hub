@@ -163,6 +163,8 @@ export const WALL_LVL_STOCK_MIN_MM = 6300;
 export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate: false });
 /** Sam, round 2 (25 Oct 2026): 2 full-length studs each side of every opening on Walls (windows, doors and other). */
 export const WALL_STUDS_EACH_SIDE = 2;
+/** Sam, 17 Nov 2026 (HUB 031): wet-area walls go to 450 stud centres. The only per-wall value the screens write; the server keeps 100–1,200. */
+export const WET_WALL_CENTRES_MM = 450;
 
 const LVL_RE = /\blvl/i;
 /** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */

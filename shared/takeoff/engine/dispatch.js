@@ -162,7 +162,9 @@ function resolveWall(m, ctx) {
       x0: x.xMm, y0: x.sillMm, x1: x.xMm + x.widthMm, y1: x.sillMm + x.heightMm, detail: x.detail || null };
   });
   const wall = { id: m.id, kind, widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
-    eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon };
+    eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
+    // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
+    studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null };
   return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", missing, problems };
 }
 
@@ -282,6 +284,7 @@ function runTimber(mat, n, items, ctx, sink) {
         sink.problems.push({ code: "plates_missing", message: `${w.label}: enter the bottom and top plate thickness to turn the frame height into a stud length.`, blocking: true });
         continue;
       }
+      if (w.wall.studCentresMm > 0) sink.problems.push({ code: "wall_centres_ignored", blocking: false, message: `${w.label} is set to ${fmt(w.wall.studCentresMm)} centres, but Studs uses its own centres (${fmt(rules.centresMm ?? 600)}) for every wall. Use a Walls item for a wall of its own.`, refs: [{ measurementId: m.id }] });
       const height = rules.heightMode === "frame"
         ? { mode: "frameHeight", frameHeightMm: studLen, bottomPlateMm: rules.bottomPlateMm, topPlateMm: rules.topPlateMm }
         : { mode: "studCut", studLengthMm: studLen };
@@ -385,7 +388,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // plate product), the same pine longest computePlates splits pine from LVL at
   const longPlates = { identity: wallPartIdentity(parts.longPlates, "longPlates"), lengthsMm: longPlateStockLengths(parts.longPlates, wallPinePlateMaxMm(parts.plates)), label: WALL_PART_LABELS.longPlates };
   const studW = parts.studs.section?.widthMm; // the stud's thickness along the wall (45 for a 90 × 45)
-  const centresMm = rules.centresMm ?? WALL_FRAMING_RULES.centresMm;
+  const itemCentresMm = rules.centresMm ?? WALL_FRAMING_RULES.centresMm;
   const results = [];
   // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
   const seen = new Set();
@@ -407,6 +410,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const block = (code, message, extra = {}) => sink.problems.push({ code, message, blocking: true, refs: [{ measurementId: m.id, ...extra }], ...(extra.missing ? { scope: "wall" } : {}) });
     const L = w.wall.widthMm;
     const H = Number(w.wall.heightMm);
+    // HUB 031: this wall's own centres (wet area) beat the item's
+    const wallCentres = w.wall.studCentresMm > 0 ? w.wall.studCentresMm : null;
+    const centresMm = wallCentres ?? itemCentresMm;
     if (w.wall.kind !== "rect") { block("wall_not_straight", `${tag} is sloped or traced as an outline. Walls only works out straight walls of one height.`); continue; }
     // HUB 029: which field, as on every other wall_incomplete (the wording unchanged)
     if (!(L > 0)) { block("wall_incomplete", `${tag}: trace the wall length.`, { missing: w.missing.includes("scale") ? ["scale"] : ["widthMm"] }); continue; }
@@ -487,7 +493,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     results.push({
       demands,
       // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
-      layout: { ...studs.layout, method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm,
+      layout: { ...studs.layout, method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item",
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,
@@ -497,7 +503,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
           noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null } },
       problems,
       status: { quantity: three.every((r) => r.status.quantity === "calculated") ? "calculated" : "incomplete", installation: studs.status.installation, procurement: "draft" },
-      explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...studs.explain, ...plates.explain, ...noggins.explain],
+      explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],
     });
   }
   if (notCounted.length) {

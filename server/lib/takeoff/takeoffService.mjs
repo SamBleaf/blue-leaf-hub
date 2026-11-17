@@ -229,7 +229,9 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       heightSource: tracedLengthMm != null ? "plan+entered" : "entered", name: optStr(i.name, 60), floor: optStr(i.floor, 40),
       // HUB 022: a wall traced with Line keeps its run and its place in it (tap order). Walls saved together share one
       // save time, so seq is what brings a run back in order. Kept only as a valid pair; otherwise the wall stands alone.
-      ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}) };
+      ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}),
+      // HUB 031 (Sam, 17 Nov 2026): this wall's own stud centres (wet areas at 450). Absent = the Walls item's centres.
+      ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }) } : {}) };
     // heights may be missing while the wall is a draft (traced first, heights next) — the engine reports it as
     // incomplete; values that ARE present must be coherent
     if (wk === "gable") { const gp = gableInputProblem(out, out.widthMm); must(!gp, gp?.message); }   // HUB 017: present values only
@@ -278,6 +280,8 @@ function cleanInputs(kind, inp, tracedLengthMm) {
   if (kind === "member") return { mode: ["projected", "true"].includes(i.mode) ? i.mode : "projected" };
   return null;
 }
+
+export { cleanInputs as cleanMeasurementInputs };
 
 /** Contribution role → measurement kinds it may use (207). A wall feeds cladding/supports/accessories/studs;
  *  timber repeated members take a distribution + a member line; aluminium takes openings. */

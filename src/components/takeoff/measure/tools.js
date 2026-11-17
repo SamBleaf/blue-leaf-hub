@@ -25,13 +25,15 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { WALLS_PURPOSE, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
+import { WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
   flashing: "#006c9b", overflow: "#dc2626", handling: "#b45309", draft: "#64748b", count: "#16a34a", selected: "#f59e0b",
   halo: "#7dd3fc", wall: "#9a3412", member: "#7c3aed", distribution: "#0d9488", trim: "#006c9b", split: "#0f172a", removed: "#94a3b8",
   window: "#0284c7", door: "#4f46e5",
+  // HUB 031: a wet-area wall (its own stud centres), cyan-700 (5.4:1 on white); its label also says "ctrs", so colour is never the only cue
+  wetWall: "#0e7490",
 });
 
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
@@ -422,6 +424,10 @@ export function wallFramingTotals(result, wallId = null) {
   if (!lays.length) return null;
   const t = { walls: lays.length, studs: 0, studsByHeight: [], bottomPlateMm: 0, topPlateMm: 0, secondTopPlateMm: null, noggins: 0, rows: [] };
   const byH = new Map();
+  // HUB 031: the walls with a centres setting of their own (wet areas at 450): { 450: 3 }. Only for the whole item.
+  const own = {};
+  if (wallId == null) for (const l of lays) if (l.centresFrom === "wall" && l.centresMm > 0) own[l.centresMm] = (own[l.centresMm] || 0) + 1;
+  if (Object.keys(own).length) t.ownCentres = own;
   for (const { totals: x } of lays) {
     t.studs += x.studs || 0;
     if (x.studs) byH.set(x.studLengthMm, (byH.get(x.studLengthMm) || 0) + x.studs);
@@ -468,7 +474,10 @@ export function wallFramingText(t, label = null, notCounted = []) {
   const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
   const rows = t.rows || [];
   const rowText = !rows.length ? "" : rows.length === 1 ? ` (${rows[0]} row${rows[0] === 1 ? "" : "s"})` : ` (${rows[0]}–${rows[rows.length - 1]} rows)`;
-  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...(out ? [out] : [])].join(" · ");
+  // HUB 031: "· 3 walls at 450" only when some wall has its own centres; otherwise the line reads exactly as before
+  const ownEntries = Object.entries(t.ownCentres || {}).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const own = ownEntries.length ? [ownEntries.map(([c, q], i) => `${i ? "" : `${n(q)} wall${q === 1 ? "" : "s"} at `}${i ? `${n(q)} at ` : ""}${n(c)}`).join(", ")] : [];
+  const body = [studs, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...own, ...(out ? [out] : [])].join(" · ");
   return label ? `${label}: ${body}` : body;
 }
 
@@ -529,6 +538,7 @@ export function wallPartText(part) {
 export function wallFramingNotes(result, wallId, spec) {
   const out = [];
   const lay = (result?.layouts || []).find((l) => l?.method === "wall_framing@1" && l.totals && l.wallMeasurementId === wallId);
+  if (lay?.centresFrom === "wall") out.push(`Studs at ${Math.round(lay.centresMm).toLocaleString("en-AU")} centres on this wall (its own setting).`);
   if (lay && lay.totals.longPlateMm > 0) {
     const over = wallLongPlateOverText(spec);
     out.push(`Plates: ${wallPartText(spec?.components?.longPlates)}${over ? ` (${over})` : ""}`);
@@ -537,6 +547,34 @@ export function wallFramingNotes(result, wallId, spec) {
     .flatMap((p) => (p.refs || []).filter((r) => r?.measurementId === wallId).map((r) => r.openingLabel || r.openingId)).filter(Boolean))];
   if (names.length) out.push(`Lintels, jacks and trimmers at ${names.join(", ")} aren't counted.`);
   return out;
+}
+
+// ── wet-area walls: a wall's own stud centres (HUB 031, Sam 17 Nov 2026) ─────────────────────────────────────
+
+/** The Walls item's own stud centres (what a wall without its own setting uses). */
+export const itemCentresMm = (material) => (Number(material?.rules?.centresMm) > 0 ? Number(material.rules.centresMm) : WALL_FRAMING_RULES.centresMm);
+/** This wall's own centres (null = the item's). */
+export const wallOwnCentresMm = (wall) => (Number(wall?.inputs?.studCentresMm) > 0 ? Number(wall.inputs.studCentresMm) : null);
+/**
+ * A wall's inputs with the wet-area setting flipped: off → 450; on (any own centres) → the key is DELETED, so
+ * switching 450 on and off leaves the inputs exactly as they were (never null, never the item's number written in).
+ */
+export function toggleWetWall(inputs) {
+  const { studCentresMm: own, ...rest } = inputs || {};
+  return Number(own) > 0 ? rest : { ...rest, studCentresMm: WET_WALL_CENTRES_MM };
+}
+/** Set a wall's own centres to `mm`, or back to the item's (null). Same rule: clearing deletes the key. */
+export function withWallCentres(inputs, mm) {
+  const rest = { ...(inputs || {}) };
+  delete rest.studCentresMm;
+  return Number(mm) > 0 ? { ...rest, studCentresMm: Number(mm) } : rest;
+}
+/** The traced walls of one material with their own centres: [{ id, name, centresMm }], in name order. */
+export function wetWallsOf(measurements, contributions, materialId) {
+  const mine = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId).map((c) => c.measurementId));
+  return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && wallOwnCentresMm(m))
+    .map((m) => ({ id: m.id, name: m.inputs?.name || "Wall", centresMm: wallOwnCentresMm(m) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────
