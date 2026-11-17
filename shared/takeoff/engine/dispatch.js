@@ -462,7 +462,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const jPlan = studW && stockOk && rules.junctionStuds !== false ? wallJunctionPlan(walls.map((x) => x.m), ctx, { thicknessMm: Number(parts.studs.section?.depthMm) || 90, studWidthMm: studW, toleranceMm: Number(rules.junctionToleranceMm) > 0 ? Number(rules.junctionToleranceMm) : undefined,
     cornersSwapped: Array.isArray(rules.cornersSwapped) ? rules.cornersSwapped : [] }) : { junctions: [], corners: [], crossings: [], skipped: [] };
   // one switch per junction (its id: butting wall + end + continuous wall); a key for a wall that no longer exists matches nothing
-  const jOff = new Set(Array.isArray(rules.junctionsOff) ? rules.junctionsOff : []);
+  const jOffKeys = new Set(Array.isArray(rules.junctionsOff) ? rules.junctionsOff : []);
+  // a key saved by the first junction build named just the butting end ("b:0"): still honoured, but only where that end makes ONE junction
+  const idsAtNode = new Map();
+  for (const j of jPlan.junctions) idsAtNode.set(j.nodeId, new Set([...(idsAtNode.get(j.nodeId) || []), j.id]));
+  const isOff = (j) => jOffKeys.has(j.id) || (jOffKeys.has(j.nodeId) && idsAtNode.get(j.nodeId).size === 1);
   const doneWalls = new Set(); // walls that were worked out (a blocked wall still gives its neighbours their junction studs, and is named in a note)
   const jWallName = (id) => { const x = walls.find((q) => q.m.id === id); return x ? tagOf(x) : "a wall"; };
   for (const { m } of studW && stockOk ? walls : []) {
@@ -510,9 +514,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }) : openings;
     // the junctions where this wall is the continuous one: two studs each (unless removed by hand), cut at THIS wall's height
     const myJ = jPlan.junctions.filter((j) => j.continuousId === m.id);
-    const jStuds = myJ.filter((j) => !jOff.has(j.id)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: x, label: `butts ${jWallName(j.buttingId)}` })));
+    const jStuds = myJ.filter((j) => !isOff(j)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: x, spaceMm: [j.studsAtMm[0], j.studsAtMm[1]], label: `butts ${jWallName(j.buttingId)}` })));
     // a T on the join of two collinear legs replaces the two leg-end studs there (the junction studs stand either side of the butting wall)
-    const dropAt = (end) => myJ.some((j) => !jOff.has(j.id) && j.dropEnd === end);
+    const dropAt = (end) => myJ.some((j) => !isOff(j) && j.dropEnd === end);
     // owner rule B: the corner's second stud, from the wall's own first point (or its last, when the wall ENDS at the corner)
     const myCornerStuds = jPlan.corners.filter((c) => c.studWallId === m.id).map((c) => ({ id: c.id, positionMm: c.studEnd === 0 ? c.offsetMm : L - c.offsetMm, label: "corner" }));
     const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
@@ -530,12 +534,14 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const jRep = new Map((studs.layout.junctionStuds || []).map((r) => [r.junctionId, r]));
     // what the wall page lists: every junction on this wall, counted or not (off = removed by hand)
     const junctionLayout = myJ.map((j) => {
-      const sts = j.studsAtMm.map((x, i) => ({ positionMm: x, state: jOff.has(j.id) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) }));
+      const sts = j.studsAtMm.map((x, i) => ({ positionMm: x, state: isOff(j) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) }));
       // owner rule A: blocks in the space between the two junction studs, at 900 centres up THIS wall's height, while the junction is counted
-      const here = j.ownsBlocks !== false && !jOff.has(j.id) && sts.some((x) => x.state === "added" || x.state === "merged");
-      const blocks = { count: blockCountFor(H), pairs: blockCountFor(H) / 2, lengthMm: JUNCTION_BLOCK.lengthMm, centresMm: blockCentresFor(H), xLeftMm: Math.round((j.stationMm - j.halfSpanMm) * 10) / 10, xRightMm: Math.round((j.stationMm + j.halfSpanMm) * 10) / 10, counted: here };
+      const here = j.ownsBlocks !== false && !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged");
+      const blocks = { count: blockCountFor(H), pairs: blockCountFor(H) / 2, lengthMm: JUNCTION_BLOCK.lengthMm, centresMm: blockCentresFor(H), xLeftMm: Math.round((j.stationMm - j.halfSpanMm) * 10) / 10, xRightMm: Math.round((j.stationMm + j.halfSpanMm) * 10) / 10, counted: here,
+        // drawn on every leg of a two-leg wall while the junction is on (counted on one only)
+        shown: !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged" || x.state === "pastEnd") };
       return { id: j.id, nodeId: j.nodeId, buttingId: j.buttingId, buttingLabel: jWallName(j.buttingId), stationMm: j.stationMm, angleDeg: j.angleDeg, split: j.split,
-        off: jOff.has(j.id), studs: sts, blocks };
+        off: isOff(j), studs: sts, blocks };
     });
     const blockJ = junctionLayout.filter((j) => j.blocks.counted);
     const blocksOut = blockJ.length ? computeJunctionBlocks({ ...part("plates"), wallId: m.id, measurementId: m.id, junctions: blockJ.map((j) => ({ id: j.id, count: j.blocks.count, label: `@ ${fmt(j.stationMm)} (butts ${j.buttingLabel})` })) }) : null;
@@ -552,8 +558,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
       layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
-    const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: centres.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
-      openings: studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), skipClosedBays: true });
+    // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
+    const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
+    const blockSpaces = jTicks.length ? junctionLayout.filter((j) => !j.off && j.studs.some((x) => x.state === "added")).map((j) => ({ id: `junction-space:${j.id}`, xLeftMm: Math.max(j.blocks.xLeftMm, 0), xRightMm: Math.min(j.blocks.xRightMm, L) })).filter((o) => o.xRightMm > o.xLeftMm + 1) : [];
+    const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: nogStations.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
+      openings: [...studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), ...blockSpaces], skipClosedBays: true });
     // a wall whose plates or noggins can't be worked out (a plate with no stud to join over, or a part's setting
     // refused) adds nothing to the totals either: it is named "not counted", with its reason, which holds the item
     const tooLong = plates.problems.filter((p) => p.code === "plate_too_long");

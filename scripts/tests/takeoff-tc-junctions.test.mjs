@@ -103,9 +103,10 @@ t("engine: a T adds two junction studs to the continuous wall only, as their own
   const jd = res.demands.filter((d) => d.role === "junction stud");
   assert.equal(jd.length, 2); assert.ok(jd.every((d) => d.lengthMm === 2700));
   assert.equal(la.junctions[0].buttingLabel, "Wall 2");
-  // regular studs unchanged: same count with and without the junction
+  // the grid stud at 3,000 stands in the space between the pair: the pair replaces it (one regular stud fewer)
   const base = run([A()]).lay("a").totals.studs;
-  assert.equal(la.totals.studs, base);
+  assert.equal(la.totals.studs, base - 1);
+  assert.ok(!la.ticks.some((x) => x.state !== "junction" && x.positionMm === 3000));
 });
 t("engine: junction studs print under JUNCT. BLK, apart from STUDS", () => {
   const { c } = run([A(), B()]);
@@ -123,11 +124,27 @@ t("engine: a different height on the butting wall never changes the continuous w
 });
 t("engine: a junction stud within one stud width of a counted stud is merged, not doubled", () => {
   // butting wall at 600 centres' grid: station 600 -> studs would be 532.5 / 667.5; the stud at 600 serves both? 600 is within 45 of neither (67.5 away) so both added.
-  // at 1170 the faces are 1102.5 / 1237.5; the grid stud at 1200 is 37.5 from 1237.5: merged
-  const b = wall("b", [1170, 0], [1170, 3000], 2700, "Wall 2");
+  // at 1130 the junction studs are 1062.5 / 1197.5; the grid stud at 1200 is 2.5 from 1197.5 and outside the space: merged
+  const b = wall("b", [1130, 0], [1130, 3000], 2700, "Wall 2");
   const la = run([A(), b]).lay("a");
   assert.equal(la.totals.junctionStuds, 1);
   assert.equal(la.junctions[0].studs[1].state, "merged"); assert.equal(la.junctions[0].studs[1].mergedWithMm, 1200);
+});
+t("engine: a grid stud in the space between a junction pair is replaced by the pair; noggins run to the junction studs", () => {
+  const la = run([A(), B()]).lay("a");
+  assert.deepEqual(la.noggins.bays.filter((b) => !b.openingId && b.fromMm >= 2400 && b.toMm <= 3600).map((b) => [b.fromMm, b.toMm]), [[2400, 2932.5], [3067.5, 3600]]);
+});
+t("engine: a wall traced in two legs framed like one wall: same studs and noggin bays as the single wall", () => {
+  const single = run([A(), B()]);
+  const l1 = wall("a1", [0, 0], [3000, 0], 2700, "Wall 1"), l2 = wall("a2", [3000, 0], [6000, 0], 2700, "Wall 1b");
+  const two = run([l1, l2, B()]);
+  const noggins = (r) => r.res.demands.filter((d) => d.role === "noggin").length;
+  assert.equal(noggins(two), noggins(single));
+  assert.equal(two.res.demands.filter((d) => d.role === "stud" || d.role === "junction stud").length, single.res.demands.filter((d) => d.role === "stud" || d.role === "junction stud").length);
+});
+t("engine: an old override key naming just the butting end still removes a single junction", () => {
+  const la = run([A(), B()], { junctionsOff: ["b:0"] }).lay("a");
+  assert.ok(!la.totals.junctionStuds); assert.ok(la.junctions[0].off);
 });
 t("engine: a junction stud inside an opening is not counted", () => {
   const a = A();

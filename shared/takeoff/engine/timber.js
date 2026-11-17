@@ -892,7 +892,18 @@ export function computeStudWall(input) {
       x, stationId: demandId(wallId, posKey(x)), opening: openings.find((o) => x > o.xLeftMm + EPS_MM && x < o.xRightMm - EPS_MM) ?? null,
     }));
     const cornerIn = Array.isArray(input.cornerStuds) ? input.cornerStuds.map((c) => ({ id: c.id, label: c.label || null, x: num(c.positionMm, "Corner stud position", { min: -Infinity }) })) : [];
-    const kept = side === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, side, wallId, cornerIn);
+    const keptAll = side === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, side, wallId, cornerIn);
+    // a junction pair REPLACES a regular stud standing in the space between its two studs (the blocks are fixed there): that
+    // stud comes out, so it is never counted inside the 90 mm block space (only while a junction stud of the pair is counted)
+    const spaces = side === null || !Array.isArray(input.junctionStuds) ? [] : input.junctionStuds
+      .filter((j) => Array.isArray(j.spaceMm) && j.spaceMm.length === 2 && Number.isFinite(j.positionMm)
+        && !(j.positionMm < side.w / 2 - EPS_MM || j.positionMm > run.runMm - side.w / 2 + EPS_MM)
+        && !openings.some((o) => j.positionMm > o.xLeftMm + EPS_MM && j.positionMm < o.xRightMm - EPS_MM)).map((j) => j.spaceMm);
+    const kept = spaces.length ? keptAll.filter((s) => {
+      const inSpace = (s.kind === "centre" || s.kind === "end") && spaces.some(([lo, hi]) => s.x > lo + EPS_MM && s.x < hi - EPS_MM);
+      if (inSpace) ctx.explain.push(`The stud at ${fmt(s.x)} is in the space between a junction's two studs, which the junction pair replaces`);
+      return !inSpace;
+    }) : keptAll;
     // what became of each corner stud: counted, merged into a stud already there, inside an opening, or past the wall's end
     const cornerReport = side === null ? [] : cornerIn.map((c) => {
       const sw = side.w;

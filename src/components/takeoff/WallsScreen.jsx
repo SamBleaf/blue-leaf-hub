@@ -610,16 +610,19 @@ function supportElements(entries, bbox, polygon) {
       }
       // owner rule A: the junction blocks (laminated pairs, 300 mm tall, at 900 centres) between the two junction studs
       for (const j of l.junctions || []) {
-        if (!j.blocks?.counted) continue;
+        if (!j.blocks?.counted && !j.blocks?.shown) continue;
+        // a wall traced in two legs: each leg draws the part of the block space that falls on it
+        const bx0 = Math.max(j.blocks.xLeftMm, 0), bx1 = Math.min(j.blocks.xRightMm, l.wallLengthMm ?? j.blocks.xRightMm);
+        if (!(bx1 > bx0)) continue;
         j.blocks.centresMm.forEach((c, i) => items.push({
           id: `${prefix}jb-${j.id}-${i}`, kind: "rect", state: "block",
-          rect: { x0: j.blocks.xLeftMm, x1: j.blocks.xRightMm, y0: c - j.blocks.lengthMm / 2, y1: c + j.blocks.lengthMm / 2 },
+          rect: { x0: bx0, x1: bx1, y0: bbox.y0 + c - j.blocks.lengthMm / 2, y1: bbox.y0 + c + j.blocks.lengthMm / 2 },
           info: { title: `Junction blocks @ ${fmtMm(c)} mm up (${j.buttingLabel} butts in)`, rows: [["Pair", `2 × ${fmtMm(j.blocks.lengthMm)} mm, laminated`], ["Fixed", `${fmtMm(j.blocks.xRightMm - j.blocks.xLeftMm)} mm space between the junction studs`]] },
         }));
       }
       // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More. A Walls
       // item (HUB 028) never says "opening framing incomplete": its one plain lintels note, on the wall's line, says it
-      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed" && t.state !== "junction").length, "stud")} at ${fmtMm(l.studLengthMm)} mm${(l.ticks || []).some((t) => t.state === "junction") ? `, plus ${plural((l.ticks || []).filter((t) => t.state === "junction").length, "junction stud")}` : ""}.`);
+      notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed" && t.state !== "junction").length, "stud")} at ${fmtMm(l.studLengthMm)} mm${(l.ticks || []).some((t) => t.state === "junction") ? `, plus ${plural((l.ticks || []).filter((t) => t.state === "junction").length, "junction stud")}` : ""}${(l.junctions || []).some((j) => j.blocks?.counted) ? `, ${plural((l.junctions || []).filter((j) => j.blocks?.counted).reduce((n, j) => n + j.blocks.count, 0), "junction block")}` : ""}.`);
       if (l.scope && l.method !== "wall_framing@1") about.push(`${e.material.name}: ${l.scope}.`);
     } else if (l.kind === "plates") {
       notes.push(`${e.material.name}: ${(l.layers || []).map((x) => `${x.tag} plate ${x.piecesMm.map((p) => fmtMm(p)).join(" + ")} mm`).join("; ")}.`);
