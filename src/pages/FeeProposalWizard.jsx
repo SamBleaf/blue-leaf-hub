@@ -1,4 +1,6 @@
 import { authFetch } from "../lib/authFetch.js";
+import { apiPost } from "../lib/apiFetch.js";
+import { settleArchitectName } from "../lib/architectNameAsk.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
@@ -472,6 +474,21 @@ export default function FeeProposalWizard() {
     }
   }
 
+  // The architect typed here is this proposal's wording. When it isn't the design team's architect, ask "Change it everywhere?"
+  // (owner decision 6): yes changes the design-team contact; no leaves the proposal's own wording. Asked once per typed name.
+  const architectAskedRef = useRef("");
+  async function askArchitectEverywhere() {
+    const typed = String(proposal.architect_name || "").trim();
+    if (!jobId || !typed || architectAskedRef.current === typed) return;
+    try {
+      const { ok, data } = await apiPost(`/api/jobs/${encodeURIComponent(jobId)}/architect-name-check`, { name: typed });
+      if (!ok || !data?.architectNameFlag) return;
+      architectAskedRef.current = typed;
+      const r = await settleArchitectName(data.architectNameFlag);
+      if (r.error) alert(r.error);
+    } catch { /* the proposal is saved; the question is a courtesy */ }
+  }
+
   async function saveDraft() {
     if (!supabaseConfigured) return;
     const sb = getSupabase();
@@ -509,6 +526,7 @@ export default function FeeProposalWizard() {
         if (error) throw new Error("Could not save your changes — please try again.");
         alert("Saved.");
       }
+      await askArchitectEverywhere();
     } catch (e) {
       alert(e?.message || String(e));
     } finally {

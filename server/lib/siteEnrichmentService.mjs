@@ -93,6 +93,15 @@ export function arcgisPointQueryUrl(endpoint, lat, lng) {
  * @returns {Promise<Record<string,unknown>|null>}
  */
 export async function arcgisPointQuery(endpoint, lat, lng) {
+  return (await arcgisPointQueryResult(endpoint, lat, lng)).attrs;
+}
+
+/**
+ * arcgisPointQuery, saying whether the service answered: { attrs, error }. error is true when the service could not be
+ * reached or did not answer properly (HTTP error, timeout, an ArcGIS `error` body, no `features` list); an answer with
+ * no matching feature is { attrs: null, error: false }. Fail-soft: never throws.
+ */
+export async function arcgisPointQueryResult(endpoint, lat, lng) {
   const url = arcgisPointQueryUrl(endpoint, lat, lng);
   // The SA gov ArcGIS servers are intermittently slow/5xx (see G1-A spike), so
   // retry once on timeout/network/5xx with a longer timeout before giving up.
@@ -102,24 +111,25 @@ export async function arcgisPointQuery(endpoint, lat, lng) {
       if (!res.ok) {
         if (res.status >= 500 && attempt < 2) continue;
         console.warn(`[siteEnrichment] ArcGIS ${res.status} for ${endpoint}`);
-        return null;
+        return { attrs: null, error: true };
       }
       const json = await res.json();
       // ArcGIS may return an `error` property even on HTTP 200.
       if (json?.error) {
         console.warn(`[siteEnrichment] ArcGIS error from ${endpoint}:`, json.error);
-        return null;
+        return { attrs: null, error: true };
       }
       const features = json?.features;
-      if (!Array.isArray(features) || features.length === 0) return null;
-      return features[0]?.attributes ?? null;
+      if (!Array.isArray(features)) return { attrs: null, error: true };
+      if (features.length === 0) return { attrs: null, error: false };
+      return { attrs: features[0]?.attributes ?? null, error: false };
     } catch (e) {
       if (attempt < 2) continue; // timeout/network — one retry, then fail-soft
       console.warn(`[siteEnrichment] arcgisPointQuery fetch error (${endpoint}):`, e?.message ?? e);
-      return null;
+      return { attrs: null, error: true };
     }
   }
-  return null;
+  return { attrs: null, error: true };
 }
 
 /**
@@ -133,18 +143,24 @@ export async function arcgisPointQuery(endpoint, lat, lng) {
  * @returns {Promise<number|null>}
  */
 export async function mapboxElevation(lat, lng) {
+  return (await _mapboxElevationResult(lat, lng)).ele;
+}
+
+/** mapboxElevation, saying whether Mapbox answered: { ele, error, skipped } (skipped: no MAPBOX_TOKEN). Never throws. */
+async function _mapboxElevationResult(lat, lng) {
   const token = _resolveMapboxToken();
-  if (!token) return null;
+  if (!token) return { ele: null, error: false, skipped: true };
   try {
     const url = `${MAPBOX_TILEQUERY_BASE}/${lng},${lat}.json?access_token=${token}&layers=contour&limit=5`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
       console.warn(`[siteEnrichment] Mapbox Tilequery ${res.status} for (${lat},${lng})`);
-      return null;
+      return { ele: null, error: true, skipped: false };
     }
     const json = await res.json();
     const features = json?.features;
-    if (!Array.isArray(features) || features.length === 0) return null;
+    if (!Array.isArray(features)) return { ele: null, error: true, skipped: false };
+    if (features.length === 0) return { ele: null, error: false, skipped: false };
     // Pick the contour feature with the highest ele (nearest to the surface).
     let maxEle = null;
     for (const f of features) {
@@ -154,10 +170,10 @@ export async function mapboxElevation(lat, lng) {
         maxEle = ele;
       }
     }
-    return maxEle;
+    return { ele: maxEle, error: false, skipped: false };
   } catch (e) {
     console.warn(`[siteEnrichment] mapboxElevation fetch error:`, e?.message ?? e);
-    return null;
+    return { ele: null, error: true, skipped: false };
   }
 }
 
@@ -166,19 +182,27 @@ export async function mapboxElevation(lat, lng) {
  * Returns null if < 2 elevations were successfully retrieved (can't compute slope).
  * Fail-soft: never throws.
  *
+ * Also says how the layer went: status "ok" (an answer, even a null one), "error" (fewer than 2 elevations and at least
+ * one sample failed) or "skipped" (no MAPBOX_TOKEN).
+ *
  * @param {number} lat
  * @param {number} lng
- * @returns {Promise<number|null>} slope in degrees
+ * @returns {Promise<{slopeDeg:number|null,status:"ok"|"error"|"skipped"}>} slope in degrees
  */
 async function _estimateSlope(lat, lng) {
   const elevations = [];
+  let errored = false, skipped = false;
   for (const dLat of _GRID_OFFSETS) {
     for (const dLng of _GRID_OFFSETS) {
-      const ele = await mapboxElevation(lat + dLat, lng + dLng);
-      if (ele !== null) elevations.push(ele);
+      const r = await _mapboxElevationResult(lat + dLat, lng + dLng);
+      if (r.skipped) { skipped = true; break; }   // no token: every sample would be the same
+      if (r.error) errored = true;
+      if (r.ele !== null) elevations.push(r.ele);
     }
+    if (skipped) break;
   }
-  if (elevations.length < 2) return null;
+  if (skipped) return { slopeDeg: null, status: "skipped" };
+  if (elevations.length < 2) return { slopeDeg: null, status: errored ? "error" : "ok" };
   const minEle = Math.min(...elevations);
   const maxEle = Math.max(...elevations);
   // Grid spans ~100 m (two offsets × 50 m) diagonally.
@@ -186,7 +210,7 @@ async function _estimateSlope(lat, lng) {
   const risem = maxEle - minEle;
   const runm  = 141;
   const slopeDeg = (Math.atan(risem / runm) * 180) / Math.PI;
-  return Math.round(slopeDeg * 10) / 10; // one decimal place
+  return { slopeDeg: Math.round(slopeDeg * 10) / 10, status: "ok" }; // one decimal place
 }
 
 /**
@@ -249,13 +273,20 @@ export function deriveComplexity({ bushfireProne, slopeBand, zone }) {
  *   6. Write site_* columns + site_intel jsonb + site_enriched_at.
  *   7. Return summary object.
  *
+ * Opt-in look-only mode (the register's "Re-check", registerRoutes.mjs): opts.write === false runs steps 1–5 and writes
+ * nothing; the result also carries `updates` (the columns step 6 would write) and `layers` ({ council, bushfire, zone,
+ * slope }: "ok" | "error" | "skipped"), so the caller can keep good stored values when a layer could not be reached.
+ * opts.sb: the Supabase client to use (default: the service client). Every other caller is unchanged.
+ *
  * @param {"jobs"|"leads"} table
  * @param {string} id  — row UUID
- * @returns {Promise<{ok:boolean,reason?:string,council?:string,bushfireProne?:boolean,zone?:string,slopeBand?:string,complexity?:string}>}
+ * @param {{ write?: boolean, sb?: object }} [opts]
+ * @returns {Promise<{ok:boolean,reason?:string,council?:string,bushfireProne?:boolean,zone?:string,slopeBand?:string,complexity?:string,updates?:object,layers?:object}>}
  */
-export async function enrichSite(table, id) {
-  const sb = getServiceSupabase();
+export async function enrichSite(table, id, opts = {}) {
+  const sb = opts.sb || getServiceSupabase();
   if (!sb) return { ok: false, reason: "no_db" };
+  const lookOnly = opts.write === false;
 
   // ── 1. Load the row ───────────────────────────────────────────────────────
   let row;
@@ -306,11 +337,15 @@ export async function enrichSite(table, id) {
 
   // ── 3. Query each layer independently ────────────────────────────────────
   const rawLayers = {};
+  // How each layer went (returned in look-only mode): "ok" = the service answered (a null value is a real "nothing
+  // there"), "error" = it could not be reached, "skipped" = not configured (no MAPBOX_TOKEN).
+  const layers = { council: "ok", bushfire: "ok", zone: "ok", slope: "ok" };
 
   // Layer 1 — LGA / Council
   let council = null;
   try {
-    const attrs = await arcgisPointQuery(ENDPOINT_LGA, lat, lng);
+    const { attrs, error } = await arcgisPointQueryResult(ENDPOINT_LGA, lat, lng);
+    if (error) layers.council = "error";
     rawLayers.lga = attrs;
     if (attrs) {
       // Prefer `lga` field; fall back to `abbname`.
@@ -320,13 +355,15 @@ export async function enrichSite(table, id) {
   } catch (e) {
     console.warn("[siteEnrichment] LGA layer error:", e?.message ?? e);
     rawLayers.lga = null;
+    layers.council = "error";
   }
 
   // Layer 2 — Bushfire overlay
   let bushfireProne = null;
   let bushfireDetail = null;
   try {
-    const attrs = await arcgisPointQuery(ENDPOINT_BUSHFIRE, lat, lng);
+    const { attrs, error } = await arcgisPointQueryResult(ENDPOINT_BUSHFIRE, lat, lng);
+    if (error) layers.bushfire = "error";
     rawLayers.bushfire = attrs;
     if (attrs) {
       // Any matching feature = the site is in a bushfire overlay polygon.
@@ -346,12 +383,14 @@ export async function enrichSite(table, id) {
   } catch (e) {
     console.warn("[siteEnrichment] Bushfire layer error:", e?.message ?? e);
     rawLayers.bushfire = null;
+    layers.bushfire = "error";
   }
 
   // Layer 3 — P&D Code zone
   let zone = null;
   try {
-    const attrs = await arcgisPointQuery(ENDPOINT_ZONE, lat, lng);
+    const { attrs, error } = await arcgisPointQueryResult(ENDPOINT_ZONE, lat, lng);
+    if (error) layers.zone = "error";
     rawLayers.zone = attrs;
     if (attrs) {
       zone = attrs.name ?? attrs.zone_code ?? null;
@@ -360,18 +399,22 @@ export async function enrichSite(table, id) {
   } catch (e) {
     console.warn("[siteEnrichment] Zone layer error:", e?.message ?? e);
     rawLayers.zone = null;
+    layers.zone = "error";
   }
 
   // Layer 4 — Slope (Mapbox Tilequery grid)
   let slopeDeg = null;
   let slopeBand = null;
   try {
-    slopeDeg = await _estimateSlope(lat, lng);
+    const slope = await _estimateSlope(lat, lng);
+    slopeDeg = slope.slopeDeg;
+    layers.slope = slope.status;
     slopeBand = slopeToBand(slopeDeg);
     rawLayers.slope = { slopeDeg, slopeBand };
   } catch (e) {
     console.warn("[siteEnrichment] Slope layer error:", e?.message ?? e);
     rawLayers.slope = null;
+    layers.slope = "error";
   }
 
   // ── 4. Derive complexity ──────────────────────────────────────────────────
@@ -389,6 +432,9 @@ export async function enrichSite(table, id) {
     site_enriched_at:    new Date().toISOString(),
     site_intel:          rawLayers,
   };
+
+  // Look-only (opt-in): nothing is written; the caller decides what to keep.
+  if (lookOnly) return { ok: true, council, bushfireProne, zone, slopeBand, complexity, updates, layers };
 
   try {
     const { error: writeErr } = await sb.from(table).update(updates).eq("id", id);

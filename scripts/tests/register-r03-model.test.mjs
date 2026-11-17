@@ -10,9 +10,10 @@ import { fileURLToPath } from "node:url";
 import {
   promptsFor, roomPrompts, questionById, resolvePromptId, makeItem, makeRoom, emptyMeta, isClientSelection, outstandingReasons,
   itemIssues, defaultItemFor, refCode, readRegister, writeRegister, QUESTION_LIBRARY_VERSION, ITEM_KINDS, REGISTER_DISPOSITIONS,
-  TECHNICAL_STATUSES, PRICING_STATUSES,
+  TECHNICAL_STATUSES, PRICING_STATUSES, editOutrunsApproval,
 } from "../../src/lib/register.js";
 import { QUESTIONS } from "../../src/lib/registerQuestions.js";
+import { architectBriefModel } from "../../src/lib/briefModel.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let pass = 0, fail = 0;
@@ -106,6 +107,24 @@ const ids = (qs) => qs.map((q) => q.id);
     it.quantity === 42.5 && it.unit === "m²" && it.supplyBy === "trade" && it.pricingRef === "PC-3" && it.sync === null);
   ok("quantity: blank means NOT MEASURED (null), never zero", makeItem({ quantity: "" }).quantity === null && makeItem({}).quantity === null);
   ok("roomPrompts (R02 API) still works on top of the library", roomPrompts("kitchen").some((p) => p.key === "K-005" && p.question));
+}
+
+// ── an approval covers the words of a requirement, scope or action (review B3) ─────────────────────
+{
+  const ev = { at: "2026-11-15T10:00:00Z", by: "Sam Morris", method: "meeting" };
+  const req = makeItem({ id: "w15", itemKind: "requirement", promptKey: "W-015", category: "windows", certainty: "client_approved", evidence: ev,
+    description: "No steps at the entry", responsibility: "architect", technicalStatus: "needs_verification" });
+  ok("approval: rewording an approved requirement outruns the approval", editOutrunsApproval(req, { description: "Two steps up to the entry are fine" }));
+  ok("approval: the same words re-saved (spacing, case) don't", !editOutrunsApproval(req, { description: "  no steps at  the Entry " }));
+  ok("approval: an approved scope record's words count too", editOutrunsApproval(makeItem({ itemKind: "scope", certainty: "client_approved", evidence: ev, description: "Remove the carport" }), { description: "Keep the carport" }));
+  ok("approval: a selection's typed words don't (its product does)", !editOutrunsApproval(makeItem({ itemKind: "selection", certainty: "client_approved", evidence: ev, description: "Oak" }), { description: "Oak, matt" }));
+  ok("approval: a change that sets the certainty itself is left to it", !editOutrunsApproval(req, { description: "Two steps", certainty: "client_approved" }));
+  // The screen steps it back (useRegister: certainty Proposed, evidence cleared); the brief then doesn't call it agreed.
+  const reg = { meta: emptyMeta({ rooms: [] }), items: [req] };
+  const said = (r) => JSON.stringify(architectBriefModel(r, {}, {}));
+  const stepped = { ...reg, items: [makeItem({ ...req, description: "Two steps up to the entry are fine", certainty: "proposed", evidence: null })] };
+  ok("approval: before, the brief says it was agreed with the client", /No steps at the entry \(agreed with the client\)/i.test(said(reg)), said(reg).slice(0, 300));
+  ok("approval: after the step-back, nothing says it was agreed", /two steps up to the entry are fine/i.test(said(stepped)) && !/agreed with the client/.test(said(stepped)), said(stepped).slice(0, 300));
 }
 
 console.log(`\nMaster Register R03 — model + library tests: ${pass} passed, ${fail} failed`);

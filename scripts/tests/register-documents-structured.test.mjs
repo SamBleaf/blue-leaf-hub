@@ -50,24 +50,28 @@ const sectionOf = (name) => notes.tenderNotes.sections.find((s) => s.title === n
 
 section("Card answers print in the existing documents (Gate 6.1)");
 ok("the schedule prints what was chosen", /Render/.test(flat(sel.selections)) && /Fibre cement/i.test(flat(sel.selections)), flat(sel.selections).slice(0, 500));
-ok("two wall systems are two lines", sel.selections.filter((r) => r.category.includes("Architectural material")).length === 2);
+ok("two wall systems are two lines", sel.selections.filter((r) => r.item.includes("Architectural material")).length === 2);
 ok("gutters say which roof", sel.selections.some((r) => /Quad/.test(r.product) && /Main roof/.test(r.product)));
-ok("a project default is labelled", sel.selections.some((r) => /project default/.test(r.category)));
-ok("a room exception is labelled", sel.selections.some((r) => r.category.startsWith("Bed 1") && /room exception/.test(r.category)));
-ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.itemId)));
-ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferenceGroups)));
-ok("scope lines carry the item id", brief.clientBrief.scopeIn.some((l) => /Walls/.test(l) && /\[W004-/.test(l)), flat(brief.clientBrief.scopeIn));
-ok("the architect brief lists card scope", arch.architectBrief.scheduleItems.some((r) => /Demolish|Remove/i.test(r.requirement) && /Walls/.test(r.requirement)), flat(arch.architectBrief.scheduleItems).slice(0, 400));
-ok("an area reads as the room's name", brief.clientBrief.scopeIn.some((l) => l.startsWith("Kitchen:")));
+// Pair 2 (SELECTIONS_SPEC.md): no system tags. A house default is said as such (house-wide, location blank in the
+// schedule); a room's own choice names its room, and what it replaces only when that default applies to the room.
+ok("a project default is a house-wide record (or its zone's), with no system tag", sel.selections.some((r) => r.house || r.zone) && !/project default|room exception|Whole house/i.test(flat(sel.technicalSchedule)));
+ok("a room exception names its room", sel.selections.some((r) => r.location === "Bed 1" && r.roomId));
+ok("every line keeps its item id", sel.selections.every((r) => /^[A-Z]\d{3}-|^X-/.test(r.ref)));
+ok("the client brief prints card choices", /Render/.test(flat(brief.clientBrief.preferences)));
+ok("scope lines carry the item id, beside the words rather than inside them", brief.clientBrief.scopeIn.some((l) => /Walls/.test(l.text) && /^W004-/.test(l.ref) && !/\[/.test(l.text)), flat(brief.clientBrief.scopeIn));
+// adb-2.0 (the brief model): house-wide work prints with the selections that affect the drawings, under its own subject.
+const archRows = [...arch.architectBrief.selections, ...arch.architectBrief.roomGroups.flatMap((g) => g.rows)];
+ok("the architect brief lists card scope", archRows.some((r) => /Demolish|Remove|Walls/i.test(`${r.label || r.room} ${r.text}`)) && /Work and selections/.test(arch.architectBrief.selectionsTitle), flat(arch.architectBrief.selections).slice(0, 400));
+ok("an area reads as the room's name", brief.clientBrief.scopeIn.some((l) => l.text.startsWith("Kitchen:")));
 
 section("Facts never become priced scope (MR-UX-02.8)");
-ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /Narrow|Steep/.test(l)));
-ok("an older Included status on a fact doesn't print as work", !brief.clientBrief.scopeIn.some((l) => /Yes/.test(l)), flat(brief.clientBrief.scopeIn));
-ok("the architect's register doesn't list it as work", !arch.architectBrief.scheduleItems.some((r) => /Narrow|Steep/.test(r.requirement)));
-ok("it's noted as a fact", brief.clientBrief.assumptions.some((l) => /Narrow/.test(l) && /fact/.test(l)), flat(brief.clientBrief.assumptions));
+ok("site access isn't Included", !brief.clientBrief.scopeIn.some((l) => /narrow|steep|site access/i.test(l.text)));
+ok("an older Included status on a fact doesn't print as work", !brief.clientBrief.scopeIn.some((l) => /Yes/.test(l.text)), flat(brief.clientBrief.scopeIn));
+ok("the architect brief doesn't list it as work", !archRows.some((r) => /narrow|steep/i.test(r.text)) && arch.architectBrief.site.some((r) => r.label === "Access" && /narrow/i.test(r.text)), flat(arch.architectBrief.site));
+ok("it's noted as a fact", brief.clientBrief.noted.some((g) => /site and household/.test(g.label) && g.items.some((t) => /^Site access is .*narrow or restricted/.test(t))), flat(brief.clientBrief.noted));
 
 section("Performance goals stay intent (B04, DEC-MRUX-03)");
-ok("the goal is labelled for review", /Airtightness[^"]*subject to consultant review/.test(flat(brief.clientBrief.preferenceGroups)) || /Airtightness[^"]*subject to consultant review/.test(flat(arch.architectBrief.scheduleItems)), flat(arch.architectBrief.scheduleItems).slice(0, 800));
+ok("the goal is labelled for review", brief.clientBrief.preferences.flatMap((g) => g.items).some((x) => /Airtightness/.test(x.text) && x.status === "For consultant review") && [...arch.architectBrief.project, ...arch.architectBrief.points].some((r) => /Airtightness/i.test(r.text) && /for consultant review/.test(r.text)), flat(arch.architectBrief.points).slice(0, 800));
 const suggestions = Object.values(PERFORMANCE_SUGGESTIONS).flat().map((s) => s.text);
 for (const [name, doc] of [["client brief", brief], ["architect brief", arch], ["schedule", sel]]) ok(`no review suggestion in the ${name}`, !suggestions.some((t) => flat(doc).includes(t)));
 
@@ -103,10 +107,11 @@ const kitchenLine = assumptions.rows.find((r) => /Kitchen/.test(r.area));
 ok("the assumption doesn't describe the benchtop that was chosen (R05-05)", !/bench/i.test(kitchenLine.text) && /cabinetry/i.test(kitchenLine.text), kitchenLine.text);
 const checkReq = mk("W-022", { itemKind: "requirement", certainty: "client_approved", evidence: { at: "2026-11-10", by: "Staff" }, description: "Steel beam over the new opening", technicalStatus: "needs_verification" });
 const plainReq = mk("W-022", { itemKind: "requirement", certainty: "client_approved", evidence: { at: "2026-11-10", by: "Staff" }, description: "Keep the existing fireplace" });
-const archCheck = buildRegisterFixture("architect_brief", { ...input(), register: { ...register, items: [...items, checkReq, plainReq] } }).architectBrief.confirmedReqs;
-ok("a client-approved requirement still needing a technical check says so (Tab 26 DOC-02)", archCheck.some((l) => /Steel beam over the new opening \(technical check pending\)$/.test(l)), flat(archCheck));
-ok("one with no open check reads as before", archCheck.some((l) => /Keep the existing fireplace$/.test(l)), flat(archCheck));
-ok("schedule rows carry the room and the item separately, for the client presentation", sel.selections.every((r) => typeof r.where === "string" && r.item && r.category.startsWith(r.where.replace(/ \((project default|room exception)\)$/, ""))), flat(sel.selections.slice(0, 2)));
+const archCheckFx = buildRegisterFixture("architect_brief", { ...input(), register: { ...register, items: [...items, checkReq, plainReq] } }).architectBrief;
+ok("a client-approved requirement still needing a technical check is a point for the next issue, agreed with the client, owner to be agreed (Tab 26 DOC-02)",
+  archCheckFx.points.some((p) => /steel beam over the new opening \(agreed with the client\)\.$/i.test(p.text) && p.who === "To be agreed"), flat(archCheckFx.points));
+ok("one with no open check prints with the project, agreed with the client", archCheckFx.project.some((r) => /Keep the existing fireplace \(agreed with the client\)\.$/.test(r.text)), flat(archCheckFx.project));
+ok("selection records carry the location and the item separately, for both documents", sel.selections.every((r) => typeof r.location === "string" && r.location && r.item), flat(sel.selections.slice(0, 2)));
 // An item reference must never read as placeholder text: "W014-XXX" blocked issuing (found by sandbox-register-structured).
 {
   const { refCode } = await import("../../src/lib/register.js");
@@ -138,7 +143,7 @@ ok("no recipient blocks it", registerDocChecks("tender_scope_notes", notes, { re
 section("Old records and rendering");
 const legacy = { meta: emptyMeta({ planRev: "A", rooms: [kitchen] }), items: [makeItem({ itemKind: "selection", promptKey: "K-005", category: "benchtop", roomId: kitchen.id, description: "Marble bench", certainty: "preference" }), makeItem({ itemKind: "scope", promptKey: "R-003", category: "scope", roomId: kitchen.id, description: "New kitchen", disposition: "new" })] };
 const lf = buildRegisterFixture("client_brief", { ...input(), register: legacy });
-ok("older typed records print unchanged", /Marble bench/.test(flat(lf.clientBrief.preferenceGroups)) && lf.clientBrief.scopeIn.some((l) => /New kitchen/.test(l)));
+ok("older typed records print unchanged", /Marble bench/.test(flat(lf.clientBrief.preferences)) && lf.clientBrief.scopeIn.some((l) => /New kitchen/.test(l.text)));
 const out = await renderRegisterDocument("tender_scope_notes", buildRegisterFixture("tender_scope_notes", input("Draft")), {});
 ok("it renders to DOCX and PDF", out.docx.length > 5000 && out.pdf.length > 5000 && out.pdf.slice(0, 4).toString() === "%PDF");
 ok("no unfilled tag or empty value", out.leaks.length === 0, out.leaks.join());

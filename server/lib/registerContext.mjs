@@ -5,35 +5,74 @@
  * consultants, drawings and commercial state are ALREADY owned by Sales/Hub. The register shows them as
  * prefilled context and links to the authoritative form — it never re-asks or stores a copy.
  * Owner by phase: before conversion the lead; after conversion the job (via the facts registry columns);
- * consultants via job_contact_roles (falling back to the lead's consultant_roster).
+ * consultants: job_contact_roles and the lead's consultant_roster merged into one list (projectStory.mergeConsultants),
+ * each with its contactId and roleId, duplicates removed. Inactive and completed people stay in the list with their
+ * status; designTeam() in briefModel.js leaves them out of everything that prints.
  *
  * Every read is defensive: a missing optional table/column degrades to "not on file", never an error.
  */
 import { setFact } from "./factsService.mjs";
-import { DELIVERY_MODELS } from "../../src/lib/register.js";
+import { DELIVERY_MODELS, PROJECT_TYPE_LABELS } from "../../src/lib/register.js";
+import { mergeConsultants, budgetConfirmedOn, confirmedNoteOf } from "../../src/lib/projectStory.js";
+import { namedArchitect } from "../../src/lib/briefModel.js";
+import { resolveEngagementPathway } from "../../src/lib/stageGates.js";
 
 const pickStr = (...vals) => { for (const v of vals) { const s = v == null ? "" : String(v).trim(); if (s) return s; } return ""; };
 const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 async function safe(fn, fallback) { try { const r = await fn(); return r ?? fallback; } catch { return fallback; } }
 
+const SITE_COLUMNS = ["site_council", "site_zone", "site_bushfire_prone", "site_slope_band", "site_complexity"];
+const looked = (row) => !!row && (!!row.site_enriched_at || SITE_COLUMNS.some((k) => row[k] != null));
+/**
+ * Where "Site and planning" reads from (both spines are enriched, mig 135): the job once its public-mapping lookup has run;
+ * until then the lead's (conversion re-runs the lookup for the job, which takes a moment), so the rows never go blank
+ * after the PTSA. Nothing is copied: the values are generated, and each spine keeps its own. null when neither has run.
+ */
+export function siteSource(job, lead) {
+  if (looked(job)) return job;
+  if (looked(lead)) return lead;
+  return null;
+}
+/** The site rows of the context, from siteSource (every value null when neither spine has been looked up). */
+export function siteFacts(job, lead) {
+  const src = siteSource(job, lead) || {};
+  return {
+    council: src.site_council || null, zone: src.site_zone || null, bushfire: src.site_bushfire_prone ?? null,
+    bushfireDetail: src.site_bushfire_detail || null,
+    slopeBand: src.site_slope_band || null, complexity: src.site_complexity || null,
+    enrichedAt: src.site_enriched_at || null,
+  };
+}
+
+/** "Re-check" runs public mapping again only when the last lookup is at least this old (per lead; the service is rate-limited). */
+export const RECHECK_MIN_MS = 10 * 60 * 1000;
+/** Is a fresh lookup due? A row never looked up is always due. */
+export function recheckDue(enrichedAt, now = Date.now()) {
+  const t = enrichedAt ? Date.parse(enrichedAt) : NaN;
+  return !Number.isFinite(t) || now - t >= RECHECK_MIN_MS;
+}
+
 export async function loadRegisterContext(sb, leadId) {
   const { data: lead } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
   if (!lead) return null;
   const job = lead.job_id ? await safe(async () => (await sb.from("jobs").select("*").eq("id", lead.job_id).maybeSingle()).data, null) : null;
 
-  const consultants = await safe(async () => {
+  const roleRows = await safe(async () => {
     const ors = [`lead_id.eq.${lead.id}`]; if (job?.id) ors.push(`job_id.eq.${job.id}`);
     const { data, error } = await sb.from("job_contact_roles")
-      .select("id, role, status, contact:crm_contacts(first_name, last_name, company, email)").or(ors.join(","));
-    if (error) return null;
-    return (data || []).filter((r) => r.role !== "referrer").map((r) => ({
-      role: r.role, status: r.status || null,
-      name: pickStr([r.contact?.first_name, r.contact?.last_name].filter(Boolean).join(" "), r.contact?.company),
-      company: r.contact?.company || null,
-    }));
-  }, null);
+      .select("id, role, status, contact_id, contact:crm_contacts(first_name, last_name, company, email, phone)").or(ors.join(","));
+    return error ? [] : (data || []);
+  }, []);
   const roster = Array.isArray(lead.consultant_roster) ? lead.consultant_roster : [];
+  // Roster people with no role row: read their contact once (one query, not one per person).
+  const roleContactIds = new Set(roleRows.map((r) => r.contact_id).filter(Boolean));
+  const rosterIds = [...new Set(roster.map((r) => r?.contactId || r?.contact_id).filter((id) => id && !roleContactIds.has(id)))];
+  const rosterContacts = rosterIds.length ? await safe(async () => {
+    const { data, error } = await sb.from("crm_contacts").select("id, first_name, last_name, company, email, phone").in("id", rosterIds);
+    return error ? {} : Object.fromEntries((data || []).map((c) => [c.id, c]));
+  }, {}) : {};
+  const consultants = mergeConsultants(roleRows, roster, rosterContacts);
 
   const meetings = await safe(async () => {
     const { data, error } = await sb.from("lead_meetings").select("meeting_type, scheduled_at, status, title")
@@ -63,7 +102,13 @@ export async function loadRegisterContext(sb, leadId) {
     return error ? null : data;
   }, null) : null;
 
-  const src = job || lead;                      // site intelligence is enriched on both spines (mig 135)
+  // The storeys fact (project_metrics.storeys, Job spine) is read only here: the Rooms list compares it with the floors
+  // the rooms are on and says so, never writes it (REGISTER_SCREENS_SPEC.md S2).
+  const storeys = job?.id ? await safe(async () => {
+    const { data, error } = await sb.from("project_metrics").select("storeys").eq("job_id", job.id).maybeSingle();
+    return error ? null : (Number.isFinite(Number(data?.storeys)) && Number(data.storeys) > 0 ? Number(data.storeys) : null);
+  }, null) : null;
+
   const deliveryModel = job?.delivery_model || lead.delivery_model || null;
   return {
     owner: job ? "job" : "lead",
@@ -80,10 +125,14 @@ export async function loadRegisterContext(sb, leadId) {
     deliveryModel,
     deliveryModelSource: job?.delivery_model ? "job" : lead.delivery_model ? "lead" : null,
     stage: lead.stage, stageEnteredAt: lead.stage_entered_at || null,
+    engagementPathway: resolveEngagementPathway(lead),   // design_build | plans_supplied | architect_tender (stageGates)
     budget: {
       min: num(lead.construction_budget_min), max: num(lead.construction_budget_max),
       estimatedValue: num(job?.estimated_value ?? lead.estimated_value),
-      financeStatus: lead.finance_status || null, confirmed: lead.wo_budget_confirmed || null,
+      // confirmed: did the client confirm the budget (the free-text Sales field, read as yes or no); confirmedNote: the words
+      // typed there beyond a plain "Yes", shown under the toggle so nothing is hidden.
+      financeStatus: lead.finance_status || null, confirmed: budgetConfirmedOn(lead.wo_budget_confirmed),
+      confirmedNote: confirmedNoteOf(lead.wo_budget_confirmed) || null,
       desiredStart: lead.desired_start_date || null,
     },
     goals: {
@@ -96,16 +145,15 @@ export async function loadRegisterContext(sb, leadId) {
       feeProposal: feeProposal ? { id: feeProposal.id, quoteNumber: feeProposal.quote_number, status: feeProposal.status } : null,
       wonSubstatus: lead.won_substatus || null,
     },
-    consultants: consultants && consultants.length ? consultants
-      : roster.map((r) => ({ role: r.role || r.type || "consultant", name: pickStr(r.name, r.company, r.contact_name), status: r.status || null, company: r.company || null })),
+    consultants,
+    // The architect typed in Sales before the design team held contacts (the Architect-tender form, older leads): shown
+    // as "Noted in Sales" so nothing is hidden, and offered as the search. The brief still prints only a contact (decision 6).
+    legacyArchitectName: namedArchitect({ consultants }) ? null : pickStr(job?.architect_name, lead.architect_name) || null,
     meetings: meetings.map((m) => ({ type: m.meeting_type, at: m.scheduled_at, status: m.status, title: m.title || null })),
     drawings: drawings.map((d) => ({ id: d.id, filename: d.filename, type: d.document_type, at: d.created_at, revision: d.revision_label || null,
       discipline: d.discipline || null, issuer: d.issuer || null, docNumber: d.doc_number || null, receivedAt: d.received_at || null, reviewStatus: d.review_status || null })),
-    site: {
-      council: src.site_council || null, zone: src.site_zone || null, bushfire: src.site_bushfire_prone ?? null,
-      slopeBand: src.site_slope_band || null, complexity: src.site_complexity || null,
-      whsProfileId: whsProfile?.id || null,
-    },
+    storeys,
+    site: { ...siteFacts(job, lead), whsProfileId: whsProfile?.id || null },
   };
 }
 
@@ -119,10 +167,44 @@ export async function setDeliveryModel(sb, leadId, value, { actorId } = {}) {
   if (!lead) throw Object.assign(new Error("Lead not found"), { status: 404 });
   if (lead.job_id) {
     const r = await setFact(lead.job_id, "delivery_model", value, { source: "manual", reason: "master_register", actorId });
-    if (!r?.ok) throw Object.assign(new Error(r?.error || "Could not save the delivery model."), { status: 400 });
+    // The facts service's reason can carry database text: it is logged here, never sent to the browser.
+    if (!r?.ok) { console.warn("[register] delivery_model:", r?.error); throw Object.assign(new Error("Could not save the delivery model. Nothing changed."), { status: 400 }); }
     return { owner: "job" };
   }
   const { error } = await sb.from("leads").update({ delivery_model: value, updated_at: new Date().toISOString() }).eq("id", leadId);
   if (error) throw Object.assign(new Error(error.code === "42703" ? "Apply migration 213 first (delivery model)." : "Could not save the delivery model."), { status: error.code === "42703" ? 503 : 400 });
+  return { owner: "lead" };
+}
+
+/**
+ * Write project type and/or estimated value through their owner, as setDeliveryModel does: the lead before conversion,
+ * the job's facts service (provenance-stamped) after. Fixes the old write-the-lead, read-the-job split once a job exists.
+ *   facts: { projectType?, estimatedValue? } — only the keys present are written. null clears.
+ */
+export async function setProjectFacts(sb, leadId, facts = {}, { actorId } = {}) {
+  const writes = [];
+  if (Object.prototype.hasOwnProperty.call(facts, "projectType")) {
+    const v = facts.projectType === "" ? null : facts.projectType;
+    if (v !== null && !Object.prototype.hasOwnProperty.call(PROJECT_TYPE_LABELS, v)) throw Object.assign(new Error("Unknown project type."), { status: 400 });
+    writes.push(["project_type", v]);
+  }
+  if (Object.prototype.hasOwnProperty.call(facts, "estimatedValue")) {
+    const raw = facts.estimatedValue;
+    const v = raw === "" || raw == null ? null : Number(raw);
+    if (v !== null && (!Number.isFinite(v) || v < 0)) throw Object.assign(new Error("The estimated value must be an amount in dollars, ex GST."), { status: 400 });
+    writes.push(["estimated_value", v]);
+  }
+  if (!writes.length) return { owner: null };
+  const { data: lead } = await sb.from("leads").select("id, job_id").eq("id", leadId).maybeSingle();
+  if (!lead) throw Object.assign(new Error("Lead not found"), { status: 404 });
+  if (lead.job_id) {
+    for (const [key, value] of writes) {
+      const r = await setFact(lead.job_id, key, value, { source: "manual", reason: "master_register", actorId });
+      if (!r?.ok) { console.warn(`[register] ${key}:`, r?.error); throw Object.assign(new Error("Could not save the project fact. Nothing changed."), { status: 400 }); }
+    }
+    return { owner: "job" };
+  }
+  const { error } = await sb.from("leads").update({ ...Object.fromEntries(writes), updated_at: new Date().toISOString() }).eq("id", leadId);
+  if (error) throw Object.assign(new Error("Could not save the project fact."), { status: 400 });
   return { owner: "lead" };
 }

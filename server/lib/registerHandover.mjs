@@ -201,7 +201,7 @@ export async function recordBaseline(sb, leadId, { actor, note } = {}) {
   } catch { /* pre-213 (column absent) — the JSON snapshot remains the record of truth */ }
   const reg = (await loadRegister(sb, leadId, { actor })).register;   // re-read so itemVersions capture the post-stamp versions
   const { data: issued } = await sb.from("lead_documents").select("id, document_type, revision_label, issued_at, content_sha256")
-    .eq("lead_id", leadId).in("document_type", ["client_brief", "architect_brief", "selections_schedule"]).eq("status", "current").not("issued_at", "is", null);
+    .eq("lead_id", leadId).in("document_type", ["client_brief", "architect_brief", "selections_schedule", "client_presentation"]).eq("status", "current").not("issued_at", "is", null);
   const snapshot = {
     kind: "register_contract_baseline", recordedAt: stampedAt, recordedBy: actor?.name || null, note: note || null,
     contractStatus: lead.contract_status || null, contractSignedDate: lead.contract_signed_date || null,

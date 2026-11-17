@@ -11,15 +11,99 @@
  *     both sides changed keep the server value and raise a notice; guard refusals (issued to the portal,
  *     approved under contract, missing evidence) revert that item with the reason;
  *   • an edit made while a save is in flight is never marked saved (per-item edit sequence).
+ * A failed save never shows the browser's own error text: offline reads "Not saved — retrying" (saveFailure).
+ * The brief's own details (rooms, floors, work words) report their own save state (metaState), and saveAt is the time
+ * of the last save that reached the server this visit, so the room bar can read "Saved 9:41 pm".
+ * The words boxes save on every keystroke: an edit that steps an approved record back keeps the approved copy for the
+ * visit, and typing the approved words back puts the approval and its evidence back (registerMerge.approvalRestore).
+ * undeleteItem (Undo after a delete) puts the very record back under its own id (registerMerge.planUndelete), in its old
+ * place even when several deletes are undone in any order (registerMerge.deletedPlaces). Once its delete has reached the
+ * server it is saved again as new with a position hint (registerMerge.placeHint), so the stored order keeps that place too
+ * (round 4, U1). A record deleted here while a save travels stays off the screen when that save's answer still holds it,
+ * and its delete then goes with the server's version now (registerMerge.withoutPendingDeletes, round 4, U2).
+ * The lead page holds two copies of the register (desktop and phone layouts). A read waits for any save of the same lead
+ * on its way from either copy (savesSettled), so the copy coming into view never shows the brief without the last edits.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
-import { makeItem, genId, emptyMeta, editOutrunsApproval, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
+import { makeItem, genId, emptyMeta, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
 // The three-way merge lives in registerMerge.js (shared with the recovery of unsaved edits, and unit-tested there).
-import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore } from "../../../../lib/registerMerge.js";
+import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, approvalStep, planUndelete, metaAfterSave, deletedPlaces, placeHint, insertInPlace, withoutPendingDeletes } from "../../../../lib/registerMerge.js";
 import { saveRegisterDraft, loadRegisterDraft, clearRegisterDraft, rememberActor } from "../../../../lib/takeoffRecovery.js";
 
 const AUTOSAVE_MS = 1200;
+const SAVE_WAIT_MS = 8000;       // how long a read waits for a save on its way before reading anyway
+const PLACES_KEPT = 100;         // deleted records whose old place is remembered for Undo (the oldest is let go)
+
+/**
+ * Saves on their way, per lead, from any copy of the register on this page (round 3, S1). The lead page renders the
+ * register twice (the desktop layout and the CSS-hidden phone layout). When the window crosses the breakpoint (an iPad
+ * turned round), the copy going out of sight saves what it holds while the copy coming into view reads the brief. That
+ * read waits for the save, so it never shows the brief without the last edits, nor offers them back as unsaved.
+ */
+const savesOnTheWay = new Map();   // leadId → Set of promises, each settled when that save (and its merge) is done
+
+/** Counts a save of this lead as on its way until `promise` settles. Exported for tests. */
+export function trackSave(leadId, promise) {
+  let set = savesOnTheWay.get(leadId);
+  if (!set) savesOnTheWay.set(leadId, (set = new Set()));
+  set.add(promise);
+  const done = () => { set.delete(promise); if (!set.size && savesOnTheWay.get(leadId) === set) savesOnTheWay.delete(leadId); };
+  promise.then(done, done);
+  return promise;
+}
+
+/**
+ * Waits until no save of this lead is on its way (one that starts meanwhile is waited for too), or waitMs passes.
+ * It first lets the rest of this render's effects run, so a copy going out of sight in the same commit has started its
+ * save. Returns true when settled, false when it stopped waiting.
+ */
+export async function savesSettled(leadId, waitMs = SAVE_WAIT_MS) {
+  await new Promise((r) => setTimeout(r, 0));
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const set = savesOnTheWay.get(leadId);
+    if (!set?.size) return true;
+    const left = until - Date.now();
+    if (left <= 0) return false;
+    let t;
+    const late = await Promise.race([Promise.allSettled([...set]).then(() => false), new Promise((r) => { t = setTimeout(() => r(true), left); })]);
+    clearTimeout(t);
+    if (late) return false;
+  }
+}
+
+/**
+ * Watches whether an element is shown (it has a box: it isn't inside a display:none layout). Checked now, then whenever
+ * the window changes size (the body's size changes) or the element's own size does. Returns the stop function.
+ * Exported for tests: RO and body stand in for ResizeObserver and document.body.
+ */
+export function watchShown(el, onChange, RO = typeof ResizeObserver === "function" ? ResizeObserver : null, body = typeof document === "undefined" ? null : document.body) {
+  if (!el) return () => {};
+  const check = () => onChange(el.getClientRects().length > 0);
+  check();
+  const ro = RO ? new RO(check) : null;
+  if (body) ro?.observe(body);
+  ro?.observe(el);
+  return () => ro?.disconnect();
+}
+
+/**
+ * [ref, shown] for a screen that must work only while it is on screen (the lead page renders its panels twice: the
+ * desktop layout and a CSS-hidden phone layout). ref is a callback ref, so when the screen swaps its root element (a
+ * placeholder while loading, then the full screen) the new element is the one watched (R1). holder, if given, is a ref
+ * object kept pointing at the same element.
+ */
+export function useShown(holder = null) {
+  const [el, setEl] = useState(null);
+  const [shown, setShown] = useState(false);
+  const ref = useCallback((node) => {
+    if (holder) holder.current = node;
+    if (node) setEl(node);
+  }, [holder]);
+  useEffect(() => watchShown(el, setShown), [el]);
+  return [ref, shown];
+}
 
 const GUARD_REASONS = {
   issued_locked: "is on the client portal — withdraw it before deleting or re-classifying",
@@ -38,6 +122,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const [info, setInfo] = useState({ mode: null, projectId: null, isPreconstruction: true, promotion: null, pendingPromotion: false, schemaReady: true });
   const [reg, setReg] = useState(null);
   const [save, setSave] = useState({ state: "idle", at: null, message: null });
+  const [saveAt, setSaveAt] = useState(null);   // the last save that reached the server (kept while later edits are pending)
   const [notices, setNotices] = useState([]);
   // Unsaved edits from an earlier visit on this device, offered back (never applied by themselves).
   const [recovery, setRecovery] = useState(null);
@@ -48,6 +133,15 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const dirty = useRef(new Map());          // id → edit sequence
   const deleted = useRef(new Map());        // id → item (as last loaded)
   const refused = useRef(new Map());        // id → "rejected" | "conflict", until that item is edited again
+  const approvedCopy = useRef(new Map());   // id → { item, notice }: what the client approved, for a record an edit stepped back (B3)
+  const deletesSent = useRef(new Set());    // ids whose delete is in the save on its way now
+  const deletedAt = useRef(new Map());      // id → the ids that were before a deleted record (deletedPlaces), so Undo puts it back there
+  const sendingNew = useRef(new Set());     // ids of records this save creates (no stored copy yet): see lateDeleted
+  const lateDeleted = useRef(new Set());    // of those, the ones deleted here while that save travels (K1)
+  const deletedBase = useRef(new Map());    // id → the stored copy a pending delete started from, so Undo can merge a newer server copy (K3)
+  const placeBack = useRef(new Set());      // ids Undo put back after (or while) their delete reached the server: saved with a position hint (U1)
+  const loadedFor = useRef(null);           // the lead the register on screen belongs to
+  const onScreen = useRef(enabled);         // this copy is on screen (the enabled flag, as the last effect saw it)
   const metaSeq = useRef(0);
   const metaSent = useRef(0);
   const metaSaved = useRef(0);
@@ -62,8 +156,11 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const meta = emptyMeta(r.meta);
     const items = (r.items || []).map((i) => makeItem(i));
     baseRef.current = { meta, items: new Map(items.map((i) => [i.id, i])) };
-    setInfo({ mode: payload.mode, projectId: payload.projectId ?? null, isPreconstruction: payload.isPreconstruction !== false,
-      promotion: payload.promotion || null, pendingPromotion: !!payload.pendingPromotion, schemaReady: payload.schemaReady !== false });
+    // A save's answer carries only the register and its mode: the project and its stage stay as the last load said.
+    setInfo((prev) => ({ mode: payload.mode,
+      projectId: "projectId" in payload ? payload.projectId ?? null : payload.mode === prev.mode ? prev.projectId : null,
+      isPreconstruction: "isPreconstruction" in payload ? payload.isPreconstruction !== false : payload.mode === prev.mode ? prev.isPreconstruction : true,
+      promotion: payload.promotion || null, pendingPromotion: !!payload.pendingPromotion, schemaReady: payload.schemaReady !== false }));
     return { meta, items };
   }, []);
 
@@ -81,15 +178,21 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
 
   const load = useCallback(async () => {
     setStatus((s) => ({ ...s, loading: true }));
+    // A save of this lead on its way (the other copy, out of sight now, sending what it held) lands first (S1).
+    await savesSettled(leadId);
+    if (!mounted.current) return null;
     const r = await apiFetch(`/api/register/leads/${leadId}`);
     if (!mounted.current) return null;
     if (!r.ok) {
       const disabled = r.code === "REGISTER_DISABLED"; // feature switch off for this lead — not an error
-      setStatus({ loading: false, error: disabled ? null : r.error, disabled });
+      // Offline, or a gateway page instead of the Hub's answer: plain words, never the browser's own error text.
+      const plain = r.network || !r.body?.error ? "Couldn't load the brief. Check the connection, then reload the page." : r.error;
+      setStatus({ loading: false, error: disabled ? null : plain, disabled });
       return null;
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); refused.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); deletedBase.current.clear(); lateDeleted.current.clear(); refused.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
+    loadedFor.current = leadId;
     regRef.current = next; setReg(next);
     setStatus({ loading: false, error: null });
     setSave({ state: "idle", at: null, message: null });
@@ -109,8 +212,23 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   }, [leadId, adopt, actorKey]);
 
   // Load only when the register is actually on screen (the lead page renders its panels in both the desktop
-  // and the CSS-hidden mobile layout — the hidden copy must not hold a second, stale register).
-  useEffect(() => { mounted.current = true; if (enabled) load(); return () => { mounted.current = false; clearTimeout(timer.current); }; }, [load, enabled]);
+  // and the CSS-hidden mobile layout — the hidden copy must not hold a second, stale register). A copy that goes out of
+  // sight (the window crossed the layout's breakpoint) saves what it still holds instead of dropping it, and when it is
+  // shown again it reads the brief afresh, unless it still has its own edits to save. Its old copy isn't left on screen
+  // meanwhile (it shows "Loading the brief…"): edited there, the fresh read would drop those edits (S1).
+  useEffect(() => {
+    mounted.current = true;
+    const cameBack = enabled && !onScreen.current;
+    onScreen.current = enabled;
+    const own = regRef.current && loadedFor.current === leadId;
+    const unsaved = own && (dirty.current.size || deleted.current.size || metaSeq.current !== metaSaved.current);
+    if (unsaved) flushRef.current();
+    else if (enabled) {
+      if (cameBack && own) { regRef.current = null; loadedFor.current = null; setReg(null); }
+      load();
+    }
+    return () => { mounted.current = false; clearTimeout(timer.current); };
+  }, [load, enabled, leadId]);
 
   const schedule = useCallback(() => {
     clearTimeout(timer.current);
@@ -131,14 +249,21 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const updateItem = useCallback((id, partial) => {
     const cur = regRef.current; if (!cur) return;
     const item = cur.items.find((i) => i.id === id);
-    let next = partial;
-    // An approval covers a specific product or answer: changing it returns the item to Proposed until the
-    // client re-confirms (the server refuses to keep "client-approved" on it without new evidence).
-    if (editOutrunsApproval(item, partial)) {
-      next = { ...partial, certainty: "proposed", evidence: null };
-      setNotices((n) => [`“${item.description || (item.answer && itemTitle(item)) || itemKindLabel(item.itemKind)}” changed after client approval — it's back to Proposed until the client re-confirms.`, ...n].slice(0, 6));
+    const kept = approvedCopy.current.get(id) || null;
+    // An approval covers a specific product, answer or (for a requirement, scope or action) its words: changing it
+    // returns the item to Proposed until the client re-confirms (the server refuses to keep "client-approved" on it
+    // without new evidence). The words boxes save on every keystroke, so the approved copy is kept for this visit and
+    // typing the approved words back puts the approval and its evidence back, and takes the notice away (approvalStep).
+    const step = approvalStep(item, partial, kept?.item || null);
+    if (step.stepped) {
+      const notice = `“${item.description || (item.answer && itemTitle(item)) || itemKindLabel(item.itemKind)}” changed after client approval — it's back to Proposed until the client re-confirms.`;
+      approvedCopy.current.set(id, { item: step.keep, notice });
+      setNotices((n) => [notice, ...n].slice(0, 6));
+    } else if (step.keep === null) {
+      approvedCopy.current.delete(id);
+      if (step.restored) setNotices((n) => { const k = n.indexOf(kept.notice); return k < 0 ? n : n.filter((_, j) => j !== k); });
     }
-    commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...next, sync: i.sync }) : i)) }, [id]);
+    commit({ ...cur, items: cur.items.map((i) => (i.id === id ? makeItem({ ...i, ...step.partial, sync: i.sync }) : i)) }, [id]);
   }, [commit]);
   const addItem = useCallback((item) => {
     const cur = regRef.current; if (!cur) return null;
@@ -152,21 +277,60 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (held && seedMatchesItem(held, seed)) return updateItem(seed.id, partial);   // the same record, answered twice before the screen caught up
     addItem({ ...seed, ...partial, ...(held ? { id: genId() } : {}) });              // an id taken by another room or question is never written through
   }, [addItem, updateItem]);
+  // Where each record about to go was in the list, counting the records deleted earlier and not put back yet in their
+  // old places, so Undo puts them back in their old order whatever order the Undos come in (S3).
+  const rememberPlaces = useCallback((items, ids) => {
+    const ghosts = [...deletedAt.current].map(([id, before]) => ({ id, before }));
+    for (const [id, before] of deletedPlaces(items, ids, ghosts)) { deletedAt.current.delete(id); deletedAt.current.set(id, before); }
+    while (deletedAt.current.size > PLACES_KEPT) deletedAt.current.delete(deletedAt.current.keys().next().value);
+  }, []);
   const deleteItem = useCallback((id) => {
     const cur = regRef.current; if (!cur) return;
-    const it = cur.items.find((i) => i.id === id);
-    if (it && baseRef.current.items.has(id)) deleted.current.set(id, baseRef.current.items.get(id));
+    const there = cur.items.some((i) => i.id === id);
+    if (there) rememberPlaces(cur.items, [id]);
+    if (there && baseRef.current.items.has(id)) { deleted.current.set(id, baseRef.current.items.get(id)); if (!deletedBase.current.has(id)) deletedBase.current.set(id, baseRef.current.items.get(id)); }
+    // Not stored yet, but the save on its way creates it: it is stored when that answer lands, so its delete follows then (K1).
+    else if (there && sendingNew.current.has(id)) lateDeleted.current.add(id);
     dirty.current.delete(id);
+    placeBack.current.delete(id);
     commit({ ...cur, items: cur.items.filter((i) => i.id !== id) }, []);
+  }, [commit, rememberPlaces]);
+  /**
+   * Undo of a delete: the exact record comes back (same id, same sync, same content), where it was in the list. A delete
+   * not yet saved is simply dropped, so the next save neither deletes nor duplicates it; one already saved puts the
+   * record back as new under its own id. Returns the record as it is back on screen, or null when it was already there.
+   */
+  const undeleteItem = useCallback((item) => {
+    const cur = regRef.current; if (!cur || !item?.id) return null;
+    const flying = deletesSent.current.has(item.id);
+    const plan = planUndelete(item, { current: cur, pending: deleted.current.get(item.id) || null, flying,
+      before: deletedAt.current.get(item.id) ?? null, base: deletedBase.current.get(item.id) || null });
+    if (!plan) return null;
+    // Deleted while its creating save travelled, then put back: it is stored now and nothing deletes it (K1).
+    lateDeleted.current.delete(item.id);
+    deleted.current.delete(item.id);
+    deletedBase.current.delete(item.id);
+    deletedAt.current.delete(item.id);
+    // Back as new (its delete reached the server, or may as it travels): its save says where it goes (U1).
+    if (!plan.item.sync || flying) placeBack.current.add(item.id); else placeBack.current.delete(item.id);
+    commit({ ...cur, items: plan.items }, plan.dirty ? [item.id] : []);
+    return plan.item;
   }, [commit]);
   const replaceItems = useCallback((fn) => {         // bulk (e.g. apply default to rooms / delete room)
     const cur = regRef.current; if (!cur) return;
     const next = fn(cur);
     const before = new Map(cur.items.map((i) => [i.id, i]));
     const touched = next.items.filter((i) => !before.has(i.id) || !same(before.get(i.id), i)).map((i) => i.id);
-    for (const i of cur.items) if (!next.items.some((n) => n.id === i.id) && baseRef.current.items.has(i.id)) deleted.current.set(i.id, baseRef.current.items.get(i.id));
+    const kept = new Set(next.items.map((n) => n.id));
+    const gone = cur.items.filter((i) => !kept.has(i.id));
+    if (gone.length) rememberPlaces(cur.items, gone.map((i) => i.id));
+    for (const i of gone) {
+      placeBack.current.delete(i.id);
+      if (baseRef.current.items.has(i.id)) { deleted.current.set(i.id, baseRef.current.items.get(i.id)); if (!deletedBase.current.has(i.id)) deletedBase.current.set(i.id, baseRef.current.items.get(i.id)); }
+      else if (sendingNew.current.has(i.id)) lateDeleted.current.add(i.id);
+    }
     commit(next, touched, !same(cur.meta, next.meta));
-  }, [commit]);
+  }, [commit, rememberPlaces]);
   const mutateMeta = useCallback((partial) => {
     const cur = regRef.current; if (!cur) return;
     commit({ ...cur, meta: emptyMeta({ ...cur.meta, ...partial }) }, [], true);
@@ -186,64 +350,105 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (!dirty.current.size && !deleted.current.size && !metaDirty) { setSave((s) => (s.state === "dirty" ? { ...s, state: "saved" } : s)); return true; }
     if (saving.current) { pending.current = true; return false; }
     saving.current = true;
-    setSave((s) => ({ ...s, state: "saving" }));
+    // Counted as on its way (savesOnTheWay) until it, and any merge it needs, is done: a read of this lead by the other
+    // copy waits for it (S1).
+    let landed;
+    trackSave(leadId, new Promise((r) => { landed = r; }));
+    try {
+      // A retry after an offline failure keeps saying "Not saved — retrying" until it gets through (no Saving… flicker).
+      setSave((s) => (s.state === "error" && s.message === SAVE_RETRY_WORDS ? s : { ...s, state: "saving" }));
 
-    const sentSeq = new Map(dirty.current);
-    const changes = [...sentSeq.keys()].map((id) => cur.items.find((i) => i.id === id)).filter(Boolean);
-    const deletes = [...deleted.current.values()].map((i) => ({ id: i.id, sync: i.sync }));
-    metaSent.current = metaSeq.current;
-    const body = { changes, deletes };
-    if (metaDirty) body.meta = { ...cur.meta, rev: baseRef.current.meta?.rev ?? cur.meta.rev };
+      const sentSeq = new Map(dirty.current);
+      // A record Undo put back as new says which record it goes after, so the stored order keeps its place (U1).
+      const changes = [...sentSeq.keys()].map((id) => cur.items.find((i) => i.id === id)).filter(Boolean)
+        .map((i) => (placeBack.current.has(i.id) && !i.sync ? { ...i, __afterId: placeHint(cur.items, i.id) } : i));
+      const deletes = [...deleted.current.values()].map((i) => ({ id: i.id, sync: i.sync }));
+      deletesSent.current = new Set(deletes.map((d) => d.id));
+      sendingNew.current = new Set(changes.filter((c) => !c.sync).map((c) => c.id));
+      lateDeleted.current = new Set();
+      metaSent.current = metaSeq.current;
+      const body = { changes, deletes };
+      if (metaDirty) body.meta = { ...cur.meta, rev: baseRef.current.meta?.rev ?? cur.meta.rev };
 
-    // keepalive lets the browser finish the save as the page goes, but refuses bodies over 64 KB — so only small ones.
-    const r = await apiPut(`/api/register/leads/${leadId}`, body, keepalive && JSON.stringify(body).length < 60000 ? { keepalive: true } : undefined);
-    saving.current = false;
-    if (!mounted.current) return false;
+      // keepalive lets the browser finish the save as the page goes, but refuses bodies over 64 KB — so only small ones.
+      const r = await apiPut(`/api/register/leads/${leadId}`, body, keepalive && JSON.stringify(body).length < 60000 ? { keepalive: true } : undefined);
+      saving.current = false;
+      deletesSent.current = new Set();
+      const sentNew = sendingNew.current, late = lateDeleted.current;
+      sendingNew.current = new Set(); lateDeleted.current = new Set();
+      if (!mounted.current) return false;
 
-    if (r.ok) {
-      const server = adopt(r.data);
-      const local = regRef.current;
-      const items = server.items.map((s) => {
-        const mine = local.items.find((i) => i.id === s.id);
-        if (mine && dirty.current.get(s.id) !== sentSeq.get(s.id) && dirty.current.has(s.id)) return makeItem({ ...mine, sync: s.sync });
-        dirty.current.delete(s.id);
-        return s;
-      });
-      // items created locally during the flight (not yet on the server) stay as they are
-      for (const i of local.items) if (!items.some((x) => x.id === i.id) && dirty.current.has(i.id) && !sentSeq.has(i.id)) items.push(i);
-      for (const d of deletes) deleted.current.delete(d.id);
-      // A sent id that neither the server nor this screen holds any more is finished with. Left here it repeats an empty save forever.
-      for (const id of sentSeq.keys()) if (!items.some((x) => x.id === id)) dirty.current.delete(id);
-      const metaChangedInFlight = metaSeq.current !== metaSent.current;
-      metaSaved.current = metaSent.current;
-      const meta = metaChangedInFlight ? emptyMeta({ ...local.meta, rev: server.meta.rev }) : server.meta;
-      const next = { meta, items };
-      regRef.current = next; setReg(next);
-      persistDraft();   // clears the device copy once everything is saved; otherwise keeps what's left
-      const stillDirty = dirty.current.size || deleted.current.size || metaChangedInFlight;
-      if (stillDirty) {
-        setSave({ state: "dirty", at: null, message: null });
-        pending.current = false; schedule();
-      } else if (outcome.current) {
-        // the valid items saved, but a guard rejection / version conflict in this cycle must stay visible
-        setSave({ state: outcome.current.state, at: null, message: outcome.current.message });
-        outcome.current = null;
-        if (pending.current) { pending.current = false; schedule(); }
-      } else {
-        setSave({ state: "saved", at: new Date(), message: null });
-        if (pending.current) { pending.current = false; schedule(); }
+      if (r.ok) {
+        const at = new Date();
+        setSaveAt(at);
+        const before = baseRef.current.meta;
+        const server = adopt(r.data);
+        const metaChangedInFlight = metaSeq.current !== metaSent.current;
+        // The answer must stand for the meta just saved, at its new rev, or the next save sends the old rev (R18). Under
+        // edits made while it travelled it never carries another screen's newer rev: the next save then meets "changed
+        // elsewhere" and merges, instead of writing this room list over theirs (S2; registerMerge.metaAfterSave).
+        server.meta = metaAfterSave(body.meta || null, server.meta, { changedSince: metaChangedInFlight, before });
+        baseRef.current.meta = server.meta;
+        const local = regRef.current;
+        const removedNow = new Set(deletes.map((d) => d.id));
+        // A record deleted here while this save travelled stays off the screen, though the server still holds it (the
+        // save may have carried an edit of it): Undo then puts it back, and its delete goes with its version now (U2).
+        // K1: a record deleted here while the save that CREATES it travelled is stored now: its delete goes with that copy.
+        if (r.ok) for (const s of server.items) if (late.has(s.id) && sentNew.has(s.id) && !local.items.some((i) => i.id === s.id)) { deleted.current.set(s.id, s); deletedBase.current.set(s.id, s); }
+        const { items: answered, stillDeleting } = withoutPendingDeletes(server.items, deleted.current, removedNow);
+        let items = answered.map((s) => {
+          const mine = local.items.find((i) => i.id === s.id);
+          if (mine && dirty.current.get(s.id) !== sentSeq.get(s.id) && dirty.current.has(s.id)) return makeItem({ ...mine, sync: s.sync });
+          dirty.current.delete(s.id);
+          return s;
+        });
+        // items created locally during the flight (not yet on the server) stay as they are. One whose delete this save
+        // carried but which Undo put back meanwhile is gone from the server now: it is saved again as new, same id, and
+        // stays where Undo put it (U1).
+        const localIds = local.items.map((i) => i.id);
+        for (const i of local.items) {
+          if (items.some((x) => x.id === i.id) || !dirty.current.has(i.id) || sentSeq.has(i.id)) continue;
+          items = removedNow.has(i.id) ? insertInPlace(items, makeItem({ ...i, sync: null }), localIds) : [...items, i];
+        }
+        for (const d of deletes) { deleted.current.delete(d.id); deletedBase.current.delete(d.id); }
+        for (const [id, s] of stillDeleting) deleted.current.set(id, s);
+        for (const id of placeBack.current) if (answered.some((s) => s.id === id)) placeBack.current.delete(id);
+        // A sent id that neither the server nor this screen holds any more is finished with. Left here it repeats an empty save forever.
+        for (const id of sentSeq.keys()) if (!items.some((x) => x.id === id)) dirty.current.delete(id);
+        metaSaved.current = metaSent.current;
+        const meta = metaChangedInFlight ? emptyMeta({ ...local.meta, rev: server.meta.rev }) : server.meta;
+        const next = { meta, items };
+        regRef.current = next; setReg(next);
+        persistDraft();   // clears the device copy once everything is saved; otherwise keeps what's left
+        const stillDirty = dirty.current.size || deleted.current.size || metaChangedInFlight;
+        if (stillDirty) {
+          setSave({ state: "dirty", at: null, message: null });
+          pending.current = false;
+          // A copy out of sight sends what's left now rather than after the autosave pause: started before this save
+          // counts as landed, so the copy on screen reading the brief waits for it too (S1).
+          if (onScreen.current) schedule(); else flushRef.current();
+        } else if (outcome.current) {
+          // the valid items saved, but a guard rejection / version conflict in this cycle must stay visible
+          setSave({ state: outcome.current.state, at: null, message: outcome.current.message });
+          outcome.current = null;
+          if (pending.current) { pending.current = false; schedule(); }
+        } else {
+          setSave({ state: "saved", at, message: null });
+          if (pending.current) { pending.current = false; schedule(); }
+        }
+        return true;
       }
-      return true;
-    }
 
-    if (r.status === 409) {
-      await resolveConflicts(r.body?.conflicts || [], r.body?.code, r.error);
+      if (r.status === 409) {
+        await resolveConflicts(r.body?.conflicts || [], r.body?.code, r.error);
+        return false;
+      }
+      const failed = saveFailure(r);
+      setSave({ state: "error", at: null, message: failed.message });
+      if (!failed.retry) return false;
+      timer.current = setTimeout(() => { flushRef.current(); }, 5000);   // offline, or a gateway page: retry
       return false;
-    }
-    setSave({ state: "error", at: null, message: r.error || "Could not save — will retry." });
-    if (!r.network) return false;
-    timer.current = setTimeout(() => { flushRef.current(); }, 5000);   // offline / network: retry
-    return false;
+    } finally { landed(); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, adopt, schedule, persistDraft]);
   flushRef.current = flush;
@@ -274,7 +479,10 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const notes = [];
     let guardRejected = false, versionConflict = false;
     const theirs = new Map(server.items.map((i) => [i.id, i]));
+    // A record deleted here and not saved yet stays off the screen (U2), unless a guard refused its delete (below).
+    const keptBack = new Set(conflicts.filter((c) => GUARD_REASONS[c.reason] && deleted.current.has(c.itemId)).map((c) => c.itemId));
     for (const t of server.items) {
+      if (deleted.current.has(t.id) && !keptBack.has(t.id)) continue;
       const mine = local.items.find((i) => i.id === t.id);
       if (!dirty.current.has(t.id) || !mine) { out.push(t); continue; }
       const reason = byReason.get(t.id);
@@ -325,11 +533,14 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       setSave(pendingOutcome
         ? { state: pendingOutcome.state, at: null, message: pendingOutcome.message }
         : { state: "dirty", at: null, message: null });
-      timer.current = setTimeout(() => { flushRef.current(); }, 50);
+      if (onScreen.current) timer.current = setTimeout(() => { flushRef.current(); }, 50);
+      else flushRef.current();   // out of sight: at once, so it is still counted as on its way (S1)
     } else if (pendingOutcome) {
       setSave({ state: pendingOutcome.state, at: null, message: pendingOutcome.message });
     } else {
-      setSave({ state: "saved", at: new Date(), message: null });
+      const at = new Date();
+      setSaveAt(at);
+      setSave({ state: "saved", at, message: null });
     }
   }
 
@@ -355,6 +566,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const notes = [...plan.conflicts, ...plan.removed.map((t) => `“${t}” was removed elsewhere, so it wasn't restored.`)];
     if (notes.length) setNotices((n) => [...notes, ...n].slice(0, 6));
     if (plan.nothingToRestore) { persistDraft(); return; }
+    // A record restored as new goes where the draft says (planRegisterRestore), and is saved with that place (K5): the load
+    // before this cleared placeBack, so without this the server would add it at the end.
+    for (const id of plan.addedIds || []) placeBack.current.add(id);
     commit(plan.reg, plan.touchedIds, plan.metaTouched);
   }, [commit, persistDraft]);
   const discardDraft = useCallback(() => {
@@ -371,7 +585,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       return { ok: false, error: r.error };
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); deletedBase.current.clear(); lateDeleted.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
     persistDraft();
     return { ok: true, held: r.data?.held || [] };
@@ -379,11 +593,13 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
 
   /** How one item's own save went. A refusal on another item says nothing about this one. */
   const saveStateOf = (id) => refused.current.get(id) || (dirty.current.has(id) ? (save.state === "error" ? "error" : "dirty") : "saved");
+  /** How the brief's own details (rooms, floors, work words, drawings) are saving: 'dirty' | 'saving' | 'error' | 'saved'. */
+  const metaState = metaSaveState({ seq: metaSeq.current, sent: metaSent.current, saved: metaSaved.current, saving: saving.current, state: save.state });
 
   return {
-    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, notices, saveStateOf,
+    loading: status.loading, error: status.error, disabled: !!status.disabled, reg, info, save, saveAt, metaState, notices, saveStateOf,
     recovery, restoreDraft, discardDraft,
     dismissNotice: (i) => setNotices((n) => n.filter((_, j) => j !== i)),
-    reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, replaceItems, mutateMeta, portal,
+    reload: load, flush, flushAll, updateItem, addItem, upsertItem, deleteItem, undeleteItem, replaceItems, mutateMeta, portal,
   };
 }

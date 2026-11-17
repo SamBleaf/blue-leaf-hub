@@ -6,7 +6,8 @@
  */
 export default function LeadDetailHeader({ breadcrumb, stepper, keyFacts, primaryAction, secondaryActions }) {
   return (
-    <div className="sticky top-0 z-10 -mx-4 border-b border-hairline bg-page/95 px-4 pb-3 pt-2 backdrop-blur">
+    // data-lead-header: while the register is open on a capture tab this header scrolls away (index.css, spec S3p).
+    <div data-lead-header="" className="sticky top-0 z-10 -mx-4 border-b border-hairline bg-page/95 px-4 pb-3 pt-2 backdrop-blur">
       <div className="flex flex-wrap items-start justify-between gap-2">
         {breadcrumb}
         {secondaryActions}

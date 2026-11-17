@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useBlueprintContext } from "../lib/BlueprintContext.jsx";
 import { authFetch } from "../lib/authFetch.js";
-import { apiPatch } from "../lib/apiFetch.js";
+import { apiPatch, apiPost } from "../lib/apiFetch.js";
 import { displayLeadName } from "../lib/leadUtils.js";
 import { LEAD_STAGES } from "../lib/constants.js";
 import {
@@ -125,7 +125,12 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
   );
 }
 
-/* ─────────────────────────── Architect Tender drawer (unchanged) ─────────────────────────── */
+/* ─────────────────────────── Architect Tender drawer ─────────────────────────── */
+// The architect typed here is kept where the register and the brief read it (owner decision 6): once the lead exists it
+// is named on the lead's design team (POST …/design-team, as a firm-only contact for the practice), which also keeps
+// leads.architect_name in step. If that save fails the lead still opens; the register shows the typed name as "Noted in
+// Sales" and offers it as the search.
+const tenderInput = "focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-[16px] text-ink sm:text-sm";
 function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
   const EMPTY = { first_name: "", last_name: "", site_address: "", architect_name: "", project_type: "", estimated_value: "" };
   const [form, setForm] = useState(EMPTY);
@@ -143,15 +148,17 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
       const body = { ...form, lead_type: "architect_tender", stage: LEAD_STAGES.TENDER, lead_source: "referral" };
       if (body.estimated_value) body.estimated_value = parseFloat(body.estimated_value) || null;
       else delete body.estimated_value;
-      const r = await authFetch("/api/sales/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Failed to create lead");
+      const r = await apiPost("/api/sales/leads", body);
+      if (!r.ok) throw new Error(r.error || "The tender wasn't created. Try again.");
+      const lead = r.data.lead;
+      const architect = form.architect_name.trim();
+      if (lead?.id && architect) {
+        // A practice, not a person: the server links the CRM's firm-only contact for that firm (or adds one, with no
+        // first or last name), so repeat tenders from the same practice never add another "Studio X Architects" person.
+        await apiPost(`/api/sales/leads/${lead.id}/design-team`, { role: "architect", company: architect });
+      }
       setForm(EMPTY);
-      onCreated(j.lead);
+      onCreated(lead);
     } catch (e2) {
       setErr(e2.message);
     } finally {
@@ -179,31 +186,31 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Client first name *</label>
-              <input className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.first_name} onChange={(e) => set("first_name", e.target.value)} />
+              <input className={tenderInput} value={form.first_name} onChange={(e) => set("first_name", e.target.value)} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Client last name</label>
-              <input className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.last_name} onChange={(e) => set("last_name", e.target.value)} />
+              <input className={tenderInput} value={form.last_name} onChange={(e) => set("last_name", e.target.value)} />
             </div>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Site address *</label>
-            <input className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.site_address} onChange={(e) => set("site_address", e.target.value)} placeholder="e.g. 25 Nilpinna Street, Burnside SA" />
+            <input className={tenderInput} value={form.site_address} onChange={(e) => set("site_address", e.target.value)} placeholder="e.g. 25 Nilpinna Street, Burnside SA" />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Architect / practice name</label>
-            <input className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.architect_name} onChange={(e) => set("architect_name", e.target.value)} placeholder="e.g. Studio X Architects" />
+            <input className={tenderInput} value={form.architect_name} onChange={(e) => set("architect_name", e.target.value)} placeholder="e.g. Studio X Architects" />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Project type</label>
-            <select className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.project_type} onChange={(e) => set("project_type", e.target.value)}>
+            <select className={tenderInput} value={form.project_type} onChange={(e) => set("project_type", e.target.value)}>
               <option value="">Select…</option>
               {PROJECT_TYPES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Estimated value ($)</label>
-            <input type="number" min="0" step="1000" className="focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink" value={form.estimated_value} onChange={(e) => set("estimated_value", e.target.value)} placeholder="e.g. 1200000" />
+            <input type="number" min="0" step="1000" className={tenderInput} value={form.estimated_value} onChange={(e) => set("estimated_value", e.target.value)} placeholder="e.g. 1200000" />
           </div>
           {err && <p className="text-sm text-red-600">{err}</p>}
           <div className="flex gap-3 pt-2">

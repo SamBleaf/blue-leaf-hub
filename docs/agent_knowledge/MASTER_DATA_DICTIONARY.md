@@ -233,6 +233,14 @@ Condensed view (key columns):
 | `has_retaining_walls` | Facts | Static | Extraction | Site plan/civil | WHS, cost | N | Y | Y |
 | `site_slope` | Facts | Static | Extraction | Site plan/classification | WHS, cost benchmarks | N | Y | Y |
 | `bal_rating` | Facts | Static | Extraction | BAL report | WHS, RFQ, compliance | N | Y | Y |
+| `client_vision` (`leads.wo_client_vision`) — **Lead spine** | Facts | Versioned | Sales / register "The project" | Client meeting, in their words | Sales, register, architect's brief, PTSA scope | Y | Y | N |
+| `key_requirements` (`leads.key_requirements`) — **Lead spine** | Facts | Versioned | Sales / register "The project" | Client meeting | Sales, register, architect's brief | Y | Y | N |
+| `client_concern` (`leads.wo_biggest_concern`) — **Lead spine** | Facts | Versioned | Sales / register "The project" | Client meeting | Sales, register, architect's brief | Y | Y | N |
+| `client_excited_about` (`leads.wo_most_excited_about`) — **Lead spine** | Facts | Versioned | Sales / register "The project" | Client meeting | Sales, register | Y | Y | N |
+| `construction_budget_min` / `_max` (`leads.construction_budget_min/_max`) — **Lead spine** | Metrics | Versioned | Sales / register "The project" (band chips write both, ex GST) | Client meeting | Sales, register, architect's brief (band only when confirmed) | Y | Y | N |
+| `budget_confirmed` (`leads.wo_budget_confirmed`, free text read as yes/no) — **Lead spine** | Metrics | Versioned | Sales / register "Confirmed with the client" (writes "Yes") | Client meeting | architect's brief (gates the printed band) | Y | Y | N |
+| `finance_status` (`leads.finance_status`) — **Lead spine** | Metrics | Versioned | Sales / register "Paying by" | Client meeting | Sales, qualify, architect's brief | Y | Y (validated: `LEAD_FINANCE_STATUS_LABELS`) | N |
+| `desired_start_date` (`leads.desired_start_date`, month stored as YYYY-MM-01) — **Lead spine** | Facts | Versioned | Sales / register "Target start" | Client meeting | Sales, architect's brief | Y | Y | N |
 | `architect` | Relationships | Versioned | Sales/extraction | Lead / title block | fee proposal, WHS, mktg | Y | Y | N |
 | `contract_value` | Metrics | Versioned | Fee proposal accepted | Tender | finance, WIPAA, portal, projects | Y | Y(controlled) | Y |
 | `original_contract_value` | Metrics | Static | Win | Tender | finance, margin | N | N | N |
@@ -263,6 +271,10 @@ Condensed view (key columns):
 | `lead_source` | BI | Static | Sales/marketing | Lead form / attribution | marketing, reporting | N | Y | N |
 | `nearest_hospital` | Site Intel | Static | **Lookup** | Address geocode | WHS emergency | N | Y | N |
 | `site_induction_url` | Site Intel | Static | System | Project creation | WHS, inductions | N | N | N |
+
+**The client's story and budget (Lead spine, registered 17 Nov 2026 in `jobFactRegistry.mjs`).** The `client_vision` … `desired_start_date` rows above live on the lead only. Sales and the Master Register's "The project" step both write them, and only through `PATCH /api/sales/leads/:id`, which checks `finance_status` against `LEAD_FINANCE_STATUS_LABELS` and that amounts are numbers ex GST (`src/lib/projectStory.js` `normaliseStoryPatch`). The register keeps no copy; they stay on the lead after conversion. `setFact` refuses lead-spine keys. The last write wins (no version check): the register reloads its context after every save.
+
+**The design team (owner decision 6).** The architect, engineer, energy assessor and other consultants are kept in one place: the `crm_contacts` row (Party spine) linked by `job_contact_roles` (lead-scoped, and job-scoped once a job exists), written by `POST /api/sales/leads/:id/design-team`. Disciplines the role check doesn't allow (energy, land surveyor, soil / geotech, lighting, sanitary) are stored as `consultant`, with the discipline on the lead's `consultant_roster` entry, which is kept in step. `jobs.architect_name` (and `leads.architect_name` before a job exists) follows the named architect for the fee proposal and RFQ packages. "Remove from this job" (`DELETE …/design-team/:roleId`) ends the role row (`status = inactive`, never deleted) unless another of the person's disciplines still uses it; a roster line with work recorded on it keeps its place and documents with nobody named (`contactId: ""`, `previousContactId` kept). The register reads one merged list (`projectStory.mergeConsultants`: contactId, roleId, deduped).
 
 (Facts like pool/lift/solar/battery/tank, overlays, building_height, site_coverage, foundation_type, wall/roof cladding are **registered now** with consumers TBD, and **wired to extraction only when a module needs them.**)
 

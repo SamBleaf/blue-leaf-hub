@@ -164,7 +164,7 @@ _resetAiModelState();
 }
 _resetAiModelState();
 {
-  const big = JSON.parse(JSON.stringify(reno)); big.clientBrief.summaryParas = Array.from({ length: 200 }, (_, i) => `Paragraph ${i} ${"word ".repeat(80)}`);
+  const big = JSON.parse(JSON.stringify(reno)); big.clientBrief.overview = Array.from({ length: 200 }, (_, i) => `Paragraph ${i} ${"word ".repeat(80)}`);
   const client = fakeClient([]);
   const out = await proofreadFixture({ client, docType: "client_brief", fx: big });
   ok("a document longer than the limit is checked up to the limit, and says so (never silently cut)", out.truncated === true && client.calls[0].messages[0].content.length <= PROOF_MAX_CHARS + 500);

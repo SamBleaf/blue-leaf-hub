@@ -118,13 +118,39 @@ export const DELIVERY_MODELS = {
 /** Delivery models that activate the management / third-party responsibility overlay (Tab 21 §13). */
 export const MANAGEMENT_DELIVERY = new Set(["build_only", "construction_management", "other"]);
 
-// Room scope on the plan (Tab 18 §4 room header).
+// Room scope on the plan (Tab 18 §4 room header): the room's one "Work" word, the only scope that prints
+// (REGISTER_SCREENS_SPEC.md C1). "altered" (a layout change such as a new doorway, owner decision 4, 17 Nov 2026) reads as
+// disposition "alter" in documents, tender and the baseline. Keys never change; only the labels do.
 export const ROOM_SCOPES = {
   new: "New",
   renovated: "Renovated",
-  existing_remain: "Existing — Remain",
-  not_in_scope: "Not in scope",
+  altered: "Altered",
+  existing_remain: "No change",
+  not_in_scope: "Not in this job",
 };
+/** The work words shown on the room's segmented control, in order. "Not in this job" sits behind the ⋯ menu. */
+export const ROOM_WORK_WORDS = ["new", "renovated", "altered", "existing_remain"];
+/** Rooms with work in them: the architect's brief needs a room brief for each (agreed C2 rule). */
+export const ROOM_SCOPES_WITH_WORK = new Set(["new", "renovated", "altered"]);
+/** The disposition a room's Work word means, for the documents, tender and baseline. */
+export const ROOM_SCOPE_DISPOSITION = { new: "new", renovated: "alter", altered: "alter", existing_remain: "retain", not_in_scope: "excluded" };
+
+// Who acts on a record ("Needs action from…", spec S4). responsibility stays the single "who"; actionRole only says
+// which consultant when responsibility is "consultant".
+export const ACTION_ROLES = {
+  engineer: "Engineer",
+  energy: "Energy assessor",
+  surveyor: "Land surveyor",
+  geotech: "Geotechnical engineer",
+  other: "Other consultant",
+};
+/** By when: the next drawing issue, the next meeting, or a date (YYYY-MM-DD). "" = not set. */
+export const ACTION_DUE = { next_issue: "Next drawing issue", next_meeting: "Next meeting" };
+export function normaliseActionDue(v) {
+  const s = String(v || "").trim();
+  if (ACTION_DUE[s]) return s;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime()) ? s : "";
+}
 
 // Controlled category keys (Tab 08 / Tab 21 coverage).
 export const REGISTER_CATEGORIES = {
@@ -299,7 +325,7 @@ export function promptsFor(section, ctx = {}) {
       if (section === "room") {
         // Room-level renovation prompts follow the ROOM's own scope: an existing/renovated room always gets
         // them; otherwise only on a renovation project (or overlay) — and a brand-new room never does.
-        const existing = roomScope === "renovated" || roomScope === "existing_remain";
+        const existing = roomScope === "renovated" || roomScope === "altered" || roomScope === "existing_remain";
         if (!existing && !(reno && roomScope !== "new")) return false;
       } else if (!reno) return false;
     }
@@ -361,6 +387,10 @@ export function makeItem(partial = {}) {
     promptKey: partial.promptKey || null,                      // Tab 21 question ID that seeded it
     disposition: oneOf(partial.disposition, REGISTER_DISPOSITIONS, "undecided"),
     description: partial.description || "",
+    // Client-facing, staff-reviewed (owner decision 8, selections pair): the short name and the words the Client
+    // Selections Presentation prints in place of a supplier's technical line. Never changes the product itself.
+    clientLabel: partial.clientLabel || "",
+    clientDescription: partial.clientDescription || "",
     product: partial.product || "",
     manufacturer: partial.manufacturer || "",
     model: partial.model || "",
@@ -378,6 +408,9 @@ export function makeItem(partial = {}) {
     source: partial.source || "",                              // drawing sheet+rev / supplier doc no+rev / meeting note
     sourceDocId: partial.sourceDocId || null,                  // linked lead_documents row (received/issued)
     nextAction: partial.nextAction || "",
+    // Needs action from… (spec S4): which consultant, when responsibility is "consultant"; and by when.
+    actionRole: partial.responsibility === "consultant" ? oneOf(partial.actionRole, ACTION_ROLES, "") : "",
+    actionDue: normaliseActionDue(partial.actionDue),
     resolved: !!partial.resolved,                              // an action / follow-up closed out
     isDefault: !!partial.isDefault,                            // a project-wide default
     overridesDefaultId: partial.overridesDefaultId || null,    // an explicit room exception to a default
@@ -443,6 +476,54 @@ export function partitionRoomPrompts(questions) {
   return primary;
 }
 
+// ── Brief presentation lists (REGISTER_SCREENS_SPEC.md, owner decisions 17 Nov 2026) ─────────────────
+// Presentation only: they decide where a question shows and what the architect's brief prints. The generated question
+// bank (registerQuestions.js) is never edited for them, and no record is ever hidden: a hidden question that has a
+// record still shows (as the earlier-answer banner, or under "Other things recorded here").
+
+/** Whole-room scope questions. The room's Work word replaces them; existing records surface only where they are. */
+export const HIDDEN_ROOM_SCOPE_PROMPTS = new Set(["R-003", "K-001", "B-001", "L-001", "V-001", "D-001", "H-001", "O-001"]);
+/** The room brief: one "How the room must work" record per room (description = the sentence). */
+export const ROOM_BRIEF_PROMPT = "R-004";
+/** The room-type layout questions that are the room's must-haves (spec S3 card 4). Other room types use R-004's own chips. */
+export const ROOM_MUST_HAVES = {
+  kitchen: ["K-002", "K-003"], scullery: ["K-002", "K-003"], pantry: ["K-002", "K-003"],
+  bathroom: ["B-002"], ensuite: ["B-002"], wc: ["B-002"], laundry: ["L-002"],
+  living: ["V-002"], dining: ["V-002"], family: ["V-002"], theatre: ["V-002"],
+  bedroom: ["D-002"], study: ["D-002"], hall: ["H-005"], alfresco: ["O-002"], balcony: ["O-002"],
+};
+export const ROOM_BRIEF_PROMPTS = new Set([ROOM_BRIEF_PROMPT, ...Object.values(ROOM_MUST_HAVES).flat()]);
+/** Site questions folded into the Project step ("During the works"); shown on Site only when a record exists. */
+export const HIDDEN_SITE_PROMPTS = new Set(["W-007"]);
+/** Where a room connects (answer.connectsTo on the room brief): another room's id, or "outside". */
+export const ROOM_USED_BY = { whole_family: "Whole family", adults: "Adults", children: "Children", guests: "Guests", home_office: "Working from home" };
+
+/**
+ * Selections that affect the drawings (owner decision 5): door height, ceilings, cladding and main walls, roof and gutters,
+ * windows and sliders, fireplace and TV wall, wet-area set-out, laundry and kitchen joinery layout, driveway, fencing,
+ * retaining and pool. Everything else is a finish and goes to the Technical Selections Schedule only.
+ *   options:  only these first-level choices count (a door height, not its hardware); the rest of the record doesn't print
+ *   elements: only these elements count (a driveway, not landscaping)
+ *   words:    "typed" prints the typed words when there are any, else the counted choices; "chips" prints only the choices
+ *   colour:   the record's colour prints too (cladding and roof colours are on the elevations)
+ *   label:    the line's subject when it has no zone or element of its own
+ */
+export const DRAWING_IMPACT = {
+  "W-018": { options: ["door_height", "door_type"], words: "typed", label: "Internal doors" },
+  "W-019": { options: ["ceiling"], words: "chips", label: "Ceilings" },
+  "W-013": { words: "typed", colour: true, label: "Walls and cladding" },
+  "W-014": { words: "typed", colour: true, label: "Roof" },
+  "W-015": { words: "typed", label: "Windows and glazing" },
+  "V-004": { words: "typed" },
+  "V-005": { elements: ["fireplace", "tv_wall"], words: "typed" },
+  "B-003": { words: "typed" }, "B-004": { words: "typed" }, "B-005": { words: "typed" }, "B-006": { words: "typed" }, "B-007": { words: "typed" },
+  "B-009": { options: ["full_height", "partial_height"], words: "chips" },
+  "L-003": { words: "typed" },
+  "W-010": { elements: ["driveway", "fencing", "retaining", "pool"], words: "typed" },
+};
+/** Choices never offered as a chip (prohibited in Australia): shown only as an existing value, marked not allowed. */
+export const HIDDEN_OPTION_IDS = { "K-005": new Set(["engineered_stone"]) };
+
 export function emptyMeta(partial = {}) {
   return {
     kind: "meta",
@@ -454,6 +535,8 @@ export function emptyMeta(partial = {}) {
     renovationOverlay: !!partial.renovationOverlay,
     scopeAreas: Array.isArray(partial.scopeAreas) ? partial.scopeAreas : [],
     rooms: Array.isArray(partial.rooms) ? partial.rooms.map((r) => makeRoom(r)) : [],
+    // Floors added on the Rooms list that have no room yet (level names); a floor with a room is carried by its rooms.
+    floors: Array.isArray(partial.floors) ? partial.floors.filter((l) => typeof l === "string" && l.trim()).map((l) => l.trim().slice(0, 40)).slice(0, 12) : [],
     lastRoomId: partial.lastRoomId || null,
     lastStep: partial.lastStep || null,
     baseline: normaliseBaseline(partial.baseline),             // staff-only pricing guide (below). Never reaches a client
@@ -723,14 +806,19 @@ export function itemAxes(item) {
 
 const PRODUCT_FIELDS = ["product", "model", "manufacturer", "colour", "supplier"];
 
+/** Words compared for an approval: spaces collapsed, case ignored, so re-saving the same words never trips it. */
+export const approvalWords = (t) => String(t ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+
 /**
- * Does this edit go beyond what the client approved? An approval covers a specific product on a selection,
- * and a specific answer on any item. The screen steps the item back to Proposed; the server refuses otherwise.
+ * Does this edit go beyond what the client approved? An approval covers a specific product on a selection, the
+ * words of a requirement, scope or action (its description is what was agreed), and a specific answer on any item.
+ * The screen steps the item back to Proposed; the server refuses otherwise (registerStore approvalGuardReason).
  */
 export function editOutrunsApproval(item, partial) {
-  if (!item || item.certainty !== "client_approved" || "certainty" in partial) return false;
+  if (!item || !partial || item.certainty !== "client_approved" || "certainty" in partial) return false;
   const productMoved = item.itemKind === "selection" && PRODUCT_FIELDS.some((f) => f in partial && stableStringify(partial[f]) !== stableStringify(item[f]));
-  return productMoved || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer));
+  const wordsMoved = item.itemKind !== "selection" && "description" in partial && approvalWords(partial.description) !== approvalWords(item.description);
+  return productMoved || wordsMoved || ("answer" in partial && answerMaterialChanged(item.answer, partial.answer));
 }
 
 /** Business-rule problems with one item (shown inline; the server enforces the same rules). */

@@ -22,6 +22,7 @@ import { PLACEHOLDER_ADDRESS, isAddressPending } from "./jobGuards.mjs";
 import { applyInboundQuoteToWorkflow } from "./rfqQuotePropagation.mjs";
 import { createInboundSubmission, addSubmissionAttachment } from "./tenderSubmissions.mjs";
 import { setFact, emitEvent } from "./factsService.mjs";
+import { loadArchitectFlag } from "./architectNameSync.mjs";
 
 // Columns the RFQ Engine may write to a job after extraction. Allowlisted so the
 // client can't patch arbitrary columns; `address` is re-normalised below when present.
@@ -166,6 +167,20 @@ export function registerJobsApiRoutes(app) {
     }
   });
 
+  // Is a name typed outside the register (the fee-proposal wizard) a different architect from the design team's?
+  // Reads only: { name } → { architectNameFlag: null | { current, proposed, leadId, roleId, contactId, role } }.
+  app.post("/api/jobs/:id/architect-name-check", requireAuth, async (req, res) => {
+    try {
+      const sb = getServiceSupabase();
+      if (!sb) return err(res, 503, "DB not configured");
+      const r = await loadArchitectFlag(sb, { jobId: String(req.params.id || "").trim() }, req.body?.name);
+      return ok(res, { architectNameFlag: r.flag ? { ...r.flag, leadId: r.leadId } : null });
+    } catch (e) {
+      console.warn("[jobs architect check]", e?.message || e);
+      return err(res, 500, "Couldn't check the architect's name. Nothing was changed.");
+    }
+  });
+
   // Patch an existing job (used by the RFQ Engine to apply extracted fields). Allowlisted
   // columns only; re-normalises `address` so address_normalised stays the canonical match key.
   app.patch("/api/jobs/:id", requireAuth, async (req, res) => {
@@ -180,7 +195,20 @@ export function registerJobsApiRoutes(app) {
       for (const key of JOB_PATCHABLE_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(body, key)) updates[key] = body[key];
       }
-      if (Object.keys(updates).length === 0) return err(res, 400, "No updatable fields provided");
+      // One architect, one place (owner decision 6): when the job has an architect on its design team and the typed name is a
+      // different one, the name isn't written here. It comes back as a flag so the caller can ask "Change it everywhere?"
+      // (yes: the design-team save, which also sets this field). Everything else in the request still saves.
+      let architectNameFlag = null;
+      if (Object.prototype.hasOwnProperty.call(updates, "architect_name")) {
+        try {
+          const r = await loadArchitectFlag(sb, { jobId: id }, updates.architect_name);
+          if (r.flag) { architectNameFlag = { ...r.flag, leadId: r.leadId }; delete updates.architect_name; }
+        } catch (e) { console.warn("[jobs PATCH] architect flag:", e?.message || e); }
+      }
+      if (Object.keys(updates).length === 0) {
+        if (architectNameFlag) return ok(res, { job: null, architectNameFlag });
+        return err(res, 400, "No updatable fields provided");
+      }
 
       // Keep the canonical address attributes in sync whenever the address itself changes.
       if (typeof updates.address === "string" && updates.address.trim()) {
@@ -207,7 +235,7 @@ export function registerJobsApiRoutes(app) {
         // G1-B: re-enrich when address changes (clears stale enrichment).
         enrichSite("jobs", id).catch(() => {});
       }
-      return ok(res, { job: data });
+      return ok(res, { job: data, ...(architectNameFlag ? { architectNameFlag } : {}) });
     } catch (e) {
       console.error("[jobs PATCH]", e);
       return err(res, 500, "Failed to update job");

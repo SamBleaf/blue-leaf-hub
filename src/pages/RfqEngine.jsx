@@ -1,5 +1,6 @@
 import { authFetch } from "../lib/authFetch.js";
 import { apiPost, apiPatch } from "../lib/apiFetch.js";
+import { settleArchitectName } from "../lib/architectNameAsk.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { composeRfqEmail, plainBodyToHtml } from "../lib/rfqComposer";
@@ -52,6 +53,12 @@ function parseRevisedEmailDraft(revisedDocument) {
 
 const RFQ_SESSION_STORAGE_KEY = "blhub_rfq_session";
 const LEGACY_RFQ_SESSION_KEYS = ["blue-leaf-hub.rfq-session.v4", "blue-leaf-hub.rfq-session.v3"];
+
+/** The architect typed here differs from the design team's: ask "Change it everywhere?" (owner decision 6). Never blocks the save. */
+async function askArchitectEverywhere(flag) {
+  const r = await settleArchitectName(flag);
+  if (r.error) alert(r.error);
+}
 
 /** Merge JSON blobs on server for Dropbox-connected jobs. */
 async function mergeJobDataJsonRemote(jobAddress, patch) {
@@ -1408,8 +1415,9 @@ export default function RfqEngine() {
         if (jid) {
           // Existing extraction job — apply the latest extracted fields via the server,
           // which re-normalises the address and keeps address_normalised canonical.
-          const { ok, error } = await apiPatch(`/api/jobs/${jid}`, fields);
+          const { ok, data: patched, error } = await apiPatch(`/api/jobs/${jid}`, fields);
           if (!ok) throw new Error(error || "Failed to update job");
+          await askArchitectEverywhere(patched?.architectNameFlag);
           await stampLeadJobLink(jid);
         } else {
           // Create via the server so the address is normalised + deduped on address_normalised —
@@ -1433,6 +1441,7 @@ export default function RfqEngine() {
           // Apply the remaining extracted fields to the new-or-matched job.
           const patchRes = await apiPatch(`/api/jobs/${newId}`, fields);
           if (!patchRes.ok) throw new Error(patchRes.error || "Failed to update job");
+          await askArchitectEverywhere(patchRes.data?.architectNameFlag);
         }
         if (addr && addr !== "Address pending") {
           const jidNow = extractionJobIdRef.current;
@@ -1707,6 +1716,7 @@ export default function RfqEngine() {
       }
       const patchRes = await apiPatch(`/api/jobs/${newId}`, patch);
       if (!patchRes.ok) throw new Error(patchRes.error || "Failed to update job");
+      await askArchitectEverywhere(patchRes.data?.architectNameFlag);
       job = patchRes.data?.job || data.job;
       // Dropbox columns are not in JOB_PATCHABLE_FIELDS — stamp via client update (same as jid branch).
       if (sharedUrl || internalPath) {

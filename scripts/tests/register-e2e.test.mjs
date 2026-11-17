@@ -164,7 +164,7 @@ async function main() {
     pv.ok && /Morgan & Alex Hart/.test(pvText) && /west brick wall retained/i.test(pvText) && /Landscaping/i.test(pvText), pv.body?.error || pvText.slice(0, 200));
   check("#15", "brief contains no dollar figures and no unfilled placeholders", pv.ok && !/\$\s?\d/.test(pvText) && !/\{[#/]?[A-Z_]{2,}\}/.test(pvText));
   const iss1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "Morgan & Alex Hart", recipientEmail: "hart.family@example.invalid" });
-  check("#18", "client brief issued as P01 with recipient + checksum (no signature required)", iss1.ok && iss1.body.document.revision_label === "P01" && !!iss1.body.document.content_sha256, JSON.stringify(iss1.body).slice(0, 300));
+  check("#18", "client brief issued as R01 with recipient + checksum (no signature required)", iss1.ok && iss1.body.document.revision_label === "R01" && !!iss1.body.document.content_sha256, JSON.stringify(iss1.body).slice(0, 300));
   const docxUrl = iss1.ok ? await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${iss1.body.document.id}/url?export=docx`) : null;
   check("#5fix", "an issued document stores BOTH the PDF and the controlled DOCX export (no half-stored issue — Tab 25 issue 5)", !!docxUrl?.ok && !!docxUrl.body.url, JSON.stringify(docxUrl?.body || {}).slice(0, 160));
   const noRecip = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_brief/issue`, { recipientName: "" });
@@ -215,22 +215,37 @@ async function main() {
   const abUrl = ab.ok ? await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${ab.body.document.id}/url`) : null;
   const abText = abUrl?.ok ? pdfText(Buffer.from(await (await fetch(abUrl.body.url.startsWith("http") ? abUrl.body.url : GW + "/storage/v1" + abUrl.body.url)).arrayBuffer()), "A-architect-brief-P01.pdf") : "";
   check("#16", "Architect Brief issued with the drawing basis and architect / consultant actions",
-    ab.ok && /Concept set C/.test(abText) && /junction where the extension meets/i.test(abText) && /To verify/i.test(abText), ab.body?.error || abText.slice(0, 300));
+    ab.ok && /Concept set C/.test(abText) && /junction where the extension meets/i.test(abText) && /technical check pending|To verify/i.test(abText) && /What we need from the design team/.test(abText), ab.body?.error || abText.slice(0, 300));
   const ss1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/selections_schedule/issue`, { recipientName: "Morgan & Alex Hart" });
   const fetchDoc = async (id, name) => { const u = await api(staff, "GET", `/api/register/leads/${leadA.id}/documents/${id}/url`); if (!u.ok) return ""; const href = u.body.url.startsWith("http") ? u.body.url : GW + "/storage/v1" + u.body.url; return pdfText(Buffer.from(await (await fetch(href)).arrayBuffer()), name); };
   const ss1Text = ss1.ok ? await fetchDoc(ss1.body.document.id, "A-selections-P01.pdf") : "";
-  check("#17", "Selections Schedule contains only client choices — the updated sink model, no scope / exclusions / requirements",
-    ss1.ok && /BCX 610-50/.test(ss1Text) && !/west brick wall/i.test(ss1Text) && !/Landscaping/i.test(ss1Text) && !/thermal comfort/i.test(ss1Text), ss1.body?.error || ss1Text.slice(0, 300));
+  // Pair 2 (SELECTIONS_SPEC.md): the Technical Selections Schedule lists the client's selections, and the requirements
+  // they must meet in a section of their own (the owner's field list: "technical requirements or dependencies"). Still
+  // no scope or exclusions.
+  check("#17", "Technical Selections Schedule: the client's selections (the updated sink model) and the requirements they must meet; no scope / exclusions",
+    ss1.ok && /BCX 610-50/.test(ss1Text) && !/west brick wall/i.test(ss1Text) && !/Landscaping/i.test(ss1Text)
+      && /Requirements these selections must meet/.test(ss1Text) && /thermal comfort/i.test(ss1Text), ss1.body?.error || ss1Text.slice(0, 300));
   check("#5", "whole-house floor default listed once; the kitchen exception listed separately", (ss1Text.match(/Engineered oak/g) || []).length === 1 && /porcelain/i.test(ss1Text));
   await editItem(staff, leadA.id, (i) => i.promptKey === "K-007", { model: "BCX 620-60" });
   const ss2 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/selections_schedule/issue`, { recipientName: "Morgan & Alex Hart" });
   const list = await api(staff, "GET", `/api/register/leads/${leadA.id}/documents`);
   const schedRevs = (list.body?.documents?.issued || []).filter((d) => d.document_type === "selections_schedule");
-  const p01 = schedRevs.find((d) => d.revision_label === "P01"), p02 = schedRevs.find((d) => d.revision_label === "P02");
+  const p01 = schedRevs.find((d) => d.revision_label === "R01"), p02 = schedRevs.find((d) => d.revision_label === "R02");
   const p01Again = p01 ? await fetchDoc(p01.id, "A-selections-P01-retrieved.pdf") : "";
   const p02Text = p02 ? await fetchDoc(p02.id, "A-selections-P02.pdf") : "";
   check("#18", "re-issue: P02 current, P01 superseded and still retrievable with its ORIGINAL content",
     ss2.ok && p01?.status === "superseded" && p02?.status === "current" && /BCX 610-50/.test(p01Again) && /BCX 620-60/.test(p02Text) && p01.content_sha256 !== p02.content_sha256);
+  // Pair 2 (SELECTIONS_SPEC.md S1, migration 220): the Client Selections Presentation is its own document, so issuing
+  // it never supersedes the technical schedule, and it prints no product codes. The old "client layout" request is
+  // the same document.
+  const cs1 = await api(staff, "POST", `/api/register/leads/${leadA.id}/documents/client_presentation/issue`, { recipientName: "Morgan & Alex Hart" });
+  const list2 = await api(staff, "GET", `/api/register/leads/${leadA.id}/documents`);
+  const issued2 = list2.body?.documents?.issued || [];
+  const csDoc = issued2.find((d) => d.document_type === "client_presentation" && d.status === "current");
+  const csText = csDoc ? await fetchDoc(csDoc.id, "A-client-presentation-R01.pdf") : "";
+  check("#18b", "the client presentation is issued as its own R01 and the technical schedule's R02 stays current; no product code prints",
+    cs1.ok && csDoc?.revision_label === "R01" && issued2.find((d) => d.id === p02?.id)?.status === "current" && /BLB-CSP-/.test(csText) && !/BCX 620-60/.test(csText) && /Franke Bell/.test(csText),
+    cs1.body?.error || csText.slice(0, 300));
   const delIssued = await api(staff, "DELETE", `/api/sales/leads/${leadA.id}/documents/${p01?.id}`);
   check("#18", "an issued revision cannot be deleted through the documents tab", delIssued.status === 409);
 

@@ -45,6 +45,30 @@ export const FACT_REGISTRY = [
   // Stays on the lead: nothing after Won reads it. Never read from delivery_model, and it never waives a commercial gate.
   { key: "plans_supplied_at", label: "Plans supplied by client", family: "identity", spine: "lead", type: "versioned", tier: "consequential",
     store: { table: "leads", column: "plans_supplied_at" }, consumers: ["sales_pipeline"] },
+  // ── The client's story and budget (lead spine) ──────────────────────────────
+  // Recorded in a client meeting, in Sales or in the Master Register's "The project" step (REGISTER_SCREENS_SPEC.md S1).
+  // Stored on the lead only and written only through PATCH /api/sales/leads/:id (which checks finance_status and the
+  // amounts): the register keeps no copy and they stay on the lead after conversion. setFact refuses lead-spine keys.
+  // Consequential: each prints in the Architect Design Brief, which leaves the business; budget figures are money (ex GST).
+  { key: "client_vision", label: "What the client wants, in their words", family: "facts", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "wo_client_vision" }, consumers: ["sales", "register", "architect_brief", "ptsa"] },
+  { key: "key_requirements", label: "Must-haves", family: "facts", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "key_requirements" }, consumers: ["sales", "register", "architect_brief"] },
+  { key: "client_concern", label: "What worries the client", family: "facts", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "wo_biggest_concern" }, consumers: ["sales", "register", "architect_brief"] },
+  { key: "client_excited_about", label: "What the client is most excited about", family: "facts", spine: "lead", type: "versioned", tier: "internal",
+    store: { table: "leads", column: "wo_most_excited_about" }, consumers: ["sales", "register"] },
+  { key: "construction_budget_min", label: "Construction budget, lower figure (ex GST)", family: "metrics", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "construction_budget_min" }, consumers: ["sales", "register", "architect_brief"] },
+  { key: "construction_budget_max", label: "Construction budget, upper figure (ex GST)", family: "metrics", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "construction_budget_max" }, consumers: ["sales", "register", "architect_brief"] },
+  // Free text in Sales; read as yes or no (projectStory.budgetConfirmedOn). The band prints only when it reads yes (owner decision 1).
+  { key: "budget_confirmed", label: "Budget confirmed with the client", family: "metrics", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "wo_budget_confirmed" }, consumers: ["sales", "register", "architect_brief"] },
+  { key: "finance_status", label: "Paying by", family: "metrics", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "finance_status" }, consumers: ["sales", "qualify", "register", "architect_brief"] },
+  { key: "desired_start_date", label: "Target start", family: "facts", spine: "lead", type: "versioned", tier: "consequential",
+    store: { table: "leads", column: "desired_start_date" }, consumers: ["sales", "register", "architect_brief"] },
   { key: "architect_name", label: "Architect", family: "relationships", spine: "job", type: "versioned", tier: "internal",
     store: { table: "jobs", column: "architect_name" }, consumers: ["fee_proposal", "whs", "marketing"] },
   { key: "client_email", label: "Client email", family: "relationships", spine: "job", type: "versioned", tier: "consequential",

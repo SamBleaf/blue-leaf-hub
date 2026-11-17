@@ -118,7 +118,7 @@ async function main() {
   const demo = makeItem({ itemKind: "scope", category: "demolition", promptKey: "W-004", section: "site", disposition: "remove", answer: ans([[["demolish"], "Demolish"]], { nature: "scope", element: { id: "el_1", key: "walls", label: "Walls" }, areaIds: [kitchen.id] }) });
   const access = makeItem({ itemKind: "scope", category: "site", promptKey: "W-001", section: "site", answer: ans([[["steep_access"], "Steep access"]], { nature: "fact" }) });
   const floor = makeItem({ itemKind: "selection", category: "flooring", promptKey: "W-017", section: "project", isDefault: true, certainty: "preference", answer: ans([[["carpet"], "Carpet"]], { nature: "choice", zone: { key: "bedroom_floor", label: "Bedrooms" } }) });
-  const bench = makeItem({ itemKind: "selection", category: "benchtop", promptKey: "K-005", roomId: kitchen.id, room: "Kitchen", certainty: "proposed", product: "Stone X", answer: ans([[["engineered_stone"], "Engineered stone"]], { nature: "choice" }) });
+  const bench = makeItem({ itemKind: "selection", category: "benchtop", promptKey: "K-005", roomId: kitchen.id, room: "Kitchen", certainty: "proposed", product: "Stone X", answer: ans([[["porcelain"], "Porcelain"]], { nature: "choice" }) });   // engineered stone is prohibited (doc suite CPB-02); scene 8 checks it is refused
   const baseline = setCategoryTier(null, "walls", "standard", { at: NOW, by: "Staff" });
   const confirmedBed = confirmRoomDefaults(bed, [floor], { at: NOW, by: "Staff" });
   const first = await putReg(reno, { meta: { ...emptyMeta({ planRev: "Rev A", renovationOverlay: true, rooms: [kitchen, confirmedBed], baseline, lastStep: "rooms", lastRoomId: bed.id }), rev: 0 }, changes: [demo, access, floor, bench] });
@@ -168,12 +168,19 @@ async function main() {
 
   scene(8, "controlled document revision and issue");
   {
+    // A client-facing document naming a prohibited product is refused, with the reason (doc suite CPB-02).
+    const benchNow = (await getReg(reno)).register.items.find((i) => i.id === bench.id);
+    await putReg(reno, { changes: [{ ...benchNow, answer: ans([[["engineered_stone"], "Engineered stone"]], { nature: "choice" }) }] });
+    const refused = await api(admin, "POST", `/api/register/leads/${reno}/documents/architect_brief/issue`, { recipientName: "Studio Example" });
+    check("a client-facing document naming engineered stone is refused, with the reason", refused.status === 422 && /engineered stone is prohibited/i.test(JSON.stringify(refused.body)), JSON.stringify(refused.body).slice(0, 200));
+    const benchBack = (await getReg(reno)).register.items.find((i) => i.id === bench.id);
+    await putReg(reno, { changes: [{ ...benchBack, answer: ans([[["porcelain"], "Porcelain"]], { nature: "choice" }) }] });
     const p1 = await api(admin, "POST", `/api/register/leads/${reno}/documents/architect_brief/issue`, { recipientName: "Studio Example" });
-    check("P01", p1.ok && p1.body.document.revision_label === "P01", JSON.stringify(p1.body).slice(0, 300));
+    check("R01", p1.ok && p1.body.document.revision_label === "R01", JSON.stringify(p1.body).slice(0, 300));
     const held = (await getReg(reno)).register.items.find((i) => i.id === access.id);
     await putReg(reno, { changes: [{ ...held, nextAction: "Check crane access" }] });
     const p2 = await api(admin, "POST", `/api/register/leads/${reno}/documents/architect_brief/issue`, { recipientName: "Studio Example" });
-    check("P02", p2.ok && p2.body.document.revision_label === "P02");
+    check("R02", p2.ok && p2.body.document.revision_label === "R02");
     const { data: rows } = await svc.from("lead_documents").select("status, content_sha256").eq("id", p1.body.document.id).single().then((r) => ({ data: [r.data] }));
     check("P01 is superseded and its hash unchanged (DB)", rows[0].status === "superseded" && rows[0].content_sha256 === p1.body.document.content_sha256);
     const notes2 = await api(admin, "POST", `/api/register/leads/${reno}/documents/tender_scope_notes/issue`, { recipientName: "Blue Leaf estimating" });

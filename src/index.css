@@ -24,10 +24,15 @@ body {
 .page-title   { @apply text-xl font-bold text-ink tracking-tight leading-tight; }
 .section-title { @apply text-base font-semibold text-ink; }
 .section-label { @apply text-xs font-semibold uppercase tracking-wide text-muted; }
-/* Compact bordered input/select used by the Master Register workshop (register/RegisterWorkshop.jsx). */
-.inp { @apply rounded-lg border border-hairline bg-surface px-2 py-1 text-sm text-ink focus-ring; }
 .body-sm      { @apply text-sm text-ink; }
 .caption      { @apply text-xs text-muted; }
+
+/* Compact bordered input/select used by the Master Register workshop (register/RegisterWorkshop.jsx). It sits in the
+   components layer, so the element's own classes win over it: text-[16px] on a phone (iOS doesn't zoom), px-3, min-h,
+   and the 3 px amber gap rule (border-l-[3px] border-l-warning). */
+@layer components {
+  .inp { @apply rounded-lg border border-hairline bg-surface px-2 py-1 text-sm text-ink focus-ring; }
+}
 
 /* ── Card ──────────────────────────────────────────────────────────────── */
 .card { @apply rounded-card border border-hairline bg-surface shadow-sm; }
@@ -41,3 +46,30 @@ body {
 /* Takeoff focused windows (plan viewer, calibration, profile editor) own the whole screen:
    hide global floating buttons while one is open. */
 body.takeoff-focus-open .blueprint-fab { display: none !important; }
+
+/* Master Register (REGISTER_SCREENS_SPEC.md S3p): on a phone or tablet the lead page's sticky stage bar is hidden while
+   a room is open or the Rooms list is in tick mode, so the room's own "Next" bar (or the tick bar) and the keyboard have
+   the space. RegisterWorkshop sets the body flag (data-register-room="open" | "tick"). */
+@media (max-width: 1023px) {
+  body[data-register-room] [data-stage-bar] { display: none !important; }
+}
+
+/* While a register drawer, panel or the full-width workspace covers the page, the global floating buttons would sit on
+   its footer: hide them (useBodyFlag("register-overlay-open") in src/lib/overlayFlag.js, ref-counted). */
+body.register-overlay-open .blueprint-fab,
+body.register-overlay-open [data-quick-add] { display: none !important; }
+
+/* While the register is open on a capture tab, the lead page's header and the project bar scroll away (spec S3p), so the
+   register's own sticky bars (top-[65px] md:top-0: under the app header on a phone, at the top from 768 px) are the
+   only ones stuck under the app header. RegisterWorkshop sets data-register-open. */
+body[data-register-open] [data-lead-header],
+body[data-register-open] [data-project-bar] { position: static; }
+
+/* The register's sticky offset: under the 65 px app header on a phone, the window top from 768 px. In the full-width
+   workspace RegisterWorkshop sets --register-top to its own bar's height, and the register's sticky bars (the ones
+   written top-[65px] md:top-0, Expand is offered from 768 px) sit under that bar instead of behind it. */
+[data-register-frame] { --register-top: 65px; }
+@media (min-width: 768px) {
+  [data-register-frame] { --register-top: 0px; }
+}
+[data-register-expanded] .sticky[class~="md:top-0"] { top: var(--register-top, 0px); }

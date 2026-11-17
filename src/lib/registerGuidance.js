@@ -17,7 +17,7 @@
  * Pure config: no imports, safe in the browser and in Node.
  */
 
-export const BASELINE_VERSION = "blue-leaf-baseline-v1.1";
+export const BASELINE_VERSION = "blue-leaf-baseline-v1.2";   // v1.2: kitchen tiers no longer name engineered stone (prohibited from 1 July 2024)
 
 /** "draft" until Blue Leaf confirms the wording below. The panel says so. Change to "confirmed" when they have. */
 export const BASELINE_WORDING_STATUS = "draft";
@@ -78,11 +78,11 @@ export const BASELINE_CATEGORIES = [
     premium: "Designer colour schedule, square-set throughout, feature ceilings where shown.",
   } },
   { key: "kitchen", label: "Kitchen and joinery", questions: ["K-004", "K-005", "K-006"], parts: [
-    { key: "cabinetry", label: "cabinetry", question: "K-004", tiers: T("Laminate flat-panel cabinetry.", "Painted or veneer cabinetry.", "Custom cabinetry.") }, { key: "benchtop", label: "benchtop", question: "K-005", tiers: T("Laminate or entry-level engineered stone bench.", "Engineered stone bench.", "Natural stone or porcelain bench.") }, { key: "splashback", label: "splashback", question: "K-006", tiers: T("Tile splashback.", "Engineered stone splashback.", "Natural stone or porcelain splashback.") },
+    { key: "cabinetry", label: "cabinetry", question: "K-004", tiers: T("Laminate flat-panel cabinetry.", "Painted or veneer cabinetry.", "Custom cabinetry.") }, { key: "benchtop", label: "benchtop", question: "K-005", tiers: T("Laminate bench.", "Porcelain or sintered stone bench.", "Natural stone or thick porcelain bench.") }, { key: "splashback", label: "splashback", question: "K-006", tiers: T("Tile splashback.", "Porcelain or sintered stone splashback.", "Natural stone or porcelain splashback.") },
   ], tiers: {
-    standard: "Laminate flat-panel cabinetry, laminate or entry-level engineered stone bench, tile splashback.",
-    upgraded: "Painted or veneer cabinetry, engineered stone bench and splashback.",
-    premium: "Custom cabinetry, natural stone or porcelain bench and splashback.",
+    standard: "Laminate flat-panel cabinetry, laminate bench, tile splashback.",
+    upgraded: "Painted or veneer cabinetry, porcelain or sintered stone bench and splashback.",
+    premium: "Custom cabinetry, natural stone or thick porcelain bench and splashback.",
   } },
   { key: "wet_areas", label: "Wet-area finishes and fixtures", questions: ["B-003", "B-004", "B-008", "B-009"], parts: [
     { key: "toilet", label: "toilet", question: "B-003", tiers: T("Standard toilet range.", "Mid-range toilet.", "Designer toilet.") }, { key: "vanity", label: "vanity", question: "B-004", tiers: T("Standard vanity range.", "Wall-hung vanity.", "Custom vanity.") }, { key: "tapware", label: "tapware", question: "B-008", tiers: T("Standard tapware range.", "Mid-range tapware.", "Designer tapware.") }, { key: "tiles", label: "tiling", question: "B-009", tiers: T("Partial-height wall tile.", "Full-height wall tile.", "Feature and full-height tile.") },

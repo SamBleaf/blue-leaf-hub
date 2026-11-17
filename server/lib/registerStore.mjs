@@ -20,7 +20,7 @@
  */
 import {
   readRegister, writeRegister, emptyMeta, makeItem, isClientSelection, roomLabel, categoryLabel,
-  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION, answerSummary, answerMaterialChanged, stableStringify,
+  resolvePromptId, questionById, REGISTER_CATEGORIES, QUESTION_LIBRARY_VERSION, answerSummary, answerMaterialChanged, stableStringify, approvalWords,
 } from "../../src/lib/register.js";
 import { notifyClient } from "./portalNotify.mjs";
 
@@ -95,6 +95,8 @@ export function selRowToItem(row, { isPreconstruction } = {}) {
     resolved: !!d.resolved,
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
+    clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
+    actionRole: d.actionRole || "", actionDue: d.actionDue || "",
     evidence: row.approval_evidence || (approved && row.approved_at ? { at: row.approved_at, by: "Portal board", method: "board" } : null),
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -148,6 +150,8 @@ export function rsiRowToItem(row) {
     resolved: !!d.resolved,
     isDefault: !!d.isDefault,
     overridesDefaultId: d.overridesDefaultId || null,
+    clientLabel: d.clientLabel || "", clientDescription: d.clientDescription || "",
+    actionRole: d.actionRole || "", actionDue: d.actionDue || "",
     evidence: row.approval_evidence || null,
     answer: d.answer || null,
     createdAt: row.created_at,
@@ -161,6 +165,9 @@ function detailOf(item) {
     promptKey: item.promptKey || null, categoryKey: item.category, section: item.section, level: item.level || "",
     isDefault: !!item.isDefault, overridesDefaultId: item.overridesDefaultId || null, resolved: !!item.resolved,
     description: item.description || "",
+    clientLabel: item.clientLabel || "", clientDescription: item.clientDescription || "",
+    // Needs action from… (spec S4): stored only once set, so older rows read back unchanged.
+    ...(item.actionRole ? { actionRole: item.actionRole } : {}), ...(item.actionDue ? { actionDue: item.actionDue } : {}),
     ...(item.answer ? { answer: item.answer } : {}),                // internal: register_detail is never in a client projection
   };
 }
@@ -213,6 +220,7 @@ function metaForCanonical(meta) {
   return {
     version: 2, planRev: m.planRev, occupancy: m.occupancy, renovationOverlay: m.renovationOverlay,
     scopeAreas: m.scopeAreas, rooms: m.rooms, lastRoomId: m.lastRoomId, lastStep: m.lastStep, baseline: m.baseline,
+    floors: m.floors,   // floors added on the Rooms list before any room is on them (P7)
     libraryVersion: QUESTION_LIBRARY_VERSION,
   };
 }
@@ -260,16 +268,168 @@ export async function resolveTarget(sb, leadId) {
 
 // ── load ─────────────────────────────────────────────────────────────────────────────────────────
 
-async function loadCanonical(sb, project) {
+/**
+ * The project's register as stored, and where each record sits: rows = item id → { table, order (its sort_order),
+ * movable }. Rows tied on sort_order read oldest first, so a tie never reads in a different order each time.
+ * movable: a save may give the row a new sort_order to make room for a record put back by Undo (round 4, U1). Only a
+ * row the register made that nobody else holds an interest in: a selection not on the client portal and not approved,
+ * a scope row or a selection not in the signed baseline (baselined_at, round 5).
+ */
+/** A client_selections row a save may renumber: the register made it, it isn't on the client portal, isn't approved and isn't in the signed baseline. */
+export const selectionRowMovable = (r) => !!r?.source_register_item_id && r.client_visible === false && !r.baselined_at && !["approved", "ordered", "installed"].includes(r.status);
+async function readCanonical(sb, project) {
   const [{ data: sels, error: sErr }, { data: rsis, error: rErr }] = await Promise.all([
-    sb.from(SEL).select("*").eq("project_id", project.id).order("sort_order", { ascending: true }),
-    sb.from(RSI).select("*").eq("project_id", project.id).order("sort_order", { ascending: true }),
+    sb.from(SEL).select("*").eq("project_id", project.id).order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
+    sb.from(RSI).select("*").eq("project_id", project.id).order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
   ]);
   if (sErr || rErr) throw new RegisterError(400, "Could not read the project register.", "CANONICAL_READ");
   const opts = { isPreconstruction: project.is_preconstruction !== false };
   const meta = emptyMeta({ ...(project.register_meta || {}), rev: Number(project.register_meta?.rev) || 0 });
-  const items = [...(sels || []).map((r) => selRowToItem(r, opts)), ...(rsis || []).map(rsiRowToItem)];
-  return { meta, items };
+  const items = [];
+  const rows = new Map();
+  for (const r of sels || []) {
+    const it = selRowToItem(r, opts);
+    items.push(it);
+    rows.set(it.id, { table: SEL, order: Number(r.sort_order) || 0,
+      movable: selectionRowMovable(r) });
+  }
+  for (const r of rsis || []) {
+    const it = rsiRowToItem(r);
+    items.push(it);
+    rows.set(it.id, { table: RSI, order: Number(r.sort_order) || 0, movable: !!r.source_register_item_id && !r.baselined_at });
+  }
+  return { register: { meta, items }, rows };
+}
+
+async function loadCanonical(sb, project) {
+  return (await readCanonical(sb, project)).register;
+}
+
+// ── Undo's place (round 4, U1) ───────────────────────────────────────────────────────────────────────────────
+// A record Undo puts back after its delete reached the server is saved again as new, under its own id. Its change
+// carries `__afterId`: the id now before it on the screen (null: first). The hint decides where the record goes in the
+// stored list and nothing else: it is never stored, and it never moves a record the store already holds.
+
+/** The changes' usable position hints: id → the id it goes after (null: first). Only for records not stored yet. */
+export function placeHints(changes, held) {
+  const out = new Map();
+  for (const ch of changes || []) {
+    if (!ch || typeof ch.id !== "string" || held.has(ch.id) || !Object.prototype.hasOwnProperty.call(ch, "__afterId")) continue;
+    const after = ch.__afterId;
+    if (after === null || (typeof after === "string" && after && after !== ch.id)) out.set(ch.id, after);
+  }
+  return out;
+}
+
+/** The change without its position hint (what is stored). */
+function withoutHint(ch) {
+  if (!ch || typeof ch !== "object" || !Object.prototype.hasOwnProperty.call(ch, "__afterId")) return ch;
+  const rest = { ...ch };
+  delete rest.__afterId;
+  return rest;
+}
+
+/**
+ * Lead mode: the stored order of ids with each hinted record straight after the id it names (first for null). A
+ * record whose neighbour is itself being put back waits for it; one whose neighbour is nowhere goes at the end.
+ */
+export function orderWithHints(ids, hints) {
+  const list = ids.filter((id) => !hints.has(id));
+  let waiting = ids.filter((id) => hints.has(id));
+  while (waiting.length) {
+    const later = [];
+    for (const id of waiting) {
+      const after = hints.get(id);
+      if (after === null) { list.unshift(id); continue; }
+      const k = list.indexOf(after);
+      if (k < 0) later.push(id);
+      else list.splice(k + 1, 0, id);
+    }
+    if (later.length === waiting.length) { list.push(...later); break; }
+    waiting = later;
+  }
+  return list;
+}
+
+/**
+ * Project mode: the sort_order of each new record, and of each stored row moved to make room. The project's records
+ * read as the client_selections rows then the room_scope_items rows, each by sort_order, so a hinted record goes into
+ * its own table straight after the id it names: after a selection, a scope row goes first of the scope rows; after a
+ * scope row, a selection goes last of the selections. sort_order is an integer (migrations 212/213), so when the
+ * neighbours leave no number between them, the rows from the next one on move up by one, as far as they need to (only
+ * movable ones; when one that isn't is in the way, the record ties with the one before it, which reads first).
+ *   current = the register as stored, rows = readCanonical's rows, fresh = the new records' changes (with their
+ *   store), gone = ids this save deletes or moves to the other table, editing = ids this save updates in place.
+ * Returns { orderFor: id → sort_order (new records), moved: id → sort_order (stored rows) }.
+ */
+export function placeInTables({ current, rows, fresh = [], hints = new Map(), gone = new Set(), editing = new Set() }) {
+  const lists = { [SEL]: [], [RSI]: [] };
+  let top = -1;
+  for (const it of current.items) {
+    const r = rows.get(it.id);
+    if (!r) continue;
+    top = Math.max(top, r.order);
+    lists[r.table].push({ id: it.id, order: r.order, movable: r.movable || editing.has(it.id), gone: gone.has(it.id) });
+  }
+  let nextOrder = top + 1;
+  const entry = (id, order) => ({ id, order, movable: true, gone: false });
+  const atEnd = ({ id, store }) => { lists[store].push(entry(id, nextOrder++)); };
+  for (const f of fresh) if (!hints.has(f.id)) atEnd(f);   // a new record with no hint goes at the end, as before
+
+  const slotAt = (list, at, id) => {
+    let p = at - 1; while (p >= 0 && list[p].gone) p--;
+    let n = at; while (n < list.length && list[n].gone) n++;
+    const prev = p >= 0 ? list[p] : null, next = n < list.length ? list[n] : null;
+    let order;
+    if (!next) order = prev ? prev.order + 1 : nextOrder;
+    else if (!prev) order = next.order - 1;
+    else if (next.order - prev.order >= 2) order = prev.order + 1;
+    else {
+      const run = [];
+      let want = prev.order + 2, blocked = false;
+      for (let j = n; j < list.length; j++) {
+        const e = list[j];
+        if (e.gone) continue;
+        if (e.order >= want) break;
+        if (!e.movable) { blocked = true; break; }
+        run.push([e, want++]);
+      }
+      if (blocked) order = prev.order;
+      else { for (const [e, o] of run) e.order = o; order = prev.order + 1; }
+    }
+    list.splice(at, 0, entry(id, order));
+    nextOrder = Math.max(nextOrder, order + 1);
+  };
+
+  let waiting = fresh.filter((f) => hints.has(f.id));
+  while (waiting.length) {
+    const later = [];
+    for (const f of waiting) {
+      const after = hints.get(f.id);
+      const own = lists[f.store], other = lists[f.store === SEL ? RSI : SEL];
+      let at;
+      if (after === null) at = 0;
+      else {
+        const k = own.findIndex((e) => e.id === after);
+        if (k >= 0) at = k + 1;
+        else if (other.some((e) => e.id === after)) at = f.store === RSI ? 0 : own.length;
+        else { later.push(f); continue; }
+      }
+      slotAt(own, at, f.id);
+    }
+    if (later.length === waiting.length) { later.forEach(atEnd); break; }
+    waiting = later;
+  }
+
+  const orderFor = new Map(), moved = new Map();
+  for (const list of [lists[SEL], lists[RSI]]) {
+    for (const e of list) {
+      const r = rows.get(e.id);
+      if (!r) orderFor.set(e.id, e.order);
+      else if (!e.gone && e.order !== r.order) moved.set(e.id, e.order);
+    }
+  }
+  return { orderFor, moved };
 }
 
 function leadSync(items) {
@@ -385,13 +545,24 @@ export async function saveRegister(sb, leadId, payload = {}, { actor } = {}) {
 
 // A screen loaded before these fields existed sends items and rooms without them. Absent means "not
 // touched", so keep what is stored. An explicit answer: null still clears it.
-const carryAnswer = (raw, before) => (raw && !("answer" in raw) && before?.answer ? { ...raw, answer: before.answer } : raw);
+// The same for the "Needs action from…" fields (actionRole, actionDue): a screen from before them can't wipe them.
+const CARRIED_FIELDS = ["answer", "actionRole", "actionDue"];
+const carryAnswer = (raw, before) => {
+  if (!raw || !before) return raw;
+  const missing = CARRIED_FIELDS.filter((f) => !(f in raw) && before[f]);
+  return missing.length ? { ...raw, ...Object.fromEntries(missing.map((f) => [f, before[f]])) } : raw;
+};
 function carryRoomConfirmations(meta, stored) {
   if (!meta || !Array.isArray(meta.rooms)) return meta;
   const byId = new Map((stored?.rooms || []).map((r) => [r.id, r]));
   return { ...meta, rooms: meta.rooms.map((r) => (r && !("defaultConfirmations" in r) && byId.has(r.id) ? { ...r, defaultConfirmations: byId.get(r.id).defaultConfirmations } : r)) };
 }
 const carryBaseline = (meta, stored) => (meta && !("baseline" in meta) && stored?.baseline ? { ...meta, baseline: stored.baseline } : meta);
+// Floors added on the Rooms list before any room is on them (P7): a screen from before them sends meta with no "floors"
+// key, and that must not wipe them. An explicit floors: [] still clears them.
+const carryFloors = (meta, stored) => (meta && !("floors" in meta) && stored?.floors?.length ? { ...meta, floors: stored.floors } : meta);
+/** Everything an older screen's meta can leave out, kept from what is stored. */
+const carryMeta = (meta, stored) => carryFloors(carryBaseline(carryRoomConfirmations(meta, stored), stored), stored);
 
 const APPROVED_STATUSES = ["approved", "ordered", "installed"];
 
@@ -413,15 +584,35 @@ function certainlyStale(sent, stored) {
  */
 function answerGuardReason(before, after, rawSync) {
   if (certainlyStale(rawSync.version, before.sync.version)) return null;     // register_apply answers: stale
-  if (!answerMaterialChanged(before.answer, after.answer)) return null;      // notes, assumptions stay editable
   const scopeStore = before.sync.table === RSI;
-  if (scopeStore && before.sync.baselined) return "baseline_locked";
-  if (before.sync.locked) return "post_contract_locked";
+  const answerMoved = answerMaterialChanged(before.answer, after.answer);
+  // register_apply compares a scope row's words only for a baseline (it refuses those itself): an approved requirement or
+  // scope record whose words change would otherwise keep "client-approved" beside words the client never agreed (B3).
+  const wordsMoved = scopeStore && !before.sync.baselined && wordsOutrunApproval(before, after);
+  if (!answerMoved && !wordsMoved) return null;                              // notes, assumptions stay editable
+  if (answerMoved && scopeStore && before.sync.baselined) return "baseline_locked";
+  if (answerMoved && before.sync.locked) return "post_contract_locked";
   const approved = scopeStore ? before.certainty === "client_approved" : APPROVED_STATUSES.includes(before.sync.status);
   if (!approved || after.certainty !== "client_approved") return null;
+  return freshApproval(before, after) ? null : "reapproval_required";
+}
+
+/**
+ * The approval rule both save paths share (the screen applies it first, register.editOutrunsApproval, stepping the
+ * record back to Proposed): what the client approved is a selection's answer, and the words of a requirement, scope or
+ * action as well as its answer. Kept "client-approved" while that changes, an item needs fresh evidence of the client's
+ * re-approval, or the save is refused. Only a stale or foreign screen reaches this.
+ */
+const wordsOutrunApproval = (before, after) => before.itemKind !== "selection" && approvalWords(before.description) !== approvalWords(after.description);
+const freshApproval = (before, after) => {
   const ev = after.evidence;
-  const fresh = ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence);
-  return fresh ? null : "reapproval_required";
+  return !!(ev?.at && ev?.by && ev.method !== "board" && stableStringify(ev) !== stableStringify(before.evidence));
+};
+/** Lead mode (the scratchpad): the same rule, read from the items themselves. */
+export function leadApprovalReason(before, after) {
+  if (!before || before.certainty !== "client_approved" || after?.certainty !== "client_approved") return null;
+  if (!answerMaterialChanged(before.answer, after.answer) && !wordsOutrunApproval(before, after)) return null;
+  return freshApproval(before, after) ? null : "reapproval_required";
 }
 
 /**
@@ -451,17 +642,26 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
       const baseVersion = ch.sync?.version || null;
       if (existing && baseVersion && existing.updatedAt !== baseVersion) conflicts.push({ itemId: ch.id, reason: "stale", current: existing });
       else if (!existing && baseVersion) conflicts.push({ itemId: ch.id, reason: "missing" });
+      else if (existing) {
+        // An approval covers what the client agreed (B3): changed and still "client-approved" needs a re-approval.
+        const reason = leadApprovalReason(existing, makeItem(carryAnswer(ch, existing)));
+        if (reason) conflicts.push({ itemId: ch.id, reason });
+      }
     }
     for (const del of deletes) {
       const existing = byId.get(del.id);
       if (existing && del.sync?.version && existing.updatedAt !== del.sync.version) conflicts.push({ itemId: del.id, reason: "stale", current: existing });
     }
-    if (conflicts.length) throw new RegisterError(409, "Some items were changed elsewhere.", "CONFLICT", { conflicts });
+    if (conflicts.length) throw new RegisterError(409, conflicts.some((c) => c.reason === "reapproval_required") ? conflictMessage(conflicts.filter((c) => c.reason === "reapproval_required"))
+      : "Some items were changed elsewhere.", "CONFLICT", { conflicts });
 
-    for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(ch, byId.get(ch.id)), updatedAt: now, sync: null }));
+    // A record put back by Undo goes back after the record its hint names, not at the end (round 4, U1).
+    const hints = placeHints(changes, byId);
+    for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(withoutHint(ch), byId.get(ch.id)), updatedAt: now, sync: null }));
+    const order = hints.size ? orderWithHints([...byId.keys()], hints) : [...byId.keys()];
     for (const del of deletes) byId.delete(del.id);
-    const nextMeta = meta ? emptyMeta({ ...carryBaseline(carryRoomConfirmations(meta, cur.meta), cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
-    const next = writeRegister({ meta: nextMeta, items: [...byId.values()] });
+    const nextMeta = meta ? emptyMeta({ ...carryMeta(meta, cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
+    const next = writeRegister({ meta: nextMeta, items: order.filter((id) => byId.has(id)).map((id) => byId.get(id)) });
 
     // Conditional write on the lead's own updated_at — a concurrent save makes this affect 0 rows and
     // we re-merge on fresh data (no lost update between two open screens).
@@ -477,9 +677,9 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
   throw new RegisterError(409, "The brief is being saved from another screen — please retry.", "BUSY");
 }
 
-async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, actor) {
-  const current = await loadCanonical(sb, target.project);
-  const meta = rawMeta ? carryBaseline(carryRoomConfirmations(rawMeta, current.meta), current.meta) : rawMeta;
+async function saveProject(sb, target, { meta: rawMeta, changes: sent, deletes }, actor) {
+  const { register: current, rows } = await readCanonical(sb, target.project);
+  const meta = rawMeta ? carryMeta(rawMeta, current.meta) : rawMeta;
   const register = { meta: meta ? emptyMeta(meta) : current.meta, items: current.items };
   // Changes may reference rooms added in this same save — resolve labels against the incoming meta.
   const known = new Set(current.items.map((it) => it.id));
@@ -488,7 +688,23 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
   const guarded = [];
   const ops = [];
   if (meta) ops.push({ op: "meta_set", base_rev: Number(meta.rev) || 0, meta: metaForCanonical(meta) });
-  let nextOrder = current.items.length;
+  // Where new rows go: at the end, or (a record put back by Undo) after the record its hint names, moving the rows
+  // after it up when there's no number free between them (round 4, U1). The hint is never stored.
+  const hints = placeHints(sent, known);
+  const changes = sent.map(withoutHint);
+  const gone = new Set(deletes.map((d) => d?.id));
+  const editing = new Set();
+  const fresh = [];
+  for (const raw of changes) {
+    if (!raw || typeof raw.id !== "string") continue;
+    const store = storeFor(makeItem(carryAnswer(raw, stored.get(raw.id))));
+    const was = rows.get(raw.id);
+    const sync = raw.sync && raw.sync.mode === "project" ? raw.sync : null;
+    if (!was) fresh.push({ id: raw.id, store });
+    else if (sync?.rowId && sync.table === store && was.table === store) editing.add(raw.id);   // updated in place
+    else gone.add(raw.id);                        // moves to the other table (its old row goes), or is refused below
+  }
+  const { orderFor, moved } = placeInTables({ current, rows, fresh, hints, gone, editing });
   for (const raw of changes) {
     const it = makeItem(carryAnswer(raw, stored.get(raw.id)));
     const want = storeFor(it);
@@ -503,8 +719,9 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
       // A real move between stores carries sync.rowId and goes through that check.
       guarded.push({ itemId: it.id, reason: "exists" });
     }
-    // Existing rows keep their sort_order (null ⇒ unchanged); new rows append after the current list.
-    const sortOrder = known.has(it.id) ? null : nextOrder++;
+    // Existing rows keep their sort_order (null ⇒ unchanged) unless moved up to make room for a record put back; new
+    // rows go after the current list, or where their hint says (placeInTables).
+    const sortOrder = known.has(it.id) ? (moved.get(it.id) ?? null) : (orderFor.get(it.id) ?? 0);
     const rowFor = (store) => (store === SEL ? itemToSelRow(it, register, sortOrder) : itemToRsiRow(it, register, sortOrder));
     if (sync?.rowId) {
       if (sync.table === want) {
@@ -525,10 +742,29 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
     if (claim) guarded.push({ itemId: del.id, reason: claim });
     ops.push({ op: sync.table === SEL ? "sel_delete" : "scope_delete", item_id: del.id, row_id: sync.rowId, base_version: sync.version });
   }
+  // Rows moved up to make room, that this save doesn't otherwise touch: only their sort_order changes (the row is
+  // written back as stored, on the version just read, so a change made meanwhile elsewhere refuses the save as stale).
+  const touched = new Set(changes.map((c) => c?.id));
+  for (const [id, order] of moved) {
+    const it = stored.get(id);
+    if (touched.has(id) || !it?.sync?.rowId) continue;
+    ops.push(it.sync.table === SEL
+      ? { op: "sel_update", item_id: id, row_id: it.sync.rowId, base_version: it.sync.version, row: itemToSelRow(it, register, order) }
+      : { op: "scope_update", item_id: id, row_id: it.sync.rowId, base_version: it.sync.version, row: itemToRsiRow(it, register, order) });
+  }
   if (guarded.length) throw new RegisterError(409, conflictMessage(guarded), "CONFLICT", { conflicts: guarded });
   if (!ops.length) return { mode: "project", register: current };
   await callApply(sb, target, ops, actor);
-  return { mode: "project", register: await loadCanonical(sb, target.project) };
+  // target.project was read before this save: after a meta_set its register_meta (rooms, floors, rev) is the old one.
+  // Answered with it, the screen would show the old room list and send the old rev next time, so every second meta
+  // save came back 409 meta_stale (R18). Read the project again for the answer.
+  return { mode: "project", register: await loadCanonical(sb, meta ? await projectNow(sb, target.project) : target.project) };
+}
+
+/** The project row as it is now (falls back to the copy in hand if it can't be read, which the next save then corrects). */
+async function projectNow(sb, project) {
+  const { data, error } = await sb.from("projects").select("id, job_id, is_preconstruction, register_meta").eq("id", project.id).maybeSingle();
+  return !error && data ? { ...project, ...data } : project;
 }
 
 async function callApply(sb, target, ops, actor) {

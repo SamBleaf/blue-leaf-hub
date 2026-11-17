@@ -7,7 +7,9 @@ import { fileURLToPath } from "url";
 import PizZip from "pizzip";
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), "../../public/templates");
-const zip = new PizZip(fs.readFileSync(join(DIR, "blb-architect-brief-template.docx")));
+// The R04 Architect Brief layout this was cut from is kept in scripts/documents/legacy/: the live Architect Brief is now
+// authored by author-adb.mjs on the shared design system (doc suite R01), and the Tender Notes get their own redesign.
+const zip = new PizZip(fs.readFileSync(join(dirname(fileURLToPath(import.meta.url)), "legacy/blb-architect-brief-template-r04.docx")));
 const xml = zip.file("word/document.xml").asText();
 
 const bodyStart = xml.indexOf("<w:body>") + "<w:body>".length;
