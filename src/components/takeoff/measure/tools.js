@@ -25,7 +25,7 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
+import { CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -602,16 +602,65 @@ export function openingRecord(id, wallId, inputs) {
  * with no wall (aluminium windows by size, sill 0 as a placeholder) never set them.
  */
 export function lastOpeningSizes(measurements) {
-  let win = { heightMm: null, sillMm: null }, door = { heightMm: null };
+  let win = { heightMm: null, sillMm: null }, door = { heightMm: null }, leafMm = null;
   const walls = new Set((measurements || []).filter((m) => m.kind === "wall").map((m) => m.id));
   for (const m of measurements || []) {
     if (m.kind !== "opening" || m.archived || !walls.has(m.parentId)) continue;
     const x = m.inputs || {};
+    // HUB 031: the last cavity slider's door width is remembered for the next one
+    if (x.type === "door" && finite(x.cavityLeafMm) && x.cavityLeafMm > 0) leafMm = x.cavityLeafMm;
     if (!(finite(x.heightMm) && x.heightMm > 0)) continue;
+    // a full-height opening follows its wall: its height must never become the next ordinary door's or window's
+    if (x.fullHeight === true) continue;
     if (x.type === "door") door = { heightMm: x.heightMm };
     else if ((x.type || "window") === "window") win = { heightMm: x.heightMm, sillMm: finite(x.sillMm) && x.sillMm >= 0 ? x.sillMm : null };
   }
-  return { window: win, door };
+  return { window: win, door: leafMm != null ? { ...door, leafMm } : door };
+}
+
+/**
+ * A full-height opening's stored height, kept as a snapshot of wall height − sill (the engine works it out afresh from
+ * the wall's height every time, so a wall's later height edit can never leave it short). Null when the wall has no
+ * usable height or the sill is at or above the top.
+ */
+export function fullHeightMm(wallInputs, sillMm) {
+  const H = Number(wallInputs?.heightMm), s = Number(sillMm) || 0;
+  return (wallInputs?.kind || "rect") === "rect" && H > 0 && s >= 0 && s < H ? H - s : null;
+}
+/**
+ * The full-height openings of a wall whose stored height must change in the SAME edit as the wall's height (so Undo
+ * puts both back): [{ before, next }].
+ */
+export function fullHeightFollowers(openings, nextWallInputs) {
+  const out = [];
+  for (const o of openings || []) {
+    if (o.archived || o.inputs?.fullHeight !== true) continue;
+    const h = fullHeightMm(nextWallInputs, o.inputs?.sillMm);
+    if (h != null && h !== o.inputs.heightMm) out.push({ before: o, next: { ...o, inputs: { ...o.inputs, heightMm: h } } });
+  }
+  return out;
+}
+/**
+ * Elevation sheet → Cavity slider on a door already drawn (HUB 031). Returns the new inputs, or { error }.
+ *  - a door wider than CAVITY_LEAF_WIDE_MM is read as the whole slider opening (its width stays, the door is (w − 20) ÷ 2);
+ *  - otherwise `side` ("left" | "right", the wall's start is left) is where the door slides: the width becomes
+ *    2 × w + 20, and for left the offset moves so the shut edge stays put.
+ * `others` = the wall's other openings [{ x0, x1, label }]; running off the wall or into one is refused.
+ */
+export function cavityConvert(inputs, side, wallLenMm, others = []) {
+  const w = Number(inputs?.widthMm), x = Number(inputs?.xMm);
+  if (!(w > 0)) return { error: "Enter the door width first." };
+  if (w > CAVITY_LEAF_WIDE_MM) {
+    const leaf = cavityLeafFromOpening(w);
+    return { inputs: { ...inputs, cavityLeafMm: leaf, cavityPocket: side === "left" || side === "right" ? side : (inputs.cavityPocket || "right") }, wide: true };
+  }
+  if (side !== "left" && side !== "right") return { error: "Choose the side the door slides into." };
+  const W = cavityOpeningWidth(w);
+  const x0 = side === "right" ? x : x - (w + CAVITY_SLIDER_EXTRA_MM);
+  if (x0 < 0 || x0 + W > wallLenMm + 1e-6) return { error: `A ${W.toLocaleString("en-AU")} opening runs past the end of this wall. Move it first.` };
+  const hit = others.find((o) => x0 < o.x1 - 1e-6 && x0 + W > o.x0 + 1e-6);
+  if (hit) return { error: `A ${W.toLocaleString("en-AU")} opening runs into ${hit.label || "another opening"}.` };
+  return { inputs: { ...inputs, xMm: x0, widthMm: W, cavityLeafMm: w, cavityPocket: side }, wide: false };
 }
 
 /**

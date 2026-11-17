@@ -158,8 +158,15 @@ function resolveWall(m, ctx) {
   if (shapeMissing.length) problems.push("wall_incomplete");
   const openings = (ctx.openingsByWall.get(m.id) || []).map((o) => {
     const x = o.inputs || {};
-    return { id: o.id, label: x.label || null, type: x.type || "window", xMm: x.xMm, sillMm: x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm,
-      x0: x.xMm, y0: x.sillMm, x1: x.xMm + x.widthMm, y1: x.sillMm + x.heightMm, detail: x.detail || null };
+    // HUB 031 (Sam, 17 Nov 2026): a full-height opening runs to the top of the wall, wherever the wall's height is set
+    // later. Worked out here once, so cladding, wall areas and framing all see the same head. Only on a straight wall
+    // with a height; otherwise the stored height stands.
+    const H = Number(inp.heightMm);
+    const fullHeight = x.fullHeight === true;
+    const heightMm = fullHeight && kind === "rect" && H > 0 && x.sillMm >= 0 && x.sillMm < H ? H - x.sillMm : x.heightMm;
+    return { id: o.id, label: x.label || null, type: x.type || "window", xMm: x.xMm, sillMm: x.sillMm, widthMm: x.widthMm, heightMm,
+      x0: x.xMm, y0: x.sillMm, x1: x.xMm + x.widthMm, y1: x.sillMm + heightMm, detail: x.detail || null,
+      fullHeight, cavityLeafMm: Number(x.cavityLeafMm) > 0 ? Number(x.cavityLeafMm) : null, cavityPocket: x.cavityPocket === "left" || x.cavityPocket === "right" ? x.cavityPocket : null };
   });
   const wall = { id: m.id, kind, widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
@@ -291,7 +298,7 @@ function runTimber(mat, n, items, ctx, sink) {
       results.push(computeStudWall({ ...base, wallId: m.id, measurementId: m.id, wallLengthMm: w.wall.widthMm, centresMm: rules.centresMm ?? 600, spacing: rules.spacing || "fixed",
         startOffsetMm: rules.startOffsetMm ?? 0, endOffsetMm: rules.endOffsetMm ?? 0, includeStart: rules.includeStart !== false, includeEnd: rules.includeEnd !== false,
         plies: n.plies || 1, allowanceMm: n.endAllowanceMm || 0, height,
-        openings: w.openings.map((o) => ({ id: o.id, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.detail ? { detail: o.detail } : {}) })) }));
+        openings: w.openings.map((o) => ({ id: o.id, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.fullHeight ? { fullHeight: true } : {}), ...(o.detail ? { detail: o.detail } : {}) })) }));
     }
   } else {
     // linear_stock@1 — plates / noggins / trim / other members + manual/count entries
@@ -427,7 +434,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       for (let k = 2; names.has(name); k++) name = `${base} (${k})`;
       names.add(name);
       nameOf.set(o.id, name);
-      return { id: o.id, label: name, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.detail ? { detail: o.detail } : {}) };
+      return { id: o.id, label: name, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.fullHeight ? { fullHeight: true } : {}), ...(o.detail ? { detail: o.detail } : {}) };
     });
     // "Wall 2 W1: its head …" when the note starts with an opening, else "Wall 2: …"
     const onWall = (msg) => ([...names].some((nm) => msg.startsWith(`${nm}:`) || msg.startsWith(`${nm} `)) ? `${tag} ${msg}` : `${tag}: ${msg}`);

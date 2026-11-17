@@ -622,6 +622,8 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
     if (xRightMm <= xLeftMm + EPS_MM || xRightMm > wallLengthMm + EPS_MM) fail(`${name} must lie within the wall, right edge after left edge.`, "openings");
     const sillMm = Math.max(0, num(o.sillMm, `${name} sill level`) - datumMm);
     let headMm = num(o.headMm, `${name} head level`, { above: true }) - datumMm;
+    // HUB 031: a full-height opening's head is the underside of the top plate (the top of the studs), never clipped
+    if (o.fullHeight === true && sillMm < studLengthMm - EPS_MM) headMm = studLengthMm;
     // HUB 028 clipOpeningLevels [Default, needs Sam]: sill and head are clipped into the stud height with a note
     // instead of blocking. A head above the studs is taken to the top of the studs. An opening wholly above the
     // studs (sill at or above them) has no height left in the stud frame, so it doesn't change this wall's framing.

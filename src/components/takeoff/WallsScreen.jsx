@@ -38,13 +38,13 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
-import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { cavityOpeningWidth, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
-import { isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -826,8 +826,12 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
   return (
     <div ref={ref} className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <div data-field="widthMm"><NumberField label="Width" value={value.widthMm} min={1} max={MAX_MM} onCommit={(n) => onField("widthMm", n)} /></div>
-        <div data-field="heightMm"><NumberField label="Height" value={value.heightMm} min={1} max={MAX_MM} onCommit={(n) => onField("heightMm", n)} /></div>
+        {value.cavityLeafMm > 0
+          ? <div data-field="cavityLeafMm"><NumberField label="Door width" value={value.cavityLeafMm} min={300} max={1500} onCommit={(n) => onField("cavityLeafMm", n)} help={`Opening ${fmtMm(value.widthMm)} (2 × ${fmtMm(value.cavityLeafMm)} + 20)`} /></div>
+          : <div data-field="widthMm"><NumberField label="Width" value={value.widthMm} min={1} max={MAX_MM} onCommit={(n) => onField("widthMm", n)} /></div>}
+        {value.fullHeight
+          ? <p className="flex items-center text-[12px] text-muted" data-field-fullheight="">Height: to the top of the wall ({fmtMm(value.heightMm)}).</p>
+          : <div data-field="heightMm"><NumberField label="Height" value={value.heightMm} min={1} max={MAX_MM} onCommit={(n) => onField("heightMm", n)} /></div>}
         <div data-field="sillMm"><NumberField label="Sill height" value={value.sillMm} min={0} max={MAX_MM} onCommit={(n) => onField("sillMm", n)} /></div>
         <div data-field="xMm"><NumberField label="Offset from wall start" value={value.xMm} min={0} max={MAX_MM} onCommit={(n) => onField("xMm", n)} /></div>
       </div>
@@ -836,6 +840,37 @@ function OpeningForm({ value, onField, canEdit, focusToken }) {
         <CommitText label="Label" value={value.label} maxLength={40} onCommit={(v) => onField("label", v)} />
         <Chips label="Type" value={value.type} options={OPENING_TYPES} onChange={(v) => onField("type", v)} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Full height and Cavity slider on an opening already drawn (HUB 031, Sam 17 Nov 2026). A door up to 1,200 wide asks which
+ * side it slides into (left is the wall start); a wider one is read as the whole opening. One tap each, one Undo.
+ */
+function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
+  const [asking, setAsking] = useState(false);
+  const chip = (on, extra = "") => `min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"} ${extra}`;
+  const slider = opening.cavityLeafMm > 0;
+  const canSlider = opening.type === "door" && timberWalls;
+  return (
+    <div className="mt-2 space-y-2" data-opening-flags="">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={opening.fullHeight} disabled={!wallHeightOk} onClick={() => onFlag("fullHeight")} data-opening-fullheight="" className={chip(opening.fullHeight, !wallHeightOk ? "opacity-50" : "")}>Full height</button>
+        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity=""
+          onClick={() => { if (slider) { onFlag("cavity"); setAsking(false); } else if (opening.widthMm > 1200) onFlag("cavity") ; else setAsking((a) => !a); }} className={chip(slider)}>Cavity slider</button>}
+      </div>
+      {!wallHeightOk && <p className="text-[11px] text-muted">Full height only works on a wall of one height.</p>}
+      {canSlider && asking && !slider && (
+        <div className="space-y-1" data-opening-pocket="">
+          <p className="text-sm text-ink">Which side does the door slide into?</p>
+          <div className="flex gap-2">
+            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "left"); }}>◀ Left</button>
+            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "right"); }}>Right ▶</button>
+          </div>
+        </div>
+      )}
+      {slider && <p className="text-[11px] text-muted">No studs or noggins in the pocket. The pocket slides {opening.cavityPocket === "left" ? "left (towards the wall start)" : "right"}.</p>}
     </div>
   );
 }
@@ -1340,7 +1375,10 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     updateWall(w, patch) {
       const latest = latestView.current.measurements.find((m) => m.id === w.id) || w;
       const before = mRec(latest);
-      record({ redo: partial({ measurements: [{ ...before, inputs: { ...(latest.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+      const nextInputs = { ...(latest.inputs || {}), ...patch };
+      // HUB 031: a wall whose height changes takes its full-height openings with it, in the SAME edit (one Undo)
+      const fol = "heightMm" in patch ? fullHeightFollowers(latestView.current.measurements.filter((m) => m.kind === "opening" && m.parentId === w.id && !m.archived), nextInputs) : [];
+      record({ redo: partial({ measurements: [{ ...before, inputs: nextInputs }, ...fol.map((f) => mRec(f.next))] }), undo: partial({ measurements: [before, ...fol.map((f) => mRec(f.before))] }) });
     },
     removeWall(w) {
       const ops = openingsOf(w.id);
@@ -1371,6 +1409,11 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
     updateOpening(o, patch) {
       const before = mRec(o);
       record({ redo: partial({ measurements: [{ ...before, inputs: { ...(o.inputs || {}), ...patch } }] }), undo: partial({ measurements: [before] }) });
+    },
+    /** Replace an opening's inputs whole (a key can be taken away, e.g. Full height off): one edit, one Undo. */
+    setOpeningInputs(o, inputs) {
+      const before = mRec(o);
+      record({ redo: partial({ measurements: [{ ...before, inputs }] }), undo: partial({ measurements: [before] }) });
     },
     removeOpening(o) {
       const cons = view.contributions.filter((c) => c.measurementId === o.id && !c.archived);
@@ -1590,6 +1633,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const [sel, setSel] = useState(null);           // { kind: "opening"|"newOpening"|"item"|"jointRow", id? }
   const [placing, setPlacing] = useState(false);
   const [draft, setDraft] = useState(null);       // new opening before it is valid
+  const [opNote, setOpNote] = useState(null);        // HUB 031: a plain word about the last Full height / Cavity slider change
   const [drag, setDrag] = useState(null);         // { id, xMm, sillMm } live preview while dragging
   const [focusToken, setFocusToken] = useState(0);
   const [datumChange, setDatumChange] = useState(null); // { before, datumMm, key } — shown only while still true
@@ -1606,7 +1650,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   const openings = openingsRaw.map((o) => {
     const x = o.inputs || {};
     const d = drag && drag.id === o.id ? drag : null;
-    return { id: o.id, xMm: d ? d.xMm : x.xMm, sillMm: d ? d.sillMm : x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm, label: x.label || "", type: x.type || "window", rec: o };
+    return { id: o.id, xMm: d ? d.xMm : x.xMm, sillMm: d ? d.sillMm : x.sillMm, widthMm: x.widthMm, heightMm: x.heightMm, label: x.label || "", type: x.type || "window", rec: o,
+      fullHeight: x.fullHeight === true, cavityLeafMm: x.cavityLeafMm > 0 ? x.cavityLeafMm : null, cavityPocket: x.cavityPocket || null };
   });
   const contribs = view.contributions.filter((c) => c.measurementId === wall.id && !c.archived);
   const onWall = [...new Set(contribs.map((c) => c.jobMaterialId))].map((id) => view.materials.find((m) => m.id === id)).filter(Boolean);
@@ -1791,7 +1836,45 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   function onOpeningField(o, field, v) {
     const cur = o.rec.inputs || {};
     if (cur[field] === v || (field === "label" && (cur.label || "") === v)) return;
-    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v });
+    // HUB 031: a cavity slider's Door width rewrites the whole opening (2 × door + 20), keeping its left edge; refused if it won't fit
+    if (field === "cavityLeafMm") {
+      const W = cavityOpeningWidth(v);
+      const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      if (!(lengthMm > 0) || cur.xMm + W > lengthMm + 1e-6) { setOpNote(`A ${fmtMm(W)} opening runs past the end of this wall. Move it first.`); return; }
+      const hit = others.find((x) => cur.xMm < x.x1 - 1e-6 && cur.xMm + W > x.x0 + 1e-6);
+      if (hit) { setOpNote(`A ${fmtMm(W)} opening runs into ${hit.label || "another opening"}.`); return; }
+      setOpNote(null);
+      act.updateOpening(o.rec, { cavityLeafMm: v, widthMm: W });
+      return;
+    }
+    // a full-height opening keeps its stored height at wall height − sill in the same edit
+    if (field === "sillMm" && cur.fullHeight === true) {
+      const h = fullHeightMm(inputs, v);
+      if (h == null) { setOpNote("The sill is at or above the top of this wall. Check the sill."); return; }
+      act.updateOpening(o.rec, { sillMm: v, heightMm: h });
+      return;
+    }
+    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v, ...(field === "type" && v !== "door" ? { cavityLeafMm: undefined, cavityPocket: undefined } : {}) });
+  }
+  /** The opening sheet's Full height / Cavity slider chips. */
+  function onOpeningFlag(o, flag, arg) {
+    const cur = { ...(o.rec.inputs || {}) };
+    setOpNote(null);
+    if (flag === "fullHeight") {
+      if (cur.fullHeight === true) { delete cur.fullHeight; act.setOpeningInputs(o.rec, cur); return; }
+      const h = fullHeightMm(inputs, cur.sillMm);
+      if (h == null) { setOpNote(inputs.heightMm > 0 ? "The sill is at or above the top of this wall. Check the sill." : "Full height only works on a wall of one height. Using the height you typed."); return; }
+      act.setOpeningInputs(o.rec, { ...cur, fullHeight: true, heightMm: h });
+      return;
+    }
+    if (flag === "cavity") {
+      if (cur.cavityLeafMm > 0) { delete cur.cavityLeafMm; delete cur.cavityPocket; act.setOpeningInputs(o.rec, cur); setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(cur.widthMm)} opening. Undo to go back.`); return; }
+      const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      const r = cavityConvert(cur, arg, lengthMm, others);
+      if (r.error) { setOpNote(r.error); return; }
+      act.setOpeningInputs(o.rec, r.inputs);
+      if (r.wide) setOpNote(`${o.label || "This door"} is ${fmtMm(cur.widthMm)} wide, so it's taken as the whole opening: a ${fmtMm(r.inputs.cavityLeafMm)} door and its pocket. Change Door width if that's wrong.`);
+    }
   }
   function onTap({ xMm, yMm, hit }) {
     if (placing) {
@@ -1809,7 +1892,10 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     if (!commit) { setDrag({ id, ...pos }); return; }
     setDrag(null);
     const o = openingsRaw.find((x) => x.id === id);
-    if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm });
+    if (o && (o.inputs?.xMm !== pos.xMm || o.inputs?.sillMm !== pos.sillMm)) {
+      const h = o.inputs?.fullHeight === true ? fullHeightMm(inputs, pos.sillMm) : null;
+      act.updateOpening(o, { xMm: pos.xMm, sillMm: pos.sillMm, ...(h != null ? { heightMm: h } : {}) });
+    }
   }
   const selectOpening = (id) => { setPlacing(false); setDraft(null); setSel({ kind: "opening", id }); showDrawing(); };
 
@@ -2121,8 +2207,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
         <Sheet key="opening-sheet" title={sel.kind === "newOpening" ? "New opening" : `Opening ${selOpening.label || ""}`.trim()} onClose={() => (sel.kind === "newOpening" ? cancelAdd() : setSel(null))} initialFocus={false}>
           <KeyboardSafe>
           <OpeningForm key={`opening-form-${draftReset}`} canEdit={canEdit} focusToken={focusToken}
-            value={sel.kind === "newOpening" ? dv : { label: selOpening.label, type: selOpening.type, widthMm: selOpening.widthMm, heightMm: selOpening.heightMm, sillMm: selOpening.sillMm, xMm: selOpening.xMm }}
+            value={sel.kind === "newOpening" ? dv : { label: selOpening.label, type: selOpening.type, widthMm: selOpening.widthMm, heightMm: selOpening.heightMm, sillMm: selOpening.sillMm, xMm: selOpening.xMm,
+              fullHeight: selOpening.fullHeight, cavityLeafMm: selOpening.cavityLeafMm, cavityPocket: selOpening.cavityPocket }}
             onField={(f, v) => (sel.kind === "newOpening" ? onDraftField(f, v) : onOpeningField(selOpening, f, v))} />
+          {sel.kind === "opening" && canEdit && (
+            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)} />
+          )}
+          {opNote && sel.kind === "opening" && <p className="mt-1 text-[11px] text-amber-800" data-opening-notice="">{opNote}</p>}
           {sel.kind === "newOpening" ? (
             <p className="mt-2 text-xs text-muted" data-opening-hint="">{placing && !Number.isFinite(draft?.tapX) ? "Tap its approximate position on the elevation, then enter the width and height." : "Enter the width and height — the opening is added as soon as its numbers are complete."}</p>
           ) : (

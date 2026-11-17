@@ -165,6 +165,14 @@ export const WALL_FRAMING_RULES = Object.freeze({ centresMm: 600, doubleTopPlate
 export const WALL_STUDS_EACH_SIDE = 2;
 /** Sam, 17 Nov 2026 (HUB 031): wet-area walls go to 450 stud centres. The only per-wall value the screens write; the server keeps 100–1,200. */
 export const WET_WALL_CENTRES_MM = 450;
+/** Sam, 17 Nov 2026 (HUB 031): a cavity slider's framing opening is 2 × the door leaf + 20 mm (920 → 1,860). One value for every slider. */
+export const CAVITY_SLIDER_EXTRA_MM = 20;
+/** The framing opening of a cavity slider whose door leaf is `leafMm` wide. */
+export const cavityOpeningWidth = (leafMm) => 2 * leafMm + CAVITY_SLIDER_EXTRA_MM;
+/** A door already drawn this wide (or wider) is read as the WHOLE slider opening when Cavity slider is turned on [Default, needs Sam]. */
+export const CAVITY_LEAF_WIDE_MM = 1200;
+/** The door leaf of a slider opening of `widthMm`, to the nearest 10. */
+export const cavityLeafFromOpening = (widthMm) => Math.round((widthMm - CAVITY_SLIDER_EXTRA_MM) / 2 / 10) * 10;
 
 const LVL_RE = /\blvl/i;
 /** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */

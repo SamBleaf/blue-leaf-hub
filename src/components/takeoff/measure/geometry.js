@@ -288,6 +288,47 @@ export function planOpening(walls, p1, p2, opts) {
 }
 
 /**
+ * A fixed-width opening (a cavity slider, HUB 031) from two taps on ONE wall. The first tap is the doorway end; the
+ * second only says which way the opening runs, and so which side the pocket is (the opening is always `widthMm` long,
+ * whatever the second tap measures). Pure, on stations along the wall in mm. An overrun past a wall end of
+ * `nudgeMaxMm` or less (a finger's slip) is slid back to finish at the wall end and reported; more is refused, and
+ * so is running into another opening: the caller keeps the first tap.
+ * @param {{ wallLenMm:number, firstMm:number, secondMm:number, widthMm:number, others?:Array<{x0:number,x1:number,label?:string}>, nudgeMaxMm?:number }} a
+ * @returns {{ ok:true, xMm:number, widthMm:number, pocket:"left"|"right", movedMm:number } | { ok:false, reason:"too_long"|"past_end"|"overlap"|"no_direction", overMm?:number, label?:string }}
+ */
+export function fixedWidthOpening({ wallLenMm, firstMm, secondMm, widthMm, others = [], nudgeMaxMm = 100 }) {
+  if (widthMm > wallLenMm + 1e-6) return { ok: false, reason: "too_long" };
+  if (!(Math.abs(secondMm - firstMm) > 1e-6)) return { ok: false, reason: "no_direction" };
+  const dir = secondMm > firstMm ? 1 : -1;
+  const anchor = round10(firstMm);
+  let x0 = dir > 0 ? anchor : anchor - widthMm;
+  let moved = 0;
+  if (x0 < 0) { if (-x0 > nudgeMaxMm + 1e-6) return { ok: false, reason: "past_end", overMm: round10(-x0) }; moved = -x0; x0 = 0; }
+  else if (x0 + widthMm > wallLenMm) {
+    const over = x0 + widthMm - wallLenMm;
+    if (over > nudgeMaxMm + 1e-6) return { ok: false, reason: "past_end", overMm: round10(over) };
+    moved = over; x0 = Math.floor((wallLenMm - widthMm) / 10) * 10;
+  }
+  const hit = others.find((o) => x0 < o.x1 - 1e-6 && x0 + widthMm > o.x0 + 1e-6);
+  if (hit) return { ok: false, reason: "overlap", label: hit.label || "another opening" };
+  return { ok: true, xMm: x0, widthMm, pocket: dir > 0 ? "right" : "left", movedMm: Math.round(moved) };
+}
+
+/**
+ * + Door → Cavity slider on the plan: the two taps → the wall (the first tap's), then `fixedWidthOpening` along it.
+ * `othersByWall` maps a wall id to its openings [{ x0, x1, label }].
+ */
+export function planCavityOpening(walls, p1, p2, widthMm, othersByWall, opts) {
+  const n1 = nearestWall(walls, p1, opts);
+  if (!n1) return { ok: false, reason: "no_wall" };
+  const w = n1.wall;
+  const a = wallStation(w.points, w.cal, p1), b = wallStation(w.points, w.cal, p2);
+  if (!a || !b) return { ok: false, reason: "no_wall" };
+  const r = fixedWidthOpening({ wallLenMm: a.lengthMm, firstMm: a.stationMm, secondMm: b.stationMm, widthMm, others: othersByWall?.get(w.id) || [] });
+  return { ...r, wallId: w.id, wallLenMm: a.lengthMm };
+}
+
+/**
  * Does an opening reach above the top of its straight traced wall anywhere along it (a window taller than the wall,
  * or under a sloping top)? The engine then deducts only the part on the wall (wall.js "opening_clipped"), so the
  * plan says so as it is placed. False when the wall has no usable height yet.

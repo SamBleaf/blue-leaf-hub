@@ -62,7 +62,7 @@
 // (existing measurements stay visible for review). Every valid edit applies at once; Undo/Redo cover all of them.
 // =============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM } from "../../../shared/takeoff/index.js";
+import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth } from "../../../shared/takeoff/index.js";
 import { addSplit, appendVertex, computeFlashingPath, finishPath, moveSplit, moveSplitToCorner, resolvePathTap, splitAtLimit } from "../../../shared/takeoff/engine/flashingPath.js";
 import { repeatedPositions } from "../../../shared/takeoff/engine/timber.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
@@ -72,8 +72,8 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
-import { COLORS, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
-import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
+import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
+import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
@@ -214,7 +214,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [wetNote, setWetNote] = useState(null);
   const [openMode, setOpenMode] = useState(null);            // { matId, kind: "window" | "door" }
   const openKind = OPENING_TOOLS.has(mode) && canEdit && openMode && openMode.matId === material?.id ? openMode.kind : null;
-  const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm } }
+  const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm, leafMm } }
+  const [openFlags, setOpenFlags] = useState({ cavity: false, fullHeight: false });   // HUB 031: start OFF at every + Door / + Window
   const openSizesRef = useRef(null);
   const sizesNow = () => openSizesRef.current || lastOpeningSizes(view.measurements);
   function setOpenSize(kind, patch) {
@@ -660,6 +661,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (!all.some((w) => w.shown)) { warn(wallsHidden()); return; }
     if (!openSizesRef.current) { openSizesRef.current = lastOpeningSizes(view.measurements); setOpenSizesState(openSizesRef.current); }
     setOpenMode({ matId: material.id, kind });
+    setOpenFlags({ cavity: false, fullHeight: false });
     setOpenStart(null);
   }
   function stopOpening() { setOpenMode(null); setOpenStart(null); setMsg(null); }
@@ -680,25 +682,50 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const onOutline = st0 ? (st0.outline ? outlines.find((w) => w.id === st0.wallId) : null) : outlineAt(outShown, p, sp, toScreen);
     if (onOutline || st0?.outline) { outlineOpeningTap(kind, p, sp, st0, onOutline); return; }
     if (!walls.length) { warn(`Tap one corner of the ${what} on a ${material.name} wall you drew, then the opposite corner.`); return; }
-    if (!(size.heightMm > 0)) { warn(`Type the ${what} height first.`); return; }
+    // HUB 031: Cavity slider (a door whose opening is 2 × the door + 20) and Full height (to the top of the wall)
+    const cavity = kind === "door" && openFlags.cavity, full = openFlags.fullHeight;
+    if (cavity && !(size.leafMm >= 300)) { warn("Type the door width first."); return; }
+    if (!full && !(size.heightMm > 0)) { warn(`Type the ${what} height first.`); return; }
     if (kind === "window" && !(size.sillMm >= 0)) { warn("Type the sill height first."); return; }
     const opts = { pxPerUnit: pxPerUnit() };
     // a tap on one of this material's walls that is hidden on the plan: say so, rather than "no wall here"
     const offWall = () => (nearestWall(all.filter((w) => !w.shown), p, opts) ? `That wall is hidden on this plan. Tap Show all to add windows and doors to it.`
       : `No ${material.name} wall here. Tap on a wall you traced.`);
+    const sillNow = kind === "door" ? 0 : size.sillMm;
     const st = pendingStart();
     if (!st) {
       const n = nearestWall(walls, p, opts);
       if (!n) { warn(offWall()); return; }
       const w = walls.find((x) => x.id === n.wall.id);
+      if (full && fullHeightMm(measNow(w.id)?.inputs, sillNow) == null) {
+        warn(measNow(w.id)?.inputs?.heightMm > 0 ? `The sill is at or above the top of ${wallName(w.id)}. Check the sill.` : `${wallName(w.id)} has no height yet. Select it and type its height, or turn off Full height.`);
+        return;
+      }
+      if (cavity && cavityOpeningWidth(size.leafMm) > n.station.lengthMm + 1e-6) {
+        warn(`A ${fmtMm(cavityOpeningWidth(size.leafMm))} opening doesn't fit on ${wallName(w.id)} (${fmtMm(Math.round(n.station.lengthMm))} long). Tap a longer wall.`);
+        return;
+      }
       const at = safePointAt(w.points, w.cal, n.station.stationMm) || p;   // shown on the wall line
       setOpenStart({ matId: material.id, kind, p, at, wallId: w.id });
       setMsg(null);
       return;
     }
     const s0 = toScreen(st.p);
-    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn("Tap the other end further away. Zoom in for a narrow opening."); return; }
-    const r = planOpening(walls, st.p, p, opts);
+    if (Math.hypot(sp.x - s0.x, sp.y - s0.y) < 20) { warn(cavity ? "Tap further along the wall, towards the pocket." : "Tap the other end further away. Zoom in for a narrow opening."); return; }
+    let r;
+    if (cavity) {
+      const W = cavityOpeningWidth(size.leafMm);
+      const others = new Map([[st.wallId, (openingsByWall.get(st.wallId) || []).map((o) => ({ x0: o.inputs?.xMm, x1: o.inputs?.xMm + o.inputs?.widthMm, label: o.inputs?.label }))]]);
+      const c = planCavityOpening(walls.filter((w) => w.id === st.wallId), st.p, p, W, others, opts);
+      if (!c.ok) {
+        // the first end stays: tap again towards the pocket (or Undo to start over)
+        warn(c.reason === "past_end" ? `From there, the ${fmtMm(W)} opening runs ${fmtMm(c.overMm)} past the end of ${wallName(st.wallId)}. Tap towards the other end, or Undo this end.`
+          : c.reason === "overlap" ? `From there, the ${fmtMm(W)} opening runs into ${c.label}. Tap towards the other end, or Undo this end.`
+            : c.reason === "too_long" ? `A ${fmtMm(W)} opening doesn't fit on ${wallName(st.wallId)}. Tap a longer wall.` : "Tap further along the wall, towards the pocket.");
+        return;
+      }
+      r = { ok: true, wallId: c.wallId, xMm: c.xMm, widthMm: c.widthMm, tappedWidthMm: c.widthMm, clipped: null, pocket: c.pocket, movedMm: c.movedMm };
+    } else r = planOpening(walls, st.p, p, opts);
     if (!r.ok) {
       // the first end stays: tap the other end again (or Undo to start over)
       warn(r.reason === "different_walls" ? `Both ends go on the same wall. Tap the other end on ${wallName(r.wallId)}.`
@@ -710,7 +737,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     }
     const wall = measNow(r.wallId);
     const label = nextOpeningLabel((openingsByWall.get(wall.id) || []).map((o) => o.inputs?.label), kind);
-    const inputs = { xMm: r.xMm, sillMm: kind === "door" ? 0 : size.sillMm, widthMm: r.widthMm, heightMm: size.heightMm, label, type: kind };
+    const inputs = { xMm: r.xMm, sillMm: sillNow, widthMm: r.widthMm, heightMm: full ? fullHeightMm(wall.inputs, sillNow) : size.heightMm, label, type: kind,
+      ...(full ? { fullHeight: true } : {}), ...(cavity ? { cavityLeafMm: size.leafMm, cavityPocket: r.pocket } : {}) };
     const rec = openingRecord(newId(), wall.id, inputs);
     const op = { redo: partial({ measurements: [rec] }), undo: partial({ archive: { measurements: [rec.id] } }) };
     record(op);
@@ -719,6 +747,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     // what was cut, kept on the opening's card until the next one is placed (the next tap must not wipe it)
     const name = wallName(wall.id), tapped = fmtMm(r.tappedWidthMm);
     const notes = [];
+    if (r.movedMm > 0) notes.push(`${label} ran ${fmtMm(r.movedMm)} past the end of ${name}, so it's moved back to finish at the end. Undo, or move it on the elevation.`);
     if (r.clipped === "corner") notes.push(`${label} went round the corner, so it's on ${name} only (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
     if (r.clipped === "end") notes.push(`${label} ran past the end of ${name}, so it's cut back to the wall (you tapped ${tapped}). Undo, or change it on ${name}'s elevation.`);
     if (r.clipped === "join") {
@@ -964,7 +993,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }
   /** Select → Height on a wall: that wall only (HUB 022). */
   function setWallHeight(m, n) {
-    record({ redo: partial({ measurements: [{ ...m, inputs: { ...(m.inputs || {}), heightMm: n } }] }), undo: partial({ measurements: [m] }) });
+    const nextInputs = { ...(m.inputs || {}), heightMm: n };
+    // HUB 031: its full-height openings follow in the SAME edit, so one Undo puts the wall and them back
+    const fol = fullHeightFollowers(openingsByWall.get(m.id), nextInputs);
+    record({ redo: partial({ measurements: [{ ...m, inputs: nextInputs }, ...fol.map((f) => f.next)] }), undo: partial({ measurements: [m, ...fol.map((f) => f.before)] }) });
   }
   /** Select → Stud centres on a wall (HUB 031): this wall only. Back to the item's centres DELETES the key. One edit, one Undo. */
   function setWallCentres(m, mm) {
@@ -1596,17 +1628,42 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             const lx = lo?.inputs || {};
             const loOutline = lo ? isOutline(measNow(lo.parentId)) : false;
             const straight = materialWalls().some((w) => w.shown), drawn = materialOutlines().some((w) => w.shown);
-            const noHeight = !(s.heightMm > 0), noSill = win && !(s.sillMm >= 0);
-            const needSize = straight && (noHeight || noSill);
-            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : "Now tap the other end.")
+            // HUB 031: Cavity slider (+ Door only, a timber walls item) and Full height; both start OFF each time + Door / + Window is pressed
+            const timberWalls = familyOf(material) === "timber";
+            const cavityOn = straight && !win && timberWalls && openFlags.cavity, fullOn = straight && openFlags.fullHeight;
+            const noHeight = !fullOn && !(s.heightMm > 0), noSill = win && !(s.sillMm >= 0);
+            const noLeaf = cavityOn && !(s.leafMm >= 300);
+            const needSize = straight && (noHeight || noSill || noLeaf);
+            const slotW = cavityOn && s.leafMm >= 300 ? cavityOpeningWidth(s.leafMm) : null;
+            const hint = openStart ? (openStart.outline ? "Now tap the opposite corner." : cavityOn ? "Now tap towards the pocket." : "Now tap the other end.")
               : !straight ? `Tap one corner of the ${what} on the wall, then the opposite corner.`
+                : noLeaf ? "Type the door width, then tap the doorway end of the slider."
+                : cavityOn ? `Tap the doorway end on the wall, then tap towards the pocket. It's always ${fmtMm(slotW)} long.`
                 : needSize ? (win ? `Type the ${noHeight && noSill ? "height and sill" : noHeight ? "height" : "sill height"}, then tap one end of the window.` : "Type the door height, then tap one end.")
                   : lo && (lx.type || "window") === openKind ? `Tap both ends of the next ${what}.` : `Tap one end of the ${what} on a wall, then the other end.`;
             return (
               <div className="space-y-2 text-sm" data-opening-panel={openKind}>
                 {straight && (
+                  <div className="flex flex-wrap gap-2" data-opening-flags="">
+                    {!win && timberWalls && (
+                      <button type="button" aria-pressed={cavityOn} onClick={() => setOpenFlags((f) => ({ ...f, cavity: !f.cavity }))} data-opening-cavity=""
+                        className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${cavityOn ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Cavity slider</button>
+                    )}
+                    <button type="button" aria-pressed={fullOn} data-opening-fullheight=""
+                      onClick={() => { setOpenFlags((f) => ({ ...f, fullHeight: !f.fullHeight })); if (win && !openFlags.fullHeight) setOpenSize("window", { sillMm: 0 }); }}
+                      className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${fullOn ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Full height</button>
+                  </div>
+                )}
+                {cavityOn && (
+                  <div data-opening-leaf="">
+                    <NumberField label="Door width" value={s.leafMm ?? null} min={300} max={1500} optional onCommit={(n) => setOpenSize("door", { leafMm: n })} help="The door itself, e.g. 920" />
+                    <p className="mt-1 text-[11px] text-muted" data-opening-cavity-width="">{slotW ? `Opening ${fmtMm(slotW)} (2 × ${fmtMm(s.leafMm)} + 20).` : "Opening: 2 × door + 20."}</p>
+                  </div>
+                )}
+                {straight && (
                   <div className="grid grid-cols-2 gap-2">
-                    <div data-opening-height=""><NumberField label="Height" value={s.heightMm ?? null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize(openKind, { heightMm: n })} /></div>
+                    {fullOn ? <p className="flex items-center text-[12px] text-muted" data-opening-fullheight-text="">Height: the wall&apos;s height.</p>
+                      : <div data-opening-height=""><NumberField label="Height" value={s.heightMm ?? null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize(openKind, { heightMm: n })} /></div>}
                     {win && <div data-opening-sill=""><NumberField label="Sill height" value={s.sillMm ?? null} min={0} max={MAX_WALL_MM} optional onCommit={(n) => setOpenSize("window", { sillMm: n })} /></div>}
                   </div>
                 )}

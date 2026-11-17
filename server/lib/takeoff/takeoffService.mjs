@@ -245,6 +245,11 @@ function cleanInputs(kind, inp, tracedLengthMm) {
     return { xMm: MM(i.xMm, "Opening offset", { allowNull: false }), sillMm: MM(i.sillMm, "Sill height", { allowNull: false }),
       widthMm: MM(i.widthMm, "Opening width", { min: 1, allowNull: false }), heightMm: MM(i.heightMm, "Opening height", { min: 1, allowNull: false }),
       label: optStr(i.label, 40), type: ["window", "door", "other"].includes(i.type) ? i.type : "window",
+      // HUB 031 (Sam, 17 Nov 2026): full height runs to the top of the wall; a cavity slider is a door whose widthMm is the
+      // whole framing opening (2 × door + 20), cavityLeafMm the door itself, cavityPocket the side the door slides into
+      ...(i.fullHeight === true ? { fullHeight: true } : {}),
+      ...(i.type === "door" && i.cavityLeafMm != null && i.cavityLeafMm !== "" ? { cavityLeafMm: MM(i.cavityLeafMm, "Door width", { min: 300, max: 1500 }),
+        ...(i.cavityPocket === "left" || i.cavityPocket === "right" ? { cavityPocket: i.cavityPocket } : {}) } : {}),
       ...(i.detail != null ? { detail: cleanOpeningDetail(i.detail) } : {}) };
   }
   if (kind === "offcut") {

@@ -3,10 +3,11 @@
 // WET_WALLS_AND_CAVITY_DOORS_PLAN.md; Sam's answers (docs/takeoff/OWNER_ANSWERS_17NOV.md) override them.
 //   node scripts/tests/takeoff-tc-hub031.test.mjs
 import assert from "node:assert/strict";
-import { CALCULATION_VERSION, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
+import { CALCULATION_VERSION, CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
+import { fixedWidthOpening } from "../../src/components/takeoff/measure/geometry.js";
 import { NOTE_CODES } from "../../shared/takeoff/fixes.js";
-import { itemCentresMm, toggleWetWall, wallFramingNotes, wallFramingText, wallFramingTotals, wetWallsOf, withWallCentres } from "../../src/components/takeoff/measure/tools.js";
+import { cavityConvert, fullHeightFollowers, fullHeightMm, lastOpeningSizes, itemCentresMm, toggleWetWall, wallFramingNotes, wallFramingText, wallFramingTotals, wetWallsOf, withWallCentres } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 4).join("\n    ")}`); } }
@@ -113,6 +114,117 @@ t("server whitelist: studCentresMm 450 is kept, 50 and 5,000 are refused plainly
   assert.equal(cleanMeasurementInputs("wall", { ...base, studCentresMm: 450 }, null).studCentresMm, 450);
   for (const v of [50, 5000]) assert.throws(() => cleanMeasurementInputs("wall", { ...base, studCentresMm: v }, null), /Stud centres must be between 100 and 1,200 mm/);
   for (const v of [undefined, null, ""]) assert.ok(!("studCentresMm" in cleanMeasurementInputs("wall", { ...base, studCentresMm: v }, null)));
+});
+
+// ══ Step 2: cavity slider (opening = 2 × door + 20) ═════════════════════════════════════════════════════════════
+t("a cavity slider's opening is 2 × the door + 20: 920 → 1,860, 820 → 1,660; the door is read back to the nearest 10", () => {
+  assert.equal(CAVITY_SLIDER_EXTRA_MM, 20);
+  assert.equal(cavityOpeningWidth(920), 1860);
+  assert.equal(cavityOpeningWidth(820), 1660);
+  assert.equal(cavityLeafFromOpening(1860), 920);
+  assert.equal(CAVITY_LEAF_WIDE_MM, 1200);
+});
+
+t("framing: a 1,860 slider at 600 in a 3,600 wall has no stud inside the pocket, 2 full studs at each edge (pocket end included)", () => {
+  const ms = [wm("w", 3600, 2400, "Wall 1"), om("o", "w", "D1", "door", 600, 1860, 2040, 0, { cavityLeafMm: 920, cavityPocket: "right" })];
+  const c = wf(ms);
+  const l = wl(c, "Wall 1");
+  nearAll(st(l), [0, 532.5, 577.5, 2482.5, 2527.5, 3000, 3600]);
+  assert.deepEqual(l.ticks.filter((x) => x.state === "removed").map((x) => x.positionMm), [1200, 1800, 2400]);
+  assert.equal(l.ticks.filter((x) => x.state === "side").length, 4);
+});
+
+t("placing a slider: the first tap is the doorway end, the second only gives the direction (and so the pocket side); width is always 1,860", () => {
+  const r = fixedWidthOpening({ wallLenMm: 3600, firstMm: 603, secondMm: 1500, widthMm: 1860 });
+  assert.deepEqual(r, { ok: true, xMm: 600, widthMm: 1860, pocket: "right", movedMm: 0 });
+  const back = fixedWidthOpening({ wallLenMm: 3600, firstMm: 2460, secondMm: 1000, widthMm: 1860 });
+  assert.deepEqual(back, { ok: true, xMm: 600, widthMm: 1860, pocket: "left", movedMm: 0 });
+  assert.equal(fixedWidthOpening({ wallLenMm: 3600, firstMm: 600, secondMm: 604, widthMm: 1860 }).widthMm, 1860, "tap rounding can't turn 920 into 1,840");
+});
+
+t("placing a slider: a finger's slip (100 mm or less) past the wall end slides back and says so; more, or running into W1, is refused; too long for the wall is refused", () => {
+  assert.deepEqual(fixedWidthOpening({ wallLenMm: 2400, firstMm: 580, secondMm: 900, widthMm: 1860 }), { ok: true, xMm: 540, widthMm: 1860, pocket: "right", movedMm: 40 });
+  assert.deepEqual(fixedWidthOpening({ wallLenMm: 2400, firstMm: 200, secondMm: 100, widthMm: 1860 }), { ok: false, reason: "past_end", overMm: 1660 });
+  assert.deepEqual(fixedWidthOpening({ wallLenMm: 2400, firstMm: 700, secondMm: 900, widthMm: 1860 }), { ok: false, reason: "past_end", overMm: 160 });
+  assert.deepEqual(fixedWidthOpening({ wallLenMm: 1500, firstMm: 0, secondMm: 100, widthMm: 1860 }), { ok: false, reason: "too_long" });
+  assert.deepEqual(fixedWidthOpening({ wallLenMm: 5000, firstMm: 1000, secondMm: 2000, widthMm: 1860, others: [{ x0: 2500, x1: 3400, label: "W1" }] }), { ok: false, reason: "overlap", label: "W1" });
+  assert.equal(fixedWidthOpening({ wallLenMm: 5000, firstMm: 1000, secondMm: 1000, widthMm: 1860 }).reason, "no_direction");
+});
+
+t("an existing door → cavity slider: right keeps the offset, left moves it back by door + 20, over 1,200 wide is read as the whole opening, no room is refused", () => {
+  const door = { xMm: 2000, sillMm: 0, widthMm: 920, heightMm: 2040, type: "door", label: "D1" };
+  assert.deepEqual(cavityConvert(door, "right", 5000).inputs, { ...door, widthMm: 1860, cavityLeafMm: 920, cavityPocket: "right" });
+  assert.deepEqual(cavityConvert(door, "left", 5000).inputs, { ...door, xMm: 1060, widthMm: 1860, cavityLeafMm: 920, cavityPocket: "left" });
+  assert.match(cavityConvert({ ...door, xMm: 200 }, "left", 5000).error, /runs past the end of this wall/);
+  assert.match(cavityConvert(door, "right", 5000, [{ x0: 3000, x1: 3500, label: "W1" }]).error, /runs into W1/);
+  const wide = cavityConvert({ ...door, widthMm: 1860 }, null, 5000);
+  assert.equal(wide.inputs.cavityLeafMm, 920);
+  assert.equal(wide.inputs.widthMm, 1860);
+  assert.equal(wide.wide, true);
+  assert.match(cavityConvert(door, null, 5000).error, /Choose the side/);
+});
+
+t("the last slider's door width is remembered for the next one", () => {
+  const ms = [wm("w", 5000, 2400, "Wall 1"), om("o", "w", "D1", "door", 600, 1860, 2040, 0, { cavityLeafMm: 920, cavityPocket: "left" })];
+  assert.equal(lastOpeningSizes(ms).door.leafMm, 920);
+  assert.deepEqual(lastOpeningSizes([wm("w", 5000, 2400, "Wall 1")]).door, { heightMm: null });
+});
+
+t("server whitelist: cavityLeafMm and cavityPocket stay on a door only; 200 is refused plainly; a window drops them", () => {
+  const base = { xMm: 0, sillMm: 0, widthMm: 1860, heightMm: 2040, label: "D1" };
+  const ok = cleanMeasurementInputs("opening", { ...base, type: "door", cavityLeafMm: 920, cavityPocket: "left" }, null);
+  assert.deepEqual([ok.cavityLeafMm, ok.cavityPocket], [920, "left"]);
+  const win = cleanMeasurementInputs("opening", { ...base, type: "window", cavityLeafMm: 920, cavityPocket: "left" }, null);
+  assert.ok(!("cavityLeafMm" in win) && !("cavityPocket" in win));
+  assert.throws(() => cleanMeasurementInputs("opening", { ...base, type: "door", cavityLeafMm: 200 }, null), /Door width must be between 300 and 1,500 mm/);
+  assert.ok(!("cavityPocket" in cleanMeasurementInputs("opening", { ...base, type: "door", cavityLeafMm: 920, cavityPocket: "up" }, null)));
+});
+
+// ══ Step 3: full height (opening height = wall height, stored as a flag) ═════════════════════════════════════════
+t("full height: the opening resolves to wall height − sill whatever was stored; a raised wall takes it up with no 'clipped' note", () => {
+  const door = (h, extra = {}) => om("o", "w", "D1", "door", 1000, 820, h, 0, extra);
+  const at2400 = wf([wm("w", 3000, 2400, "Wall 1"), door(2400, { fullHeight: true })]);
+  const at2700 = wf([wm("w", 3000, 2700, "Wall 1"), door(2400, { fullHeight: true })]);   // the stored 2,400 is stale: the wall went up
+  const plain = wf([wm("w", 3000, 2700, "Wall 1"), door(2400)]);
+  const opening = (c) => wl(c, "Wall 1").openings[0];
+  assert.equal(opening(at2400).headMm, 2400);
+  assert.equal(opening(at2700).headMm, 2700, "follows the wall");
+  assert.equal(opening(plain).headMm, 2400, "without the flag the stored height stands");
+  assert.ok(!WR(at2700).problems.some((p) => p.code === "opening_clipped"));
+  // a window with a sill runs from the sill to the top of the wall
+  const win = wf([wm("w", 3000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 900, 1200, 900, { fullHeight: true })]);
+  assert.equal(opening(win).headMm, 2700);
+  assert.equal(opening(win).sillMm, 900);
+});
+
+t("full height: studs, plates and noggins count as for any opening of that width (nothing is framed above the head by Walls itself)", () => {
+  const full = wf([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2400, 0, { fullHeight: true })]);
+  const door = wf([wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2040, 0)]);
+  assert.deepEqual(st(wl(full, "Wall 1")), st(wl(door, "Wall 1")));
+});
+
+t("full height on a legacy Studs item in frame-height mode never blocks (head = the top of the studs)", () => {
+  const studsItem = { id: "st", name: "Studs", methodKey: "wall_frame", methodVersion: 1, spec: { family: "timber", purpose: "studs", section: { depthMm: 90, widthMm: 45 }, grade: "MGP10", treatment: "H2", stock: {} }, rules: { centresMm: 600, studHeightMm: 2200 } };
+  const c = computeWorkspace(snap([studsItem], [wm("w", 3000, 2400, "Wall 1"), om("o", "w", "D1", "door", 1000, 820, 2400, 0, { fullHeight: true })], [{ id: "cs", measurementId: "w", jobMaterialId: "st", role: "wall" }]));
+  assert.ok(!c.materialResults.st.problems.some((p) => p.blocking), JSON.stringify(c.materialResults.st.problems));
+  assert.equal(c.materialResults.st.layouts[0].openings[0].headMm, 2200);
+});
+
+t("full height helpers: the stored snapshot is wall height − sill; followers rewrite it in the wall's own edit, plain openings untouched", () => {
+  assert.equal(fullHeightMm({ kind: "rect", heightMm: 2700 }, 0), 2700);
+  assert.equal(fullHeightMm({ kind: "rect", heightMm: 2700 }, 900), 1800);
+  assert.equal(fullHeightMm({ kind: "rect", heightMm: 2700 }, 2700), null);
+  assert.equal(fullHeightMm({ kind: "gable", heightMm: 2700 }, 0), null);
+  const ops = [om("d", "w", "D1", "door", 0, 820, 2400, 0, { fullHeight: true }), om("w1", "w", "W1", "window", 1000, 900, 1500, 300, { fullHeight: true }), om("p", "w", "W2", "window", 2000, 900, 1200, 900)];
+  const fol = fullHeightFollowers(ops, { kind: "rect", heightMm: 2700 });
+  assert.deepEqual(fol.map((f) => [f.next.id, f.next.inputs.heightMm]), [["d", 2700], ["w1", 2400]]);
+  assert.deepEqual(fullHeightFollowers(ops.slice(0, 1), { kind: "rect", heightMm: 2400 }), [], "already right: no edit");
+});
+
+t("server whitelist: fullHeight is kept only as true", () => {
+  const base = { xMm: 0, sillMm: 0, widthMm: 820, heightMm: 2400, label: "D1", type: "door" };
+  assert.equal(cleanMeasurementInputs("opening", { ...base, fullHeight: true }, null).fullHeight, true);
+  for (const v of ["true", 1, false, null]) assert.ok(!("fullHeight" in cleanMeasurementInputs("opening", { ...base, fullHeight: v }, null)));
 });
 
 console.log(`takeoff-tc-hub031: ${pass} passed, ${fail} failed`);
