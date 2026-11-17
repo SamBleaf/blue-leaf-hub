@@ -1,7 +1,7 @@
 ---
-sop_version: 2.7
-last_reviewed: 2026-10-26
-app_version: takeoff-r03 (HUB 029/030 build, commits f33c7b5 to a3a7ee2)
+sop_version: 2.8
+last_reviewed: 2026-11-18
+app_version: takeoff-r03 + HUB 032 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed; renderer takeoff-pdf@5, calc takeoff-calc@6)
 screenshot_status: needs_replacement
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -316,6 +316,11 @@ Everything that still stops the supplier PDF is in one box above **Export suppli
 
 ## 12. Edge cases and limits
 
+- **Timber prints as the supplier take-off (HUB 032, renderer takeoff-pdf@5).** The TIMBER part of the PDF has one heading per member role in this order: **T&B PLATES** (bottom, top, second top), **STUDS** (cripples above and below openings are folded in here: they are stud product cut from stud lengths), **JAMB STUDS** (kings and jacks), **JUNCT. BLK**, **HD & SILL TR** (head and sill trimmers), **LINTELS**, **NOGGINS**. Under each heading is one row per product, for example `PINE 90x45 MGP10 P/M   12/6, 4/5.4, 9/4.8   255.90 LM`. A cut list reads **count/length in metres, longest first**; the total is metres of stock bought to 2 decimals. **P/M** = per metre (random lengths, unit LM). A stud bought at 2.4, 2.7 or 3.0 m is a **precut stud**: its row is a count, unit **EA** (`LVL STUD SMART10 H2 90X35 2.7M   270 EA`). Cladding, aluminium and flashing keep their own tables.
+- The order lines, quantities, "need / ordered / left" and the order identity do not change: each line is still one stock length of one product. The roles only decide where a line prints. If you raise, lower or spare a line, its pieces are shared across the roles in proportion, so the printed pieces always add up to what is on the order.
+- A PDF exported before this change (renderer takeoff-pdf@4 or older) keeps its own per-length table when it is re-opened; only new exports use the take-off layout.
+- **MGP10 is only orderable in 600 mm lengths** (0.6, 1.2, 1.8, 2.4, 3.0 … 6.0 m): a 2,650 piece buys 3,000 and a 2,700 piece buys 3,000, because 2,700 is not a multiple of 600. LVL and every other grade keep the 1,200 mm then 300 mm steps (SOP 20-08).
+
 - One supplier per order; up to 200 lines per order.
 - Exporting never changes "ordered"; only **Record order placed** does.
 - A draft PDF can be exported even when the order isn't ready; the supplier PDF needs every readiness check to pass, no stale line, no invalid quantity, **and** the takeoff must not be **Needs review**.
@@ -521,6 +526,18 @@ Next review date: 2027-04-14
 **TC-27 — Update all out-of-date lines (HUB 029, UI Review)**
 1. `?takeoffSeed=mixed` → Timber and cladding → make a draft with two or more generic lines → **Save order details** → change something both lines come from (e.g. the rafter pitch, SOP 20-08).
 2. Expected: **Update all N lines** next to **Remove all N out-of-date lines**. Tap it. Expected: "Updated N lines to what the takeoff needs now — saved." with no stale box left and no **Save order details** button.
+- [ ] Pass  [ ] Fail
+
+**TC-28 — Timber order prints as the supplier take-off (HUB 032, API + PDF)**
+1. Local stack or the unit test `node scripts/tests/takeoff-tc-hub032.test.mjs`. Job with a Walls item (default products) and two walls, one with a door; make a Timber and cladding draft and **Export draft PDF**.
+2. Expected: the TIMBER part shows headings **T&B PLATES**, **STUDS**, **NOGGINS** (and **JAMB STUDS** / **HD & SILL TR** when openings are framed), each with product rows like `PINE 90x45 MGP10 P/M` and a cut list such as `2/4.2`, a total in **LM**, and LVL studs at 2.7 m as `… 2.7M   N EA`. No "— 2,700 mm length" rows. Footer shows `takeoff-pdf@5 · takeoff-calc@6`.
+3. Expected: the order screen lines, quantities and "need / ordered / left" are unchanged from before; the frozen snapshot has `orderFormat` "supplier-takeoff@1" and `supplierGroups`.
+- [ ] Pass  [ ] Fail
+
+**TC-29 — MGP10 lengths lock to 600 mm (HUB 032, API)**
+1. Same Walls item. Read the plate and noggin lines (MGP10 by default).
+2. Expected: every MGP10 line length is a multiple of 600 (e.g. a 2,700 noggin buys 3,000, never 2,700); the LVL studs still buy 2,700. A cut of 2,650 in MGP10 buys 3,000 and one of 6,001 is reported unavailable (never clamped).
+3. Edge: mark 3,000 not stocked on an MGP10 product, a 2,650 cut now buys 3,600. A 1,500 or 2,700 "not stocked" mark left from the old grid is ignored.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

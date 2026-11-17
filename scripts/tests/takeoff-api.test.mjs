@@ -1690,7 +1690,7 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   assert.equal((await SP(`/jobs/carpentry/${J.carpA}/workspaces`, { id: w, name: "HUB028 s3" })).status, 200);
   // three saved company products (one per part, with treatments), so nothing is "missing product"
   const prod = (purpose, widthMm = 45) => ({ id: purpose, isActive: true, rules: {},
-    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP10", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
+    spec: { family: "timber", purpose, section: { depthMm: 90, widthMm }, grade: "MGP15", treatment: "H2", stock: { maxMm: null, unavailableMm: [] } } });
   const spec = wallFramingDefaults([prod("studs"), prod("plates"), prod("noggins", 35)]);
   const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
     materials: { upsert: [{ id: walls, name: "Walls", methodKey: "wall_framing", methodVersion: 1, spec, rules: { centresMm: 600, doubleTopPlate: false, openingFraming: false } }] },   // HUB 031: the pre-rules item (the rules have their own tests)
@@ -1717,9 +1717,9 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = (await q("SELECT quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY item->>'description'", [oid])).rows;
   assert.deepEqual(stored.map((x) => [x.item.component, x.quantity, Number(x.finished_length_mm), x.item.description]), [
-    ["noggins", 1, 1800, "Noggins 90 × 35 MGP10 H2 — 1,800 mm length"], ["noggins", 1, 4800, "Noggins 90 × 35 MGP10 H2 — 4,800 mm length"],
-    ["plates", 2, 4200, "Plates 90 × 45 MGP10 H2 — 4,200 mm length"], ["plates", 2, 6000, "Plates 90 × 45 MGP10 H2 — 6,000 mm length"],
-    ["studs", 21, 2700, "Studs 90 × 45 MGP10 H2 — 2,700 mm length"]]);
+    ["noggins", 1, 1800, "Noggins 90 × 35 MGP15 H2 — 1,800 mm length"], ["noggins", 1, 4800, "Noggins 90 × 35 MGP15 H2 — 4,800 mm length"],
+    ["plates", 2, 4200, "Plates 90 × 45 MGP15 H2 — 4,200 mm length"], ["plates", 2, 6000, "Plates 90 × 45 MGP15 H2 — 6,000 mm length"],
+    ["studs", 21, 2700, "Studs 90 × 45 MGP15 H2 — 2,700 mm length"]]);
   const lines = (await S(`/workspaces/${w}/orders`)).data.orders.find((x) => x.id === oid).lines;
   assert.deepEqual(lines.map((l) => l.item.component).sort(), ["noggins", "noggins", "plates", "plates", "studs"]);
   // the draft export carries the per-part cut lists in its site appendix

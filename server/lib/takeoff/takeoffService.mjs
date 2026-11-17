@@ -17,7 +17,7 @@ import {
   bucketKey as makeBucketKey, profileDimensionList, materialProblems, isFiniteNumber, requirePositive, requireQuantity,
   normaliseSpec, orderLineState, describeSpec, SPEC_SCHEMA_VERSION, materialSpecKey, polylineLengthMm, ITEM_STALE_TEXT,
   SECTION_VALUES, SECTION_LABEL, GROUP_LABEL, materialGroup, materialSection, accessorySupplierConflict,
-  SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, DEFAULT_SUPPLIER_NAME_HINT,
+  SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, DEFAULT_SUPPLIER_NAME_HINT, buildSupplierGroups, SUPPLIER_ORDER_FORMAT,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
@@ -1142,7 +1142,8 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
         items.set(mat.id, g);
       }
       g.lines.push({ bucketKey: sl.bucketKey, unit: sl.unit, quantity: l.quantity, required: sl.quantity, description: sl.item?.description || sl.unit,
-        finishedLengthMm: sl.finishedLengthMm ?? null, stockLengthMm: sl.item?.stockLengthMm ?? null, note: sl.item?.note || null, stale: st.stale, problem: sl.problems.length > 0 });
+        finishedLengthMm: sl.finishedLengthMm ?? null, stockLengthMm: sl.item?.stockLengthMm ?? null, note: sl.item?.note || null, stale: st.stale, problem: sl.problems.length > 0,
+        ...(sl.roles ? { roles: sl.roles, product: sl.product || null } : {}) });
       continue;
     }
     // Print exactly what the bucket is: a material whose CURRENT spec key equals the bucket's.
@@ -1188,6 +1189,10 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     for (const l of g.lines) byUnit[l.unit] = (byUnit[l.unit] || 0) + l.quantity;
     return { ...g, groupId: `M${i + 1}`, totals: { byUnit } };
   });
+  // the timber order in the supplier's take-off layout (grouped by member role); other materials keep their own tables
+  const timberItems = itemList.filter((g) => g.group === "timber" && g.lines.every((l) => l.roles));
+  const supplierGroups = timberItems.length ? buildSupplierGroups(timberItems) : [];
+  for (const g of timberItems) g.inSupplierGroups = true;
   const byUnitAll = {};
   for (const g of itemList) for (const [u, n] of Object.entries(g.totals.byUnit)) byUnitAll[u] = (byUnitAll[u] || 0) + n;
   // the site appendix travels in the same frozen snapshot (never part of the supplier order itself)
@@ -1231,6 +1236,7 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
     notes: order.notes || null,
     groups: groupList,
     items: itemList,
+    ...(supplierGroups.length ? { orderFormat: SUPPLIER_ORDER_FORMAT, supplierGroups } : {}),
     appendix,
     notIncluded,
     ...(acknowledgeLeftOff && notIncluded.length ? { leftOffAcknowledged: true } : {}),

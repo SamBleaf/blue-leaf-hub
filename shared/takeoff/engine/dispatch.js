@@ -17,7 +17,7 @@
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { identityKey } from "./contract.js";
-import { FAMILIES, TIMBER_GRID, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
+import { FAMILIES, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
@@ -826,7 +826,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
   const lines = new Map();
   const demById = new Map(demands.map((d) => [d.id, d]));
   const recipeLabels = new Map((mat.rules?.recipe?.groups || []).map((g) => [g.id, g.label || g.kind || g.id]));
-  const add = (key, unit, qty, finishedLengthMm, item, demandIds, identity) => {
+  const add = (key, unit, qty, finishedLengthMm, item, demandIds, identity, role = null) => {
     // the material id is part of the bucket: two materials with the same product never share (or corrupt) a line
     const bucketKey = `${matKey}|${mat.id}|${key}`;
     let l = lines.get(bucketKey);
@@ -838,8 +838,16 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // HUB 028 Walls: the part a line buys (studs, plates, long plates or noggins), on the line and on its order item, so
       // an out-of-date stud line is never offered a plate line of the same length
       if (WALL_PARTS.includes(identity?.component)) { l.component = identity.component; l.item = { ...l.item, component: identity.component }; }
+      // the supplier take-off groups a timber order by member role (stud, king, jack, lintel, plate, noggin …): what each
+      // line was bought FOR, so the export can print "STUDS", "JAMB STUDS", "T&B PLATES" (supplierOrder.js). The product
+      // is the line's own timber identity (section, grade, treatment, species).
+      if (n.family === "timber") {
+        l.roles = {};
+        if (identity?.family === "timber") l.product = { section: identity.section ?? null, grade: identity.grade ?? null, treatment: identity.treatment ?? null, species: identity.species ?? null };
+      }
       lines.set(bucketKey, l);
     }
+    if (l.roles) { const r = role || "other"; l.roles[r] = (l.roles[r] || 0) + qty; }
     l.exact += qty;
     for (const d of demandIds) l.demandIds.push(d);
   };
@@ -873,7 +881,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         const ids = b.cuts.map((c) => c.demandId);
         const first = demById.get(ids[0]);
         add(`${unit}|${b.stockLengthMm}|${g.identityKey}`, unit, 1, b.stockLengthMm,
-          { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity);
+          { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity, first?.role);
       }
     }
     if (n.family === "aluminium") {
@@ -924,7 +932,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     if (allocatable(d)) continue;
     if (d.kind === "linear" && d.unit === "lm") {
       // exact LM (incl. spare) is summed per material and rounded ONCE below — never per wall then again
-      add(`lm|${identityKey(d.identity)}`, "lm", d.exactLm ?? d.quantity, null, { description: `${itemText(d, n, recipeLabels, { thickness: true })} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity);
+      add(`lm|${identityKey(d.identity)}`, "lm", d.exactLm ?? d.quantity, null, { description: `${itemText(d, n, recipeLabels, { thickness: true })} — random lengths (LM)`, note: "Estimate — total LM, not a piece count" }, [d.id], d.identity, d.role);
       continue;
     }
     if (d.kind === "linear") {
@@ -932,10 +940,10 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // material's linear demand that carries no policy is bought on the owner timber grid (the one definition)
       const L = d.lengthMm;
       if (d.lengthKind !== "orderedStock" && d.stockPolicy == null && n.family === "timber") {
-        const s = selectStock(L, { ...TIMBER_GRID, maxMm: n.stock?.maxMm ?? null, unavailableMm: n.stock?.unavailableMm || [] });
+        const s = selectStock(L, { ...timberGridFor(d.identity?.grade), maxMm: n.stock?.maxMm ?? null, unavailableMm: n.stock?.unavailableMm || [] });
         if (s.stockMm == null) { sink.problems.push({ code: "unavailable_stock", message: `${d.label || "A piece"}: ${s.message}`, blocking: true }); continue; }
-        add(`piece|${s.stockMm}|${identityKey(d.identity)}`, "piece", d.quantity, s.stockMm, { description: `${itemText(d, n, recipeLabels)} — ${fmt(s.stockMm)} mm length`, stockLengthMm: s.stockMm }, [d.id], d.identity);
-      } else add(`piece|${L}|${identityKey(d.identity)}`, d.unit === "bar" ? "bar" : "piece", d.quantity, L, { description: `${itemText(d, n, recipeLabels)} — ${fmt(L)} mm length${d.lengthKind === "orderedStock" ? " (as entered)" : ""}`, stockLengthMm: L }, [d.id], d.identity);
+        add(`piece|${s.stockMm}|${identityKey(d.identity)}`, "piece", d.quantity, s.stockMm, { description: `${itemText(d, n, recipeLabels)} — ${fmt(s.stockMm)} mm length`, stockLengthMm: s.stockMm }, [d.id], d.identity, d.role);
+      } else add(`piece|${L}|${identityKey(d.identity)}`, d.unit === "bar" ? "bar" : "piece", d.quantity, L, { description: `${itemText(d, n, recipeLabels)} — ${fmt(L)} mm length${d.lengthKind === "orderedStock" ? " (as entered)" : ""}`, stockLengthMm: L }, [d.id], d.identity, d.role);
       continue;
     }
     if (d.unit === "sheet" || d.kind === "sheet") {

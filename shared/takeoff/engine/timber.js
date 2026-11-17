@@ -33,7 +33,7 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
-import { TIMBER_GRID } from "./families.js";
+import { TIMBER_GRID, isMgp10Grade, timberGridFor } from "./families.js";
 
 /** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
 const GEOM_TOL_MM = 0.001;
@@ -42,6 +42,7 @@ const GEOM_TOL_MM = 0.001;
  *  Not configurable. The same object as engine/families.js TIMBER_GRID, its one definition. */
 export const TIMBER_STOCK_GRID = TIMBER_GRID;
 /** "1,200 mm then 300 mm steps" — how the grid reads in a message. */
+const MGP10_TEXT = "600 mm, then 600 mm steps (600, 1,200, 1,800 …)";
 const GRID_TEXT = `${formatMm(TIMBER_GRID.minMm, 0)} mm then ${formatMm(TIMBER_GRID.incrementMm, 0)} mm steps`;
 
 /** Proposed safeguard (06): generated members per wall or item. Excess is rejected, never truncated. */
@@ -63,7 +64,7 @@ const DETAIL_SOURCES = ["reviewed-detail", "explicit"];
 // even when two parts are the same product, as `follower` keeps automatic battens apart.
 const OPTIONAL_IDENTITY = ["supplier", "manufacturer", "sku", "moisture", "endCondition", "finish", "profile", "component"];
 // Stock settings timber accepts: the fixed grid, its product restrictions and the allocator's cutting-loss fields.
-const STOCK_KEYS = new Set(["kind", "minMm", "incrementMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
+const STOCK_KEYS = new Set(["grade", "kind", "minMm", "incrementMm", "maxMm", "unavailableMm", "sharePieces", "kerfMm", "kerfConfirmed",
   "endTrimMm", "finalEndAcceptable", "minRetainedOffcutMm"]);
 const CUTTING_LENGTHS = [["kerfMm", "Saw kerf"], ["endTrimMm", "End trim"], ["minRetainedOffcutMm", "Keep offcuts from"]];
 const CUTTING_FLAGS = [["kerfConfirmed", "Kerf confirmed"], ["finalEndAcceptable", "Final stock end acceptable"]];
@@ -241,8 +242,9 @@ export function timberIdentity(product = {}) {
   return Object.freeze(id);
 }
 
-const onGrid = (l) => {
-  const steps = (l - TIMBER_STOCK_GRID.minMm) / TIMBER_STOCK_GRID.incrementMm;
+const onGrid = (l, grade = null) => {
+  const g = timberGridFor(grade);
+  const steps = (l - g.minMm) / g.incrementMm;
   return steps >= 0 && Math.abs(steps - Math.round(steps)) < 1e-9;
 };
 
@@ -261,22 +263,28 @@ export function timberStockPolicy(opts = {}) {
   if (!opts || typeof opts !== "object" || Array.isArray(opts)) fail("Stock settings are invalid.", "stock");
   const unknown = Object.keys(opts).filter((k) => !STOCK_KEYS.has(k) && opts[k] !== undefined);
   if (unknown.length) fail(`Timber stock has no “${unknown.join("”, “")}” setting — it is ${GRID_TEXT}, restricted only by the product maximum and unavailable lengths.`, "stock");
+  // MGP10 (Sam, 18 Nov 2026) buys on its own 600 mm grid; the grade picks the grid, so the 1,200 + 300n a saved spec
+  // carries is simply replaced for MGP10, never refused. Every other grade must still state the owner grid.
+  const grid = timberGridFor(opts.grade);
+  const mgp = isMgp10Grade(opts.grade);
   const { kind, minMm, incrementMm, unavailableMm } = opts;
-  if ((kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
-    || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm)) {
+  if (!mgp && ((kind !== undefined && kind !== TIMBER_STOCK_GRID.kind) || (minMm !== undefined && minMm !== TIMBER_STOCK_GRID.minMm)
+    || (incrementMm !== undefined && incrementMm !== TIMBER_STOCK_GRID.incrementMm))) {
     fail(`Timber stock is ${GRID_TEXT} for every supplier — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   }
+  if (mgp && kind !== undefined && kind !== grid.kind) fail(`MGP10 stock is ${MGP10_TEXT} — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   const maxMm = opts.maxMm ?? null;
-  if (maxMm !== null) num(maxMm, "Longest stock", { min: TIMBER_STOCK_GRID.minMm });
-  const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").map((l) => {
-    num(l, "Unavailable length", { min: TIMBER_STOCK_GRID.minMm });
-    if (!onGrid(l)) fail(`${fmt(l)} mm is not a timber stock length (${GRID_TEXT}).`, "unavailableMm");
-    return l;
+  if (maxMm !== null) num(maxMm, "Longest stock", { min: grid.minMm });
+  const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").flatMap((l) => {
+    num(l, "Unavailable length", { min: grid.minMm });
+    if (onGrid(l, opts.grade)) return [l];
+    if (mgp && onGrid(l)) return [];   // a 1,500 / 2,700 mark left from the 300 grid: MGP10 is never bought at it anyway
+    fail(`${fmt(l)} mm is not a timber stock length (${mgp ? MGP10_TEXT : GRID_TEXT}).`, "unavailableMm");
   }))].sort((x, y) => x - y);
   const cutting = {};
   for (const [k, label] of CUTTING_LENGTHS) if (opts[k] !== undefined && opts[k] !== null) cutting[k] = num(opts[k], label);
   for (const [k, label] of CUTTING_FLAGS) if (opts[k] !== undefined && opts[k] !== null) cutting[k] = flag(opts[k], label);
-  return Object.freeze({ ...TIMBER_STOCK_GRID, maxMm, unavailableMm: Object.freeze(unavailable), ...cutting, sharePieces: flag(opts.sharePieces, "Cut allocation", false) });
+  return Object.freeze({ ...grid, maxMm, unavailableMm: Object.freeze(unavailable), ...cutting, sharePieces: flag(opts.sharePieces, "Cut allocation", false) });
 }
 
 /**
@@ -313,7 +321,7 @@ function setup(input, role) {
   const sizing = resolveSizing({ section: identity.section, sizing: input.sizing });
   const share = [input.cutAllocation, input.stock?.sharePieces].filter((v) => v !== undefined && v !== null);
   if (share.length === 2 && share[0] !== share[1]) fail("Cut allocation is set two different ways — choose one.", "cutAllocation");
-  const stockPolicy = timberStockPolicy({ ...(input.stock || {}), sharePieces: flag(share[0], "Cut allocation", SHARED_STOCK_BY_DEFAULT.has(role)) });
+  const stockPolicy = timberStockPolicy({ ...(input.stock || {}), grade: identity.grade, sharePieces: flag(share[0], "Cut allocation", SHARED_STOCK_BY_DEFAULT.has(role)) });
   const ctx = { materialId, identity, stockPolicy, installation: sizing.installation, problems: [], explain: [...sizing.explain] };
   // HUB 028: a Walls part names itself in its identity problem ("Studs: …"); everything else keeps the plain
   // "Timber" wording. The stock note is never labelled (a Walls item says it once, naming the parts without one).
@@ -321,7 +329,7 @@ function setup(input, role) {
   if (stockPolicy.maxMm === null) {
     ctx.problems.push(problem("stock_max_unset", STOCK_MAX_UNSET_NOTE, { blocking: false }));
   }
-  ctx.explain.push(`Stock: ${GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
+  ctx.explain.push(`Stock: ${isMgp10Grade(identity.grade) ? MGP10_TEXT : GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
     + `${stockPolicy.unavailableMm.length ? `, unavailable ${stockPolicy.unavailableMm.map(fmt).join("/")} mm` : ""}`
     + `${stockPolicy.kerfMm !== undefined ? `, kerf ${fmt(stockPolicy.kerfMm)} mm${stockPolicy.kerfConfirmed ? "" : " (unconfirmed)"}` : ""}`
     + `${stockPolicy.endTrimMm !== undefined ? `, end trim ${fmt(stockPolicy.endTrimMm)} mm` : ""}; `
@@ -395,7 +403,7 @@ function explicitMember(ctx, m, { owner, lengths, allowanceMm, idParts, sourceRe
   } else return { missing: `${id} product (section, grade, treatment)` };
   if (m.stock !== undefined && (typeof m.stock !== "object" || m.stock === null)) fail(`${owner} ${id}: stock settings are invalid.`, "members");
   const stockPolicy = !m.stock && identityKey(identity) === identityKey(ctx.identity) ? ctx.stockPolicy
-    : timberStockPolicy({ sharePieces: false, ...(m.stock || {}) });
+    : timberStockPolicy({ sharePieces: false, ...(m.stock || {}), grade: identity.grade });
   if (stockPolicy !== ctx.stockPolicy && stockPolicy.maxMm === null) {
     ctx.problems.push(problem("stock_max_unset", `${owner} ${id}: the longest available stock isn't set for this product — confirm it before ordering.`, { blocking: false }));
   }

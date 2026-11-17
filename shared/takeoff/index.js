@@ -22,4 +22,6 @@ export { gableInputProblem } from "./engine/wall.js";
 export { methodReads, wallIncompleteText } from "./engine/dispatch.js";
 
 /** Bumped when any calculation in this package changes behaviour; frozen into exports. */
-export const CALCULATION_VERSION = "takeoff-calc@5"; // @5: per-wall stud centres, full-height openings, cavity sliders, automatic opening framing (HUB 031, Sam 17 Nov 2026); @4: all timber bought in 300 mm steps from 1,200 (Sam, 25 Oct 2026; HUB 028); @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits
+export const CALCULATION_VERSION = "takeoff-calc@6"; // @6: MGP10 is bought only in 600 mm lengths (600, 1,200, 1,800 …; Sam, 18 Nov 2026), order lines carry the member roles the supplier take-off groups by; @5: per-wall stud centres, full-height openings, cavity sliders, automatic opening framing (HUB 031, Sam 17 Nov 2026); @4: all timber bought in 300 mm steps from 1,200 (Sam, 25 Oct 2026; HUB 028); @3: TC-R04 generic methods (timber, cladding, supports, accessories, aluminium bars, continuous flashing paths); @2: spec v2 identity, split provenance, manual/count splits
+
+export * from "./supplierOrder.js";

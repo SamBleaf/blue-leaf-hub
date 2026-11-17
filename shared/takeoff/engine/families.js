@@ -25,10 +25,24 @@ export const TIMBER_PURPOSES = Object.freeze(["rafters", "joists", "studs", "pla
  *  The ONE definition: engine/timber.js, dispatch.js and the app read it from here. */
 export const TIMBER_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300 });
 export const TIMBER_GRID_SOURCE = "OWNER-2026-10-25";
-/** Is this a length on the timber grid (1,200, 1,500, 1,800 …)? Only these can be marked "not stocked". */
-export function onTimberGrid(mm) {
+/**
+ * MGP10 is only orderable in 600 mm lengths: 600, 1,200, 1,800 … (Sam, 18 Nov 2026: "so .6, 1.2, 1.8 and so on. so all
+ * MGP10 lengths will have to lock to those lengths"). Applies to ANY product whose grade is MGP10 (any supplier, any
+ * part: studs, plates, noggins, jambs, lintels). LVL and every other grade keep TIMBER_GRID. The shortest MGP10
+ * length is 600 (Sam named .6); a piece never buys shorter than that.
+ */
+export const MGP10_GRID = Object.freeze({ kind: "grid", minMm: 600, incrementMm: 600 });
+export const MGP10_GRID_SOURCE = "OWNER-2026-11-18";
+const MGP10_RE = /\bMGP\s*-?\s*10\b/i;
+/** Is this timber grade MGP10 ("MGP10", "MGP 10", "mgp10")? Not MGP12, not LVL Smart 10. */
+export const isMgp10Grade = (grade) => MGP10_RE.test(String(grade ?? ""));
+/** The stock grid a grade buys on: 600 × n for MGP10, the owner's 1,200 + 300n for everything else. */
+export const timberGridFor = (grade) => (isMgp10Grade(grade) ? MGP10_GRID : TIMBER_GRID);
+/** Is this a length on the timber grid (1,200, 1,500, 1,800 …; 600, 1,200, 1,800 … for MGP10)? Only these can be marked "not stocked". */
+export function onTimberGrid(mm, grade = null) {
   const n = Number(mm);
-  return isFiniteNumber(n) && n >= TIMBER_GRID.minMm && (n - TIMBER_GRID.minMm) % TIMBER_GRID.incrementMm === 0;
+  const g = timberGridFor(grade);
+  return isFiniteNumber(n) && n >= g.minMm && Math.abs((n - g.minMm) / g.incrementMm - Math.round((n - g.minMm) / g.incrementMm)) < 1e-9;
 }
 export const TIMBER_COVER_OPTIONS_MM = Object.freeze([70, 90, 120, 140]);
 /**
@@ -239,9 +253,10 @@ export function wallFramingDefaults(presets = []) {
 export function wallPinePlateMaxMm(platesPart) {
   const s = platesPart?.stock || {};
   const max = Number(s.maxMm);
-  if (s.maxMm == null || s.maxMm === "" || !(max >= TIMBER_GRID.minMm)) return null;
+  const g = timberGridFor(platesPart?.grade);   // MGP10 plates step in 600s, so a 5,700 longest means 5,400
+  if (s.maxMm == null || s.maxMm === "" || !(max >= g.minMm)) return null;
   const off = new Set((Array.isArray(s.unavailableMm) ? s.unavailableMm : []).map(Number));
-  for (let l = TIMBER_GRID.minMm + Math.floor((max - TIMBER_GRID.minMm) / TIMBER_GRID.incrementMm) * TIMBER_GRID.incrementMm; l >= TIMBER_GRID.minMm; l -= TIMBER_GRID.incrementMm) {
+  for (let l = g.minMm + Math.floor((max - g.minMm) / g.incrementMm + 1e-9) * g.incrementMm; l >= g.minMm; l -= g.incrementMm) {
     if (!off.has(l)) return l;
   }
   return null;
@@ -271,7 +286,7 @@ export function longPlateStockLengths(part, overMm = WALL_PART_DEFAULT_MAX_MM.pl
 /** Can a Walls part's longest length buy anything? None set is fine (a note); under 1,200 (the grid's shortest) isn't. */
 export function wallPartLongestOk(part) {
   const m = part?.stock?.maxMm;
-  return m == null || m === "" || Number(m) >= TIMBER_GRID.minMm;
+  return m == null || m === "" || Number(m) >= timberGridFor(part?.grade).minMm;
 }
 
 /** Method per family/purpose (versioned keys from 06). */
@@ -320,7 +335,7 @@ function normaliseWallPart(p, label, part) {
     grade: txt(x.grade, 40), treatment: txt(x.treatment, 40), species: txt(x.species, 40),
     supplierName: txt(x.supplierName), productCode: txt(x.productCode, 60),
     stock: { maxMm,
-      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter((l) => onTimberGrid(l) || l === longest) },
+      unavailableMm: lengthsList(x.stock?.unavailableMm, `${label}: unavailable length`).filter((l) => onTimberGrid(l, x.grade) || l === longest) },
   };
 }
 
@@ -349,7 +364,7 @@ export function normaliseFamilySpec(spec) {
       grade: txt(s.grade, 40), treatment: txt(s.treatment, 40), species: txt(s.species, 40),
       plies: s.plies == null ? 1 : Math.max(1, Math.round(Number(s.plies)) || 1),
       // the owner's grid for ALL timber suppliers; availability may only remove grid lengths, never add off-grid ones
-      stock: { ...TIMBER_GRID, maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter(onTimberGrid) },
+      stock: { ...timberGridFor(s.grade), maxMm, unavailableMm: lengthsList(s.stock?.unavailableMm, "Unavailable length").filter((l) => onTimberGrid(l, s.grade)) },
       sizing,
       endAllowanceMm: s.endAllowanceMm == null || s.endAllowanceMm === "" ? 0 : num(s.endAllowanceMm, "End allowance", { min: -1e-9 }),
     };
