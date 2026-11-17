@@ -236,6 +236,48 @@ export function planUndelete(item, { current = null, pending = null, flying = fa
   return { ...plan, items: [...list.slice(0, k), plan.item, ...list.slice(k)] };
 }
 
+/**
+ * Round 4 (U1): the position hint a record put back by Undo is saved with, once its delete has reached the server (it is
+ * saved again as new, and the server would otherwise add it at the end): the id now before it in the list, or null when
+ * it is first. The server uses it for the stored order only (registerStore placeHints) and never stores it.
+ */
+export function placeHint(items, id) {
+  const k = (items || []).findIndex((i) => i.id === id);
+  return k > 0 ? items[k - 1].id : null;
+}
+
+/**
+ * Round 4 (U1): a record kept on screen that a save's answer doesn't hold (Undo put it back while its delete travelled):
+ * it goes straight after the nearest record before it on the screen (localIds, in order) that the answer holds, or first
+ * when none is, so the answer doesn't move it to the end. Returns the new list.
+ */
+export function insertInPlace(list, item, localIds) {
+  const k = (localIds || []).indexOf(item.id);
+  if (k < 0) return [...list, item];
+  for (let j = k - 1; j >= 0; j--) {
+    const at = list.findIndex((x) => x.id === localIds[j]);
+    if (at >= 0) return [...list.slice(0, at + 1), item, ...list.slice(at + 1)];
+  }
+  return [item, ...list];
+}
+
+/**
+ * Round 4 (U2): a save's answer, minus the records deleted here while it travelled (pending = the store's deletes not
+ * yet saved, id → copy; sentDeletes = the ids whose delete this save carried). Such a record is still on the server (the
+ * save may even have carried an edit of it, which bumped its version), but it must not come back on screen while its
+ * delete waits, or Undo finds it already there and the next save deletes a record the screen shows. Returns
+ * { items, stillDeleting: id → the server's copy now }: the pending delete goes with that copy's version.
+ */
+export function withoutPendingDeletes(serverItems, pending, sentDeletes = new Set()) {
+  const stillDeleting = new Map();
+  const items = [];
+  for (const s of serverItems || []) {
+    if (pending?.has(s.id) && !sentDeletes.has(s.id)) stillDeleting.set(s.id, s);
+    else items.push(s);
+  }
+  return { items, stillDeleting };
+}
+
 // ── The store's save words (pure, so they can be tested without React; useRegister uses them) ─────────────
 
 export const SAVE_RETRY_WORDS = "Not saved — retrying";

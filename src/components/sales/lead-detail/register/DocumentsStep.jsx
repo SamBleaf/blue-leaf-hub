@@ -57,6 +57,32 @@ function architectRecipient(context) {
   if (!a) return "";
   return [a.name, a.company && a.company !== a.name ? a.company : ""].filter(Boolean).join(", ");
 }
+/**
+ * Who "Issue to" starts with (D3): the document's usual recipient (the named architect for the architect's brief and the
+ * schedule, the client for the client's documents, Blue Leaf estimating for the internal notes); when that is blank,
+ * whoever the document's current issued revision went to (docs.issued, status current, the highest version), so a name
+ * typed for R01 is still there after a reload and for R02.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- pure, the step's "Issue to" default, exported for the node tests
+export function issueToDefault(key, context, issued = []) {
+  if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
+  const usual = key === "architect_brief" || key === "selections_schedule"
+    ? { name: architectRecipient(context), email: "" }
+    : { name: context?.identity?.clientName || "", email: context?.identity?.email || "" };
+  if (clean(usual.name)) return usual;
+  const current = (Array.isArray(issued) ? issued : []).filter((d) => d?.document_type === key && d.status === "current")
+    .sort((a, b) => (b.version || 0) - (a.version || 0))[0];
+  const name = clean(current?.recipient_name);
+  return name ? { name, email: clean(current.recipient_email) || usual.email } : usual;
+}
+/**
+ * The architect's brief's release blockers for the readiness line before a preview: "Issue to" as the preview will start it
+ * (issueToDefault), so a brief already issued to someone doesn't count the recipient as still to fix (D3).
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- pure, the readiness line's blockers, exported for the node tests
+export function readinessBlockers(reg, context, issued = []) {
+  return releaseBlockers("architect_brief", reg, { recipientName: issueToDefault("architect_brief", context, issued).name, drawingBasis: reg.meta.planRev });
+}
 
 // Where a printed line comes from, said in a few words beside it. Every lead fact (site, client, project, budget,
 // funding, the client's story) is the client's details in Sales; the drawing basis and During the works are the project's.
@@ -238,11 +264,7 @@ export default function DocumentsStep({
   useEffect(() => () => { if (proofUrl) URL.revokeObjectURL(proofUrl); }, [proofUrl]);
   const dropProof = () => { proofSeq.current += 1; setProof(null); setProofBusy(false); };
 
-  function defaultRecipient(key) {
-    if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
-    if (key === "architect_brief" || key === "selections_schedule") return { name: architectRecipient(context), email: "" };
-    return { name: context?.identity?.clientName || "", email: context?.identity?.email || "" };
-  }
+  const defaultRecipient = (key) => issueToDefault(key, context, docs.issued);
 
   async function openPreview(key, { keepDrawer = false } = {}) {
     setMsg(null); setBusy(true); setActive(key); dropProof(); setSheet(null); setConfirmDelete(null);
@@ -349,9 +371,9 @@ export default function DocumentsStep({
   const titles = useMemo(() => briefSectionTitles(liveModel), [liveModel]);
   const needBrief = useMemo(() => roomsNeedingBrief(reg), [reg]);
   // The release blockers, live from the same rules the server checks (finding N2): with the name under "Issue to" for the
-  // red marks on the lines, and with the named architect for the readiness line before a preview.
+  // red marks on the lines, and with the name "Issue to" will start with for the readiness line before a preview (D3).
   const liveBlockers = useMemo(() => (context ? releaseBlockers("architect_brief", reg, { recipientName: recipient.name, drawingBasis: reg.meta.planRev }) : []), [reg, context, recipient.name]);
-  const readyBlockers = useMemo(() => (context ? releaseBlockers("architect_brief", reg, { recipientName: architectRecipient(context), drawingBasis: reg.meta.planRev }) : []), [reg, context]);
+  const readyBlockers = useMemo(() => (context ? readinessBlockers(reg, context, docs.issued) : []), [reg, context, docs.issued]);
   const stale = !!preview && preview.printKey !== printKey(reg, context);
 
   // Lines that carry a check: red where a release blocker targets them (live, so a fixed line loses its red at once,

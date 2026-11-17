@@ -3,12 +3,14 @@
  *   - two rooms added at once on two screens never share an order after the merge (finding P10);
  *   - a failed save never shows the browser's own error text, and offline reads "Not saved — retrying" (N6);
  *   - the brief's own details (rooms, floors, work words) report their own save state to the room bar (N5);
- *   - Undo of several deletes, in any order, puts the records back in their old order (round 3, S3).
+ *   - Undo of several deletes, in any order, puts the records back in their old order (round 3, S3);
+ *   - round 4: the position hint a record put back as new is saved with, where a save's answer keeps it (U1), and a
+ *     record deleted while a save travels stays out of that save's answer (U2).
  * No server, no database. Run: node scripts/tests/register-merge.test.mjs
  */
 import { readFileSync } from "node:fs";
 import { emptyMeta, makeRoom, makeItem } from "../../src/lib/register.js";
-import { mergeMeta, distinctRoomOrder, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, deletedPlaces, planUndelete } from "../../src/lib/registerMerge.js";
+import { mergeMeta, distinctRoomOrder, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, deletedPlaces, planUndelete, placeHint, insertInPlace, withoutPendingDeletes } from "../../src/lib/registerMerge.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -135,6 +137,26 @@ section("Undo of several deletes keeps the old order (S3)");
     if (!bad && s.ids() !== ORIGINAL) bad = `run ${run}: ${s.ids()}`;
   }
   ok("400 random runs of deletes, bulk removals and Undos: always in the old order, on the way and at the end", !bad, bad);
+}
+
+section("Round 4: Undo's place once the delete reached the server (U1), and a delete made while a save travels (U2)");
+{
+  const L = ["a", "b", "c", "d"].map((id) => makeItem({ id }));
+  ok("placeHint: the id now before the record", placeHint(L, "c") === "b");
+  ok("…null when it is first, or not on the list", placeHint(L, "a") === null && placeHint(L, "zz") === null && placeHint(null, "a") === null);
+  const ids = (l) => l.map((i) => i.id).join("");
+  const answer = ["a", "c", "d"].map((id) => makeItem({ id }));
+  ok("insertInPlace: after the nearest record before it on screen that the answer holds", ids(insertInPlace(answer, makeItem({ id: "b" }), ["a", "b", "c", "d"])) === "abcd");
+  ok("…skipping records before it the answer doesn't hold", ids(insertInPlace(["a", "d"].map((id) => makeItem({ id })), makeItem({ id: "c" }), ["a", "b", "c", "d"])) === "acd");
+  ok("…first when nothing before it is held", ids(insertInPlace(answer, makeItem({ id: "z" }), ["z", "a", "c", "d"])) === "zacd");
+  ok("…at the end when the screen never had it", ids(insertInPlace(answer, makeItem({ id: "q" }), ["a", "c", "d"])) === "acdq");
+  const server = ["a", "x", "b"].map((id) => makeItem({ id, sync: { mode: "lead", version: `v2-${id}` } }));
+  const pending = new Map([["x", makeItem({ id: "x", sync: { mode: "lead", version: "v1-x" } })], ["b", makeItem({ id: "b" })]]);
+  const w = withoutPendingDeletes(server, pending, new Set(["b"]));
+  ok("withoutPendingDeletes: a record whose delete waits stays out of the answer", ids(w.items) === "ab");
+  ok("…and its pending delete gets the server's copy now (its version)", w.stillDeleting.get("x")?.sync.version === "v2-x" && w.stillDeleting.size === 1);
+  ok("…a delete this very save carried isn't held back (the server answered it)", w.items.some((i) => i.id === "b"));
+  ok("…nothing pending, nothing held back", ids(withoutPendingDeletes(server, new Map()).items) === "axb");
 }
 
 section("The store and the header use them");

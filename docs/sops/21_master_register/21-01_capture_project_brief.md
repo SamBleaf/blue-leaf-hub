@@ -95,7 +95,7 @@ On a phone, What worries them, the priorities, Confirmed, Paying by and the exci
 **Site and planning** (from public mapping — a guide only)
 
 19. Read the rows: **Council**, **Planning zone**, **Bushfire**, **Slope**, **Site complexity**, **Access**. You can't edit them here. Bushfire reads "In a mapped bushfire area" with "BAL to be assessed", or "Not in a mapped bushfire area", or "Not confirmed" when public mapping has no answer. It never reads "No" just because nothing is known.
-20. To look the site up again, tap **Re-check**. You will see "Checking public mapping…", then "Updated 17 Nov". If the lookup can't run you will see a plain message, for example "Couldn't reach the mapping service. Nothing changed." or "Checked less than 10 minutes ago, so it wasn't run again." Nothing you already have is lost.
+20. To look the site up again, tap **Re-check**. You will see "Checking public mapping…", then "Updated 17 Nov". If the lookup can't run you will see a plain message, for example "Couldn't reach the mapping service. Nothing changed." or "Checked less than 10 minutes ago, so it wasn't run again." Nothing you already have is lost. If you see "Couldn't find the site address on the map. Check the address in Sales.", correct the site address or suburb in Sales, then tap **Re-check** again: it runs straight away, with no wait. (Re-typing the same address still waits a minute.)
 21. The **Access** value is a link (for example "Standard driveway"). Tap it to open that answer in a side panel and change it.
 22. **During the works.** Tap **Moving out**, **Partly lived in** or **Living there**. It saves on the tap.
 23. If an older note about living on site exists, it shows as "Earlier note: “…”". Tap **Tidy up** to reword it or remove it.
@@ -346,7 +346,8 @@ Blue Leaf's own follow-ups never print in the architect's brief. They stay in th
 | **Not saved — try again** under a story box | The client's details couldn't be saved | Tap **try again**. Your words stay in the box |
 | The gaps strip still lists "budget" after you chose a band | The save hadn't finished | Wait for **Saved ✓**. The strip updates when the client's details reload |
 | The brief still says the budget is to be confirmed | **Confirmed with the client** isn't ticked, or Sales holds words such as "Pending bank approval" | Tick it once the client confirms. Words in Sales that aren't a plain yes don't count |
-| **Re-check** says it couldn't reach the mapping service | The mapping service is down, or the address can't be found | Nothing changed. Try again in a minute, or check the address in Sales |
+| **Re-check** says it couldn't reach the mapping service | The mapping service is down | Nothing changed. Try again in a minute |
+| **Re-check** says "Couldn't find the site address on the map. Check the address in Sales." | The site address or suburb in Sales isn't one the map can find | Nothing changed. Correct the address or suburb in Sales, then tap **Re-check**: it runs straight away once the address is corrected. Re-typing the same address waits a minute |
 | The architect is named but the brief says "The design team" | The person was typed in Sales, not named in the design team | Tap **Name the architect** and pick them. Only a design-team contact prints |
 | "Someone else uses that email" | That email belongs to another contact | Tap **Use (their name)** if it is the same person, or **Back** and change the email |
 | No **+ Add room here** on the floor header | The job has only one floor | Use **+ Add room** at the top. Each floor gets its own once there are two floors |

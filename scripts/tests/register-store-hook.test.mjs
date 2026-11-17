@@ -10,6 +10,11 @@
  *   S1  the two copies of the register (desktop and phone layouts): a read waits for the other copy's save on its way;
  *   S2  a meta save answered with another screen's newer meta, under edits made meanwhile, still meets the conflict merge;
  *   S3  several deletes undone, in any order, come back in their old order.
+ * Fix round 4:
+ *   U1  Undo after the delete reached the server: the record is saved again with a position hint, so the STORED order (what
+ *       GET and a reload read) keeps its old place too, in lead mode and project mode;
+ *   U2  a record deleted while a save carrying its edit travels stays off the screen when that answer lands, Undo puts it
+ *       back, and its delete otherwise goes with the server's version now (no "changed elsewhere" refusal).
  *
  * The pure rules (registerMerge.approvalStep, planUndelete, metaAfterSave) are tested directly. The store itself runs for
  * real: useRegister is bundled with esbuild, rendered once with react-dom/server (which runs its hooks but no effects),
@@ -22,8 +27,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { makeItem, makeRoom, emptyMeta, writeRegister, readRegister } from "../../src/lib/register.js";
-import { approvalStep, approvalRestore, planUndelete, metaAfterSave } from "../../src/lib/registerMerge.js";
-import { saveRegister, loadRegister, promoteRegisterToProject, RegisterError } from "../../server/lib/registerStore.mjs";
+import { approvalStep, approvalRestore, planUndelete, metaAfterSave, deletedPlaces, placeHint } from "../../src/lib/registerMerge.js";
+import { saveRegister, loadRegister, promoteRegisterToProject, RegisterError, placeHints, orderWithHints, placeInTables } from "../../server/lib/registerStore.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -178,15 +183,20 @@ function world({ lead = {}, project = null } = {}) {
     return { data: { ok: true, results: [], promoted: {} }, error: null };
   };
   const from = (t) => {
-    const st = { filters: [], op: "select", payload: null };
+    const st = { filters: [], op: "select", payload: null, orders: [] };
     const rows = () => (db[t] || []).filter((r) => st.filters.every(([c, v]) => String(r[c]) === String(v)));
+    // order() sorts as PostgREST does (each key in turn, a stable sort), so the project's stored order is what GET reads.
+    const sorted = (list) => [...list].sort((a, z) => {
+      for (const [c, asc] of st.orders) { if (a[c] === z[c]) continue; return (a[c] < z[c] ? -1 : 1) * (asc ? 1 : -1); }
+      return 0;
+    });
     const run = () => {
       if (st.op === "update") { const hit = rows(); hit.forEach((r) => Object.assign(r, clone(st.payload))); return hit; }
       if (st.op === "insert") { (db[t] ||= []).push(...[].concat(st.payload)); return [].concat(st.payload); }
-      return rows();
+      return sorted(rows());
     };
     const b = {
-      select() { return b; }, order() { return b; }, limit() { return b; }, like() { return b; }, in() { return b; },
+      select() { return b; }, order(c, o = {}) { st.orders.push([c, o.ascending !== false]); return b; }, limit() { return b; }, like() { return b; }, in() { return b; },
       eq(c, v) { st.filters.push([c, v]); return b; },
       update(p) { st.op = "update"; st.payload = p; return b; },
       insert(p) { st.op = "insert"; st.payload = p; return b; },
@@ -452,6 +462,211 @@ try {
     await store.flush();
     store.undeleteItem(rec.get("b")); store.undeleteItem(rec.get("d"));
     ok("deletes already saved, then undone: back in their old places on screen", order() === "abcde");
+  }
+
+  // ── Round 4 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  const peekOf = (store) => () => { let cur = null; store.replaceItems((c) => { cur = c; return c; }); return cur; };
+
+  section("The server's position hint, as a rule (U1)");
+  {
+    const held = new Set(["a", "c"]);
+    const hints = placeHints([{ id: "b", __afterId: "a" }, { id: "x", __afterId: null }, { id: "c", __afterId: "a" }, { id: "y" },
+      { id: "z", __afterId: 7 }, { id: "q", __afterId: "q" }], held);
+    ok("only records not stored yet take a hint (a stored record is never moved), and only an id or null", flat([...hints]) === flat([["b", "a"], ["x", null]]), flat([...hints]));
+    ok("lead order: after the id it names, null first", orderWithHints(["a", "c", "d", "b", "x"], hints).join("") === "xabcd");
+    ok("…a record whose neighbour is put back in the same save waits for it, whatever order they were sent in",
+      orderWithHints(["a", "e", "d", "c"], new Map([["d", "c"], ["c", "a"]])).join("") === "acde");
+    ok("…one whose neighbour is nowhere goes at the end", orderWithHints(["a", "b", "z"], new Map([["z", "gone"]])).join("") === "abz");
+
+    // Project mode: the rows' sort_order. a0 c1 d2 e3 in the scope table; b goes after a, with no number free.
+    const rsi = (id, order, movable = true) => [id, { table: "room_scope_items", order, movable }];
+    const cur = (ids) => ({ meta: emptyMeta({}), items: ids.map((id) => makeItem({ id, itemKind: "requirement" })) });
+    const rows = new Map([rsi("a", 0), rsi("c", 1), rsi("d", 2), rsi("e", 5)]);
+    const p = placeInTables({ current: cur(["a", "c", "d", "e"]), rows, fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", "a"]]) });
+    ok("no number free: the rows after move up only as far as they need (e keeps 5)", p.orderFor.get("b") === 1 && flat([...p.moved]) === flat([["c", 2], ["d", 3]]), flat([[...p.orderFor], [...p.moved]]));
+    const gap = placeInTables({ current: cur(["a", "c"]), rows: new Map([rsi("a", 0), rsi("c", 4)]), fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", "a"]]) });
+    ok("a number free: taken, nothing moves", gap.orderFor.get("b") === 1 && gap.moved.size === 0);
+    const first = placeInTables({ current: cur(["a"]), rows: new Map([rsi("a", 0)]), fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", null]]) });
+    ok("first: before the first row (a number below it), nothing moves", first.orderFor.get("b") === -1 && first.moved.size === 0);
+    const locked = placeInTables({ current: cur(["a", "c"]), rows: new Map([rsi("a", 0), rsi("c", 1, false)]), fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", "a"]]) });
+    ok("a row that mustn't be rewritten (issued, approved, baselined) is never moved: the record ties with the one before it", locked.orderFor.get("b") === 0 && locked.moved.size === 0);
+    const edited = placeInTables({ current: cur(["a", "c"]), rows: new Map([rsi("a", 0), rsi("c", 1, false)]), fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", "a"]]), editing: new Set(["c"]) });
+    ok("…but one this save updates anyway can be (its own update carries the new number)", edited.orderFor.get("b") === 1 && flat([...edited.moved]) === flat([["c", 2]]));
+    const deleting = placeInTables({ current: cur(["a", "c", "d"]), rows: new Map([rsi("a", 0), rsi("c", 1), rsi("d", 2)]), fresh: [{ id: "b", store: "room_scope_items" }], hints: new Map([["b", "a"]]), gone: new Set(["c"]) });
+    ok("a row this save deletes leaves its number free", deleting.orderFor.get("b") === 1 && deleting.moved.size === 0, flat([[...deleting.orderFor], [...deleting.moved]]));
+    const mixed = new Map([["s1", { table: "client_selections", order: 0, movable: true }], rsi("a", 1), rsi("b", 2)]);
+    const afterSel = placeInTables({ current: cur(["s1", "a", "b"]), rows: mixed, fresh: [{ id: "x", store: "room_scope_items" }], hints: new Map([["x", "s1"]]) });
+    ok("a scope record after a selection goes first of the scope rows", afterSel.orderFor.get("x") === 0 && afterSel.moved.size === 0);
+    const selAfterScope = placeInTables({ current: cur(["s1", "a", "b"]), rows: mixed, fresh: [{ id: "s2", store: "client_selections" }], hints: new Map([["s2", "b"]]) });
+    ok("a selection after a scope row goes last of the selections", selAfterScope.orderFor.get("s2") === 1);
+    const plain = placeInTables({ current: cur(["a", "c"]), rows: new Map([rsi("a", 0), rsi("c", 7)]), fresh: [{ id: "n", store: "room_scope_items" }] });
+    ok("a new record with no hint goes at the end (after the highest number, never onto one in use)", plain.orderFor.get("n") === 8);
+
+    // Random runs: the screen's Undo (deletedPlaces + planUndelete + placeHint) against the project's sort_order
+    // (placeInTables), with deletes saved and Undos saved one at a time or several in one save. After every save the
+    // stored order (sort_order, then oldest first) must read exactly as the screen does.
+    const ORIGINAL = "abcdefgh";
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    let bad = null;
+    for (let run = 0; run < 300 && !bad; run++) {
+      let made = 0;
+      const stored = new Map([...ORIGINAL].map((id, k) => [id, { order: k, made: made++ }]));
+      let list = [...ORIGINAL].map((id) => makeItem({ id, itemKind: "requirement" }));
+      const places = new Map();
+      const storedIds = () => [...stored].sort((x, z) => x[1].order - z[1].order || x[1].made - z[1].made).map(([id]) => id).join("");
+      for (let step = 0; step < 14 && !bad; step++) {
+        const on = list.map((i) => i.id), gone = [...ORIGINAL].filter((id) => !on.includes(id));
+        if (on.length && (rnd(2) === 0 || !gone.length)) {
+          const ids = [...new Set([on[rnd(on.length)], on[rnd(on.length)]])].slice(0, 1 + rnd(2));
+          for (const [id, before] of deletedPlaces(list, ids, [...places].map(([id2, b]) => ({ id: id2, before: b })))) { places.delete(id); places.set(id, before); }
+          list = list.filter((i) => !ids.includes(i.id));
+          ids.forEach((id) => stored.delete(id));                               // the delete is saved
+        } else if (gone.length) {
+          const undone = [...new Set(Array.from({ length: 1 + rnd(3) }, () => gone[rnd(gone.length)]))];
+          for (const id of undone) { list = planUndelete(makeItem({ id, itemKind: "requirement" }), { current: { items: list }, before: places.get(id) ?? null }).items; places.delete(id); }
+          const hints = new Map(undone.map((id) => [id, placeHint(list, id)]));
+          const ids = storedIds().split("").filter(Boolean);
+          const rows = new Map(ids.map((id) => [id, { table: "room_scope_items", order: stored.get(id).order, movable: true }]));
+          const p = placeInTables({ current: cur(ids), rows, fresh: undone.map((id) => ({ id, store: "room_scope_items" })), hints });
+          for (const [id, order] of p.moved) stored.get(id).order = order;
+          for (const id of undone) stored.set(id, { order: p.orderFor.get(id), made: made++ });
+        }
+        const screenIds = list.map((i) => i.id).join("");
+        if (storedIds() !== screenIds) bad = `run ${run} step ${step}: stored ${storedIds()} vs screen ${screenIds}`;
+      }
+    }
+    ok("300 random runs of saved deletes and Undos (one or several per save): the stored order always reads as the screen", !bad, bad);
+  }
+
+  for (const mode of ["lead", "project"]) {
+    section(`The store, ${mode} mode: Undo after the delete reached the server keeps its place in the STORED order (U1)`);
+    const recs = [
+      ...(mode === "project" ? [makeItem({ id: "s1", itemKind: "selection", category: "tapware", description: "Basin mixer" }),
+        makeItem({ id: "s2", itemKind: "selection", category: "tapware", description: "Shower rose" })] : []),
+      ...["a", "b", "c", "d", "e"].map((id, k) => makeItem({ id, itemKind: "requirement", promptKey: `W-04${k}`, category: "notes", description: `Note ${id}` })),
+    ];
+    const w = world({ lead: { selections_schedule: clone(writeRegister({ meta: emptyMeta({ rooms: [room] }), items: recs })), ...(mode === "lead" ? { job_id: null } : {}) }, project: mode === "project" ? {} : null });
+    if (mode === "project") await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { id: null, name: "Staff" } });
+    const log = serve(w);
+    const store = H.mountStore(LEAD_ID, { enabled: true });
+    const loaded = await store.reload();
+    const rec = new Map(loaded.register.items.map((i) => [i.id, i]));
+    const peek = peekOf(store);
+    const screen = () => peek().items.map((i) => i.id).join(",");
+    const stored = async () => (await loadRegister(w.sb, LEAD_ID)).register.items.map((i) => i.id).join(",");
+    const original = await stored();
+    ok("loaded in order", screen() === original && original === (mode === "project" ? "s1,s2,a,b,c,d,e" : "a,b,c,d,e"), original);
+    const undo = (...ids) => ids.forEach((id) => store.undeleteItem(rec.get(id)));
+
+    store.deleteItem("b"); await store.flush();
+    ok("the delete reached the server", !(await stored()).split(",").includes("b"));
+    undo("b"); await store.flush();
+    const sent = puts(log).at(-1)?.body.changes?.find((c) => c.id === "b");
+    ok("the save puts it back as new with a hint: the record now before it", sent && !sent.sync && sent.__afterId === "a", flat(sent));
+    ok("after the next save, GET (and so a reload or a print) reads the old order", (await stored()) === original, await stored());
+    ok("…and so does the screen", screen() === original, screen());
+    const raw = mode === "lead" ? w.db.leads[0].selections_schedule.find((i) => i.id === "b") : storedRows(w, "b")[0];
+    ok("the hint is never stored", raw && !("__afterId" in raw) && !flat(raw).includes("__afterId"), flat(raw));
+
+    store.deleteItem("b"); store.deleteItem("c"); store.deleteItem("d"); await store.flush();
+    undo("b", "c", "d"); await store.flush();
+    ok("'Delete all' saved, then its Undo (each in turn, one save): the old order stored", (await stored()) === original, await stored());
+
+    store.deleteItem("b"); store.deleteItem("c"); store.deleteItem("d"); await store.flush();
+    let movedRows = 0, rewritten = [];
+    for (const id of ["d", "c", "b"]) {
+      const snap = new Map(clone(w.db.room_scope_items).map((r) => [r.id, r]));
+      undo(id); await store.flush();
+      for (const r of w.db.room_scope_items) {
+        const was = snap.get(r.id);
+        if (!was || was.sort_order === r.sort_order) continue;
+        movedRows++;
+        const strip = (row) => { const o = { ...row }; delete o.sort_order; delete o.updated_at; return o; };
+        if (flat(strip(was)) !== flat(strip(r))) rewritten.push(r.source_register_item_id);
+      }
+    }
+    ok("…undone last first, one save each (project mode: no number free, the rows after move up): the old order stored", (await stored()) === original, await stored());
+    if (mode === "project") ok("…rows moved up to make room change their sort_order and nothing else", movedRows > 0 && !rewritten.length, flat({ movedRows, rewritten }));
+    ok("…on screen too", screen() === original, screen());
+
+    store.deleteItem("c");
+    const travelling = store.flush();      // the delete is on its way
+    undo("c");                             // Undo pressed while it travels
+    await travelling;
+    ok("Undo while the delete travels: the answer leaves it where Undo put it (not at the end)", screen() === original, screen());
+    await store.flush();
+    ok("…and the next save stores it there", (await stored()) === original, await stored());
+
+    store.deleteItem("a"); await store.flush(); undo("a"); await store.flush();
+    ok(mode === "project" ? "the first scope record (after the last selection): back first of the scope rows" : "the first record: back first", (await stored()) === original, await stored());
+    if (mode === "project") {
+      store.deleteItem("s1"); await store.flush(); undo("s1"); await store.flush();
+      ok("the first selection: back first", (await stored()) === original, await stored());
+      store.deleteItem("s2"); await store.flush(); undo("s2"); await store.flush();
+      ok("the last selection (the record after it is a scope row): back last of the selections", (await stored()) === original, await stored());
+    }
+    store.deleteItem("e"); await store.flush(); undo("e"); await store.flush();
+    ok("the last record: back last", (await stored()) === original, await stored());
+    ok("no save was refused on the way", refusals(log).length === 0, flat(refusals(log)));
+    ok("each record is stored once", (await stored()).split(",").length === recs.length && (mode === "lead" || ["a", "b", "c", "d", "e", "s1", "s2"].every((id) => storedRows(w, id).length === 1)));
+  }
+
+  for (const mode of ["lead", "project"]) {
+    section(`The store, ${mode} mode: a record deleted while a save carrying its edit travels (U2)`);
+    const w = world({ lead: { selections_schedule: scratchpad(), ...(mode === "lead" ? { job_id: null } : {}) }, project: mode === "project" ? {} : null });
+    if (mode === "project") await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { id: null, name: "Staff" } });
+    const log = serve(w);
+    const store = H.mountStore(LEAD_ID, { enabled: true });
+    await store.reload();
+    const peek = peekOf(store);
+    const screen = () => peek().items.map((i) => i.id).join(",");
+    const held = async (id) => (await loadRegister(w.sb, LEAD_ID)).register.items.find((i) => i.id === id) || null;
+
+    store.updateItem("w20", { description: "Keep the lemon tree and the fig" });
+    const shown = peek().items.find((i) => i.id === "w20");       // the record as the screen shows it (what Undo hands back)
+    const travelling = store.flush();                               // the save carrying the edit
+    store.deleteItem("w20");                                        // deleted while it travels
+    await travelling;
+    ok("the save's answer doesn't bring it back on screen", screen() === "w15,w21", screen());
+    ok("…it is still on the server, with the edit (the delete hasn't gone yet)", (await held("w20"))?.description === "Keep the lemon tree and the fig");
+    const back = store.undeleteItem(shown);
+    ok("Undo puts it back, in its place", back?.id === "w20" && screen() === "w15,w20,w21", screen());
+    const before = puts(log).length;
+    await store.flush();
+    ok("…and nothing deletes it: no delete is sent", puts(log).slice(before).every((p) => !(p.body.deletes || []).some((d) => d.id === "w20")), flat(puts(log).slice(before).map((p) => p.body.deletes)));
+    ok("…the record and its edit are kept", (await held("w20"))?.description === "Keep the lemon tree and the fig");
+
+    store.updateItem("w21", { description: "Morning sun in the kitchen and the study" });
+    const going = store.flush();
+    store.deleteItem("w21");
+    await going;
+    const versionNow = (await held("w21"))?.sync?.version;
+    ok("no Undo: still off the screen after the answer", screen() === "w15,w20", screen());
+    await store.flush();
+    const del = puts(log).at(-1)?.body.deletes?.find((d) => d.id === "w21");
+    ok("…the delete goes with the server's version now (the save just answered bumped it)", del && del.sync?.version === versionNow, flat([del, versionNow]));
+    ok("…so it isn't refused as changed elsewhere, and the record is gone", refusals(log).length === 0 && !(await held("w21")), flat(refusals(log)));
+  }
+
+  section("The store: a save refused while a delete waits keeps that record off the screen (U2)");
+  {
+    const w = world({ lead: { selections_schedule: scratchpad(), job_id: null } });
+    const log = serve(w);
+    const store = H.mountStore(LEAD_ID, { enabled: true });
+    const loaded = await store.reload();
+    const peek = peekOf(store);
+    const screen = () => peek().items.map((i) => i.id).join(",");
+    // Another screen edits w21 first, so this screen's edit of it is refused as changed elsewhere (409, then merged).
+    const w21 = loaded.register.items.find((i) => i.id === "w21");
+    await saveRegister(w.sb, LEAD_ID, { changes: [{ ...w21, nextAction: "Ask about the blinds" }] }, { actor: { name: "Other screen" } });
+    store.updateItem("w21", { description: "Morning sun in the kitchen and the study" });
+    store.deleteItem("w20");
+    await store.flush();
+    ok("the save was refused (another screen's edit)", refusals(log)[0]?.reason === "stale", flat(refusals(log)));
+    ok("…and the record whose delete waits isn't put back on screen by the merge", screen() === "w15,w21", screen());
+    await store.flush();   // the merge's own retry (50 ms later) is put back by the peek above, so save now
+    ok("…the retry deletes it, and keeps both edits of w21", !storedLead(w, "w20") && storedLead(w, "w21")?.description === "Morning sun in the kitchen and the study" && storedLead(w, "w21")?.nextAction === "Ask about the blinds");
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });

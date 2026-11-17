@@ -9,6 +9,7 @@
  * lines read only with "Change in Sales ›"). Round 2: R6 (Delete all empty: references kept, Undo restores the very records),
  * R9 (Re-check words from the route's answer), R11 (the drawing basis saves as it is typed), R12 (the issue bar is sticky only
  * beside the two panes; the pack buttons are 44 px), R2 ("Not in this brief" lists the records still waiting). Round 3: M1 (a floor slot tapped then cleared is empty).
+ * Round 4: D3 ("Issue to" starts with the named architect, else the current revision's recipient; the readiness line agrees).
  *
  *   node scripts/tests/register-documents-ui.test.mjs
  */
@@ -36,7 +37,7 @@ const entry = join(dir, "entry.jsx");
 writeFileSync(entry, `
 import { renderToStaticMarkup } from "react-dom/server";
 import EditDrawer, { recheckMessage } from ${JSON.stringify(join(REG, "EditDrawer.jsx"))};
-import DocumentsStep, { PrintList, CheckEntries, IssueBar } from ${JSON.stringify(join(REG, "DocumentsStep.jsx"))};
+import DocumentsStep, { PrintList, CheckEntries, IssueBar, issueToDefault, readinessBlockers } from ${JSON.stringify(join(REG, "DocumentsStep.jsx"))};
 import { Mini, Select } from ${JSON.stringify(join(REG, "ui.jsx"))};
 const noop = () => {};
 const store = { mutateMeta: noop, replaceItems: noop, upsertItem: noop, updateItem: noop, deleteItem: noop, addItem: noop, patchLead: async () => true, reloadContext: noop, onPortalItem: noop };
@@ -45,7 +46,7 @@ export const step = (props) => renderToStaticMarkup(<DocumentsStep stage="consul
 export const list = (props) => renderToStaticMarkup(<PrintList onlyWarned={false} setOnlyWarned={noop} onOpen={noop} previewLines={null} {...props} />);
 export const entries = (props) => renderToStaticMarkup(<CheckEntries onFix={noop} onReview={noop} onAskDelete={noop} onDelete={noop} onCancelDelete={noop} {...props} />);
 export const issueBar = (props) => renderToStaticMarkup(<IssueBar docKey="architect_brief" recipient={{ name: "", email: "" }} setRecipient={noop} canIssue={false} onIssue={noop} label="Issue R01" {...props} />);
-export { recheckMessage };
+export { recheckMessage, issueToDefault, readinessBlockers };
 export const mini = () => renderToStaticMarkup(<Mini label="Issue to"><input data-x="1" /></Mini>);
 export const select = (className) => renderToStaticMarkup(<Select value="" onChange={noop} options={[["a", "A"]]} className={className} />);
 `);
@@ -219,6 +220,32 @@ try {
   const sl = text(R.list({ reg: slotReg, lines: architectBriefLines(slotModel, {}), notPrinted: slotModel.notPrinted, marks: () => "", titles: briefSectionTitles(slotModel), defaultOpenNot: true }));
   const emptyCount = slotModel.notPrinted.filter((x) => x.group === "empty").length;
   ok(`…rendered: 'Empty (${emptyCount})' counts it`, sl.includes(`Empty (${emptyCount})`) && emptyCount === slotModel.notPrinted.filter((x) => x.group === "empty" && x.id !== "sl1").length + 1, sl.slice(sl.indexOf("Not in this brief"), sl.indexOf("Not in this brief") + 500));
+
+  section("Round 4: 'Issue to' keeps who the brief was issued to (D3)");
+  // Snake case, as GET …/documents lists lead_documents (LIST_COLS).
+  const rev = (version, status, name, type = "architect_brief", email = "") => ({ id: `d${version}${type}`, document_type: type, version, status, revision_label: `R0${version}`, recipient_name: name, recipient_email: email });
+  const typedR01 = [rev(1, "current", "BLH TEST Issue Architect", "architect_brief", "arch@example.test")];
+  ok("no architect named, nothing issued: 'Issue to' starts blank", R.issueToDefault("architect_brief", context, []).name === "" && R.issueToDefault("architect_brief", context).name === "", JSON.stringify(R.issueToDefault("architect_brief", context, [])));
+  const afterIssue = R.issueToDefault("architect_brief", context, typedR01);
+  ok("no architect named, R01 issued to a typed name: 'Issue to' starts with that name (and its email), after a reload or for R02",
+    afterIssue.name === "BLH TEST Issue Architect" && afterIssue.email === "arch@example.test", JSON.stringify(afterIssue));
+  const r02 = R.issueToDefault("architect_brief", context, [rev(1, "superseded", "Old Studio"), rev(2, "current", "New Studio")]);
+  ok("…the CURRENT revision's recipient, never a superseded one", r02.name === "New Studio", JSON.stringify(r02));
+  ok("…a superseded revision alone gives nothing", R.issueToDefault("architect_brief", context, [rev(1, "superseded", "Old Studio")]).name === "");
+  ok("…and another document's revision never fills the architect's brief", R.issueToDefault("architect_brief", context, [rev(1, "current", "The Client", "client_brief")]).name === "");
+  const named = R.issueToDefault("architect_brief", withArch, typedR01);
+  ok("a named architect still comes first: 'Jo Archer, Archer Studio'", named.name === "Jo Archer, Archer Studio" && named.email === "", JSON.stringify(named));
+  const ready0 = R.readinessBlockers(register, context, []);
+  const ready1 = R.readinessBlockers(register, context, typedR01);
+  ok(`the readiness line counts the recipient until a revision is issued (${ready0.length}), then doesn't (${ready1.length})`,
+    ready0.some((b) => b.key === "recipient") && !ready1.some((b) => b.key === "recipient") && ready1.length === ready0.length - 1 && ready0.length === blockers.length,
+    JSON.stringify([ready0.map((b) => b.key), ready1.map((b) => b.key)]));
+  ok("…and agrees with what the preview will check for that name", JSON.stringify(ready1.map((b) => b.key)) === JSON.stringify(releaseBlockers("architect_brief", register, { recipientName: afterIssue.name, drawingBasis: register.meta.planRev }).map((b) => b.key)));
+  ok("the step starts 'Issue to' and counts the readiness line from the same default, with the issued revisions it loaded",
+    /const defaultRecipient = \(key\) => issueToDefault\(key, context, docs\.issued\)/.test(stepSrc)
+      && /const readyBlockers = useMemo\(\(\) => \(context \? readinessBlockers\(reg, context, docs\.issued\) : \[\]\), \[reg, context, docs\.issued\]\)/.test(stepSrc)
+      && /const rec = recipient\.name && active === key \? recipient : defaultRecipient\(key\)/.test(stepSrc),
+    stepSrc.slice(stepSrc.indexOf("const readyBlockers"), stepSrc.indexOf("const readyBlockers") + 200));
 } finally {
   rmSync(dir, { recursive: true, force: true });
   try { rmSync(out, { force: true }); } catch { /* gone */ }

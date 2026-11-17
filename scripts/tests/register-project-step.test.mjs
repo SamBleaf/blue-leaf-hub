@@ -17,6 +17,10 @@
  * Round 3: a name-only entry saved again (a retry after a lost answer) reuses the name-only contact of that discipline
  * (P2); a firm-only save links the CRM's practice only when the typed email and phone agree, and fills its blanks (P3);
  * the Sales 'Budget confirmed' hint is 12 px (P5).
+ * Round 4: a no-email save reuses a "consultant" role row only when the lead's roster has that contact in the same
+ * discipline (an energy assessor is never the land surveyor of the same name) (D1); a practice with an email links only a
+ * practice, never a person at that firm sharing the office email, and never writes its details onto a person (D2). Both
+ * also through the real design-team route (esbuild bundle, an in-memory database stand-in, no network).
  *
  *   node scripts/tests/register-project-step.test.mjs
  */
@@ -31,7 +35,7 @@ import {
   mergeConsultants, rosterAdd, rosterRemove, rosterNeedsRole, sameDiscipline, storageRolesFor, teamRows, contactLabel, splitName,
   searchWords, contactMatches, STORY_COLUMNS, BUDGET_FIELD_KEYS, STORY_FIELD_KEYS, PHONE_MORE_KEYS, DESIGN_TEAM_ROLES, OTHER_CONSULTANT_ROLES,
   budgetPairError, emailMatch, sameNamedOnJob, firmOnlyName, firmOnlyMatch, phoneKey, conflictWords, contactNameOf, nameKey,
-  detailsAgree, detailsToFill,
+  detailsAgree, detailsToFill, firmShaped,
 } from "../../src/lib/projectStory.js";
 import { siteSource, siteFacts, recheckDue, RECHECK_MIN_MS } from "../../server/lib/registerContext.mjs";
 import { BUDGET_BANDS, budgetLine, designTeam, namedArchitect } from "../../src/lib/briefModel.js";
@@ -342,7 +346,28 @@ ok("an over-matched query is re-checked exactly ('*' and '_' are wildcards in th
 ok("no email → nothing to match", eq(emailMatch([ava], { name: "Ava Arch", email: "" }), {}));
 ok("the conflict names the person in plain words", conflictWords(ben) === "Ben Draw, Arch Studio" && conflictWords({ company: "Studio X" }) === "Studio X" && contactNameOf(ben) === "Ben Draw");
 ok("names compare without case, punctuation or extra spaces", nameKey(" O'Neil,  AVA ") === "o neil ava");
-ok("the route links by email only through emailMatch, archived contacts left out", /emailMatch\(same, \{ name, email \}\)/.test(salesSrc) && /\.not\("is_archived", "is", true\)\.limit\(20\)/.test(salesSrc) && /code: "EMAIL_IN_USE"/.test(salesSrc));
+ok("the route links by email only through emailMatch, archived contacts left out", /emailMatch\(same, \{ name, email, firmOnly: !!firmOnly \}\)/.test(salesSrc) && /\.not\("is_archived", "is", true\)\.limit\(20\)/.test(salesSrc) && /code: "EMAIL_IN_USE"/.test(salesSrc));
+
+section("A practice with an email links only a practice, never a person at that firm (D2)");
+{
+  const person = { id: "e-ava", first_name: "Ava", last_name: "Arch", company: "Studio X Architects", email: "info@studiox.test", phone: null };
+  const firm = { id: "e-firm", first_name: "", last_name: null, company: "Studio X Architects", email: "INFO@studiox.test", phone: null };
+  const split = { id: "e-split", first_name: "Studio", last_name: "X Architects", company: "studio x architects", email: "info@studiox.test" };
+  const elsewhere = { id: "e-else", first_name: "Bo", last_name: "Bell", company: "Bell Design", email: "info@studiox.test" };
+  ok("firmShaped: no person's name, or a 'name' that is only the firm split in two; a person is not", firmShaped(firm) && firmShaped(split) && !firmShaped(person)
+    && firmShaped({ first_name: "", last_name: null, company: null }) && !firmShaped({ first_name: "Studio", last_name: "X", company: "Other Co" }));
+  const practiceEntry = { name: "Studio X Architects", email: "info@studiox.test", firmOnly: true };
+  ok("a practice whose email a person at that firm shares (the office email) → nothing linked, no conflict (the practice is added)", eq(emailMatch([person], practiceEntry), {}));
+  ok("…the CRM's practice with that email → linked, even listed after the person", emailMatch([person, firm], practiceEntry).contact === firm);
+  ok("…an earlier tender's split-name practice counts as the practice", emailMatch([person, split], practiceEntry).contact === split);
+  ok("…someone at another firm with that email is still a conflict", emailMatch([elsewhere], practiceEntry).conflict === elsewhere && !emailMatch([elsewhere], practiceEntry).contact);
+  ok("…a person at the firm and someone elsewhere → not linked, and no conflict either", eq(emailMatch([elsewhere, person], practiceEntry), {}));
+  ok("a person named with that email still links that person (unchanged)", emailMatch([person], { name: "Ava Arch", email: "info@studiox.test" }).contact === person
+    && emailMatch([firm], { name: "Ava Arch", email: "info@studiox.test" }).conflict === firm);
+  const fillAt = salesSrc.indexOf("if (contact && firmOnly");
+  ok("the route: a practice's typed details are written only onto a practice (never onto a person)", /if \(contact && firmOnly && firmShaped\(contact\)\) \{/.test(salesSrc)
+    && fillAt > 0 && salesSrc.indexOf("detailsToFill(contact,", fillAt) > fillAt && (salesSrc.match(/detailsToFill\(/g) || []).length === 1);
+}
 
 section("'+ Add someone new' twice: the second save reuses the person");
 const onJob = [
@@ -359,7 +384,7 @@ ok("a firm-only contact is matched by its firm", sameNamedOnJob(onJob, { name: "
 ok("…but not under another firm typed", sameNamedOnJob(onJob, { name: "Studio X", company: "Studio Y", role: "architect" }) === null);
 ok("no name or no role → nothing", sameNamedOnJob(onJob, { name: " ", company: "Dup Studio", role: "architect" }) === null && sameNamedOnJob(null, { name: "A", role: "architect" }) === null
   && sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Dup Studio" }) === null);
-ok("the route reuses the person only through sameNamedOnJob, with the role, firm, phone and email", /sameNamedOnJob\(onJob, \{ name, company, phone, email, role \}\)/.test(salesSrc)
+ok("the route reuses the person only through sameNamedOnJob, with the role, firm, phone, email and the lead's roster", /sameNamedOnJob\(onJob, \{ name, company, phone, email, role \}, lead\.consultant_roster\)/.test(salesSrc)
   && /\.select\("id, status, role, contact:crm_contacts\(\*\)"\)/.test(salesSrc));
 
 section("No email: an engineer 'Tom' is never the architect 'Tom' (R7)");
@@ -375,9 +400,50 @@ ok("the architect 'Tom', same phone (written another way) → reused", sameNamed
 ok("the architect 'Tom', same email (any case) → reused", sameNamedOnJob(toms, { name: "Tom", email: "TOM@arch.test", role: "architect" })?.id === "c-arch");
 ok("the engineer 'Tom' of Beam Co, same firm → reused", sameNamedOnJob(toms, { name: "Tom", company: "beam co", role: "engineer" })?.id === "c-eng");
 ok("…and not as an architect", sameNamedOnJob(toms, { name: "Tom", company: "Beam Co", role: "architect" }) === null);
-ok("an energy assessor (stored as 'consultant') of the same firm → reused; as an engineer → not", sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "energy" })?.id === "c-nrg"
-  && sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "engineer" }) === null);
+const tomsRoster = [{ role: "energy", contactId: "c-nrg" }];
+ok("an energy assessor (stored as 'consultant', energy on the roster) of the same firm → reused; as an engineer → not", sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "energy" }, tomsRoster)?.id === "c-nrg"
+  && sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "engineer" }, tomsRoster) === null);
 ok("a phone compares by its digits", phoneKey("+61 (412) 345-678") === "0412345678" && phoneKey("08 8123 4567") === "0881234567" && phoneKey(null) === "");
+
+section("A 'consultant' role row is reused only in the discipline the roster gives it (D1)");
+{
+  // Energy, land surveyor, soil and geotech, lighting and sanitary are all stored as "consultant" in job_contact_roles.
+  const sam = { id: "c-sam", first_name: "Sam", last_name: "Lee", company: null, phone: null, email: null };
+  const rows = [{ id: "r-sam", status: "active", role: "consultant", contact: sam }];
+  const energyRoster = [{ role: "energy", contactId: "c-sam", deliverables: [] }];
+  ok("a name-only energy assessor 'Sam Lee' is never reused as the land surveyor 'Sam Lee'", sameNamedOnJob(rows, { name: "Sam Lee", role: "land_surveyor" }, energyRoster) === null);
+  ok("…nor as soil and geotech, lighting or sanitary", ["soil_geotech", "lighting", "sanitary"].every((role) => sameNamedOnJob(rows, { name: "Sam Lee", role }, energyRoster) === null));
+  ok("…the energy assessor saved again (a retry) → reused", sameNamedOnJob(rows, { name: "sam  LEE", role: "energy" }, energyRoster)?.id === "c-sam");
+  ok("…the same firm, phone or email does not make another discipline the same", sameNamedOnJob([{ ...rows[0], contact: { ...sam, company: "Star Rate", phone: "0400 111 222" } }],
+    { name: "Sam Lee", company: "Star Rate", phone: "0400 111 222", role: "land_surveyor" }, energyRoster) === null);
+  ok("one person under one 'consultant' row in two disciplines → reused in either, not in a third", sameNamedOnJob(rows, { name: "Sam Lee", role: "soil_geotech" },
+    [{ role: "land_surveyor", contactId: "c-sam" }, { role: "soil_geotech", contact_id: "c-sam" }])?.id === "c-sam"
+    && sameNamedOnJob(rows, { name: "Sam Lee", role: "lighting" }, [{ role: "land_surveyor", contactId: "c-sam" }, { role: "soil_geotech", contactId: "c-sam" }]) === null);
+  ok("no roster, or the roster doesn't name this contact → not reused (a new contact, never a merge)", sameNamedOnJob(rows, { name: "Sam Lee", role: "energy" }) === null
+    && sameNamedOnJob(rows, { name: "Sam Lee", role: "energy" }, null) === null
+    && sameNamedOnJob(rows, { name: "Sam Lee", role: "energy" }, [{ role: "energy", contactId: "c-other" }]) === null);
+  ok("…an emptied slot (the person taken off) doesn't count", sameNamedOnJob(rows, { name: "Sam Lee", role: "energy" }, [{ role: "energy", contactId: "", previousContactId: "c-sam" }]) === null);
+  ok("…a roster entry that itself says only 'consultant' gives no discipline", sameNamedOnJob(rows, { name: "Sam Lee", role: "land_surveyor" }, [{ role: "consultant", contactId: "c-sam" }]) === null);
+  ok("a 'Consultant' card role is the roster's 'other' discipline", sameNamedOnJob(rows, { name: "Sam Lee", role: "consultant" }, [{ role: "other", contactId: "c-sam" }])?.id === "c-sam"
+    && sameNamedOnJob(rows, { name: "Sam Lee", role: "consultant" }, energyRoster) === null);
+  ok("the architect and engineer rows are their own discipline: no roster needed", sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Dup Studio", role: "architect" }, [])?.id === "c-dup"
+    && sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Dup Studio", role: "architect" }, energyRoster)?.id === "c-dup");
+  // The route's no-email path, step by step: the role row is "consultant", the roster entry carries the discipline.
+  const saved = [], roster = [];
+  const save = (entry) => {
+    const c = sameNamedOnJob(saved, entry, roster);
+    const made = c || { id: `c-${saved.length + 1}`, ...splitName(entry.name), company: null, phone: null, email: null };
+    if (!c) saved.push({ id: `r-${saved.length + 1}`, status: "active", role: storageRolesFor(entry.role).dbRole, contact: made });
+    roster.splice(0, roster.length, ...rosterAdd(roster, { contactId: made.id, rosterRole: storageRolesFor(entry.role).rosterRole }, NOW));
+    return made;
+  };
+  const energy = save({ name: "Sam Lee", role: "energy" });
+  const surveyor = save({ name: "Sam Lee", role: "land_surveyor" });
+  ok("saving the energy assessor, then a land surveyor of the same name → two contacts, one discipline each", surveyor.id !== energy.id && saved.length === 2
+    && eq(roster.map((e) => [e.role, e.contactId]), [["energy", energy.id], ["land_surveyor", surveyor.id]]), flat(roster));
+  ok("…each one's retry finds its own (no third contact)", save({ name: "Sam Lee", role: "energy" }).id === energy.id && save({ name: "Sam Lee", role: "land_surveyor" }).id === surveyor.id
+    && saved.length === 2 && roster.length === 2);
+}
 
 section("A practice named with no person is a firm-only contact, linked to the CRM's (R8)");
 ok("the name is the firm → the firm", firmOnlyName({ name: "Studio X Architects", company: "studio x  architects" }) === "studio x architects");
@@ -472,7 +538,7 @@ ok("on this job: the practice with another phone typed → not reused (goes to t
 ok("…the same phone, or none typed → reused", sameNamedOnJob(firmOnJob, { name: "Studio X Architects", phone: "(08) 8123-4567", role: "architect" })?.id === "f-1"
   && sameNamedOnJob(firmOnJob, { name: "Studio X Architects", role: "architect" })?.id === "f-1");
 {
-  const fillAt = dtRoute.indexOf("if (contact && firmOnly)");
+  const fillAt = dtRoute.indexOf("if (contact && firmOnly && firmShaped(contact))");
   const fillBlock = dtRoute.slice(fillAt, dtRoute.indexOf("if (!contact) {", fillAt));
   ok("the route: a linked practice gets the typed email or phone it has none of, before anything else is written", fillAt > dtRoute.indexOf("firmOnlyMatch(")
     && /const fill = detailsToFill\(contact, \{ email, phone \}\);/.test(fillBlock) && /\.from\("crm_contacts"\)\.update\(\{ \.\.\.fill, updated_at: now \}\)\.eq\("id", contact\.id\)/.test(fillBlock)
@@ -485,6 +551,142 @@ section("The roster is written against what is stored now (no lost update)");
 ok("the roster write is conditional on the lead being unchanged", /\.eq\("updated_at", current\.updated_at\)/.test(salesSrc) && /current = fresh;/.test(salesSrc));
 ok("both the add and the remove re-apply their change to the fresh roster", /saveRoster\(sb, lead, \(roster\) => rosterAdd\(roster,/.test(salesSrc) && /saveRoster\(sb, lead, \(roster\) => rosterRemove\(roster,/.test(salesSrc));
 ok("a second clash says so in plain words", salesSrc.includes("Someone else changed the design team — try again.") && (salesSrc.match(/err\(res, 409, ROSTER_CLASH, "CONFLICT"\)/g) || []).length === 2);
+
+// ── The design-team route itself (D1, D2): salesRoutes.mjs bundled with esbuild, its database and sign-in swapped for
+//    an in-memory stand-in (no .env read, no network, no server listening) ───────────────────────────────────────────
+{
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  const stubs = mkdtempSync(join(tmpdir(), "design-team-route-"));
+  const routeOut = join(REPO_ROOT, "node_modules", ".cache", `design-team-route-${process.pid}.mjs`);
+  const stub = (name, src) => { const f = join(stubs, name); writeFileSync(f, src); return f; };
+  const sbStub = stub("supabaseService.mjs", "export const getServiceSupabase = () => globalThis.__designTeamSb || null;\n");
+  const authStub = stub("requireAuth.mjs", "export const requireAuth = (req, _res, next) => { req.caller = { id: 'u-test', role: 'staff' }; next(); };\n"
+    + "export const requireRole = () => (_req, _res, next) => next();\nexport const requireCronSecretOrAdmin = (_req, _res, next) => next();\n");
+  const envStub = stub("dotenv.mjs", "export const config = () => ({ parsed: {} });\nexport default { config };\n");
+  // A LIKE pattern as PostgREST reads it: '\x' is x, '%' any run, '_' any one character.
+  const likeRe = (pat) => {
+    let re = "";
+    for (let i = 0; i < pat.length; i++) {
+      const ch = pat[i];
+      if (ch === "\\" && i + 1 < pat.length) re += pat[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      else re += ch === "%" ? ".*" : ch === "_" ? "." : ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp(`^${re}$`, "i");
+  };
+  const memoryDb = (tables) => {
+    const writes = [];
+    let seq = 0;
+    const from = (table) => {
+      const st = { op: "select", filters: [], payload: null, join: null, limit: null };
+      const rows = () => (tables[table] ||= []);
+      const run = () => {
+        if (st.op === "insert") {
+          const made = (Array.isArray(st.payload) ? st.payload : [st.payload]).map((p) => ({ id: `${table}-new-${++seq}`, ...p }));
+          rows().push(...made); writes.push({ table, op: "insert", rows: made }); return made;
+        }
+        const hit = rows().filter((r) => st.filters.every((f) => f(r)));
+        if (st.op === "update") { hit.forEach((r) => Object.assign(r, st.payload)); writes.push({ table, op: "update", ids: hit.map((r) => r.id), patch: st.payload }); return hit; }
+        const out = st.join ? hit.map((r) => ({ ...r, [st.join.as]: (tables[st.join.table] || []).find((c) => c.id === r[`${st.join.as}_id`]) || null })) : hit;
+        return st.limit == null ? out : out.slice(0, st.limit);
+      };
+      const q = {
+        select(cols = "*") { const m = st.op === "select" && /(\w+):(\w+)\(/.exec(cols); if (m) st.join = { as: m[1], table: m[2] }; return q; },
+        insert(p) { st.op = "insert"; st.payload = p; return q; },
+        update(p) { st.op = "update"; st.payload = p; return q; },
+        eq(k, v) { st.filters.push((r) => r[k] === v); return q; },
+        is(k, v) { st.filters.push((r) => (r[k] ?? null) === v); return q; },
+        not(k, _op, v) { st.filters.push((r) => (r[k] ?? null) !== v); return q; },
+        in(k, vs) { st.filters.push((r) => vs.includes(r[k])); return q; },
+        ilike(k, pat) { const re = likeRe(pat); st.filters.push((r) => re.test(String(r[k] ?? ""))); return q; },
+        or(expr) {
+          const any = expr.split(",").map((part) => { const [k, , ...v] = part.split("."); return (r) => String(r[k]) === v.join("."); });
+          st.filters.push((r) => any.some((f) => f(r))); return q;
+        },
+        order() { return q; },
+        limit(n) { st.limit = n; return q; },
+        maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
+        single: async () => { const d = run()[0]; return d ? { data: d, error: null } : { data: null, error: { code: "PGRST116", message: "no rows" } }; },
+        then: (ok2, no) => Promise.resolve({ data: run(), error: null }).then(ok2, no),
+      };
+      return q;
+    };
+    return { sb: { from }, tables, writes };
+  };
+  try {
+    await build({
+      entryPoints: [join(REPO_ROOT, "server/lib/salesRoutes.mjs")], outfile: routeOut, bundle: true, format: "esm", platform: "node", logLevel: "silent",
+      plugins: [{ name: "design-team-stubs", setup(b) {
+        b.onResolve({ filter: /\/supabaseService\.mjs$/ }, () => ({ path: sbStub }));
+        b.onResolve({ filter: /\/requireAuth\.mjs$/ }, () => ({ path: authStub }));
+        b.onResolve({ filter: /^dotenv(\/.*)?$/ }, () => ({ path: envStub }));
+        b.onResolve({ filter: /^[^./]/ }, (a) => ({ path: a.path, external: true }));
+      } }],
+    });
+    const { registerSalesRoutes } = await import(pathToFileURL(routeOut).href);
+    const handlers = {};
+    registerSalesRoutes(new Proxy({}, { get: (_t, method) => (path, ...hs) => { handlers[`${String(method)} ${path}`] = hs; } }));
+    const postTeam = handlers["post /api/sales/leads/:id/design-team"];
+    const call = async (db, leadId, body) => {
+      globalThis.__designTeamSb = db.sb;
+      let status = 200, json = null;
+      const res = { status(n) { status = n; return res; }, json(b) { json = b; return res; } };
+      const req = { params: { id: leadId }, body, query: {}, headers: {} };
+      for (const h of postTeam) { let next = false; await h(req, res, () => { next = true; }); if (!next) break; }
+      return { status, json };
+    };
+    const leadRow = (id, roster = []) => ({ id, job_id: null, consultant_roster: roster, updated_at: "2026-11-17T00:00:00.000Z" });
+
+    section("The design-team route: an energy assessor is never the land surveyor of the same name (D1)");
+    {
+      const db = memoryDb({
+        leads: [leadRow("L-d1", [{ role: "energy", contactId: "c-sam", deliverables: [] }])],
+        crm_contacts: [{ id: "c-sam", first_name: "Sam", last_name: "Lee", company: null, email: null, phone: null, contact_type: "other", status: "active" }],
+        job_contact_roles: [{ id: "r-sam", lead_id: "L-d1", job_id: null, contact_id: "c-sam", role: "consultant", status: "active" }],
+      });
+      const surveyor = await call(db, "L-d1", { role: "land_surveyor", name: "Sam Lee" });
+      const roster1 = db.tables.leads[0].consultant_roster;
+      ok("a name-only land surveyor 'Sam Lee' → a new contact, not the energy assessor", surveyor.status === 200 && surveyor.json?.ok === true && surveyor.json.contactId && surveyor.json.contactId !== "c-sam"
+        && db.tables.crm_contacts.length === 2, flat(surveyor));
+      ok("…the roster keeps one discipline each (energy → the assessor, land surveyor → the new contact)", eq(roster1.map((e) => [e.role, e.contactId]), [["energy", "c-sam"], ["land_surveyor", surveyor.json?.contactId]]), flat(roster1));
+      ok("…and the design team shows two people, not one person in both", (surveyor.json?.consultants || []).filter((c) => c.name === "Sam Lee").map((c) => `${c.role}:${c.contactId}`).sort().join(",")
+        === ["energy:c-sam", `land_surveyor:${surveyor.json?.contactId}`].sort().join(","), flat(surveyor.json?.consultants));
+      const energyAgain = await call(db, "L-d1", { role: "energy", name: "Sam Lee" });
+      const surveyorAgain = await call(db, "L-d1", { role: "land_surveyor", name: "sam lee" });
+      ok("each one saved again (a retry) → its own contact, no third", energyAgain.json?.contactId === "c-sam" && surveyorAgain.json?.contactId === surveyor.json?.contactId
+        && db.tables.crm_contacts.length === 2 && db.tables.leads[0].consultant_roster.length === 2, flat([energyAgain.json?.contactId, surveyorAgain.json?.contactId, db.tables.crm_contacts.length]));
+    }
+
+    section("The design-team route: a practice with an email never links or writes onto a person at that firm (D2)");
+    {
+      const ava = { id: "c-ava", first_name: "Ava", last_name: "Arch", company: "Studio X Architects", email: "info@studiox.com.au", phone: null, contact_type: "architect", status: "active" };
+      const db = memoryDb({ leads: [leadRow("L-d2")], crm_contacts: [{ ...ava }], job_contact_roles: [] });
+      const r = await call(db, "L-d2", { role: "architect", name: "Studio X Architects", company: "Studio X Architects", email: "info@studiox.com.au", phone: "08 8123 4567" });
+      const made = db.tables.crm_contacts.find((c) => c.id === r.json?.contactId);
+      ok("the practice is saved (no 'someone else uses that email' stop)", r.status === 200 && r.json?.ok === true, flat(r));
+      ok("…Ava's CRM record is untouched: no phone written onto her", db.tables.crm_contacts[0].phone === null && !db.writes.some((w) => w.table === "crm_contacts" && w.op === "update"), flat(db.writes));
+      ok("…the practice is a new firm-only contact with the email and phone typed", r.json?.contactId !== "c-ava" && made && made.first_name === "" && made.last_name === null
+        && made.company === "Studio X Architects" && made.email === "info@studiox.com.au" && made.phone === "08 8123 4567", flat(made));
+      ok("…and it, not Ava, is the architect on this lead", db.tables.job_contact_roles.length === 1 && db.tables.job_contact_roles[0].contact_id === made?.id
+        && eq(db.tables.leads[0].consultant_roster.map((e) => [e.role, e.contactId]), [["architect", made?.id]]), flat(db.tables.job_contact_roles));
+      const practice = { id: "c-studio", first_name: "", last_name: null, company: "Studio X Architects", email: "info@studiox.com.au", phone: null, contact_type: "architect", status: "active" };
+      const db2 = memoryDb({ leads: [leadRow("L-d2b")], crm_contacts: [{ ...ava }, { ...practice }], job_contact_roles: [] });
+      const r2 = await call(db2, "L-d2b", { role: "architect", company: "Studio X Architects", email: "INFO@studiox.com.au", phone: "08 8123 4567" });
+      ok("the CRM's practice with that email → linked, and the phone it had none of goes onto the practice (not Ava)", r2.json?.contactId === "c-studio"
+        && db2.tables.crm_contacts.find((c) => c.id === "c-studio").phone === "08 8123 4567" && db2.tables.crm_contacts.find((c) => c.id === "c-ava").phone === null
+        && db2.tables.crm_contacts.length === 2, flat([r2.json, db2.writes]));
+      const db3 = memoryDb({ leads: [leadRow("L-d2c")], crm_contacts: [{ ...ava }], job_contact_roles: [] });
+      const r3 = await call(db3, "L-d2c", { role: "architect", name: "Ava Arch", company: "Studio X Architects", email: "info@studiox.com.au", phone: "0400 111 222" });
+      ok("a person named with that email still links that person, and nothing is written onto her", r3.json?.contactId === "c-ava" && db3.tables.crm_contacts[0].phone === null
+        && db3.tables.crm_contacts.length === 1, flat(r3.json));
+    }
+  } catch (e) {
+    ok("the design-team route runs against the in-memory stand-in", false, e?.stack || e);
+  } finally {
+    delete globalThis.__designTeamSb;
+    rmSync(stubs, { recursive: true, force: true });
+    rmSync(routeOut, { force: true });
+  }
+}
 
 // ── Rendered (esbuild → string, no browser) ────────────────────────────────────────────────────────
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");

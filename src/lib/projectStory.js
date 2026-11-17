@@ -455,19 +455,34 @@ export const nameKey = (s) => norm(s);
 export const contactNameOf = (row) => pick(personName(row), row?.company);
 
 /**
+ * A contact that is a practice, not a person: no first or last name, or a "name" that is only its firm split in two
+ * (first "Studio", last "X Architects", firm "Studio X Architects", as earlier tenders saved a practice).
+ */
+export const firmShaped = (row) => !personName(row) || nameKey(personName(row)) === nameKey(row?.company);
+
+/**
  * "+ Add someone new" with an email that a contact already has. The email is matched exactly (any case, archived
  * contacts left out by the caller); it links that contact only when the names match too, so a shared office address
  * (info@studio.com) never links the wrong person or drops the typed name.
+ * A practice named with no person (firmOnly) links only a contact that is itself a practice (firmShaped): a person at
+ * that firm who shares the office email is not the practice, so nothing is linked ({}) and the caller adds the practice
+ * (or links the CRM's one, firmOnlyMatch). Someone at another firm with that email is still a conflict.
  *   rows  crm_contacts rows that may share the email (the caller's query may over-match: the email is re-checked here)
- * Returns { contact } to reuse, { conflict } for someone else with that email, or {} when nobody has it.
+ * Returns { contact } to reuse, { conflict } for someone else with that email, or {} when nobody (to link) has it.
  */
-export function emailMatch(rows, { name, email }) {
+export function emailMatch(rows, { name, email, firmOnly = false }) {
   const want = clean(email).toLowerCase();
   if (!want) return {};
   const same = (Array.isArray(rows) ? rows : []).filter((r) => r && !r.is_archived && clean(r.email).toLowerCase() === want);
   if (!same.length) return {};
   const key = nameKey(name);
-  const hit = same.find((r) => key && (nameKey(personName(r)) === key || nameKey(r.company) === key));
+  const named = (r) => !!key && (nameKey(personName(r)) === key || nameKey(r.company) === key);
+  if (firmOnly) {
+    const practice = same.find((r) => named(r) && firmShaped(r));
+    if (practice) return { contact: practice };
+    return same.some(named) ? {} : { conflict: same[0] };
+  }
+  const hit = same.find(named);
   return hit ? { contact: hit } : { conflict: same[0] };
 }
 
@@ -506,18 +521,29 @@ export function detailsToFill(contact, { email, phone } = {}) {
  * same full name only when that contact has no firm, phone or email either: the earlier save of the same entry.
  * Otherwise a new contact is made. A firm-only contact (no first or last name) goes by its firm: the name or firm typed
  * must be that firm, and a typed phone or email must agree with it (detailsAgree).
+ * A role row stored as "consultant" holds several disciplines (energy, land surveyor, soil and geotech, lighting,
+ * sanitary), so its discipline is the roster's: it is reused only when the lead's roster has that contact in the
+ * discipline being named (a name-only energy assessor "Sam Lee" is never the land surveyor "Sam Lee"). No roster entry
+ * for the contact → not reused (a new contact, never a merge of two people).
  *   roleRows  [{ status, role, contact: { id, first_name, last_name, company, phone, email, is_archived? } }] for this
  *             lead and its job
  *   role      the design-team role being named (DESIGN_TEAM_ROLES)
+ *   roster    the lead's consultant_roster: [{ role, contactId }]
  * Returns the contact, or null.
  */
-export function sameNamedOnJob(roleRows, { name, company, phone, email, role } = {}) {
+export function sameNamedOnJob(roleRows, { name, company, phone, email, role } = {}, roster = []) {
   const key = nameKey(name), firm = nameKey(company), tel = phoneKey(phone), mail = clean(email).toLowerCase();
   if (!key || !role) return null;
   const nameOnly = !firm && !tel && !mail;
+  const want = storageRolesFor(role)?.rosterRole || role;
+  const entries = (Array.isArray(roster) ? roster : []).filter(Boolean);
+  // The roster names the contact in this discipline (a roster entry's own "consultant" says no discipline, so it is not one).
+  const rosterSays = (contactId) => entries.some((e) => rosterContactId(e) === contactId && (e.role || e.type) !== "consultant"
+    && sameDiscipline(e.role || e.type || "other", want));
   for (const r of Array.isArray(roleRows) ? roleRows : []) {
     const c = r?.contact;
     if (!c?.id || c.is_archived || !isOn(r.status) || !sameDiscipline(r.role, role)) continue;
+    if (r.role === "consultant" && !rosterSays(c.id)) continue;
     const person = personName(c), theirFirm = nameKey(c.company);
     if (!person) {
       // A firm-only contact: the name typed is the firm, any firm typed is the same one, a phone or email typed agrees.
@@ -557,7 +583,6 @@ export function firmOnlyName({ name, company } = {}) {
 export function firmOnlyMatch(rows, { company, contactType, email, phone } = {}) {
   const want = clean(company).toLowerCase();
   if (!want) return null;
-  const firmShaped = (r) => !personName(r) || nameKey(personName(r)) === nameKey(r.company);
   const hits = (Array.isArray(rows) ? rows : []).filter((r) => r && r.id && !r.is_archived && r.status !== "lost"
     && clean(r.company).toLowerCase() === want && firmShaped(r) && detailsAgree(r, { email, phone }));
   if (!hits.length) return null;

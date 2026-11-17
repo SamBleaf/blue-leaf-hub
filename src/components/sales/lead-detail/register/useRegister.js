@@ -17,7 +17,10 @@
  * The words boxes save on every keystroke: an edit that steps an approved record back keeps the approved copy for the
  * visit, and typing the approved words back puts the approval and its evidence back (registerMerge.approvalRestore).
  * undeleteItem (Undo after a delete) puts the very record back under its own id (registerMerge.planUndelete), in its old
- * place even when several deletes are undone in any order (registerMerge.deletedPlaces).
+ * place even when several deletes are undone in any order (registerMerge.deletedPlaces). Once its delete has reached the
+ * server it is saved again as new with a position hint (registerMerge.placeHint), so the stored order keeps that place too
+ * (round 4, U1). A record deleted here while a save travels stays off the screen when that save's answer still holds it,
+ * and its delete then goes with the server's version now (registerMerge.withoutPendingDeletes, round 4, U2).
  * The lead page holds two copies of the register (desktop and phone layouts). A read waits for any save of the same lead
  * on its way from either copy (savesSettled), so the copy coming into view never shows the brief without the last edits.
  */
@@ -25,7 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPut, apiPost } from "../../../../lib/apiFetch.js";
 import { makeItem, genId, emptyMeta, itemKindLabel, itemTitle, seedMatchesItem } from "../../../../lib/register.js";
 // The three-way merge lives in registerMerge.js (shared with the recovery of unsaved edits, and unit-tested there).
-import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, approvalStep, planUndelete, metaAfterSave, deletedPlaces } from "../../../../lib/registerMerge.js";
+import { same, mergeItem, mergeMeta, registerDraftOf, draftIsEmpty, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, approvalStep, planUndelete, metaAfterSave, deletedPlaces, placeHint, insertInPlace, withoutPendingDeletes } from "../../../../lib/registerMerge.js";
 import { saveRegisterDraft, loadRegisterDraft, clearRegisterDraft, rememberActor } from "../../../../lib/takeoffRecovery.js";
 
 const AUTOSAVE_MS = 1200;
@@ -133,6 +136,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
   const approvedCopy = useRef(new Map());   // id → { item, notice }: what the client approved, for a record an edit stepped back (B3)
   const deletesSent = useRef(new Set());    // ids whose delete is in the save on its way now
   const deletedAt = useRef(new Map());      // id → the ids that were before a deleted record (deletedPlaces), so Undo puts it back there
+  const placeBack = useRef(new Set());      // ids Undo put back after (or while) their delete reached the server: saved with a position hint (U1)
   const loadedFor = useRef(null);           // the lead the register on screen belongs to
   const onScreen = useRef(enabled);         // this copy is on screen (the enabled flag, as the last effect saw it)
   const metaSeq = useRef(0);
@@ -184,7 +188,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       return null;
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); refused.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); refused.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
     loadedFor.current = leadId;
     regRef.current = next; setReg(next);
     setStatus({ loading: false, error: null });
@@ -283,6 +287,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     if (there) rememberPlaces(cur.items, [id]);
     if (there && baseRef.current.items.has(id)) deleted.current.set(id, baseRef.current.items.get(id));
     dirty.current.delete(id);
+    placeBack.current.delete(id);
     commit({ ...cur, items: cur.items.filter((i) => i.id !== id) }, []);
   }, [commit, rememberPlaces]);
   /**
@@ -292,11 +297,14 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
    */
   const undeleteItem = useCallback((item) => {
     const cur = regRef.current; if (!cur || !item?.id) return null;
-    const plan = planUndelete(item, { current: cur, pending: deleted.current.get(item.id) || null, flying: deletesSent.current.has(item.id),
+    const flying = deletesSent.current.has(item.id);
+    const plan = planUndelete(item, { current: cur, pending: deleted.current.get(item.id) || null, flying,
       before: deletedAt.current.get(item.id) ?? null });
     if (!plan) return null;
     deleted.current.delete(item.id);
     deletedAt.current.delete(item.id);
+    // Back as new (its delete reached the server, or may as it travels): its save says where it goes (U1).
+    if (!plan.item.sync || flying) placeBack.current.add(item.id); else placeBack.current.delete(item.id);
     commit({ ...cur, items: plan.items }, plan.dirty ? [item.id] : []);
     return plan.item;
   }, [commit]);
@@ -308,7 +316,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const kept = new Set(next.items.map((n) => n.id));
     const gone = cur.items.filter((i) => !kept.has(i.id));
     if (gone.length) rememberPlaces(cur.items, gone.map((i) => i.id));
-    for (const i of gone) if (baseRef.current.items.has(i.id)) deleted.current.set(i.id, baseRef.current.items.get(i.id));
+    for (const i of gone) { placeBack.current.delete(i.id); if (baseRef.current.items.has(i.id)) deleted.current.set(i.id, baseRef.current.items.get(i.id)); }
     commit(next, touched, !same(cur.meta, next.meta));
   }, [commit, rememberPlaces]);
   const mutateMeta = useCallback((partial) => {
@@ -339,7 +347,9 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       setSave((s) => (s.state === "error" && s.message === SAVE_RETRY_WORDS ? s : { ...s, state: "saving" }));
 
       const sentSeq = new Map(dirty.current);
-      const changes = [...sentSeq.keys()].map((id) => cur.items.find((i) => i.id === id)).filter(Boolean);
+      // A record Undo put back as new says which record it goes after, so the stored order keeps its place (U1).
+      const changes = [...sentSeq.keys()].map((id) => cur.items.find((i) => i.id === id)).filter(Boolean)
+        .map((i) => (placeBack.current.has(i.id) && !i.sync ? { ...i, __afterId: placeHint(cur.items, i.id) } : i));
       const deletes = [...deleted.current.values()].map((i) => ({ id: i.id, sync: i.sync }));
       deletesSent.current = new Set(deletes.map((d) => d.id));
       metaSent.current = metaSeq.current;
@@ -364,17 +374,27 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
         server.meta = metaAfterSave(body.meta || null, server.meta, { changedSince: metaChangedInFlight, before });
         baseRef.current.meta = server.meta;
         const local = regRef.current;
-        const items = server.items.map((s) => {
+        const removedNow = new Set(deletes.map((d) => d.id));
+        // A record deleted here while this save travelled stays off the screen, though the server still holds it (the
+        // save may have carried an edit of it): Undo then puts it back, and its delete goes with its version now (U2).
+        const { items: answered, stillDeleting } = withoutPendingDeletes(server.items, deleted.current, removedNow);
+        let items = answered.map((s) => {
           const mine = local.items.find((i) => i.id === s.id);
           if (mine && dirty.current.get(s.id) !== sentSeq.get(s.id) && dirty.current.has(s.id)) return makeItem({ ...mine, sync: s.sync });
           dirty.current.delete(s.id);
           return s;
         });
         // items created locally during the flight (not yet on the server) stay as they are. One whose delete this save
-        // carried but which Undo put back meanwhile is gone from the server now: it is saved again as new, same id.
-        const removedNow = new Set(deletes.map((d) => d.id));
-        for (const i of local.items) if (!items.some((x) => x.id === i.id) && dirty.current.has(i.id) && !sentSeq.has(i.id)) items.push(removedNow.has(i.id) ? makeItem({ ...i, sync: null }) : i);
+        // carried but which Undo put back meanwhile is gone from the server now: it is saved again as new, same id, and
+        // stays where Undo put it (U1).
+        const localIds = local.items.map((i) => i.id);
+        for (const i of local.items) {
+          if (items.some((x) => x.id === i.id) || !dirty.current.has(i.id) || sentSeq.has(i.id)) continue;
+          items = removedNow.has(i.id) ? insertInPlace(items, makeItem({ ...i, sync: null }), localIds) : [...items, i];
+        }
         for (const d of deletes) deleted.current.delete(d.id);
+        for (const [id, s] of stillDeleting) deleted.current.set(id, s);
+        for (const id of placeBack.current) if (answered.some((s) => s.id === id)) placeBack.current.delete(id);
         // A sent id that neither the server nor this screen holds any more is finished with. Left here it repeats an empty save forever.
         for (const id of sentSeq.keys()) if (!items.some((x) => x.id === id)) dirty.current.delete(id);
         metaSaved.current = metaSent.current;
@@ -441,7 +461,10 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
     const notes = [];
     let guardRejected = false, versionConflict = false;
     const theirs = new Map(server.items.map((i) => [i.id, i]));
+    // A record deleted here and not saved yet stays off the screen (U2), unless a guard refused its delete (below).
+    const keptBack = new Set(conflicts.filter((c) => GUARD_REASONS[c.reason] && deleted.current.has(c.itemId)).map((c) => c.itemId));
     for (const t of server.items) {
+      if (deleted.current.has(t.id) && !keptBack.has(t.id)) continue;
       const mine = local.items.find((i) => i.id === t.id);
       if (!dirty.current.has(t.id) || !mine) { out.push(t); continue; }
       const reason = byReason.get(t.id);
@@ -541,7 +564,7 @@ export function useRegister(leadId, { enabled = true, actorKey = null } = {}) {
       return { ok: false, error: r.error };
     }
     const next = adopt(r.data);
-    dirty.current.clear(); deleted.current.clear(); metaSaved.current = metaSeq.current;
+    dirty.current.clear(); deleted.current.clear(); placeBack.current.clear(); metaSaved.current = metaSeq.current;
     regRef.current = next; setReg(next);
     persistDraft();
     return { ok: true, held: r.data?.held || [] };

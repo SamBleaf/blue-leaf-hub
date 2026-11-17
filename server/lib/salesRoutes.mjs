@@ -35,7 +35,7 @@ import { CONTRACT_DOC_TYPE, withContractEvidence, decodePdfUpload } from "./lead
 import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
 import {
   normaliseStoryPatch, budgetPairError, storageRolesFor, rosterAdd, rosterRemove, rosterNeedsRole, splitName, searchWords, contactMatches, CONTACT_TYPE_WORDS,
-  emailMatch, sameNamedOnJob, firmOnlyName, firmOnlyMatch, detailsToFill, conflictWords, contactNameOf,
+  emailMatch, sameNamedOnJob, firmOnlyName, firmOnlyMatch, firmShaped, detailsToFill, conflictWords, contactNameOf,
 } from "../../src/lib/projectStory.js";
 import { loadRegisterContext } from "./registerContext.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
@@ -1107,11 +1107,12 @@ export function registerSalesRoutes(app) {
       if (email) {
         // The same email, any case, archived contacts left out. The pattern only narrows the query ('*' is PostgREST's
         // wildcard, so it becomes a one-character '_'); emailMatch re-checks the address exactly and links the contact
-        // only when the names match too. Someone else with that email is never linked silently.
+        // only when the names match too. Someone else with that email is never linked silently. A practice links only
+        // a practice: a person at that firm sharing the office email is left alone and the practice is added.
         const pattern = email.replace(/[\\%_]/g, "\\$&").replace(/\*/g, "_");
         const { data: same, error: sErr } = await sb.from("crm_contacts").select("*").ilike("email", pattern).not("is_archived", "is", true).limit(20);
         if (sErr) return err(res, 400, translateDbError(sErr));
-        const m = emailMatch(same, { name, email });
+        const m = emailMatch(same, { name, email, firmOnly: !!firmOnly });
         if (m.conflict) {
           const c = m.conflict;
           return res.status(409).json({ ok: false, code: "EMAIL_IN_USE", error: `Someone else uses that email: ${conflictWords(c)}. Use them, or change the email.`,
@@ -1121,11 +1122,12 @@ export function registerSalesRoutes(app) {
       } else {
         // No email: the person already on this lead or job is reused (a second Save, a double tap, a retry after a lost
         // answer), so the save never adds a second contact and role. sameNamedOnJob needs the same discipline and the
-        // same firm, phone or email (or, for a name only, a contact with none of them either).
+        // same firm, phone or email (or, for a name only, a contact with none of them either). A "consultant" role row
+        // holds several disciplines, so the lead's roster says which one it is (energy is never the land surveyor).
         const ors = [`lead_id.eq.${lead.id}`]; if (lead.job_id) ors.push(`job_id.eq.${lead.job_id}`);
         const { data: onJob } = await sb.from("job_contact_roles")
           .select("id, status, role, contact:crm_contacts(*)").or(ors.join(","));
-        contact = sameNamedOnJob(onJob, { name, company, phone, email, role });
+        contact = sameNamedOnJob(onJob, { name, company, phone, email, role }, lead.consultant_roster);
       }
       if (!contact && firmOnly) {
         // A practice: the CRM's firm-only contact with the same firm (any case), before adding another one. The pattern
@@ -1136,8 +1138,9 @@ export function registerSalesRoutes(app) {
         if (cErr && cErr.code !== "42703") return err(res, 400, translateDbError(cErr));   // pre-mig-180: no company column
         contact = firmOnlyMatch(cErr ? [] : firms, { company: firmOnly, contactType: roles.contactType, email, phone });
       }
-      if (contact && firmOnly) {
-        // A practice linked: the email or phone typed that it has none of is written onto it (never over one it has).
+      if (contact && firmOnly && firmShaped(contact)) {
+        // A practice linked: the email or phone typed that it has none of is written onto it (never over one it has, and
+        // never onto a person: a practice's details are not theirs).
         const fill = detailsToFill(contact, { email, phone });
         if (Object.keys(fill).length) {
           const { data: filled, error: uErr } = await sb.from("crm_contacts").update({ ...fill, updated_at: now }).eq("id", contact.id).select("*").maybeSingle();

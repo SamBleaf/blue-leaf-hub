@@ -81,6 +81,16 @@
 - **House-strip wording.** The strip summary's wording differs from the artboard ("Floor: timber, engineered" against "engineered timber").
 - **Spec copy.** REGISTER_SCREENS_SPEC.md S4 footnotes still say "Decisions we need from you" and "Our list only — doesn't print". The code says "Decisions to make", and the Blue Leaf footnote names the client brief.
 
+## Known issues to clear before release (round 4 review, 17 Nov)
+
+1. **Medium.** Deleting a record while the save that creates it is still in flight brings it back, and it stays stored (`useRegister.js` ~:288; the record isn't in the base yet, so no delete is queued).
+2. **Medium.** Naming the same person, with the same firm and phone, in a second consultant discipline creates a duplicate CRM contact (`projectStory.js` ~:546, where the roster check applies to every consultant row). It fails safe: a duplicate, never a merge.
+3. **Low.** Undo after the version refresh can write this screen's older copy over another screen's edit without a conflict (`useRegister.js` ~:396; `registerMerge` planUndelete).
+4. **Low.** In project mode, baselined selections count as movable, so a renumber can rewrite a baselined row's sort_order (`registerStore.mjs` ~:292; the scope table already checks baselined_at).
+5. **Low.** A record put back by Undo and then restored from the device draft after a reload goes to the end (`registerMerge.js` ~:123; `placeBack` is cleared on load).
+
+Also worth a ticket: a record moved between client_selections and room_scope_items gets sort_order 0 and jumps to the top.
+
 ## Release notes
 
 - Ship step 1 of "Altered" (`fix/room-scope-keep-unknown`, `ee55a1d`, off main) a few days before this branch.
@@ -205,7 +215,7 @@ Also passed down:
 
 ## Still to do
 
-1. Fix round 3, its final browser check, then commit.
+1. Clear the known issues above (one small round), then a last browser pass.
 2. The owner reviews the screens on the real job (the sandbox walkthrough screenshots) and answers the "Still open" questions.
 3. Push the branch only with the owner's OK. Release after the Lato gate and step 1 of "Altered".
 4. Later (documented, not in this release):
