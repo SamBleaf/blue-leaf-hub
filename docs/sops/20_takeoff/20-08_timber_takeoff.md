@@ -634,6 +634,12 @@ Next review date: 2027-04-14
 4. Node: scripts/tests/takeoff-tc-hub031.test.mjs "fail closed: …", "the SmartLVL 13 guide's own worked example …", "the Smart10 guide's own worked example …"; PDF cross-check: `node scripts/takeoff/standards/verify-lintels-vs-pdf.mjs` (92 rows match).
 - [ ] Pass  [ ] Fail
 
+**TC-25 — Hoop iron on a wall, and short MGP10 pieces (HUB 033)**
+1. Walls card > **Hoop iron**: the product (default 30 x 0.8 galvanised, to confirm) and an optional **Roll length**. Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm). In **Select**, tap a wall and **Hoop iron on this wall: Off** to leave it out; **On** puts it back (one Undo each).
+2. Expected on a 9,000 wall: 16 straps, 11.2 m. Node: scripts/tests/takeoff-tc-hub033.test.mjs.
+3. Short MGP10 pieces (noggins, cripples, short trimmers under 1.2 m) are cut from the same product's stud/plate lengths: first from what is left over on the lengths bought for the longer pieces, then shared between themselves. Studs and plates stay one length each. An MGP10 product with no longest length set uses 6,000 mm and the card still asks you to confirm it.
+- [ ] Pass  [ ] Fail
+
 ### Post-test checklist
 - [ ] All test cases passed
 - [ ] No console errors observed during testing

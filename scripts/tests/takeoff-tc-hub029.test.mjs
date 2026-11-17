@@ -28,9 +28,11 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import {
   BLUE_LEAF_SHEET_JOINT, FAMILY_NEED_FIELDS, FIX_APPLY_ACTIONS, FIX_CARD_FIELDS, FIX_ROUTES, FIX_TARGETS, FIX_TARGET_KINDS, FIX_WALL_FIELDS, INSTALLATION_STATUS, NOTE_CODES,
-  PROBLEM_TEXT, PROCUREMENT_STATUS, QUANTITY_STATUS, WALL_FRAMING_RULES, buildCalibration, computeWorkspace, familyProblems, fixEntryFor, fixTargetKey, fixesFor, gableInputProblem,
+  PROBLEM_TEXT, PROCUREMENT_STATUS, QUANTITY_STATUS, WALL_FRAMING_RULES, buildCalibration, computeWorkspace as computeWorkspaceRaw, familyProblems, fixEntryFor, fixTargetKey, fixesFor, gableInputProblem,
   isInstallationNote, methodFor, rescaleCandidates, starterProfile, verifyCalibration, wallFramingDefaults, wallIncompleteText, wallsText,
 } from "../../shared/takeoff/index.js";
+// HUB 033: hoop iron is on by default for every wall; these framing tests are about studs, plates and noggins, so its line is left out here (takeoff-tc-hub033 covers it)
+const computeWorkspace = (w) => { const c = computeWorkspaceRaw(w); return { ...c, scheduleLines: c.scheduleLines.filter((l) => !l.hoop) }; };
 import { productGroups, specFromGroup } from "../../shared/takeoff/products/index.js";
 
 let pass = 0, fail = 0;

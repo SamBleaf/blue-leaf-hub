@@ -34,6 +34,9 @@ export const TIMBER_GRID_SOURCE = "OWNER-2026-10-25";
  */
 export const MGP10_GRID = Object.freeze({ kind: "grid", minMm: 1200, incrementMm: 300, aboveMm: 3000, incrementAboveMm: 600 });
 export const MGP10_GRID_SOURCE = "OWNER-2026-11-18";
+/** Sam, 18 Nov 2026: an MGP10 product with no longest length set uses the top of its grid, 6,000 mm (the longest MGP10 stud/plate length
+ *  Blue Leaf buys, 6.0 m), so short pieces can be cut from the product's own stock lengths. A default to confirm: the order says so. */
+export const MGP10_DEFAULT_MAX_MM = 6000;
 /** Every length of a grid up to maxMm, ascending (the stepped MGP10 grid steps wider above its aboveMm). */
 export function gridLengthsUpTo(grid, maxMm) {
   const out = [];

@@ -2,8 +2,10 @@
 // MGP10 only orderable in 600 mm lengths. Run: node scripts/tests/takeoff-tc-hub032.test.mjs
 import assert from "node:assert/strict";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
-import { computeWorkspace, wallFramingDefaults, methodFor, WALL_FRAMING_RULES, buildSupplierGroups, formatCuts, memberGroup, productText, splitByRole, metres,
+import { computeWorkspace as computeWorkspaceRaw, wallFramingDefaults, methodFor, WALL_FRAMING_RULES, buildSupplierGroups, formatCuts, memberGroup, productText, splitByRole, metres,
   isMgp10Grade, timberGridFor, onTimberGrid, MGP10_GRID, TIMBER_GRID, CALCULATION_VERSION, SUPPLIER_ORDER_FORMAT, normaliseFamilySpec } from "../../shared/takeoff/index.js";
+// HUB 033: hoop iron is on by default for every wall; these framing tests are about studs, plates and noggins, so its line is left out here (takeoff-tc-hub033 covers it)
+const computeWorkspace = (w) => { const c = computeWorkspaceRaw(w); return { ...c, scheduleLines: c.scheduleLines.filter((l) => !l.hoop) }; };
 import { timberStockPolicy } from "../../shared/takeoff/engine/timber.js";
 import { selectStock } from "../../shared/takeoff/engine/stock.js";
 import { buildExportSnapshot, snapshotHash } from "../../server/lib/takeoff/takeoffService.mjs";
@@ -30,7 +32,7 @@ await t("MGP10 stock rule: 1,200 minimum, 300 mm steps up to 3,000, only 600 mm 
   assert.equal(buy(6001, "MGP10"), null, "over the longest: unavailable, never clamped or spliced");
   assert.equal(selectStock(6001, stock("MGP10")).reason, "exceeds-max");
   assert.equal(buy(3300, "MGP10", { maxMm: null }), 3600);
-  assert.equal(buy(9100, "MGP10", { maxMm: null }), 9600, "above 3 m with no longest set: still 600 mm steps");
+  assert.equal(buy(5100, "MGP10", { maxMm: null }), 5400, "above 3 m with no longest set: still 600 mm steps (no longest set = the grid's 6,000, 18 Nov)");
 });
 
 await t("MGP10 stock rule edge cases: a longest length off the grid, lengths marked not stocked, case and spacing of the grade", () => {

@@ -16,8 +16,9 @@
 // =============================================================================
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
-import { identityKey } from "./contract.js";
-import { FAMILIES, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
+import { demandId, identityKey } from "./contract.js";
+import { HOOP_IRON_RULE, hoopIronForWall, hoopIronProduct, hoopIronRolls } from "../hoopIron.js";
+import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
@@ -176,7 +177,9 @@ function resolveWall(m, ctx) {
     // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
     studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null,
     // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
-    loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null };
+    loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null,
+    // Sam, 18 Nov 2026: hoop iron is on for every wall; this wall's switch turns it off
+    noHoopIron: inp.noHoopIron === true };
   return { wall, openings, label: inp.name || m.label || "Wall", heightSource: inp.heightSource || "entered", missing, problems };
 }
 
@@ -526,6 +529,15 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // the cut lists name each piece's wall ("Wall 2 stud @ 1,177.5 (beside W1)", "Wall 1 second top plate 0–6,000")
       d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Bottom plate|Top plate|Second top plate|Noggin)\b/, (x) => x.toLowerCase())}`;
     }
+    // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off
+    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(L);
+    const hoopProduct = hoopIronProduct(rules.hoopIronProductId);
+    if (hoop && hoop.straps > 0) {
+      demands.push({ id: demandId(mat.id, "hoop-iron", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "piece", quantity: hoop.straps, lengthMm: hoop.strapMm,
+        identity: { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM: Number(rules.hoopIronRollM) > 0 ? Number(rules.hoopIronRollM) : null },
+        label: `${tag} hoop iron: ${hoop.straps} straps of ${fmt(hoop.strapMm)} mm = ${hoop.metres} m`, itemDescription: `${hoopProduct.name}, ${fmt(hoop.strapMm)} mm straps`,
+        sourceRefs: [{ measurementId: m.id, wallId: m.id, role: "hoop iron" }], provenance: "calculated" });
+    }
     const layers = plates.layout?.layers || [];
     const layerMm = (t) => (layers.find((l) => l.tag === t)?.piecesMm || []).reduce((a, b) => a + b, 0);
     results.push({
@@ -572,7 +584,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const used = (k) => partDemands(k).length > 0;
   // the allocator's "pieces are not shared" (no longest length on the noggins), as one plain note naming the length
   // each noggin buys ("its own 1,200 length") when they all buy the same one
-  if (parts.noggins.stock?.maxMm == null && used("noggins")) {
+  if (parts.noggins.stock?.maxMm == null && !isMgp10Grade(parts.noggins.grade) && used("noggins")) {
     const each = [...new Set(partDemands("noggins").map((d) => selectStock(d.lengthMm, d.stockPolicy).stockMm))];
     const own = each.length === 1 && each[0] ? `its own ${fmt(each[0])} length` : "its own length";
     sink.problems.push({ code: "noggins_not_shared", message: `Noggins: each is cut from ${own}. Set the noggins' longest length under Details to share lengths across walls.`, blocking: false });
@@ -803,6 +815,50 @@ function describeIdentity(n) {
   return [p.manufacturer, p.name, p.sku ? `SKU ${p.sku}` : null, p.thicknessMm ? `${p.thicknessMm} thick` : null].filter(Boolean).join(" ");
 }
 
+/**
+ * Sam, 18 Nov 2026: short MGP10 pieces (noggins, cripples, short trimmers: under the 1,200 shortest length) are cut out of the SAME
+ * product's stud/plate stock lengths, combined with that product's longer pieces, never packed only among themselves. Two steps:
+ *   1. every piece that is not short is allocated exactly as before (a stud is still one stock length, never shared);
+ *   2. the product's short pieces from EVERY part (cripples, noggins, trimmers) are allocated together, first into what is left over
+ *      on the lengths step 1 buys (a 3.6 m stock for a 3.3 m stud leaves 300 mm), then new stock lengths shared between them.
+ * The demands, their parts and labels are untouched (a cut list still names each cut's own part). A product with no short piece
+ * (and anything that is not MGP10 on its grid with a longest length) is allocated exactly as before.
+ * @returns the same shape as allocateLinear(): groups from both steps
+ */
+function allocateWithShortSharing(linear, opts) {
+  const mgp = (d) => d.stockPolicy?.kind === "grid" && d.stockPolicy.maxMm != null && isMgp10Grade(d.identity?.grade);
+  const isShort = (d) => mgp(d) && d.lengthMm < d.stockPolicy.minMm - 1e-9;
+  const shorts = linear.filter(isShort);
+  if (!shorts.length) return allocateLinear(linear, opts);
+  const rest = linear.filter((d) => !isShort(d));
+  const productOf = (identity) => ({ ...identity, component: undefined, shortSharing: true });
+  const first = rest.length ? allocateLinear(rest, opts) : { groups: [], rejected: [], unusedOffcuts: (opts?.existingOffcuts || []).map((o) => ({ offcutId: o.id, lengthMm: o.lengthMm, label: o.label })), problems: [],
+    totals: { groups: 0, cuts: 0, allocatedCuts: 0, unavailableCuts: 0, rejectedDemands: 0, newBars: 0, offcutsUsed: 0 } };
+  // what is left on each bought length of a product that has short pieces (whole mm, usable only by a piece that fits)
+  const products = new Set(shorts.map((d) => identityKey(productOf(d.identity))));
+  const demandOf = new Map(linear.map((d) => [d.id, d]));
+  const residuals = [];
+  const stockOf = new Map();
+  for (const g of first.groups) for (const b of g.bars) {
+    if (b.source !== "new" || !(b.residualMm > 0)) continue;
+    const d = demandOf.get(b.cuts[0]?.demandId);
+    if (!d || !mgp(d) || !products.has(identityKey(productOf(d.identity)))) continue;
+    const id = `left:${g.id || ""}:${b.id}`;
+    stockOf.set(id, b.stockLengthMm);
+    residuals.push({ id, lengthMm: b.residualMm, identity: productOf(d.identity), label: `left on a ${b.stockLengthMm} mm length`, endTrimMm: 0 });
+  }
+  // recorded offcuts step 1 did not use stay on offer, to the short pieces of the product they were recorded for
+  const originalOf = new Map(shorts.map((d) => [identityKey(d.identity), d.identity]));
+  const unusedIds = new Set(first.unusedOffcuts.map((o) => o.offcutId));
+  const unusedRecorded = (opts?.existingOffcuts || []).filter((o) => unusedIds.has(o.id) && originalOf.has(identityKey(o.identity))).map((o) => ({ ...o, identity: productOf(originalOf.get(identityKey(o.identity))) }));
+  const second = allocateLinear(shorts.map((d) => ({ ...d, identity: productOf(d.identity), stockPolicy: { ...d.stockPolicy, sharePieces: true } })),
+    { ...opts, existingOffcuts: [...unusedRecorded, ...residuals] });
+  // a cut taken from what was left on a bought length is listed against that length
+  for (const g of second.groups) for (const b of g.bars) if (b.source === "offcut" && stockOf.has(b.offcutId)) b.fromBoughtStockMm = stockOf.get(b.offcutId);
+  return { ...second, groups: [...first.groups, ...second.groups], rejected: [...first.rejected, ...second.rejected], problems: [...first.problems, ...second.problems],
+    totals: Object.fromEntries(Object.keys(second.totals).map((k) => [k, (first.totals[k] || 0) + second.totals[k]])) };
+}
+
 const isUnresolved = (identity) => !identity || String(identity.family || "").startsWith("unresolved:");
 const timberText = (id) => [id.section ? String(id.section).replace("x", " × ") : "section?", id.grade, id.species, id.treatment].filter(Boolean).join(" ");
 
@@ -841,6 +897,8 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // the supplier take-off groups a timber order by member role (stud, king, jack, lintel, plate, noggin …): what each
       // line was bought FOR, so the export can print "STUDS", "JAMB STUDS", "T&B PLATES" (supplierOrder.js). The product
       // is the line's own timber identity (section, grade, treatment, species).
+      // Sam, 18 Nov 2026: hoop iron (straps) keeps its product and roll length so the HOOP IRON group can show straps, metres and rolls
+      if (identity?.family === "hoopIron") l.hoop = { name: identity.name, id: identity.id, rollM: identity.rollM ?? null };
       if (n.family === "timber") {
         l.roles = {};
         if (identity?.family === "timber") l.product = { section: identity.section ?? null, grade: identity.grade ?? null, treatment: identity.treatment ?? null, species: identity.species ?? null };
@@ -872,7 +930,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       offcuts.push({ id: o.id, lengthMm: o.lengthMm, identity: linear[0].identity, label: o.label });
     }
     const offcutById = new Map(offcuts.map((o) => [o.id, o]));
-    allocation = allocateLinear(linear, { existingOffcuts: offcuts });
+    allocation = allocateWithShortSharing(linear, { existingOffcuts: offcuts });
     const unit = n.family === "aluminium" ? "bar" : "piece";
     for (const g of allocation.groups) {
       for (const u of g.unavailable || []) sink.problems.push({ code: "unavailable_stock", message: `${demById.get(u.demandId)?.label || u.demandId}: ${u.message || u.reason}`, blocking: true });
@@ -880,7 +938,8 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         if (b.source !== "new") continue;
         const ids = b.cuts.map((c) => c.demandId);
         const first = demById.get(ids[0]);
-        add(`${unit}|${b.stockLengthMm}|${g.identityKey}`, unit, 1, b.stockLengthMm,
+        // a bar shared across a product's parts is bought as its longest cut's part (the line keeps that part and its roles)
+        add(`${unit}|${b.stockLengthMm}|${first?.identity ? identityKey(first.identity) : g.identityKey}`, unit, 1, b.stockLengthMm,
           { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity, first?.role);
       }
     }
@@ -896,23 +955,25 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // H-flashing — a batten and an H-flashing of the same length are never one row. HUB 028 Walls: one per part
       // ("Studs cut list", "Plates cut list", "Long plates cut list", "Noggins cut list"), even for the same product
       const lists = new Map();
-      const listOf = (g) => {
-        const d = demById.get(g.bars[0]?.cuts[0]?.demandId || g.unavailable?.[0]?.demandId);
+      const listOf = (demandId) => {
+        const d = demById.get(demandId);
         const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : WALL_PARTS.includes(d?.identity?.component) ? d.identity.component : "";
         if (!lists.has(f)) lists.set(f, { title: f === "battens" ? `battens cut list (${FOLLOWER_TEXT.battens})` : f === "hflashing" ? `H-flashing cut list (${FOLLOWER_TEXT.hflashing})`
           : WALL_PART_LABELS[f] ? `${WALL_PART_LABELS[f]} cut list` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
         return lists.get(f).rows;
       };
       for (const g of allocation.groups) {
-        const rows = listOf(g);
+        // a stock length shared across parts (Sam, 18 Nov 2026: short MGP10 pieces cut from the product's stud/plate lengths) lists each cut under its OWN part
         for (const b of g.bars) for (const c of b.cuts) {
+          const rows = listOf(c.demandId);
           const k = `${c.lengthMm}|${b.stockLengthMm}`;
-          const r = rows.get(k) || { cutMm: c.lengthMm, stockMm: b.source === "new" ? b.stockLengthMm : null, qty: 0, labels: [] };
+          const r = rows.get(k) || { cutMm: c.lengthMm, stockMm: b.source === "new" ? b.stockLengthMm : b.fromBoughtStockMm ?? null, qty: 0, labels: [] };
           r.qty += 1; if (c.label) r.labels.push(c.label);
           rows.set(k, r);
         }
         for (const u of g.unavailable || []) {
           const d = demById.get(u.demandId);
+          const rows = listOf(u.demandId);
           rows.set(`u|${u.demandId}`, { cutMm: d?.lengthMm, stockMm: null, qty: d?.quantity || 1, labels: [d?.label].filter(Boolean) });
         }
       }
@@ -954,7 +1015,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     const u = d.unit || "piece";
     add(`${u}|${d.lengthMm ?? ""}|${identityKey(d.identity)}`, u, d.quantity, u === "piece" || u === "bar" ? d.lengthMm ?? null : null,
       // counted items keep their own entered label (e.g. "Cladding screws 8g × 40 (entered, quote Q-123)")
-      { description: d.itemDescription || (d.identity?.item ? itemText(d, n, recipeLabels) : d.label) || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity);
+      { description: d.itemDescription || (d.identity?.item ? itemText(d, n, recipeLabels) : d.label) || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity, d.role);
   }
   const all = [...lines.values()];
   for (const l of all) {
@@ -965,6 +1026,11 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       l.quantity = Math.ceil(byInc - 1e-9);
       if (Math.abs(l.quantity - l.exact) > 1e-9) l.item = { ...l.item, note: `${l.exact.toFixed(2)} LM calculated${inc ? ` → ${byInc.toFixed(2)} LM in ${inc} m steps` : ""}, ordered as ${l.quantity} LM` };
     } else l.quantity = Math.max(UNIT_INTEGER.has(l.unit) ? 1 : 0, Math.ceil(l.exact - 1e-9));
+    if (l.hoop) {
+      const metres = Number(((l.quantity * HOOP_IRON_RULE.strapMm) / 1000).toFixed(2));
+      const rolls = hoopIronRolls(metres, l.hoop.rollM);
+      l.item = { ...l.item, hoopMetres: metres, note: `${l.quantity} straps of ${fmt(HOOP_IRON_RULE.strapMm)} mm = ${metres} m (2 straps per ${fmt(HOOP_IRON_RULE.spanMm)} mm of wall)${rolls ? ` → ${rolls} ${rolls === 1 ? "roll" : "rolls"} of ${l.hoop.rollM} m` : ""} · default product, confirm with the supplier` };
+    }
     if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null) l.problems.push("A timber line has no stock length.");
     if (l.follower === "battens" || l.follower === "hflashing") {
       const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);

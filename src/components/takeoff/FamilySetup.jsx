@@ -29,6 +29,7 @@
 // with "Use for <new product>" (only when it applies) or "Dismiss".
 // =============================================================================
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { HOOP_IRON_PRODUCTS, hoopIronProduct } from "../../../shared/takeoff/hoopIron.js";
 import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PURPOSES, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT, WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_LABELS, applyTimberPreset, describeFamilySpec,
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, isMgp10Grade, onTimberGrid, timberPresetLabel, timberStockRuleText, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
@@ -1423,6 +1424,19 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
         <div className="space-y-3 pb-2">
           <p className="text-[11px] text-muted">Size: <b>manual selection</b>. The app does not check structural adequacy.</p>
           {WALL_PARTS.map((part) => <WallPart key={part} d={d} part={part} presets={presets} />)}
+        </div>
+      </details>
+      {/* Sam, 18 Nov 2026: hoop iron, 2 straps of 0.7 m for every 1,200 mm of wall, on for every wall (switch it off per wall on the plan) */}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-hoop="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Hoop iron · {hoopIronProduct(r.hoopIronProductId).name}</summary>
+        <div className="space-y-3 pb-2">
+          <p className="text-[11px] text-muted">Every wall gets 2 straps of 700 mm for every 1,200 mm of its length (0.7 m per 600 mm). Turn it off for one wall by selecting the wall on the plan. {hoopIronProduct(r.hoopIronProductId).defaultToConfirm ? "The product is a default: confirm the size with your supplier." : ""}</p>
+          <label className="block text-sm text-ink">Product
+            <select className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline px-2" value={hoopIronProduct(r.hoopIronProductId).id} data-walls-hoop-product=""
+              onChange={(e) => d.patch({ rules: { hoopIronProductId: e.target.value } })}>
+              {HOOP_IRON_PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+          <NumberField label="Roll length, optional" unit="m" optional value={r.hoopIronRollM ?? null} min={1} max={1000} help="If set, the order also shows how many rolls."
+            onCommit={(n) => d.patch({ rules: { hoopIronRollM: n ?? undefined } })} />
         </div>
       </details>
       {d.error && <Banner tone="error">{d.error}</Banner>}

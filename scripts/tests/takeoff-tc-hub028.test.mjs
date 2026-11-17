@@ -35,7 +35,7 @@ import { TIMBER_STOCK_GRID, timberStockPolicy } from "../../shared/takeoff/engin
 import { selectStock } from "../../shared/takeoff/engine/stock.js";
 import {
   CALCULATION_VERSION, TIMBER_GRID, TIMBER_GRID_SOURCE, TIMBER_PRESETS, TIMBER_PURPOSES, WALLS_PURPOSE, WALL_FRAMING_RULES, WALL_LONG_PLATE_DEFAULT,
-  WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_DEFAULTS_SOURCE, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
+  WALL_PARTS, WALL_PART_DEFAULTS, WALL_PART_DEFAULTS_SOURCE, WALL_PART_DEFAULT_MAX_MM, WALL_PART_LABELS, computeWorkspace as computeWorkspaceRaw, describeFamilySpec, familyIdentity, familyProblems, getMethod, isLvlTimber,
   longPlateStockLengths, methodFor, methodReads, normaliseFamilySpec, onTimberGrid, orderLineState, orderStatus, productionMethods, stockIdentityKey, timberProductFill,
   wallFramingDefaults, wallPartFill, wallPartProducts, WALL_STUDS_EACH_SIDE, applyTimberPreset, matchTimberChoice, timberPresetsFor,
 } from "../../shared/takeoff/index.js";
@@ -46,6 +46,8 @@ import { cleanMaterialContent } from "../../server/lib/takeoff/takeoffService.mj
 import { isWallsItem, lastWallHeight, lineStartHeight, toolsFor, usesWalls, wallFramingNotes, wallFramingText, wallFramingTotals, wallLongPlateOverMm, wallLongPlateOverText, wallPartText,
   wallPartsNeedText, wallPartsToFix, wallsNotCounted } from "../../src/components/takeoff/measure/tools.js";
 
+// HUB 033: hoop iron is on by default for every wall; these framing tests are about studs, plates and noggins, so its line is left out here (takeoff-tc-hub033 covers it)
+const computeWorkspace = (w) => { const c = computeWorkspaceRaw(w); return { ...c, scheduleLines: c.scheduleLines.filter((l) => !l.hoop) }; };
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); } }
 
@@ -861,7 +863,7 @@ t("Walls, the 2,700 example (round 2): 21 studs × 2,700, plates 2 × 6,000 + 2 
     ["plates", "plates", "Plates 90 × 45 MGP15 H2 — 6,000 mm length"], ["plates", "plates", "Plates 90 × 45 MGP15 H2 — 4,200 mm length"],
     ["noggins", "noggins", "Noggins 90 × 35 MGP15 H2 — 4,800 mm length"], ["noggins", "noggins", "Noggins 90 × 35 MGP15 H2 — 1,800 mm length"]]);
   // never a king, jack, trimmer or lintel; one plain "aren't counted" note, which doesn't block (quantity stays incomplete, as Studs)
-  assert.deepEqual([...new Set(r.demands.map((d) => d.role))].sort(), ["bottom-plate", "noggin", "stud", "top-plate"]);
+  assert.deepEqual([...new Set(r.demands.map((d) => d.role))].filter((x) => x !== "hoop iron").sort(), ["bottom-plate", "noggin", "stud", "top-plate"]);
   assert.ok(!r.demands.some((d) => /king|jack|trimmer|lintel/i.test(`${d.role} ${d.label}`)));
   assert.deepEqual(msgs(c), [["opening_framing_not_counted", false, NOT_COUNTED], ["stock_max_unset", false, STUDS_NO_MAX]]);
   assert.deepEqual([wl(c, "Wall 1").openingsNotCounted, wl(c, "Wall 2").openingsNotCounted], [["d1"], ["o1"]]);

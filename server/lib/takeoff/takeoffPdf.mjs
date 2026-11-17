@@ -416,7 +416,7 @@ function draw(doc, snap, opts) {
   // longest first, total LM (P/M per metre) or EA (precut studs). Snapshots from before @5 have no supplierGroups.
   if ((snap.supplierGroups || []).length) {
     need(60);
-    doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T("TIMBER"), M, y, { width: CW });
+    doc.font(fonts.bold).fontSize(12).fillColor(INK).text(T((snap.supplierGroups.some((g) => g.rows.some((r) => !r.manual && r.unit !== "STRAP")) ? "TIMBER" : "ORDER")), M, y, { width: CW });
     y = doc.y + 4;
     doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(T("Cut lists read count/length in metres, longest first. P/M = per metre (total LM is the stock bought); EA = precut, counted each."), M, y, { width: CW });
     y = doc.y + 6;
@@ -427,14 +427,16 @@ function draw(doc, snap, opts) {
       doc.font(fonts.bold).fontSize(10).fillColor(INK).text(T(g.heading), M + 6, y + 4, { width: CW - 12, lineBreak: false });
       y += 22;
       for (const r of g.rows) {
-        const prodW = CW * 0.36, cutX = M + prodW + 8, cutW = CW - prodW - 8 - 70;
+        const prodW = CW * 0.36, cutX = M + prodW + 8, cutW = CW - prodW - 8 - (r.totalText ? 134 : 70);
         doc.font(fonts.regular).fontSize(9);
         const cutText = r.unit === "EA" ? "" : r.cutText || "";
-        const h = Math.max(15, doc.heightOfString(T(r.product), { width: prodW }) + 5, doc.heightOfString(T(cutText || " "), { width: cutW }) + 5);
+        const totalText = r.totalText || (r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`);
+        const prodText = r.manual ? `${r.product} (added by hand)` : r.product;
+        const h = Math.max(15, doc.heightOfString(T(prodText), { width: prodW }) + 5, doc.heightOfString(T(cutText || " "), { width: cutW }) + 5);
         need(h);
-        doc.fillColor(r.problem ? "#b45309" : INK).text(T(r.product), M + 4, y + 3, { width: prodW });
+        doc.fillColor(r.problem ? "#b45309" : INK).text(T(prodText), M + 4, y + 3, { width: prodW });
         if (cutText) doc.fillColor(INK).text(T(cutText), cutX, y + 3, { width: cutW });
-        doc.font(fonts.bold).fillColor(INK).text(T(r.unit === "EA" ? `${r.quantity} EA` : `${r.totalLm.toFixed(2)} LM`), M + CW - 66, y + 3, { width: 66, align: "right", lineBreak: false });
+        doc.font(fonts.bold).fillColor(INK).text(T(totalText), M + CW - (r.totalText ? 130 : 66), y + 3, { width: r.totalText ? 130 : 66, align: "right", lineBreak: false });
         doc.save().moveTo(M, y + h).lineTo(M + CW, y + h).lineWidth(0.4).strokeColor(HAIR).stroke().restore();
         y += h;
       }

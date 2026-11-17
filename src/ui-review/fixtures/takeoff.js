@@ -338,7 +338,7 @@ const fail = (status, error, code) => ({ __status: status, body: { ok: false, er
  * Wall inputs exactly as the server keeps them (takeoffService.mjs cleanInputs): known keys only, so a field the
  * server would drop is dropped here too. HUB 022: runId + seq are kept only as a valid pair (a uuid and 1–1,000).
  */
-const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon", "studCentresMm", "loadBearing"];
+const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon", "studCentresMm", "loadBearing", "noHoopIron"];
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function serverWallInputs(i) {
   if (!i) return i;

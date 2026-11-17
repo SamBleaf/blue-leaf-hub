@@ -1712,7 +1712,7 @@ await t("HUB 028 step 3: the REAL server works out a Walls run like the shared e
   const oid = id();
   const o = await SP(`/workspaces/${w}/orders`, { category: "timber_cladding", id: oid, supplierId: supplier });
   assert.equal(o.status, 200, JSON.stringify(o.data));
-  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls));
+  const sched = (await S(`/workspaces/${w}/orders`)).data.scheduleLines.filter((l) => l.jobMaterialIds.includes(walls) && !l.hoop);   // HUB 033: the hoop iron line has its own tests
   const pr = await call("PATCH", `/api/takeoff/orders/${oid}`, { body: { expectedRevision: o.data.order.revision, lines: sched.map((l) => ({ bucketKey: l.bucketKey, quantity: l.quantity })) } });
   assert.equal(pr.status, 200, JSON.stringify(pr.data));
   const stored = (await q("SELECT quantity, finished_length_mm, item FROM takeoff_order_lines WHERE order_id=$1 ORDER BY item->>'description'", [oid])).rows;

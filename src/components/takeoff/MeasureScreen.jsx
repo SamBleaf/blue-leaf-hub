@@ -1008,6 +1008,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (typeof v === "boolean") inputs.loadBearing = v; else delete inputs.loadBearing;
     record({ redo: partial({ measurements: [{ ...m, inputs }] }), undo: partial({ measurements: [m] }) });
   }
+  /** Select → Hoop iron on a wall (Sam, 18 Nov 2026): on for every wall; this wall's switch turns it off. Back on DELETES the key. */
+  function setWallHoopIron(m, on) {
+    const inputs = { ...(m.inputs || {}) };
+    if (on) delete inputs.noHoopIron; else inputs.noHoopIron = true;
+    record({ redo: partial({ measurements: [{ ...m, inputs }] }), undo: partial({ measurements: [m] }) });
+  }
   /** A tap in Wet-area walls mode: that wall of THIS Walls item goes to 450, or back to the item's centres. */
   function wetTap(p) {
     const walls = materialWalls();
@@ -2021,6 +2027,18 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                       const own = typeof sel.inputs?.loadBearing === "boolean" ? sel.inputs.loadBearing : (typeof selMat.rules?.carriesRoof === "boolean" ? selMat.rules.carriesRoof : null);
                       return <button key={k} type="button" aria-pressed={own === v} onClick={() => setWallCarries(sel, v === selMat.rules?.carriesRoof ? null : v)}
                         className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${own === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {rect && canEdit && isWallsItem(selMat) && (
+                <div className="space-y-1" data-wall-hoopiron="">
+                  <p className="text-[11px] text-muted">Hoop iron on this wall: 2 straps of 0.7 m for every 1,200 mm of wall</p>
+                  <div className="flex gap-2">
+                    {[["on", "On", true], ["off", "Off", false]].map(([k, text, v]) => {
+                      const on = sel.inputs?.noHoopIron !== true;
+                      return <button key={k} type="button" aria-pressed={on === v} onClick={() => setWallHoopIron(sel, v)}
+                        className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
                     })}
                   </div>
                 </div>

@@ -33,7 +33,7 @@
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
-import { TIMBER_GRID, isMgp10Grade, onGrid as onGridFor, timberGridFor } from "./families.js";
+import { MGP10_DEFAULT_MAX_MM, TIMBER_GRID, isMgp10Grade, onGrid as onGridFor, timberGridFor } from "./families.js";
 
 /** 06 internal geometric precision for station generation (never used for quantities or stock rounding). */
 const GEOM_TOL_MM = 0.001;
@@ -269,7 +269,8 @@ export function timberStockPolicy(opts = {}) {
     fail(`Timber stock is ${GRID_TEXT} for every supplier — restrict it with the product maximum or unavailable lengths instead.`, "stock");
   }
   if (mgp && kind !== undefined && kind !== grid.kind) fail(`MGP10 stock is ${MGP10_TEXT} — restrict it with the product maximum or unavailable lengths instead.`, "stock");
-  const maxMm = opts.maxMm ?? null;
+  // Sam, 18 Nov 2026: an MGP10 product with no longest length set defaults to the top of its grid so short pieces can share its lengths
+  const maxMm = opts.maxMm ?? (mgp ? MGP10_DEFAULT_MAX_MM : null);
   if (maxMm !== null) num(maxMm, "Longest stock", { min: grid.minMm });
   const unavailable = [...new Set(list(unavailableMm, "Unavailable lengths").flatMap((l) => {
     num(l, "Unavailable length", { min: grid.minMm });
@@ -322,10 +323,12 @@ function setup(input, role) {
   // HUB 028: a Walls part names itself in its identity problem ("Studs: …"); everything else keeps the plain
   // "Timber" wording. The stock note is never labelled (a Walls item says it once, naming the parts without one).
   checkIdentity(ctx, identity, role, text(input.label) || "Timber");
-  if (stockPolicy.maxMm === null) {
+  // an MGP10 product with no longest length uses the grid's 6,000 (an assumed default): still said, so it is confirmed before ordering
+  const maxAssumed = isMgp10Grade(identity.grade) && (input.stock?.maxMm ?? null) === null;
+  if (stockPolicy.maxMm === null || maxAssumed) {
     ctx.problems.push(problem("stock_max_unset", STOCK_MAX_UNSET_NOTE, { blocking: false }));
   }
-  ctx.explain.push(`Stock: ${isMgp10Grade(identity.grade) ? MGP10_TEXT : GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm`}`
+  ctx.explain.push(`Stock: ${isMgp10Grade(identity.grade) ? MGP10_TEXT : GRID_TEXT}${stockPolicy.maxMm === null ? ", longest not set" : `, longest ${fmt(stockPolicy.maxMm)} mm${maxAssumed ? " (assumed: not set)" : ""}`}`
     + `${stockPolicy.unavailableMm.length ? `, unavailable ${stockPolicy.unavailableMm.map(fmt).join("/")} mm` : ""}`
     + `${stockPolicy.kerfMm !== undefined ? `, kerf ${fmt(stockPolicy.kerfMm)} mm${stockPolicy.kerfConfirmed ? "" : " (unconfirmed)"}` : ""}`
     + `${stockPolicy.endTrimMm !== undefined ? `, end trim ${fmt(stockPolicy.endTrimMm)} mm` : ""}; `
@@ -405,7 +408,7 @@ function explicitMember(ctx, m, { owner, lengths, allowanceMm, idParts, sourceRe
   if (m.stock !== undefined && (typeof m.stock !== "object" || m.stock === null)) fail(`${owner} ${id}: stock settings are invalid.`, "members");
   const stockPolicy = !m.stock && identityKey(identity) === identityKey(ctx.identity) ? ctx.stockPolicy
     : timberStockPolicy({ sharePieces: false, ...(m.stock || {}), grade: identity.grade });
-  if (stockPolicy !== ctx.stockPolicy && stockPolicy.maxMm === null) {
+  if (stockPolicy !== ctx.stockPolicy && (stockPolicy.maxMm === null || (isMgp10Grade(identity.grade) && (m.stock?.maxMm ?? null) === null))) {
     ctx.problems.push(problem("stock_max_unset", `${owner} ${id}: the longest available stock isn't set for this product — confirm it before ordering.`, { blocking: false }));
   }
   const materialId = text(m.materialId) || ctx.materialId;
