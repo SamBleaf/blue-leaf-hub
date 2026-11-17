@@ -22,7 +22,7 @@ import {
 import { clean, isUnfinished, hasRoomBrief, roomBriefRecord, disagreeingScope, roomRow, architectBriefModel, labelOf } from "../../../../lib/briefModel.js";
 import {
   briefSeed, roomSeed, standardBriefText, toggleAnswerList, connectedFrom, connectCandidates, earlierWords, workWordFor, keepWorkPlan, changeWorkPlan,
-  readdable, contractFixed, setRoomScope, renameRoomMeta, moveRoomToFloor, floorChoices, floorKey, normaliseFloor, workLabel, savedFloors, floorsPatch,
+  readdIfGone, contractFixed, setRoomScope, renameRoomMeta, moveRoomToFloor, floorChoices, floorKey, normaliseFloor, workLabel, savedFloors, floorsPatch,
 } from "../../../../lib/roomScreen.js";
 import { useEscapeLayer } from "../../../../lib/overlayFlag.js";
 import { ChoiceChips } from "./ChoiceRow.jsx";
@@ -80,10 +80,12 @@ export function FloorChips({ reg, room, mutateMeta, readOnly, onDone }) {
 
 /**
  * "An earlier answer says “New kitchen”, but this room is set to Renovated. Only one can print." [Keep Renovated] deletes
- * that record; [Change to New] sets the Work and deletes the records that now disagree. Both offer Undo (the records come
- * back under a fresh id). After the contract the baseline guard would refuse the delete, so the banner says to use a variation.
+ * that record; [Change to New] sets the Work and deletes the records that now disagree. Both offer Undo: with the store's
+ * undeleteItem the very records come back under their own ids (so nothing that points at them is cut off); without it a
+ * copy is re-added, only for a record that really went. After the contract the baseline guard would refuse the delete, so
+ * the banner says to use a variation.
  */
-export function EarlierAnswerBanner({ reg, room, mutateMeta, deleteItem, addItem, readOnly, onSettled }) {
+export function EarlierAnswerBanner({ reg, room, mutateMeta, deleteItem, addItem, undeleteItem, readOnly, onSettled }) {
   const { toast, show, clear } = useToast();
   const latest = useRef(reg);
   latest.current = reg;
@@ -96,14 +98,19 @@ export function EarlierAnswerBanner({ reg, room, mutateMeta, deleteItem, addItem
   const target = workWordFor(first);
   const plan = target ? changeWorkPlan(reg, room, target) : null;
   const fixed = contractFixed(first) || (plan && plan.remove.some(contractFixed));
+  const canUndo = !!(undeleteItem || addItem);
   const restore = (items, scope) => () => {
     if (scope) mutateMeta({ rooms: setRoomScope(latest.current.meta.rooms, room.id, scope) });
-    if (addItem) items.forEach((i) => addItem(readdable(i)));
+    for (const i of items) {
+      if (undeleteItem) { undeleteItem(i); continue; }
+      const back = readdIfGone(latest.current, i);
+      if (back && addItem) addItem(back);
+    }
   };
   const keep = () => {
     const { remove } = keepWorkPlan(reg, room);
     remove.forEach((i) => deleteItem(i.id));
-    show(`Removed “${words}”.`, addItem ? restore(remove, null) : null);
+    show(`Removed “${words}”.`, canUndo ? restore(remove, null) : null);
     onSettled?.();
   };
   const change = () => {
@@ -168,7 +175,7 @@ function HowItReads({ reg, context, room }) {
   );
 }
 
-export default function RoomBriefCard({ reg, room, context, upsertItem, updateItem, deleteItem, mutateMeta, readOnly, compact = false, onOpenRoom, addItem, onTypingChange, headingRef }) {
+export default function RoomBriefCard({ reg, room, context, upsertItem, updateItem, deleteItem, mutateMeta, readOnly, compact = false, onOpenRoom, addItem, undeleteItem, onTypingChange, headingRef }) {
   const seedId = useRef(genId());
   const mhIds = useRef({});
   const [moreRooms, setMoreRooms] = useState(false);
@@ -263,7 +270,7 @@ export default function RoomBriefCard({ reg, room, context, upsertItem, updateIt
         <div className="space-y-1.5"><p className={label13}>Work</p>
           <WorkControl full room={room} readOnly={readOnly} onChange={(k) => mutateMeta({ rooms: setRoomScope(rooms, room.id, k) })} />
         </div>
-        <EarlierAnswerBanner reg={reg} room={room} mutateMeta={mutateMeta} deleteItem={deleteItem} addItem={addItem} readOnly={readOnly} />
+        <EarlierAnswerBanner reg={reg} room={room} mutateMeta={mutateMeta} deleteItem={deleteItem} addItem={addItem} undeleteItem={undeleteItem} readOnly={readOnly} />
         {box}
         {connectsTo}
         {musts}

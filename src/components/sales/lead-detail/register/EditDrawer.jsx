@@ -41,6 +41,7 @@ import { useDialogFocus, useNarrow } from "./useRoomUi.js";
 const NOT_PRINTED_WORDS = {
   schedule: "Won't print here: it's in the Technical Selections Schedule.",
   client: "Won't print here: it's the client's choice, in the client's brief.",
+  waiting: "Won't print yet: it's still open and no one is named to settle it. Name who in the Actions list.",
   empty: "Won't print: it holds nothing yet.",
   office: "Won't print: it's kept for the office.",
 };
@@ -51,6 +52,24 @@ const FACT_FIELDS = {
 };
 const SITE_WORDS = "From public mapping. It can't be edited here — re-check if the site or address changed.";
 const MAPPING_DOWN = "Couldn't reach the mapping service. Nothing changed.";
+const RECHECK_SKIPPED = "Checked recently, so it wasn't run again. Nothing new.";
+
+/**
+ * What a Re-check says, from the route's answer (review R9): a lookup that ran says "Updated <the lookup's day>" from the
+ * stored context.site.enrichedAt (as the Project step does), never today's date by itself; one the server skipped (still
+ * running, or under 10 minutes old) says so in the route's own words; a refusal shows the route's plain message, and a
+ * network failure or a gateway page the plain fallback. { text, updated }: updated → reload the context.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- pure words for the drawer's Re-check, exported for the node tests
+export function recheckMessage(r, now = new Date()) {
+  if (r?.ok && r.data?.skipped) return { text: clean(r.data.message) || RECHECK_SKIPPED, updated: false };
+  if (r?.ok) {
+    const at = r.data?.context?.site?.enrichedAt;
+    const day = adelaideDay(at && Number.isFinite(Date.parse(at)) ? at : now.toISOString());
+    return { text: day ? `Updated ${day}` : "Updated", updated: true };
+  }
+  return { text: !r?.network && clean(r?.body?.error) ? clean(r.body.error) : MAPPING_DOWN, updated: false };
+}
 const textBtn = "focus-ring inline-flex min-h-[44px] items-center rounded px-1 text-sm font-bold text-primary hover:underline";
 
 /**
@@ -173,8 +192,9 @@ function SiteBody({ target, lead, readOnly, reloadContext }) {
   async function recheck() {
     setMsg("Checking public mapping…");
     const r = await apiPost(`/api/register/leads/${lead.id}/site/recheck`, {});
-    if (r.ok) { setMsg(`Updated ${adelaideDay(new Date().toISOString())}`); reloadContext?.(); }
-    else setMsg(!r.network && clean(r.body?.error) ? clean(r.body.error) : MAPPING_DOWN);
+    const said = recheckMessage(r);
+    setMsg(said.text);
+    if (said.updated) reloadContext?.();
   }
   return (
     <div className="space-y-2" data-testid="drawer-site">
@@ -206,7 +226,7 @@ function SalesBody({ target, onClose }) {
 }
 
 export default function EditDrawer({
-  target, lead, reg, context, actor, readOnly, saveStateOf, updateItem, deleteItem, upsertItem, addItem, mutateMeta, replaceItems, patchLead, reloadContext,
+  target, lead, reg, context, actor, readOnly, saveStateOf, updateItem, deleteItem, upsertItem, addItem, undeleteItem, mutateMeta, replaceItems, patchLead, reloadContext,
   onPortalItem, onClose, onPreview, onNext, nextLabel, onOpenRoom, saveText,
 }) {
   const phone = useNarrow();
@@ -229,7 +249,7 @@ export default function EditDrawer({
         if (!rooms.length) return <p className="text-sm text-muted">This room has been removed.</p>;
         return rooms.map((room) => (
           <div key={room.id} className="space-y-2 border-b border-hairline pb-3 last:border-0">
-            <RoomBriefCard reg={reg} room={room} context={context} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} addItem={addItem} mutateMeta={mutateMeta}
+            <RoomBriefCard reg={reg} room={room} context={context} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} addItem={addItem} undeleteItem={undeleteItem} mutateMeta={mutateMeta}
               readOnly={readOnly} compact onOpenRoom={onOpenRoom ? () => onOpenRoom(room.id) : undefined} />
           </div>
         ));
@@ -256,10 +276,12 @@ export default function EditDrawer({
             </div>
           </div>
         );
+        // Saved as it is typed, like every other words box (the store batches the saves), so Escape, ×, the scrim and
+        // Preview again all keep what was typed (review R11: saved only on blur, Escape lost it).
         return (
           <label className="block space-y-1">
             <span className="text-[13px] text-muted">Drawings this brief is based on</span>
-            <input defaultValue={reg.meta.planRev || ""} disabled={readOnly} onBlur={(e) => clean(e.target.value) !== (reg.meta.planRev || "") && mutateMeta({ planRev: clean(e.target.value) })}
+            <DraftInput value={reg.meta.planRev || ""} tidy={clean} disabled={readOnly} onCommit={(v) => { if (clean(v) !== clean(reg.meta.planRev)) mutateMeta({ planRev: clean(v) }); }}
               placeholder="e.g. DA rev 3" className="inp min-h-[44px] w-full px-3 text-[16px] sm:text-[15px]" data-testid="drawer-planrev" />
           </label>
         );

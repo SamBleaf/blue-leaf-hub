@@ -6,11 +6,13 @@
  * ("Fix n" on the earlier-answer entry), N15 (the long guidance shows in the drawer), N16 (Re-check for every staff
  * member), N19 (section titles from briefSectionTitles), P3 (the delete question names the place; "Confirm the budget"),
  * P5 (only "Brief to follow." greys a room line; the budget line isn't grey), M1 (selects are 16 px on a phone), D1 (Sales
- * lines read only with "Change in Sales ›").
+ * lines read only with "Change in Sales ›"). Round 2: R6 (Delete all empty: references kept, Undo restores the very records),
+ * R9 (Re-check words from the route's answer), R11 (the drawing basis saves as it is typed), R12 (the issue bar is sticky only
+ * beside the two panes; the pack buttons are 44 px), R2 ("Not in this brief" lists the records still waiting). Round 3: M1 (a floor slot tapped then cleared is empty).
  *
  *   node scripts/tests/register-documents-ui.test.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,8 +35,8 @@ const out = join(REPO, "node_modules", ".cache", `register-documents-ui-${proces
 const entry = join(dir, "entry.jsx");
 writeFileSync(entry, `
 import { renderToStaticMarkup } from "react-dom/server";
-import EditDrawer from ${JSON.stringify(join(REG, "EditDrawer.jsx"))};
-import DocumentsStep, { PrintList, CheckEntries } from ${JSON.stringify(join(REG, "DocumentsStep.jsx"))};
+import EditDrawer, { recheckMessage } from ${JSON.stringify(join(REG, "EditDrawer.jsx"))};
+import DocumentsStep, { PrintList, CheckEntries, IssueBar } from ${JSON.stringify(join(REG, "DocumentsStep.jsx"))};
 import { Mini, Select } from ${JSON.stringify(join(REG, "ui.jsx"))};
 const noop = () => {};
 const store = { mutateMeta: noop, replaceItems: noop, upsertItem: noop, updateItem: noop, deleteItem: noop, addItem: noop, patchLead: async () => true, reloadContext: noop, onPortalItem: noop };
@@ -42,6 +44,8 @@ export const drawer = (props) => renderToStaticMarkup(<EditDrawer actor={{ id: "
 export const step = (props) => renderToStaticMarkup(<DocumentsStep stage="consultants" info={{}} flush={async () => true} saveStateOf={() => "saved"} actor={{ id: "u1" }} saveText="" {...store} {...props} />);
 export const list = (props) => renderToStaticMarkup(<PrintList onlyWarned={false} setOnlyWarned={noop} onOpen={noop} previewLines={null} {...props} />);
 export const entries = (props) => renderToStaticMarkup(<CheckEntries onFix={noop} onReview={noop} onAskDelete={noop} onDelete={noop} onCancelDelete={noop} {...props} />);
+export const issueBar = (props) => renderToStaticMarkup(<IssueBar docKey="architect_brief" recipient={{ name: "", email: "" }} setRecipient={noop} canIssue={false} onIssue={noop} label="Issue R01" {...props} />);
+export { recheckMessage };
 export const mini = () => renderToStaticMarkup(<Mini label="Issue to"><input data-x="1" /></Mini>);
 export const select = (className) => renderToStaticMarkup(<Select value="" onChange={noop} options={[["a", "A"]]} className={className} />);
 `);
@@ -142,6 +146,79 @@ try {
   ok(`the delete question names the place: 'Delete ${empty?.targets.length} empty Laundry answers? They hold nothing.'`, !!empty && eh.includes(`Delete ${empty.targets.length} empty Laundry answer${empty.targets.length === 1 ? "" : "s"}? They hold nothing.`), eh.slice(-400));
   const rh = text(R.entries({ entries: blockers, tone: "red", reg: register }));
   ok("red: the room-brief rule reads 'Go room by room', the recipient 'Name the architect', the stone 'Fix'", rh.includes("Go room by room") && rh.includes("Name the architect") && /Fix/.test(rh), rh.slice(0, 600));
+
+  section("Round 2: the issue bar and the pack buttons (R12)");
+  const reason = "Fix the 3 items in red first.";
+  const ib = R.issueBar({ sticky: false, reason });
+  ok("in a narrower column (or on a phone) the issue bar isn't sticky: it sits after the line list", !/class="[^"]*\bsticky\b/.test(ib) && /data-sticky="false"/.test(ib) && /class="border-t border-hairline pt-3"/.test(ib), ib.slice(0, 300));
+  const ibs = R.issueBar({ sticky: true, stageInset: 52, reason });
+  ok("beside the two panes it is sticky, above the app nav and the stage bar", /class="sticky bottom-\[76px\] z-20[^"]*md:bottom-0"/.test(ibs) && /style="bottom:52px"/.test(ibs) && /data-sticky="true"/.test(ibs), ibs.slice(0, 300));
+  const band = ibs.split('data-testid="issue-architect_brief"')[0].split("<div").at(-1) + ibs.split('data-testid="issue-architect_brief"')[1];
+  ok("…and one row: the reason sits beside Issue R01 in the button's band, not on a line under it", /sm:flex-row sm:items-center/.test(band) && band.includes(`data-testid="issue-reason">${reason}</p>`), band.slice(0, 400));
+  ok("…with no reason, nothing under or beside the button", !/issue-reason/.test(R.issueBar({ sticky: true })));
+  ok("the step puts the bar in sticky mode only in the two-pane layout", /<IssueBar [^>]*sticky=\{wide && !phone\}/.test(readFileSync(join(REG, "DocumentsStep.jsx"), "utf8")));
+  const stepH = R.step({ lead, reg: register, context });
+  const packs = [...stepH.matchAll(/<button[^>]*data-testid="pack-[a-z]+"[^>]*>/g)].map((x) => x[0]);
+  ok("the Coordination requests pack buttons are 44 px with 13 px words", packs.length === 7 && packs.every((b) => /min-h-\[44px\]/.test(b) && /text-\[13px\]/.test(b) && !/text-\[11px\]|py-1\b/.test(b)), packs[0]);
+
+  section("Round 2: 'Not in this brief' lists what's still waiting (R2)");
+  const wnp = [{ id: "i25", group: "waiting", reason: "waiting" }, { id: "i45", group: "later_kind", reason: "later_kind" }];
+  const wl = text(R.list({ reg: register, lines, notPrinted: wnp, marks, titles, defaultOpenNot: true }));
+  ok("a record still open with no one named has its own group", wl.includes("Still open, with no one named (in the Actions list) (1)"), wl.slice(wl.indexOf("Not in this brief"), wl.indexOf("Not in this brief") + 300));
+  ok("…and a group this screen doesn't know is still listed, never hidden", wl.includes("Other records (1)"));
+  const wd = text(R.drawer({ target: { kind: "record", ids: ["i25"], reasons: { i25: "waiting" }, line: "Waiting" }, lead, reg: register, context }));
+  ok("the drawer says why it waits, in one sentence", wd.includes("Won't print yet: it's still open and no one is named to settle it. Name who in the Actions list."), wd.slice(0, 300));
+
+  section("Round 2: Re-check says what the route did (R9)");
+  const now = new Date("2026-11-17T03:00:00Z");
+  const ran = R.recheckMessage({ ok: true, data: { skipped: false, context: { site: { enrichedAt: "2026-11-17T02:58:00Z" } } } }, now);
+  ok("a lookup that ran: 'Updated <its day>', from the stored enrichedAt, and the context reloads", ran.text === "Updated 17 Nov" && ran.updated === true, JSON.stringify(ran));
+  const old = R.recheckMessage({ ok: true, data: { skipped: false, context: { site: { enrichedAt: "2026-11-09T02:00:00Z" } } } }, now);
+  ok("…the lookup's day, never today's by itself", old.text === "Updated 9 Nov", JSON.stringify(old));
+  const skip = R.recheckMessage({ ok: true, data: { skipped: true, reason: "running", message: "Public mapping is already being checked for this project. Try again in a minute.", context: { site: { enrichedAt: "2026-11-02T02:00:00Z" } } } }, now);
+  ok("skipped by the server: its own words, no 'Updated', no reload", skip.text === "Public mapping is already being checked for this project. Try again in a minute." && !skip.updated && !/Updated/.test(skip.text), JSON.stringify(skip));
+  const skip2 = R.recheckMessage({ ok: true, data: { skipped: true, reason: "recent", context: {} } }, now);
+  ok("…and plain words when it sends none", skip2.text === "Checked recently, so it wasn't run again. Nothing new." && !skip2.updated, JSON.stringify(skip2));
+  const refused = R.recheckMessage({ ok: false, status: 429, error: "x", body: { ok: false, error: "Couldn't reach the mapping service a moment ago. Try again in a minute. Nothing changed.", code: "SITE_LOOKUP" } }, now);
+  ok("a refusal shows the route's plain message", refused.text === "Couldn't reach the mapping service a moment ago. Try again in a minute. Nothing changed." && !refused.updated, JSON.stringify(refused));
+  const gateway = R.recheckMessage({ ok: false, status: 502, error: "Request failed (HTTP 502)", body: null }, now);
+  const offline = R.recheckMessage({ ok: false, network: true, error: "Failed to fetch" }, now);
+  ok("a gateway page or no connection: the plain fallback, never 'HTTP 502' or the browser's words", gateway.text === "Couldn't reach the mapping service. Nothing changed." && offline.text === gateway.text, JSON.stringify([gateway, offline]));
+  const drawerSrc = readFileSync(join(REG, "EditDrawer.jsx"), "utf8");
+  ok("the drawer's Re-check goes through recheckMessage (no 'Updated <today>' of its own)", /const said = recheckMessage\(r\)/.test(drawerSrc) && !/Updated \$\{adelaideDay\(new Date\(\)/.test(drawerSrc));
+
+  section("Round 2: the drawing basis keeps what was typed (R11)");
+  const mt = R.drawer({ target: { kind: "meta", key: "planRev", line: "Drawing basis: DA rev 3" }, lead, reg: register, context });
+  ok("the box shows the stored drawing basis, 16 px on a phone", /<input[^>]*value="DA rev 3"[^>]*data-testid="drawer-planrev"|<input[^>]*data-testid="drawer-planrev"[^>]*value="DA rev 3"/.test(mt) && /drawer-planrev/.test(mt) && /text-\[16px\]/.test(mt.match(/<input[^>]*drawer-planrev[^>]*>/)?.[0] || ""), mt.slice(0, 400));
+  const planBox = drawerSrc.slice(drawerSrc.lastIndexOf("<", drawerSrc.indexOf('data-testid="drawer-planrev"')), drawerSrc.indexOf('data-testid="drawer-planrev"'));
+  ok("it saves as it is typed (a DraftInput committing each change), not only on blur, so Escape, ×, the scrim and Preview again keep it",
+    /^<DraftInput /.test(planBox) && /onCommit=/.test(planBox) && /mutateMeta\(\{ planRev: clean\(v\) \}\)/.test(planBox) && !/onBlur|defaultValue/.test(planBox), planBox.slice(0, 300));
+
+  section("Round 2: Delete all empty and its Undo (R6)");
+  const stepSrc = readFileSync(join(REG, "DocumentsStep.jsx"), "utf8");
+  const del = stepSrc.slice(stepSrc.indexOf("function deleteEmpty("), stepSrc.indexOf("const reviewEmpty"));
+  ok("only records deletableEmpty still allows are deleted (a typed or picked zone, a link or a received document keeps one)", /deletableEmpty\(reg, \{ keep: keepIds \}\)/.test(del) && /may\.has\(i\.id\)/.test(del), del.slice(0, 300));
+  ok("Undo puts back the very records, under their own ids (undeleteItem), never copies under new ids", /undeleteItem \? \(\) => gone\.forEach\(\(i\) => undeleteItem\(i\)\)/.test(del) && !/addItem|readdable/.test(del), del);
+  ok("the step takes undeleteItem from the store, and the received documents' linked records are kept", /\bundeleteItem, upsertItem\b/.test(stepSrc) && /contentChecks\("architect_brief", reg, context, liveModel, \{ keepIds \}\)/.test(stepSrc) && /register_item_ids/.test(stepSrc.slice(stepSrc.indexOf("const keepIds"), stepSrc.indexOf("const liveContent"))));
+  const linked = contentChecks("architect_brief", register, context, null, { keepIds: ["i63"] }).find((c) => c.action === "delete_empty");
+  ok("a record a received document links isn't offered (the Laundry offers 2, not 3)", !!linked && linked.targets.map((t) => t.id).join() === "i62,i64", JSON.stringify(linked?.targets));
+
+  section("Round 3: a floor slot tapped then cleared is empty; an Other zone with words is not (M1)");
+  const slotReg = { meta: register.meta, items: [...register.items,
+    makeItem({ id: "sl1", promptKey: "W-017", itemKind: "selection", category: "flooring", answer: { v: 1, state: "not_discussed", selected: [], zone: { key: "bedroom_floor", label: "Bedroom floor" } } }),
+    makeItem({ id: "oz1", promptKey: "W-017", itemKind: "selection", category: "flooring", answer: { v: 1, state: "not_discussed", selected: [], zone: { key: "other_zone", label: "Rear studio walls" } } })] };
+  const slotModel = architectBriefModel(slotReg, context, {});
+  const slotEmpty = contentChecks("architect_brief", slotReg, context, slotModel).filter((c) => c.action === "delete_empty");
+  const throughout = slotEmpty.find((c) => c.place === "Throughout");
+  ok("'Delete all empty' offers the cleared Bedroom floor slot (Throughout), never the Other zone", !!throughout && throughout.targets.map((t) => t.id).join() === "sl1"
+    && !slotEmpty.some((c) => c.targets.some((t) => t.id === "oz1")), JSON.stringify(slotEmpty.map((c) => [c.place, c.targets.map((t) => t.id)])));
+  const slotQ = text(R.entries({ entries: [throughout].filter(Boolean), tone: "amber", reg: slotReg, confirmKey: throughout?.key }));
+  ok("…and the entry names it and asks 'Delete 1 empty whole-house answer? They hold nothing.'", slotQ.includes("prints nothing: Bedroom floor.") && slotQ.includes("Delete 1 empty whole-house answer? They hold nothing."), slotQ.slice(-300));
+  const groups = Object.fromEntries(slotModel.notPrinted.filter((x) => ["sl1", "oz1"].includes(x.id)).map((x) => [x.id, x.group]));
+  ok("'Not in this brief' lists the slot as Empty, not 'In the Technical Selections Schedule instead'", groups.sl1 === "empty" && groups.oz1 === "schedule", JSON.stringify(groups));
+  const sl = text(R.list({ reg: slotReg, lines: architectBriefLines(slotModel, {}), notPrinted: slotModel.notPrinted, marks: () => "", titles: briefSectionTitles(slotModel), defaultOpenNot: true }));
+  const emptyCount = slotModel.notPrinted.filter((x) => x.group === "empty").length;
+  ok(`…rendered: 'Empty (${emptyCount})' counts it`, sl.includes(`Empty (${emptyCount})`) && emptyCount === slotModel.notPrinted.filter((x) => x.group === "empty" && x.id !== "sl1").length + 1, sl.slice(sl.indexOf("Not in this brief"), sl.indexOf("Not in this brief") + 500));
 } finally {
   rmSync(dir, { recursive: true, force: true });
   try { rmSync(out, { force: true }); } catch { /* gone */ }

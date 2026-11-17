@@ -1,11 +1,12 @@
 /**
  * RoomScreenParts — the cards of a room screen below the room brief (REGISTER_SCREENS_SPEC.md S3 cards 5, 7 and 8, S3p):
  *   ChoicesCard        "Choices for this room": the primary rows, "More choices (n) ▾", and last "Office only (n) ▸"
- *   ActionsInRoom      "Actions in this room": the room's open points (briefModel.openPoints, the Actions rule), ✓ to
- *                      close one, and "+ Needs action from…" (a new follow-up for this room with "What's needed?" focused)
+ *   ActionsInRoom      "Actions in this room": the room's open points (briefModel.openPoints, the Actions rule, one row
+ *                      per record as in the Actions list), ✓ to close one, and "+ Needs action from…" (a new follow-up
+ *                      for this room with "What's needed?" focused)
  *   OtherRecorded      "Other things recorded here (n) ▸": every record of the room no row shows, each with Remove
  *                      (never for a record in the signed contract or on the client portal: the server would refuse it;
- *                      Undo puts a record back only when it really went)
+ *                      Undo puts the same record back, under its own id, only when it really went)
  *
  * Which question goes in which group, and what no row shows, is roomLayout() in src/lib/roomScreen.js; this file only
  * draws it. Repeat questions keep one row per record (ChoiceRepeat / ApplianceRow) with their repeat keys.
@@ -252,15 +253,24 @@ function OtherRow({ reg, room, item, actor, saveState, updateItem, deleteItem, o
   );
 }
 
-/** "Other things recorded here (n) ▸": shown only when a record of the room has no row of its own. */
-export function OtherRecorded({ reg, room, items, actor, saveState, updateItem, deleteItem, addItem, onPortalItem, readOnly, onToast, onOpenRecord }) {
+/**
+ * "Other things recorded here (n) ▸": shown only when a record of the room has no row of its own. Remove offers Undo:
+ * with the store's undeleteItem the very record comes back under its own id (links to it and its documents hold);
+ * without it a copy is re-added, and only when the record really went.
+ */
+export function OtherRecorded({ reg, room, items, actor, saveState, updateItem, deleteItem, addItem, undeleteItem, onPortalItem, readOnly, onToast, onOpenRecord }) {
   const [open, setOpen] = useState(false);
   // Undo reads the register as it is when tapped: a delete the server refused has put the record back under its own id,
-  // and re-adding a copy then would list it twice.
+  // and re-adding a copy then would list it twice (undeleteItem checks the same).
   const latest = useRef(reg);
   latest.current = reg;
   if (!items.length) return null;
-  const onRemoved = (item) => onToast?.("Removed.", addItem ? () => { const back = readdIfGone(latest.current, item); if (back) addItem(back); } : null);
+  const undo = (item) => {
+    if (undeleteItem) return () => { undeleteItem(item); };
+    if (addItem) return () => { const back = readdIfGone(latest.current, item); if (back) addItem(back); };
+    return null;
+  };
+  const onRemoved = (item) => onToast?.("Removed.", undo(item));
   return (
     <section className="rounded-card border border-hairline bg-surface" data-testid="other-recorded">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={`${disclosure} text-muted`}>

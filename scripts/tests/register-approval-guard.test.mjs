@@ -11,6 +11,7 @@ import { saveRegister, loadRegister, promoteRegisterToProject, leadApprovalReaso
 import { buildRegisterFixture } from "../../server/lib/registerDocuments.mjs";
 import { buildClientBriefPayload, buildSelectionsSchedulePayload } from "../../server/lib/documents/documentPayloads.mjs";
 import { makeItem, makeRoom, emptyMeta, writeRegister } from "../../src/lib/register.js";
+import { approvalStep } from "../../src/lib/registerMerge.js";
 import { REGISTER_PROJECTS } from "../documents/fixtures/register-projects.mjs";
 
 let pass = 0, fail = 0;
@@ -107,6 +108,44 @@ section("Project mode refuses it before register_apply (whose SQL compares a sco
   const it2 = fresh.register.items.find((i) => i.id === "w15");
   const stepped = await refusal(saveRegister(w.sb, LEAD_ID, { changes: [{ ...it2, description: "Two steps up to the entry are fine", certainty: "proposed", evidence: null }] }, { actor: { name: "Staff" } }));
   ok("the screen's step-back saves", stepped === null);
+}
+
+section("Words typed one key at a time: the approval comes back with the approved words (R3), and the guard still holds");
+{
+  // The screen's own rule (registerMerge.approvalStep, as useRegister.updateItem applies it), one keystroke per save.
+  const type = (item, kept, description) => {
+    const step = approvalStep(item, { description }, kept);
+    return { item: makeItem({ ...item, ...step.partial, sync: item.sync }), kept: step.keep === undefined ? kept : step.keep, step };
+  };
+  for (const mode of ["lead", "project"]) {
+    const w = world({ lead: { selections_schedule: scratchpad() }, project: mode === "project" ? {} : null });
+    if (mode === "project") await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { id: null, name: "Staff" } });
+    const fresh = async () => (await loadRegister(w.sb, LEAD_ID, { autoPromote: false })).register.items.find((i) => i.id === "w15");
+    const save = (item) => refusal(saveRegister(w.sb, LEAD_ID, { changes: [item] }, { actor: { name: "Staff" } }));
+    let it = await fresh();
+    ok(`${mode}: starts approved`, it.certainty === "client_approved" && it.evidence?.by === "Sam Morris");
+    // One key typed: the screen steps it back, and that saves.
+    let t = type(it, null, "No steps at the entryx");
+    ok(`${mode}: the first key steps it back to Proposed and keeps the approved copy`, t.step.stepped && t.item.certainty === "proposed" && !t.item.evidence && t.kept?.evidence?.by === "Sam Morris");
+    ok(`${mode}: …which saves`, (await save(t.item)) === null);
+    it = await fresh();
+    ok(`${mode}: the server holds it as Proposed`, it.certainty === "proposed" && !it.evidence);
+    // Backspace: the approved words again, so the approval and its evidence come back, and that saves too.
+    t = type(it, t.kept, "No steps at the entry");
+    ok(`${mode}: typing the approved words back restores the approval and its evidence`, t.step.restored && t.item.certainty === "client_approved" && t.item.evidence?.by === "Sam Morris" && t.kept === null);
+    const back = await save(t.item);
+    ok(`${mode}: the server accepts the restored original words`, back === null, back?.message);
+    it = await fresh();
+    ok(`${mode}: stored approved again, with the original evidence`, it.certainty === "client_approved" && it.evidence?.at === EV.at && it.description === "No steps at the entry", flat(it));
+    // A stale or foreign screen that keeps the approval on changed words is still refused.
+    const e = await save({ ...it, description: "Two steps up to the entry are fine" });
+    ok(`${mode}: changed words with the approval kept are still refused`, e?.status === 409 && e.conflicts?.[0]?.reason === "reapproval_required", flat({ s: e?.status, c: e?.conflicts }));
+    ok(`${mode}: …and nothing was written`, (await fresh()).description === "No steps at the entry");
+    // A typo fixed before the save went: what is sent is the approved record, unchanged.
+    let quick = type(it, null, "No steps at the entryy");
+    quick = type(quick.item, quick.kept, "No steps at the entry");
+    ok(`${mode}: a typo fixed before the save leaves it exactly as approved`, quick.item.certainty === "client_approved" && quick.item.evidence?.by === "Sam Morris" && (await save(quick.item)) === null);
+  }
 }
 
 section("A by-when prints with the action (N18)");

@@ -5,7 +5,7 @@
  * base = the copy the edit started from, mine = the local edit, theirs = the server's copy now.
  * Fields only I changed are re-applied on top of theirs; fields both sides changed keep theirs and are reported.
  */
-import { makeItem, emptyMeta, mergeBaseline } from "./register.js";
+import { makeItem, emptyMeta, mergeBaseline, editOutrunsApproval } from "./register.js";
 
 export const ITEM_FIELDS = Object.keys(makeItem({})).filter((k) => !["id", "kind", "sync", "createdAt", "updatedAt"].includes(k));
 export const META_FIELDS = ["planRev", "occupancy", "renovationOverlay", "scopeAreas", "lastRoomId", "lastStep", "floors"];
@@ -123,6 +123,117 @@ export function planRegisterRestore(draft, current, titleOf = (i) => i.descripti
   const items = [...current.items.map((i) => now.get(i.id)), ...added];
   const nothingToRestore = !touchedIds.length && !metaTouched;
   return { reg: nothingToRestore ? current : { meta, items }, touchedIds, metaTouched, conflicts, removed, nothingToRestore };
+}
+
+// ── Approval kept for the visit, Undo of a delete, the meta after a save (pure; useRegister uses them) ──────
+
+/**
+ * B3: the words boxes save on every keystroke, so the first character typed into an approved record steps it back to
+ * Proposed (register.editOutrunsApproval). The store keeps the approved copy for the visit. When a later edit puts back
+ * exactly what the client approved (the same words, ignoring spaces and case, the same answer, the same product) and
+ * the record is still the stepped-back one (Proposed, no evidence), its approval and evidence come back.
+ * Returns { certainty, evidence } to put back, or null.
+ */
+export function approvalRestore(approved, next) {
+  if (!approved || !next || approved.certainty !== "client_approved" || approved.id !== next.id) return null;
+  if (next.certainty !== "proposed" || next.evidence || next.itemKind !== approved.itemKind) return null;
+  const rest = { ...next };
+  delete rest.certainty; delete rest.evidence;     // compared as an edit: an edit that sets the certainty never outruns it
+  return editOutrunsApproval(approved, rest) ? null : { certainty: approved.certainty, evidence: approved.evidence };
+}
+
+/**
+ * One edit to one record, as the store applies it (useRegister.updateItem). item = the record on screen, partial = the
+ * edit, kept = the approved copy held for this record since an earlier edit stepped it back (or null).
+ * Returns { partial, keep, stepped, restored }:
+ *   - stepped: the edit goes beyond what the client approved, so it is back to Proposed (no evidence); keep = item;
+ *   - restored: the edit puts back what the client approved, so the approval and its evidence come back; keep = null;
+ *   - an edit that sets the certainty itself (approved again with new evidence, or another step) ends the kept copy: keep = null;
+ *   - otherwise keep is undefined (leave the kept copy as it is).
+ */
+export function approvalStep(item, partial, kept = null) {
+  if (!item || !partial) return { partial, keep: undefined, stepped: false, restored: false };
+  if ("certainty" in partial) return { partial, keep: kept ? null : undefined, stepped: false, restored: false };
+  if (editOutrunsApproval(item, partial)) return { partial: { ...partial, certainty: "proposed", evidence: null }, keep: item, stepped: true, restored: false };
+  const back = kept ? approvalRestore(kept, makeItem({ ...item, ...partial, sync: item.sync })) : null;
+  if (back) return { partial: { ...partial, ...back }, keep: null, stepped: false, restored: true };
+  return { partial, keep: undefined, stepped: false, restored: false };
+}
+
+/**
+ * R18: the meta a save's answer leaves this screen on, as the copy its next edits start from. Its rev is the one the
+ * next save sends. sent = the meta the save carried (at rev r), or null; answer = the meta in the server's answer;
+ * changedSince = this screen changed the meta while the save travelled; before = the copy it held before the save.
+ *   - A save that carried the meta at r was accepted only at r, so the server then holds r + 1: an answer at r + 1 is
+ *     this save's own, and is used as it is.
+ *   - An answer read before the save (rev ≤ r) would leave the screen on the old room list and send r again next time,
+ *     which the server refuses as changed elsewhere. Then what was sent is what the server holds, at r + 1.
+ *   - An answer past r + 1 also holds another screen's save, made straight after this one (round 3, S2). With nothing
+ *     changed here since, it is used as it is. With edits made here since, they were made on what was sent, so the
+ *     copy stays what was sent, at r + 1: the next save then meets "changed elsewhere" and goes through the three-way
+ *     merge, instead of carrying the newer rev and writing this screen's room list over the other screen's.
+ *   - Nothing sent: an answer whose rev moved on (another screen saved) is used as it is unless edits were made here
+ *     since, which keep the copy they started from (before), for the same reason.
+ */
+export function metaAfterSave(sent, answer, { changedSince = false, before = null } = {}) {
+  if (!answer) return answer;
+  const got = Number(answer.rev) || 0;
+  if (!sent) return changedSince && before && (Number(before.rev) || 0) !== got ? before : answer;
+  const r = Number(sent.rev) || 0;
+  if (got === r + 1 || (got > r + 1 && !changedSince)) return answer;
+  return emptyMeta({ ...sent, rev: r + 1 });
+}
+
+/** Where a record goes back in a list of ids: straight after the last of `before` still on it (first, when none is). */
+function slotAfter(ids, before) {
+  const was = new Set(before);
+  for (let k = ids.length - 1; k >= 0; k--) if (was.has(ids[k])) return k + 1;
+  return 0;
+}
+
+/**
+ * Where deleted records go back on Undo (round 3, S3), for records about to be deleted from `items`: id → the ids of
+ * everything before it in the list. Records deleted earlier and not put back yet (ghosts: [{ id, before }]) are
+ * counted in their old places, so each record's `before` holds everything that was before it at first. Undo puts it
+ * straight after the last of those still on the list, so deletes undone in any order come back in their old order
+ * (a list abcde, b then d deleted, undone b then d, or d then b: abcde). An id not on the list is left out.
+ */
+export function deletedPlaces(items, ids, ghosts = []) {
+  let all = (items || []).map((i) => i.id);
+  for (const g of ghosts || []) {
+    if (!g?.id || !Array.isArray(g.before) || all.includes(g.id)) continue;
+    const k = slotAfter(all, g.before);
+    all = [...all.slice(0, k), g.id, ...all.slice(k)];
+  }
+  const out = new Map();
+  for (const id of ids || []) { const k = all.indexOf(id); if (k >= 0) out.set(id, all.slice(0, k)); }
+  return out;
+}
+
+/**
+ * Undo of a delete (B1): the very record comes back, under its own id, so links to it (linked records, room confirmations,
+ * source documents) still hold. pending = the stored copy the store keeps for a delete not yet saved, null once the delete
+ * reached the server (or for a record that was never saved); flying = that delete is in the save on its way now;
+ * before = the ids that were before it (deletedPlaces): it goes back straight after the last of them still on the list,
+ * so several deletes undone in any order keep their old order. at = an index instead (the end when neither is known).
+ * Returns { item, dirty, items } (dirty: it must be saved again; items: the list with it back), or null when the record
+ * is already there.
+ */
+export function planUndelete(item, { current = null, pending = null, flying = false, before = null, at = null } = {}) {
+  const list = current?.items || [];
+  if (!item?.id || list.some((i) => i.id === item.id)) return null;
+  let plan;
+  if (pending) {
+    const back = makeItem({ ...item, sync: pending.sync });
+    // Not sent yet: the delete is simply dropped, and only edits made before it need saving. Sent: the save under way may
+    // remove it, so it is saved again (as new, same id, if the server did remove it: useRegister's save answer).
+    plan = { item: back, dirty: flying || ITEM_FIELDS.some((f) => !same(back[f], pending[f])) };
+  } else {
+    plan = { item: makeItem({ ...item, sync: null }), dirty: true };   // the server no longer has it: put back as new, same id
+  }
+  const k = Array.isArray(before) ? slotAfter(list.map((i) => i.id), before)
+    : Number.isInteger(at) && at >= 0 ? Math.min(at, list.length) : list.length;
+  return { ...plan, items: [...list.slice(0, k), plan.item, ...list.slice(k)] };
 }
 
 // ── The store's save words (pure, so they can be tested without React; useRegister uses them) ─────────────

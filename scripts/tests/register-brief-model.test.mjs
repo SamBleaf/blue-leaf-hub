@@ -9,7 +9,7 @@ import { makeItem, emptyMeta, makeRoom, ROOM_SCOPES, writeRegister, readRegister
 import { mergeItem } from "../../src/lib/registerMerge.js";
 import {
   architectBriefModel, architectBriefLines, openPoints, roomRow, whoOf, dueLabel, isUnfinished, tidy, chipWords, budgetLine, budgetWords,
-  BUDGET_BAND_RX, disagreeingScope, hasRoomBrief, isEmptyRecord, briefSectionTitles, forNextIssue, HELD_BACK_WORDS,
+  BUDGET_BAND_RX, disagreeingScope, hasRoomBrief, isEmptyRecord, briefSectionTitles, forNextIssue, HELD_BACK_WORDS, deletableEmpty, referencedIds, waitsAsPoint,
 } from "../../src/lib/briefModel.js";
 import { contentChecks, roomsNeedingBrief, roomBriefBlocker, upperFloorHint, releaseBlockers } from "../../src/lib/registerQuality.js";
 import { realJob } from "../documents/fixtures/real-extension-job.mjs";
@@ -159,8 +159,147 @@ section("Empty answers hold nothing at all (review B1)");
     && !isEmptyRecord(makeItem({ promptKey: "K-008", answer: { v: 1, state: "not_applicable", selected: [] } })));
   ok("…nor one on the client portal or in the contract baseline", !isEmptyRecord(makeItem({ promptKey: "K-008", sync: { clientVisible: true } })) && !isEmptyRecord(makeItem({ promptKey: "K-008", sync: { baselined: true } })));
   ok("an answer from a newer screen is never empty", !isEmptyRecord(makeItem({ promptKey: "K-008", answer: { v: 99, state: "recorded" } })));
-  ok("a blank seeded row (zone, areas, owner, answer version) is still empty", isEmptyRecord(makeItem({ promptKey: "W-017", responsibility: "client", answer: { v: 1, state: "not_discussed", zone: { key: "main_floor", label: "Main floor" }, areaIds: ["kt"] } })));
+  ok("a blank seeded row (areas, owner, answer version) is still empty", isEmptyRecord(makeItem({ promptKey: "W-017", responsibility: "client", answer: { v: 1, state: "not_discussed", areaIds: ["kt"] } })));
   ok("the real job's three empty Laundry answers are still offered, with their place for the confirm", cc.at(-1).targets.map((t) => t.id).join() === "i62,i63,i64" && cc.at(-1).place === "Laundry");
+}
+
+section("'Delete all empty' never takes a choice or a record something points at (review R6)");
+{
+  const withItems = (...extra) => ({ meta: register.meta, items: [...register.items, ...extra.map((x) => makeItem(x))] });
+  const emptyIds = (r, o) => (contentChecks("architect_brief", r, context, null, o).filter((c) => c.action === "delete_empty").flatMap((c) => c.targets.map((t) => t.id)));
+  // An Other zone's label is typed words (registerChoice: "the only copy of what was said"), and a zone picked on a
+  // question whose zones are a choice (cladding) is a choice.
+  const other = { id: "z1", promptKey: "W-013", itemKind: "selection", category: "cladding", answer: { v: 1, state: "not_discussed", selected: [], zone: { key: "other", label: "Rear studio walls" } } };
+  const chosen = { id: "z2", promptKey: "W-013", itemKind: "selection", category: "cladding", answer: { v: 1, state: "not_discussed", selected: [], zone: { key: "main_walls", label: "Main walls" } } };
+  const otherFloor = { id: "z3", promptKey: "W-017", itemKind: "selection", category: "flooring", answer: { v: 1, state: "not_discussed", selected: [], zone: { key: "other_zone", label: "Rear studio walls" } } };
+  ok("an Other zone's typed label isn't empty", !isEmptyRecord(makeItem(other)));
+  ok("…nor is a zone picked on a question whose zones are a choice", !isEmptyRecord(makeItem(chosen)));
+  ok("…nor an Other zone 'Rear studio walls' on a floor laid out one row per zone", !isEmptyRecord(makeItem(otherFloor)));
+  const rz = withItems(other, chosen, otherFloor);
+  ok("none is offered for deletion", !emptyIds(rz).some((id) => ["z1", "z2", "z3"].includes(id)) && !deletableEmpty(rz).some((i) => ["z1", "z2", "z3"].includes(i.id)));
+  ok("'Not in this brief' never calls them empty", !architectBriefModel(rz, context, {}).notPrinted.some((x) => ["z1", "z2", "z3"].includes(x.id) && x.group === "empty"));
+  // A roof row with nothing on it yet, with a gutter row linked under it.
+  const roof = { id: "rf1", promptKey: "W-014", itemKind: "selection", category: "roof", answer: { v: 1, state: "not_discussed", selected: [] } };
+  const gutter = { id: "gt1", promptKey: "W-014", itemKind: "selection", category: "roof", answer: { v: 1, state: "recorded", selected: [], element: { id: "el_g", key: "gutters", label: "Gutters" }, linkedItemIds: ["rf1"] } };
+  const rg = withItems(roof, gutter);
+  ok("the empty roof row is still empty on its own", isEmptyRecord(item(rg, "rf1")));
+  ok("…but a row linked under it points at it, so it isn't offered", referencedIds(rg).has("rf1") && !emptyIds(rg).includes("rf1") && !deletableEmpty(rg).some((i) => i.id === "rf1"));
+  ok("…and without the gutter row it is", emptyIds(withItems(roof)).includes("rf1"));
+  // A whole-house default that a room's own answer overrides, and one a room confirmed.
+  const def = { id: "df1", promptKey: "W-018", itemKind: "selection", category: "doors", isDefault: true, answer: { v: 1, state: "not_discussed", selected: [] } };
+  const own = { id: "ow1", promptKey: "W-018", itemKind: "selection", category: "doors", roomId: "kt", overridesDefaultId: "df1", description: "Cavity slider" };
+  ok("a default a room's own answer overrides isn't offered", !emptyIds(withItems(def, own)).includes("df1") && emptyIds(withItems(def)).includes("df1"));
+  const confirmed = { meta: { ...register.meta, rooms: register.meta.rooms.map((r) => (r.id === "kt" ? { ...r, defaultConfirmations: { df1: { at: "2026-11-17T01:00:00Z", by: "Sam" } } } : r)) }, items: [...register.items, makeItem(def)] };
+  ok("…nor one a room confirmed", referencedIds(confirmed).has("df1") && !emptyIds(confirmed).includes("df1"));
+  ok("records a received document links (keepIds) aren't offered either", !emptyIds(register, { keepIds: ["i63"] }).includes("i63") && emptyIds(register, { keepIds: ["i63"] }).join() === "i62,i64");
+  ok("the real job: the three Laundry answers are still the ones offered", deletableEmpty(register).map((i) => i.id).join() === "i62,i63,i64");
+}
+
+section("A zone that came with its row is seed data: a slot tapped then cleared is still empty (round 3, M1)");
+{
+  const withItems = (...extra) => ({ meta: register.meta, items: [...register.items, ...extra.map((x) => makeItem(x))] });
+  const emptyIds = (r) => (contentChecks("architect_brief", r, context, null).filter((c) => c.action === "delete_empty").flatMap((c) => c.targets.map((t) => t.id)));
+  const cleared = (id, promptKey, category, key, label, extra = {}) => ({ id, promptKey, itemKind: "selection", category, ...extra, answer: { v: 1, state: "not_discussed", selected: [], zone: { key, label } } });
+  // The fixed-zone slots ChoiceRepeat / PromptRow lay out (seedFor): floors, paint surfaces, and the whole-house kitchen and wet-area standards.
+  const slots = [
+    cleared("s1", "W-017", "flooring", "bedroom_floor", "Bedroom floor"),
+    cleared("s2", "W-019", "painting", "walls", "Walls"),
+    cleared("s3", "K-005", "kitchen", "kitchen", "Kitchen"),
+    cleared("s4", "B-008", "wet_areas", "ensuite", "Ensuite"),
+    cleared("s5", "K-004", "kitchen", "scullery", "Scullery"),
+  ];
+  const ids = slots.map((s) => s.id);
+  for (const s of slots) ok(`a cleared ${s.promptKey} '${s.answer.zone.label}' slot is empty`, isEmptyRecord(makeItem(s)), flat(s));
+  const rs = withItems(...slots);
+  ok("…so 'Delete all empty answers' offers them", ids.every((id) => emptyIds(rs).includes(id)) && ids.every((id) => deletableEmpty(rs).some((i) => i.id === id)), flat(emptyIds(rs)));
+  const np = Object.fromEntries(architectBriefModel(rs, context, {}).notPrinted.filter((x) => ids.includes(x.id)).map((x) => [x.id, x.group]));
+  ok("…and 'Not in this brief' calls them empty, never 'in the schedule'", ids.every((id) => np[id] === "empty"), flat(np));
+  ok("a bare 'Other zone' slot with no words typed is empty too", isEmptyRecord(makeItem(cleared("s6", "W-017", "flooring", "other_zone", "Other zone"))));
+  ok("a slot with a finish on it isn't empty", !isEmptyRecord(makeItem({ ...cleared("s7", "W-017", "flooring", "bedroom_floor", "Bedroom floor"),
+    answer: { v: 1, state: "recorded", selected: [{ optionId: "wool", path: ["carpet", "wool"], label: "Wool" }], zone: { key: "bedroom_floor", label: "Bedroom floor" } } })));
+  ok("…nor one with words typed on it", !isEmptyRecord(makeItem({ ...cleared("s8", "W-019", "painting", "ceiling", "Ceiling"), description: "Raked ceiling in the living room" })));
+  ok("a zone this screen doesn't know is kept (never offered)", !isEmptyRecord(makeItem(cleared("s9", "W-017", "flooring", "mezzanine_floor", "Mezzanine floor"))));
+  ok("a kitchen standard's zone inside a room is not a laid-out slot, so it is kept", !isEmptyRecord(makeItem(cleared("s10", "K-005", "kitchen", "kitchen", "Kitchen", { roomId: "kt" }))));
+}
+
+section("Open work never prints as settled (review R2; D3 only takes Blue Leaf's own points out of 03)");
+{
+  const shed = (responsibility) => load((j) => {
+    j.register.items.push({ id: "sh1", kind: "item", promptKey: "W-004", itemKind: "scope", section: "site", category: "existing", disposition: "remove", description: "Demolish the rear shed",
+      nextAction: "Client to confirm the shed goes", responsibility });
+    j.register.items.push({ id: "rw1", kind: "item", itemKind: "scope", roomId: "ld", section: "room", category: "demolition", disposition: "remove", description: "Remove the old trough",
+      nextAction: "Client to confirm the trough goes", responsibility });
+  }).register;
+  const where = (r) => {
+    const mm = architectBriefModel(r, context, {});
+    const ln = architectBriefLines(mm, {});
+    return { mm, sel: ln.filter((l) => l.section === "selections" && l.ids.includes("sh1")).map((l) => l.text), room: ln.filter((l) => l.section === "rooms" && l.ids.includes("rw1")).map((l) => l.text),
+      pts: mm.points.filter((p) => p.ids.some((id) => ["sh1", "rw1"].includes(id))), np: Object.fromEntries(mm.notPrinted.filter((x) => ["sh1", "rw1"].includes(x.id)).map((x) => [x.id, x.group])),
+      text: ln.map((l) => l.text).join("\n") };
+  };
+  for (const [who, group] of [["client", "client"], ["", "waiting"]]) {
+    const r = shed(who), w = where(r);
+    ok(`waiting on ${who || "no one"}: neither record is a point for the next drawing issue`, !forNextIssue(item(r, "sh1")) && !forNextIssue(item(r, "rw1")) && !w.pts.length);
+    ok(`…'Demolish the rear shed' doesn't print as settled work in 05`, !w.sel.length && !/rear shed/i.test(w.text) && w.mm.selectionsTitle === "Selections that affect the drawings", flat(w.sel));
+    ok(`…nor the Laundry's 'Remove the old trough' in 04`, !w.room.length && !/old trough/i.test(w.text)
+      && !/old trough/i.test(roomRow(r, context, r.meta.rooms.find((x) => x.id === "ld")).text), flat(w.room));
+    ok(`…both wait in 'Not in this brief' (${group})`, w.np.sh1 === group && w.np.rw1 === group, flat(w.np));
+    ok(`…and stay in the Actions list's 'everything'`, ["sh1", "rw1"].every((id) => openPoints(r, context, { scope: "all", merge: false }).some((p) => p.ids.includes(id))));
+    ok(`…waitsAsPoint says so`, waitsAsPoint(item(r, "sh1")) && waitsAsPoint(item(r, "rw1")));
+  }
+  const rb = shed("blue_leaf"), wb = where(rb);
+  ok("Blue Leaf's own: not a point in 03 (D3)", !wb.pts.length && !forNextIssue(item(rb, "sh1")) && !waitsAsPoint(item(rb, "sh1")));
+  ok("…so the work prints where it belongs: 05 and the Laundry's row", flat(wb.sel) === flat(["Demolish the rear shed."]) && wb.mm.selectionsTitle === "Work and selections that affect the drawings"
+    && wb.room.length === 1 && /Remove the old trough\./i.test(wb.room[0]), flat({ sel: wb.sel, room: wb.room }));
+  ok("…and isn't also in 'Not in this brief'", !("sh1" in wb.np) && !("rw1" in wb.np));
+  // A point for the next drawing issue is still said once, in 03.
+  const ra = shed("architect"), wa = where(ra);
+  ok("the architect's open work: a point in 03, not repeated in 04 or 05", wa.pts.length === 2 && !wa.sel.length && !wa.room.length, flat({ pts: wa.pts.map((p) => p.text), sel: wa.sel, room: wa.room }));
+  ok("…and the Laundry's row on its own (How this room reads) agrees: no 'old trough'", !/old trough/i.test(roomRow(ra, context, ra.meta.rooms.find((x) => x.id === "ld")).text));
+  // A room must-have the client is still to confirm (a requirement: always for the next drawing issue) is a point in 03 only.
+  const mh = load((j) => j.register.items.push({ id: "mh1", kind: "item", promptKey: "L-002", itemKind: "requirement", roomId: "ld", section: "room", category: "layout",
+    description: "Folding bench under the window", nextAction: "Client to confirm the bench length", responsibility: "client" })).register;
+  const mm2 = architectBriefModel(mh, context, {}), ln2 = architectBriefLines(mm2, {});
+  ok("a must-have waiting on the client: a point in 03 (Client)", mm2.points.some((p) => p.ids.includes("mh1") && p.who === "Client") && forNextIssue(item(mh, "mh1")), flat(mm2.points.map((p) => [p.ids, p.who])));
+  ok("…not also in the Laundry's row in 04, in the brief or on its own", !ln2.some((l) => l.section === "rooms" && /folding bench/i.test(l.text))
+    && !/folding bench/i.test(roomRow(mh, context, mh.meta.rooms.find((x) => x.id === "ld")).text));
+  // Blue Leaf's own must-have point (D3): not in 03, so it prints in the room's row.
+  const mhb = load((j) => j.register.items.push({ id: "mh2", kind: "item", promptKey: "L-002", itemKind: "requirement", roomId: "ld", section: "room", category: "layout",
+    description: "Folding bench under the window", nextAction: "Check the window sill height", responsibility: "blue_leaf" })).register;
+  const ln3 = architectBriefLines(architectBriefModel(mhb, context, {}), {});
+  ok("Blue Leaf's own must-have point isn't in 03 but prints in the Laundry's row", !ln3.some((l) => l.section === "points" && l.ids.includes("mh2"))
+    && ln3.some((l) => l.section === "rooms" && l.ids.includes("mh2") && /folding bench under the window/i.test(l.text)), flat(ln3.filter((l) => l.section === "rooms" && /Laundry/.test(l.label))));
+}
+
+section("Open work never prints as settled in 06 either (round 3, M2)");
+{
+  // Open records 06 would otherwise catch: supplied by the client, or by others, while someone is still to confirm them.
+  const open = (responsibility, { nextAction = "Client to confirm" } = {}) => load((j) => {
+    j.register.items.push({ id: "sh2", kind: "item", promptKey: "W-004", itemKind: "scope", section: "site", category: "existing", disposition: "new", description: "Demolish the rear shed",
+      supplyBy: "client", nextAction, responsibility });
+    j.register.items.push({ id: "rw2", kind: "item", itemKind: "scope", roomId: "ld", section: "room", category: "demolition", disposition: "new", description: "Install the old trough",
+      supplyBy: "client", nextAction, responsibility });
+    j.register.items.push({ id: "bo2", kind: "item", itemKind: "scope", section: "site", category: "landscaping", disposition: "by_others", description: "Front fence and gate",
+      nextAction, responsibility });
+  }).register;
+  const ids = ["sh2", "rw2", "bo2"];
+  const where = (r) => {
+    const mm = architectBriefModel(r, context, {}), ln = architectBriefLines(mm, {});
+    return { mm, out: ln.filter((l) => l.section === "outside" && l.ids.some((id) => ids.includes(id))).map((l) => l.text),
+      np: Object.fromEntries(mm.notPrinted.filter((x) => ids.includes(x.id)).map((x) => [x.id, x.group])), text: ln.map((l) => l.text).join("\n") };
+  };
+  for (const [who, group] of [["client", "client"], ["", "waiting"]]) {
+    const r = open(who), w = where(r);
+    ok(`waiting on ${who || "no one"}: none prints in 06 as 'Supplied by the client' or 'By others'`, !w.out.length && !/rear shed|old trough|front fence/i.test(w.text), flat(w.out));
+    ok(`…they wait in 'Not in this brief' (${group})`, ids.every((id) => w.np[id] === group), flat(w.np));
+    ok(`…and stay in the Actions list's 'everything'`, ids.every((id) => openPoints(r, context, { scope: "all", merge: false }).some((p) => p.ids.includes(id))));
+  }
+  // Settled (no next action): 06 still says who supplies it or who does it.
+  const rSettled = open("client", { nextAction: "" }), settled = where(rSettled);
+  ok("settled: 'By others' still prints in 06", settled.out.some((t) => /front fence and gate/i.test(t)), flat(settled.out));
+  ok("…the shed prints as work in 05 and the Laundry's record in its row", architectBriefLines(settled.mm, {}).some((l) => l.section === "selections" && l.ids.includes("sh2"))
+    && /old trough/i.test(roomRow(rSettled, context, rSettled.meta.rooms.find((x) => x.id === "ld")).text), flat(settled.mm.selections));
+  ok("…and none of them is left in 'Not in this brief'", !ids.some((id) => id in settled.np), flat(settled.np));
 }
 
 section("The Actions count records; the brief merges in-or-out elements (review N13)");

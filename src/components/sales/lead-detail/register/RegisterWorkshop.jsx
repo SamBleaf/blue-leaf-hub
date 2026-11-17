@@ -18,7 +18,7 @@ import { SAVE_RETRY_WORDS } from "../../../../lib/registerMerge.js";
 import { useEscapeLayer, useBodyFlag, useBodyData } from "../../../../lib/overlayFlag.js";
 import { apiFetch, apiPut } from "../../../../lib/apiFetch.js";
 import { useAuth } from "../../../../lib/useAuth.js";
-import { useRegister } from "./useRegister.js";
+import { useRegister, useShown } from "./useRegister.js";
 import { useNarrow } from "./useRoomUi.js";
 import { IconButton, Popover, MenuItem } from "./RoomUi.jsx";
 import ProjectStep from "./ProjectStep.jsx";
@@ -97,16 +97,10 @@ function BriefMenu({ reg, context, lead, mutateMeta }) {
 export default function RegisterWorkshop({ lead, patch, stage }) {
   const { profile } = useAuth();
   const rootRef = useRef(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return undefined;
-    const check = () => setVisible(el.getClientRects().length > 0);
-    check();
-    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(check) : null;
-    ro?.observe(document.body);
-    return () => ro?.disconnect();
-  }, []);
+  // Is this copy on screen? (The lead page renders a desktop and a CSS-hidden phone layout.) setRoot is a callback ref on
+  // every root below, so the element watched follows the swap from the loading placeholder to the full screen (R1):
+  // watching the placeholder left `visible` false for good, and nothing gated on it (the body flags, the baseline) ran.
+  const [setRoot, visible] = useShown(rootRef);
   // Unsaved edits are kept on this device per signed-in staff member (same key format as Takeoff's recovery).
   const store = useRegister(lead.id, { enabled: visible, actorKey: profile?.id ? `staff:${profile.id}` : null });
   const { reg, info, save } = store;
@@ -269,28 +263,35 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   ].filter(Boolean).join(" · ");
 
   // Switched off for this lead (REGISTER_ENABLED / REGISTER_PILOT_LEADS): the pre-register lists, exactly as before.
-  if (store.disabled) return <div ref={rootRef}>{LEGACY_BY_STAGE[stage] && <LegacyScheduleRows lead={lead} patch={patch} variant={LEGACY_BY_STAGE[stage]} />}</div>;
-  if (!loaded && !store.error) return <div ref={rootRef} />; // first load — nothing shows until the switch is known
+  if (store.disabled) return <div ref={setRoot}>{LEGACY_BY_STAGE[stage] && <LegacyScheduleRows lead={lead} patch={patch} variant={LEGACY_BY_STAGE[stage]} />}</div>;
+  if (!loaded && !store.error) return <div ref={setRoot} />; // first load — nothing shows until the switch is known
 
   return (
     // Every ⚑ below (PromptRow in older screens passes no reg/context) reads the register, Sales context and staff member here.
     <NeedsActionProvider reg={reg} context={context} actor={profile}>
     {/* data-register-frame carries --register-top, the offset the register's sticky bars sit under (index.css); in the
         full-width workspace it is that workspace's own bar. !mt-0: a parent's space-y margin must not push the fixed
-        workspace down (P2). */}
-    <div ref={rootRef} data-register-frame="" data-register-expanded={expanded ? "" : undefined}
+        workspace down (P2). The workspace has no top padding: a scrolling box's padding pushes its sticky bar down, and the
+        room content then scrolled into view above the bar. The gap it gave sits under the bar instead (a spacer). */}
+    <div ref={setRoot} data-register-frame="" data-register-expanded={expanded ? "" : undefined}
       style={expanded ? { "--register-top": `${expandBarH}px` } : undefined}
-      className={expanded ? "fixed inset-0 z-40 !mt-0 overflow-y-auto bg-page px-2 py-3 sm:px-6 sm:py-4" : "-mx-3 sm:mx-0"}>
-      <div className={`rounded-card border border-hairline bg-surface ${expanded ? "mx-auto max-w-[1180px]" : ""}`} data-testid="register-workshop">
+      className={expanded ? "fixed inset-0 z-40 !mt-0 overflow-y-auto bg-page px-2 pb-3 sm:px-6 sm:pb-4" : "-mx-3 sm:mx-0"}>
       {expanded && (
-        <div ref={expandBarRef} className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-hairline bg-surface px-4 py-1 text-[11px]">
-          <span className="font-semibold text-ink">{context?.identity?.clientName || lead.name || "This project"}</span>
-          {context?.identity?.siteAddress && <span className="text-muted">{siteLine(context.identity.siteAddress, context.identity.suburb)}</span>}
-          <span className="text-muted">Stage: {STAGES.find((s) => s.id === context?.stage)?.label || stage}</span>
-          <span className="text-muted">Drawings: {reg?.meta.planRev || "—"}</span>
-          <button type="button" onClick={() => setExpanded(false)} className="ml-auto inline-flex min-h-[44px] items-center rounded-lg border border-hairline px-3 text-ink hover:bg-page" data-testid="register-exit-expand">Exit full width ✕</button>
-        </div>
+        <>
+          {/* The workspace's own bar, full width at the very top of the workspace (it cancels the side padding). */}
+          <div ref={expandBarRef} className="sticky top-0 z-30 -mx-2 border-b border-hairline bg-surface px-4 py-1 text-[11px] sm:-mx-6" data-testid="register-expand-bar">
+            <div className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-x-3 gap-y-0.5">
+              <span className="font-semibold text-ink">{context?.identity?.clientName || lead.name || "This project"}</span>
+              {context?.identity?.siteAddress && <span className="text-muted">{siteLine(context.identity.siteAddress, context.identity.suburb)}</span>}
+              <span className="text-muted">Stage: {STAGES.find((s) => s.id === context?.stage)?.label || stage}</span>
+              <span className="text-muted">Drawings: {reg?.meta.planRev || "—"}</span>
+              <button type="button" onClick={() => setExpanded(false)} className="ml-auto inline-flex min-h-[44px] items-center rounded-lg border border-hairline px-3 text-ink hover:bg-page" data-testid="register-exit-expand">Exit full width ✕</button>
+            </div>
+          </div>
+          <div className="h-3 sm:h-4" aria-hidden="true" />
+        </>
       )}
+      <div className={`rounded-card border border-hairline bg-surface ${expanded ? "mx-auto max-w-[1180px]" : ""}`} data-testid="register-workshop">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -380,7 +381,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
             )}
             {reg && roomShown && (
               <RoomScreen reg={reg} context={context} stage={stage} roomId={activeRoomId} actor={profile} upsertItem={store.upsertItem} updateItem={store.updateItem}
-                deleteItem={store.deleteItem} addItem={store.addItem} replaceItems={store.replaceItems} mutateMeta={store.mutateMeta} saveState={store.saveStateOf}
+                deleteItem={store.deleteItem} undeleteItem={store.undeleteItem} addItem={store.addItem} replaceItems={store.replaceItems} mutateMeta={store.mutateMeta} saveState={store.saveStateOf}
                 metaState={store.metaState} saveAt={store.saveAt} onOpenRecord={(id, opts) => setRecordDrawer({ kind: "record", ids: [id], ...(opts?.details ? { details: true } : {}) })}
                 onPortalItem={onPortalItem} flush={store.flush} onBack={() => setRoomOpen(false)} onOpenRoom={(id) => openRoom(id)} />
             )}
@@ -396,7 +397,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
               <HandoverPanel lead={lead} reg={reg} info={info} flush={store.flush} portal={store.portal} onBaseline={setBaseline} />
             )}
             {reg && step === "documents" && (
-              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flushAll} updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
+              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flushAll} updateItem={store.updateItem} deleteItem={store.deleteItem} undeleteItem={store.undeleteItem} addItem={store.addItem}
                 upsertItem={store.upsertItem} mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} patchLead={patchLead} reloadContext={reloadContext}
                 saveStateOf={store.saveStateOf} actor={profile} onPortalItem={onPortalItem} onOpenRoom={openRoom} onOpenActions={(f) => setActionsOpen(f || "next_issue")} saveText={saveText} />
             )}
@@ -406,7 +407,7 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
               onOpenRecord={(id, ids) => setRecordDrawer({ kind: "record", ids: ids?.length ? ids : [id] })} onClose={() => setActionsOpen(null)} />
           )}
           {reg && recordDrawer && (
-            <EditDrawer target={recordDrawer} lead={lead} reg={reg} context={context} actor={profile} readOnly={false} saveStateOf={store.saveStateOf} updateItem={store.updateItem} addItem={store.addItem}
+            <EditDrawer target={recordDrawer} lead={lead} reg={reg} context={context} actor={profile} readOnly={false} saveStateOf={store.saveStateOf} updateItem={store.updateItem} addItem={store.addItem} undeleteItem={store.undeleteItem}
               deleteItem={store.deleteItem} upsertItem={store.upsertItem} mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} patchLead={patchLead}
               reloadContext={reloadContext} onPortalItem={onPortalItem} onClose={() => setRecordDrawer(null)} onPreview={() => { setRecordDrawer(null); setActionsOpen(null); gotoStep("documents"); }}
               onOpenRoom={(id) => { setRecordDrawer(null); setActionsOpen(null); openRoom(id); }} saveText={saveText} />

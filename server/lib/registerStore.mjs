@@ -406,6 +406,11 @@ function carryRoomConfirmations(meta, stored) {
   return { ...meta, rooms: meta.rooms.map((r) => (r && !("defaultConfirmations" in r) && byId.has(r.id) ? { ...r, defaultConfirmations: byId.get(r.id).defaultConfirmations } : r)) };
 }
 const carryBaseline = (meta, stored) => (meta && !("baseline" in meta) && stored?.baseline ? { ...meta, baseline: stored.baseline } : meta);
+// Floors added on the Rooms list before any room is on them (P7): a screen from before them sends meta with no "floors"
+// key, and that must not wipe them. An explicit floors: [] still clears them.
+const carryFloors = (meta, stored) => (meta && !("floors" in meta) && stored?.floors?.length ? { ...meta, floors: stored.floors } : meta);
+/** Everything an older screen's meta can leave out, kept from what is stored. */
+const carryMeta = (meta, stored) => carryFloors(carryBaseline(carryRoomConfirmations(meta, stored), stored), stored);
 
 const APPROVED_STATUSES = ["approved", "ordered", "installed"];
 
@@ -500,7 +505,7 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
 
     for (const ch of changes) byId.set(ch.id, makeItem({ ...carryAnswer(ch, byId.get(ch.id)), updatedAt: now, sync: null }));
     for (const del of deletes) byId.delete(del.id);
-    const nextMeta = meta ? emptyMeta({ ...carryBaseline(carryRoomConfirmations(meta, cur.meta), cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
+    const nextMeta = meta ? emptyMeta({ ...carryMeta(meta, cur.meta), rev: (Number(cur.meta.rev) || 0) + 1 }) : cur.meta;
     const next = writeRegister({ meta: nextMeta, items: [...byId.values()] });
 
     // Conditional write on the lead's own updated_at — a concurrent save makes this affect 0 rows and
@@ -519,7 +524,7 @@ async function saveLead(sb, target, { meta, changes, deletes }) {
 
 async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, actor) {
   const current = await loadCanonical(sb, target.project);
-  const meta = rawMeta ? carryBaseline(carryRoomConfirmations(rawMeta, current.meta), current.meta) : rawMeta;
+  const meta = rawMeta ? carryMeta(rawMeta, current.meta) : rawMeta;
   const register = { meta: meta ? emptyMeta(meta) : current.meta, items: current.items };
   // Changes may reference rooms added in this same save — resolve labels against the incoming meta.
   const known = new Set(current.items.map((it) => it.id));
@@ -568,7 +573,16 @@ async function saveProject(sb, target, { meta: rawMeta, changes, deletes }, acto
   if (guarded.length) throw new RegisterError(409, conflictMessage(guarded), "CONFLICT", { conflicts: guarded });
   if (!ops.length) return { mode: "project", register: current };
   await callApply(sb, target, ops, actor);
-  return { mode: "project", register: await loadCanonical(sb, target.project) };
+  // target.project was read before this save: after a meta_set its register_meta (rooms, floors, rev) is the old one.
+  // Answered with it, the screen would show the old room list and send the old rev next time, so every second meta
+  // save came back 409 meta_stale (R18). Read the project again for the answer.
+  return { mode: "project", register: await loadCanonical(sb, meta ? await projectNow(sb, target.project) : target.project) };
+}
+
+/** The project row as it is now (falls back to the copy in hand if it can't be read, which the next save then corrects). */
+async function projectNow(sb, project) {
+  const { data, error } = await sb.from("projects").select("id, job_id, is_preconstruction, register_meta").eq("id", project.id).maybeSingle();
+  return !error && data ? { ...project, ...data } : project;
 }
 
 async function callApply(sb, target, ops, actor) {

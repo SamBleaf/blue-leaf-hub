@@ -5,7 +5,7 @@
  *
  *   node scripts/tests/register-needs-action.test.mjs
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,9 +16,10 @@ import {
   prefillWhat, suggestedWho, defaultDue, whoChoices, choiceByKey, setActionPatch, donePatch, checkedPatch, clearPatch, undoPatchFor,
   flagState, pillWords, footnoteFor, groupPoints, actionsSummary, copyListText, copiedWords, pointLine, pointTags, pointSubject,
   isOverdue, addedWords, subjectLine, openingView, rowOpensSheet, WHO_CHOICES, PARK_REASON, UNNAMED_GROUP,
-  assignPatch, whatToSaveOnClose, actionPoints,
+  assignPatch, whatToSaveOnClose, actionPoints, FOOTNOTE_ARCHITECT, FOOTNOTE_CLIENT, FOOTNOTE_BLUE_LEAF, FOOTNOTE_OURS,
 } from "../../src/lib/needsAction.js";
 import { realJob } from "../documents/fixtures/real-extension-job.mjs";
+import { buildRegisterFixture } from "../../server/lib/registerDocuments.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 700)}` : ""}`); } };
@@ -30,6 +31,7 @@ const item = (reg, id) => reg.items.find((i) => i.id === id);
 const apply = (reg, id, patch) => ({ ...reg, items: reg.items.map((i) => (i.id === id ? makeItem({ ...i, ...patch, sync: i.sync }) : i)) });
 const C = (key) => choiceByKey(key, context);
 const ids = (pts) => pts.map((p) => p.ids.join("+")).join(",");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const L002 = (more = {}) => makeItem({ id: "x1", promptKey: "L-002", itemKind: "requirement", roomId: "ld", section: "room", category: "layout", ...more });
 
 section("Prefill: what's needed (S4 prefill rules)");
@@ -189,10 +191,30 @@ ok("no one named yet reads so on the pill", pillWords(context, makeItem({ nextAc
 ok("a past date is overdue", isOverdue("2026-11-16", "2026-11-17") && !isOverdue("2026-11-17", "2026-11-17") && !isOverdue("next_issue", "2026-11-17"));
 ok("footnote by who (the client brief's heading is “Decisions to make”)", footnoteFor(item(register, "i27"), "architect") === "Prints in the architect's brief under “Needed for the next drawing issue”."
   && footnoteFor(item(register, "i29"), "client") === "Prints in the client's brief under “Decisions to make”.");
-// Owner decision D3: Blue Leaf's own actions are our list; the architect's 03 leaves responsibility "blue_leaf" out.
-ok("Blue Leaf: our list only — even a technical check (D3), and the brief agrees", footnoteFor(makeItem({ promptKey: "K-006", itemKind: "selection" }), "blue_leaf") === "Our list only — doesn't print."
-  && footnoteFor(item(register, "i27"), "blue_leaf") === "Our list only — doesn't print."
-  && !architectBriefModel(apply(register, "i27", setActionPatch(item(register, "i27"), C("blue_leaf"), { what: "Confirm half round", due: "next_meeting" })), context, {}).points.some((x) => x.ids.includes("i27")));
+// Owner decision D3: the architect's 03 leaves responsibility "blue_leaf" out. The client brief (its design is locked)
+// still lists Blue Leaf's decisions under "Decisions to make", so the footnote says so (R16), checked against both builders.
+{
+  const printsFor = (id, who) => {
+    const it = item(register, id);
+    const reg = apply(register, id, setActionPatch(it, C(who), { what: "Decide it", due: "next_meeting" }));
+    const cpb = buildRegisterFixture("client_brief", { lead: realJob().lead, context, register: reg, projectRef: "X", status: "Draft", recipientName: "C" }).clientBrief;
+    return { footnote: footnoteFor(item(reg, id), who), client: cpb.decisions.some((d) => d.action === "Decide it."),
+      architect: architectBriefModel(reg, context, {}).points.some((x) => x.ids.includes(id)) };
+  };
+  const bl = printsFor("i27", "blue_leaf");
+  ok("Blue Leaf (Gutters): 'Not in the architect's brief. The client's brief lists it under “Decisions to make”.' — and both briefs agree",
+    bl.footnote === FOOTNOTE_BLUE_LEAF && FOOTNOTE_BLUE_LEAF === "Not in the architect's brief. The client's brief lists it under “Decisions to make”." && !bl.architect && bl.client, flat(bl));
+  ok("…even a technical check (D3)", footnoteFor(makeItem({ promptKey: "K-006", itemKind: "selection", technicalStatus: "needs_verification" }), "blue_leaf") === FOOTNOTE_BLUE_LEAF);
+  const blReq = printsFor("i61", "blue_leaf");
+  ok("Blue Leaf on a requirement (washer / dryer layout): our list only, and neither brief prints it", blReq.footnote === FOOTNOTE_OURS && FOOTNOTE_OURS === "Our list only — doesn't print." && !blReq.architect && !blReq.client, flat(blReq));
+  const cl = printsFor("i27", "client");
+  const cpbHeading = /sectionHead\("S5_NUM", "Decisions", "([^"]+)"\)/.exec(readFileSync(join(REPO_ROOT, "scripts/documents/author-cpb.mjs"), "utf8"))?.[1];
+  ok("Client: the footnote names the client brief's printed heading (“Decisions to make”), and the client brief lists it",
+    cpbHeading === "Decisions to make" && cl.footnote === FOOTNOTE_CLIENT && FOOTNOTE_CLIENT.includes(`“${cpbHeading}”`) && FOOTNOTE_BLUE_LEAF.includes(`“${cpbHeading}”`) && cl.client, flat({ cl, cpbHeading }));
+  const clReq = printsFor("i61", "client");
+  ok("Client on a requirement: never a decision in the client brief, so the footnote names the architect's 03, where it prints", clReq.footnote === FOOTNOTE_ARCHITECT && clReq.architect && !clReq.client, flat(clReq));
+  ok("no footnote for no one", footnoteFor(item(register, "i27"), null) === "" && footnoteFor(null, "blue_leaf") === FOOTNOTE_BLUE_LEAF);
+}
 ok("the sheet's subject line", subjectLine(register, item(register, "i27")) === "Throughout · Gutters" && subjectLine(register, item(register, "i61")) === "Laundry · Washer / dryer layout");
 
 section("The Actions list is openPoints with every element its own row, grouped (the real job)");

@@ -19,7 +19,7 @@
  */
 import { ROOM_SCOPES, ROOM_SCOPES_WITH_WORK, resolvePromptId, questionById, categoryLabel, roomLabel, dispositionLabel } from "./register.js";
 import {
-  clean, andList, hasRoomBrief, disagreeingScope, openPoints, heldBackReason, isEmptyRecord, namedArchitect, plainShort, labelOf, placeOf, subjectOf,
+  clean, andList, hasRoomBrief, disagreeingScope, openPoints, heldBackReason, deletableEmpty, namedArchitect, plainShort, labelOf, placeOf, subjectOf,
   budgetInverted,
 } from "./briefModel.js";
 import { restrictedFindings } from "./restrictedProducts.js";
@@ -130,9 +130,10 @@ export function upperFloorHint(register) {
 /**
  * The content checks for one document. The fourth argument (the document's brief model) is accepted for older callers
  * and no longer read: every check here counts records, not printed lines.
+ *   o.keepIds  records held elsewhere (a received document's linked records): never offered for deletion
  * Returns [{ key, text, targets, action?, place? }] in the order staff should work through them.
  */
-export function contentChecks(docType, register, context = {}, _model = null) {
+export function contentChecks(docType, register, context = {}, _model = null, { keepIds = [] } = {}) {
   if (docType !== "architect_brief") return [];
   const out = [];
   const items = register?.items || [];
@@ -185,9 +186,9 @@ export function contentChecks(docType, register, context = {}, _model = null) {
     text: `${labelOf(i)} says ${quote(i.description)} but is marked ${dispositionLabel(i.disposition)}. It won't print until they agree.` });
   for (const { i } of held.filter((x) => x.why === "no_ask")) out.push({ key: `no_ask:${i.id}`, targets: [rec(i.id)],
     text: `${clean(i.description) ? quote(i.description) : labelOf(i)}: ${i.responsibility === "client" ? "a client action" : "an action"} that doesn't say what's needed. It won't print.` });
-  // 10 · Empty answers, by room.
+  // 10 · Empty answers, by room: only those "Delete all n" may delete (nothing points at them, review R6).
   const empties = new Map();
-  for (const i of items.filter((x) => isEmptyRecord(x) && resolvePromptId(x.promptKey))) {
+  for (const i of deletableEmpty(register, { keep: keepIds })) {
     const k = placeOf(register, i).label;
     if (!empties.has(k)) empties.set(k, []);
     empties.get(k).push(i);

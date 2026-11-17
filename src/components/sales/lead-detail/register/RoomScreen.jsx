@@ -21,14 +21,19 @@
  * room-level (meta) save, metaState, with the store's last save time, saveAt. onOpenRecord(id) opens a record in the
  * edit drawer (the house strip's Change / Open; "Other things recorded here" › Show details passes { details: true }
  * so Product details opens). A room holding records on the client portal or in the contract can't
- * be removed: its menu offers "Not in this job" instead.
+ * be removed: its menu offers "Not in this job" instead. undeleteItem (the store's Undo of a delete) puts a removed record
+ * back under its own id; without it a copy is re-added.
+ *
+ * On a phone the room bar and the footer are full-bleed (spec S3p "Full width"): they reach the window's edges, whatever
+ * padding the lead page, its stage card and the register frame put around the room (measured, edgeBleed in roomScreen.js),
+ * so nothing that scrolls under them shows at their sides.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { genId, ROOM_SCOPES, ROOM_WORK_WORDS } from "../../../../lib/register.js";
 import { clean, openPoints, floorLabel } from "../../../../lib/briefModel.js";
 import {
   roomLayout, roomPosition, roomSaveState, saveWords, flushWithin, setRoomScope, duplicateRoomMeta, removeRoomPlan, removeRoomText, duplicatedText,
-  roomSeed, canRemoveRoom,
+  roomSeed, canRemoveRoom, edgeBleed, sameBleed,
 } from "../../../../lib/roomScreen.js";
 import RoomBriefCard, { WorkControl, EarlierAnswerBanner, FloorChips } from "./RoomBriefCard.jsx";
 import HouseStrip from "./HouseStrip.jsx";
@@ -38,6 +43,36 @@ import { Confirm, IconButton, MenuDivider, MenuItem, Popover, Segmented, Spinner
 import { storeGet, storeSet, useNarrow, useStageBarInset, useToast } from "./useRoomUi.js";
 
 const textBtn = "focus-ring inline-flex min-h-[44px] items-center rounded-lg px-2.5 text-sm font-bold text-primary hover:bg-primary/5";
+// Measure before paint in the browser; a plain effect where there is no window (server rendering, tests).
+const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/**
+ * The margins that take the phone room bar and footer to the window's edges (null off a phone, or before there is a
+ * layout: the class margins apply). Measured from the room screen's own box, again when it or the window resizes.
+ */
+function useEdgeBleed(ref, on) {
+  const [bleed, setBleed] = useState(null);
+  useBrowserLayoutEffect(() => {
+    const el = ref.current;
+    if (!on || !el) return undefined;
+    let raf = 0;
+    const measure = () => {
+      try {
+        const next = edgeBleed(el.getBoundingClientRect(), document.documentElement.clientWidth);
+        setBleed((p) => (sameBleed(p, next) ? p : next));
+      } catch { /* no layout */ }
+    };
+    measure();
+    const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(later) : null;
+    ro?.observe(el);
+    window.addEventListener("resize", later);
+    return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener("resize", later); };
+  }, [on, ref]);
+  return on ? bleed : null;
+}
+const bleedStyle = (bleed, more) => (bleed ? { marginLeft: -bleed.left, marginRight: -bleed.right, ...more } : more);
+
 const isTextField = (el) => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "button", "submit", "range"].includes(el.type)) || el.isContentEditable);
 
 export default function RoomScreen(props) {
@@ -55,10 +90,11 @@ export default function RoomScreen(props) {
   return <RoomView key={room.id} {...props} room={room} />;
 }
 
-function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, deleteItem, addItem, replaceItems, mutateMeta, saveState, metaState, saveAt, onPortalItem, flush, onBack, onOpenRoom, onOpenRecord }) {
+function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, deleteItem, addItem, undeleteItem, replaceItems, mutateMeta, saveState, metaState, saveAt, onPortalItem, flush, onBack, onOpenRoom, onOpenRecord }) {
   const narrow = useNarrow();
   const stageInset = useStageBarInset();
   const rootRef = useRef(null);
+  const bleed = useEdgeBleed(rootRef, narrow);
   const headingRef = useRef(null);
   const workMenuBtn = useRef(null);
   const barMenuBtn = useRef(null);
@@ -84,7 +120,8 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
     return () => { mounted.current = false; };
   }, []);
 
-  const points = useMemo(() => openPoints(reg, context, { scope: "all" }), [reg, context]);
+  // One row per record, as the Actions list and its pill count them (needsAction.actionPoints, finding N13).
+  const points = useMemo(() => openPoints(reg, context, { scope: "all", merge: false }), [reg, context]);
   const layout = useMemo(() => roomLayout(reg, context, room, { projectType: context?.projectType || "", stage, points }), [reg, context, room, stage, points]);
   const pos = roomPosition(rooms, room.id);
 
@@ -173,7 +210,8 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
   // ── 1 the room bar ──
   const saveText = sw && <span className={`whitespace-nowrap text-xs ${swTone}`} data-testid="room-save-state" aria-live="polite">{sw.text}</span>;
   const bar = narrow ? (
-    <div className="sticky top-[65px] z-20 -mx-2 -mt-2 grid min-h-[52px] grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-1 border-b border-hairline bg-surface px-1 md:top-0" data-testid="room-bar">
+    <div className="sticky top-[65px] z-20 -mx-2 -mt-2 grid min-h-[52px] grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-1 border-b border-hairline bg-surface px-2 md:top-0"
+      style={bleedStyle(bleed)} data-testid="room-bar" data-bleed={bleed ? "" : undefined}>
       <button type="button" onClick={onBack} aria-label="Back to Rooms" className="focus-ring flex h-11 w-11 items-center justify-center rounded-lg text-xl font-bold text-primary">‹</button>
       <div className="min-w-0 text-center">
         <h2 className="truncate text-[17px] font-bold leading-[22px] text-ink">{name}</h2>
@@ -252,13 +290,13 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
       ) : (
         <>
           {workRow}
-          <EarlierAnswerBanner reg={reg} room={room} mutateMeta={mutateMeta} deleteItem={deleteItem} addItem={addItem} readOnly={readOnly}
+          <EarlierAnswerBanner reg={reg} room={room} mutateMeta={mutateMeta} deleteItem={deleteItem} addItem={addItem} undeleteItem={undeleteItem} readOnly={readOnly}
             onSettled={() => setTimeout(() => { try { headingRef.current?.focus(); } catch { /* gone */ } }, 160)} />
           {layout.collapsed ? (
             <p className="rounded-card border border-hairline bg-surface p-4 text-[15px] text-muted sm:text-sm" data-testid="no-work">No work planned here — no brief needed.</p>
           ) : (
             <>
-              <RoomBriefCard reg={reg} room={room} context={context} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} mutateMeta={mutateMeta} addItem={addItem}
+              <RoomBriefCard reg={reg} room={room} context={context} upsertItem={upsertItem} updateItem={updateItem} deleteItem={deleteItem} mutateMeta={mutateMeta} addItem={addItem} undeleteItem={undeleteItem}
                 readOnly={readOnly} headingRef={headingRef} />
               <ChoicesCard layout={layout} room={room} rooms={rooms} reg={reg} seedFor={seedFor} row={row} />
             </>
@@ -269,12 +307,12 @@ function RoomView({ reg, context, stage, room, actor, upsertItem, updateItem, de
         </>
       )}
 
-      <OtherRecorded reg={reg} room={room} items={layout.other} actor={actor} saveState={saveState} updateItem={updateItem} deleteItem={deleteItem} addItem={addItem}
+      <OtherRecorded reg={reg} room={room} items={layout.other} actor={actor} saveState={saveState} updateItem={updateItem} deleteItem={deleteItem} addItem={addItem} undeleteItem={undeleteItem}
         onPortalItem={onPortalItem} readOnly={readOnly} onToast={show} onOpenRecord={onOpenRecord} />
 
-      {/* 9 sticky footer: above the Hub's bottom nav on a phone, above the lead's stage bar wherever it shows */}
+      {/* 9 sticky footer: above the Hub's bottom nav on a phone (full-bleed there, like the bar), above the lead's stage bar wherever it shows */}
       <div className={`sticky bottom-[76px] z-20 -mx-2 -mb-2 border-t border-hairline bg-surface px-4 py-2 pb-[max(8px,env(safe-area-inset-bottom))] sm:-mx-4 sm:-mb-4 md:bottom-0 ${footerHidden ? "hidden" : ""}`}
-        style={stageInset ? { bottom: stageInset } : undefined} data-testid="room-footer">
+        style={bleedStyle(bleed, stageInset ? { bottom: stageInset } : undefined)} data-testid="room-footer">
         {notSaved && (
           <div role="alert" className="mb-2 space-y-2 rounded-lg border border-warning bg-warning/10 px-3 py-2 text-[15px] text-ink sm:text-sm">
             <p>{narrow ? "Still not saved. Stay here or carry on — your answers are kept on this phone." : "Not saved yet — check your connection. Your answers are kept."}</p>

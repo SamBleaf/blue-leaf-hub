@@ -37,12 +37,15 @@ import { useDialogFocus, useNarrow } from "./useRoomUi.js";
 import { contractFixed } from "../../../../lib/roomScreen.js";
 
 const OCCUPANCY = [["vacant", "Moving out"], ["partly", "Partly lived in"], ["occupied", "Living there"]];
+/** A segment label of three or more words keeps its last two together when it wraps ("Partly / lived in", never "… / in"). */
+const keepEnd = (t) => (t.split(" ").length > 2 ? t.replace(/ (\S+)$/, "\u00a0$1") : t);
 const card = "flex flex-col gap-3 rounded-card border border-hairline bg-surface p-4";
 const cardTitle = "m-0 text-base font-semibold text-ink";
 const textBtn = "focus-ring inline-flex min-h-[44px] flex-none items-center px-2 text-[13px] font-bold text-primary";
 const capFirst = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
 const adelaideDay = (d = new Date()) => d.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Adelaide" });
 const RECHECK_FAILED = "Couldn't reach the mapping service. Nothing changed.";
+const RECHECK_SKIPPED = "Checked less than 10 minutes ago, so it wasn't run again.";
 const MENU_W = 256;
 /** Where a fixed menu goes: under the element, kept 8 px inside the window. */
 const menuPos = (el) => {
@@ -276,11 +279,16 @@ export default function ProjectStep({
       if (r === null || r === false) setTypeError("Not saved — try again.");
     }
   }
-  // The server picks the job (else the lead), and skips a lookup under 10 minutes old: "Updated" names the lookup's day.
+  // The server picks the job (else the lead). It skips a lookup under 10 minutes old or one still running, and says so
+  // (skipped + message): only a lookup that ran says "Updated", with the lookup's day. A skip still reloads the site
+  // rows, so a lookup someone else ran a minute ago shows.
   async function recheck() {
     setSiteMsg("Checking public mapping…");
     const r = await apiPost(`/api/register/leads/${lead.id}/site/recheck`, {});
-    if (r.ok) {
+    if (r.ok && r.data?.skipped) {
+      setSiteMsg(clean(r.data.message) || RECHECK_SKIPPED);
+      reloadContext?.();
+    } else if (r.ok) {
       const at = r.data?.context?.site?.enrichedAt;
       setSiteMsg(`Updated ${adelaideDay(at && Number.isFinite(Date.parse(at)) ? new Date(at) : new Date())}`);
       reloadContext?.();
@@ -413,13 +421,15 @@ export default function ProjectStep({
           {readOnly ? (
             <p className={`text-[15px] ${meta.occupancy ? "text-ink" : "text-muted"}`}>{OCCUPANCY.find(([k]) => k === meta.occupancy)?.[1] || "Not recorded"}</p>
           ) : (
-            <div className="flex h-11 overflow-hidden rounded-lg border border-hairline">
+            // No fixed height: each segment is at least 44 px and the row grows with it (a phone gives "Partly lived in"
+            // two lines, 15 px, "Partly / lived in", rather than cutting it).
+            <div className="flex overflow-hidden rounded-lg border border-hairline" data-testid="works-segments">
               {OCCUPANCY.map(([k, l], i) => {
                 const on = meta.occupancy === k;
                 return (
                   <button key={k} type="button" aria-pressed={on} data-focus-key={i === 0 ? "occupancy" : undefined} onClick={() => !on && mutateMeta({ occupancy: k })}
-                    className={`focus-ring flex flex-1 items-center justify-center gap-1.5 text-sm ${i ? "border-l border-hairline" : ""} ${on ? "bg-primary font-bold text-white" : "bg-surface text-ink hover:bg-page"}`}>
-                    {on && <Tick />}{l}
+                    className={`focus-ring flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-1.5 px-2 py-1 text-center text-[15px] leading-tight sm:text-sm ${i ? "border-l border-hairline" : ""} ${on ? "bg-primary font-bold text-white" : "bg-surface text-ink hover:bg-page"}`}>
+                    {on && <Tick />}{keepEnd(l)}
                   </button>
                 );
               })}

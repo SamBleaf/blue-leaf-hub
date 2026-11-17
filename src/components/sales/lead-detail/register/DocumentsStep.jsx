@@ -15,14 +15,15 @@
  *
  * Widths (spec S5): two panes from 1000 px of the step's own width; below that a "What will print | PDF" switch; on a
  * phone (the viewport under 640 px, not the column) the line list only, the red and amber boxes as two rows that open a
- * sheet, a sticky Download / Open PDF bar above the app nav, and the issue bar at the end of the list.
+ * sheet, a sticky Download / Open PDF bar above the app nav, and the issue bar at the end of the list. The issue bar is
+ * sticky only in the two-pane layout, where it is one row; in a narrower column it sits after the list too, so it never
+ * covers the red box (review R12).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../../../lib/apiFetch.js";
 import { roomLabel, refCode, outstandingReasons, isClientSelection, itemTitle } from "../../../../lib/register.js";
-import { architectBriefModel, architectBriefLines, briefSectionTitles, namedArchitect, placeOf, labelOf, isEmptyRecord, clean } from "../../../../lib/briefModel.js";
+import { architectBriefModel, architectBriefLines, briefSectionTitles, namedArchitect, placeOf, labelOf, deletableEmpty, clean } from "../../../../lib/briefModel.js";
 import { contentChecks, releaseBlockers, roomsNeedingBrief } from "../../../../lib/registerQuality.js";
-import { readdable } from "../../../../lib/roomScreen.js";
 import { Chip, Mini, Section, Select } from "./ui.jsx";
 import { Popover, Toast } from "./RoomUi.jsx";
 import { useNarrow, useStageBarInset, useToast } from "./useRoomUi.js";
@@ -199,7 +200,7 @@ function useWidth(ref) {
 }
 
 export default function DocumentsStep({
-  lead, reg, info, context, stage, flush, updateItem, deleteItem, upsertItem, addItem, mutateMeta, replaceItems, patchLead, reloadContext, saveStateOf, actor,
+  lead, reg, info, context, stage, flush, updateItem, deleteItem, undeleteItem, upsertItem, addItem, mutateMeta, replaceItems, patchLead, reloadContext, saveStateOf, actor,
   onPortalItem, onOpenRoom, onOpenActions, saveText,
 }) {
   const [docs, setDocs] = useState({ issued: [], sources: [], schemaReady: true });
@@ -342,7 +343,9 @@ export default function DocumentsStep({
   // The architect's brief, live: the same model and checks the server uses, recomputed on every change.
   const liveModel = useMemo(() => (context ? architectBriefModel(reg, context, { recipientName: recipient.name }) : null), [reg, context, recipient.name]);
   const liveLines = useMemo(() => (liveModel ? architectBriefLines(liveModel, { siteAddress: [context?.identity?.siteAddress, context?.identity?.suburb].filter(Boolean).join(", "), clientName: context?.identity?.clientName, drawingBasis: reg.meta.planRev }) : []), [liveModel, context, reg.meta.planRev]);
-  const liveContent = useMemo(() => (context ? contentChecks("architect_brief", reg, context, liveModel) : []), [reg, context, liveModel]);
+  // Records a received document is linked to are never offered as "empty" for deletion (review R6).
+  const keepIds = useMemo(() => [...new Set((docs.sources || []).flatMap((d) => (Array.isArray(d.register_item_ids) ? d.register_item_ids : [])))], [docs.sources]);
+  const liveContent = useMemo(() => (context ? contentChecks("architect_brief", reg, context, liveModel, { keepIds }) : []), [reg, context, liveModel, keepIds]);
   const titles = useMemo(() => briefSectionTitles(liveModel), [liveModel]);
   const needBrief = useMemo(() => roomsNeedingBrief(reg), [reg]);
   // The release blockers, live from the same rules the server checks (finding N2): with the name under "Issue to" for the
@@ -434,15 +437,18 @@ export default function DocumentsStep({
     setDrawer(checkTarget(t, check.text, check.help));
   }
   // "Delete all n": each record through deleteItem, so the server's guards still apply, then 6 s to undo (finding B1).
-  // Only records still empty are deleted: anything typed into one since the check keeps it.
+  // Only records that may still go are deleted (deletableEmpty): anything typed or chosen on one since the check, or a
+  // link to it from another record or a received document, keeps it. Undo puts back the very records, under their own
+  // ids (the store's undeleteItem, review R6), so nothing that pointed at them is left hanging.
   function deleteEmpty(check) {
-    const gone = check.targets.map((t) => reg.items.find((i) => i.id === t.id)).filter((i) => i && isEmptyRecord(i));
+    const may = new Set(deletableEmpty(reg, { keep: keepIds }).map((i) => i.id));
+    const gone = check.targets.map((t) => reg.items.find((i) => i.id === t.id)).filter((i) => i && may.has(i.id));
     setConfirmDelete(null);
     setSheet(null);                                              // a phone sheet's scrim would cover the Undo
     if (!gone.length) return;
     gone.forEach((i) => deleteItem(i.id));
     const n = gone.length;
-    toast.show(`Deleted ${n} empty answer${n === 1 ? "" : "s"}.`, addItem ? () => gone.forEach((i) => addItem(readdable(i))) : null);
+    toast.show(`Deleted ${n} empty answer${n === 1 ? "" : "s"}.`, undeleteItem ? () => gone.forEach((i) => undeleteItem(i)) : null);
   }
   const reviewEmpty = (check) => { setSheet(null); setDrawer({ kind: "record", ids: check.targets.map((t) => t.id), line: check.text }); };
 
@@ -584,22 +590,10 @@ export default function DocumentsStep({
                   </div>
                 )}
 
-                {/* F · Issue bar: at the end of the list on a phone; from 640 px sticky, above the app nav and the stage bar. */}
-                <div className={phone ? "border-t border-hairline pt-3" : "sticky bottom-[76px] z-20 -mx-3 border-t border-hairline bg-surface px-3 py-2 md:bottom-0"}
-                  style={!phone && stageInset ? { bottom: stageInset } : undefined} data-testid={`issue-bar-${d.key}`}>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                    <Mini label="Issue to"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} placeholder={d.key === "architect_brief" ? "Name of the architect or firm" : "Name"}
-                      autoComplete="off" className="inp min-h-[44px] w-full px-3 text-[16px] sm:w-56 sm:text-[13px]" data-testid="issue-to" /></Mini>
-                    <Mini label="Email (kept on the record — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} inputMode="email" autoComplete="off"
-                      className="inp min-h-[44px] w-full px-3 text-[16px] sm:w-60 sm:text-[13px]" /></Mini>
-                    <div>
-                      <button type="button" disabled={!canIssue} onClick={issue} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-40 sm:w-auto" data-testid={`issue-${d.key}`}>Issue {rev(preview.revision)}</button>
-                      {(blockReason || recipientChanged) && (
-                        <p className="mt-0.5 text-[12px] text-muted">{blockReason || "Recipient changed since this preview — preview again to re-check before issuing."}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {/* F · Issue bar: sticky (one row) only beside the two panes; after the list otherwise (review R12). */}
+                <IssueBar docKey={d.key} sticky={wide && !phone} stageInset={stageInset} recipient={recipient} setRecipient={setRecipient}
+                  placeholder={d.key === "architect_brief" ? "Name of the architect or firm" : "Name"} canIssue={canIssue} onIssue={issue} label={`Issue ${rev(preview.revision)}`}
+                  reason={blockReason || (recipientChanged ? "Recipient changed since this preview — preview again to re-check before issuing." : "")} />
 
                 {/* Phone: the draft PDF itself, in a sticky bar above the app nav (no frame on a phone). */}
                 {phone && (
@@ -644,7 +638,7 @@ export default function DocumentsStep({
         const next = nextAfter(drawer);
         return (
           <EditDrawer target={drawer} lead={lead} reg={reg} context={context} actor={actor} readOnly={false} saveStateOf={saveStateOf} updateItem={updateItem} deleteItem={deleteItem}
-            upsertItem={upsertItem} addItem={addItem} mutateMeta={mutateMeta} replaceItems={replaceItems} patchLead={patchLead} reloadContext={reloadContext} onPortalItem={onPortalItem}
+            upsertItem={upsertItem} addItem={addItem} undeleteItem={undeleteItem} mutateMeta={mutateMeta} replaceItems={replaceItems} patchLead={patchLead} reloadContext={reloadContext} onPortalItem={onPortalItem}
             onClose={() => setDrawer(null)} onPreview={() => openPreview(active || "architect_brief", { keepDrawer: true })} onNext={next?.go} nextLabel={next?.label}
             onOpenRoom={onOpenRoom ? (id) => { if (window.confirm(`This closes the preview — open the ${(reg.meta.rooms || []).find((r) => r.id === id)?.name || "room"}?`)) { setDrawer(null); onOpenRoom(id); } } : undefined}
             saveText={saveText} />
@@ -654,12 +648,37 @@ export default function DocumentsStep({
 
       <Section title="Coordination requests (draft packs from the same register)" defaultOpen={false}>
         <p className="text-[11px] text-muted">A filtered schedule of the items tagged for each consultant or supplier — current drawings, room, product direction, status and open questions. A working document, not an issued record.</p>
-        <div className="flex flex-wrap gap-1.5">
-          {PACKS.map(([k, l]) => <button key={k} type="button" disabled={busy} onClick={() => openPack(k)} className="rounded-full border border-hairline px-2.5 py-1 text-[11px] text-ink hover:bg-page disabled:opacity-40">{l} pack</button>)}
+        <div className="flex flex-wrap gap-2">
+          {PACKS.map(([k, l]) => <button key={k} type="button" disabled={busy} onClick={() => openPack(k)} className="min-h-[44px] rounded-full border border-hairline px-4 text-[13px] font-semibold text-ink hover:bg-page disabled:opacity-40" data-testid={`pack-${k}`}>{l} pack</button>)}
         </div>
       </Section>
 
       <SourceDocuments lead={lead} reg={reg} info={info} sources={docs.sources} reload={load} openFile={openFile} updateItem={updateItem} />
+    </div>
+  );
+}
+
+/**
+ * F · The issue bar: Issue to, Email (kept on the record, nothing is sent) and Issue Rnn, with why it can't issue yet beside
+ * the button. sticky: beside the two panes it stays above the app nav and the stage bar, in one row; in a narrower column
+ * (the Hub column at 1280, a tablet) and on a phone it sits after the line list, so it never covers the red box (review
+ * R12: at two rows it hid an entry and its Fix).
+ */
+export function IssueBar({ docKey, sticky = false, stageInset = 0, recipient, setRecipient, placeholder = "Name", canIssue, onIssue, label, reason = "" }) {
+  return (
+    <div className={sticky ? "sticky bottom-[76px] z-20 -mx-3 border-t border-hairline bg-surface px-3 py-2 md:bottom-0" : "border-t border-hairline pt-3"}
+      style={sticky && stageInset ? { bottom: stageInset } : undefined} data-testid={`issue-bar-${docKey}`} data-sticky={sticky ? "true" : "false"}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+        <Mini label="Issue to"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} placeholder={placeholder}
+          autoComplete="off" className="inp min-h-[44px] w-full px-3 text-[16px] sm:w-56 sm:text-[13px]" data-testid="issue-to" /></Mini>
+        <Mini label="Email (kept on the record — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} inputMode="email" autoComplete="off"
+          className="inp min-h-[44px] w-full px-3 text-[16px] sm:w-60 sm:text-[13px]" /></Mini>
+        {/* The button and its reason share one 44 px band, so the bar stays one row wherever it fits. */}
+        <div className="flex flex-col gap-1 sm:min-w-[16rem] sm:flex-1 sm:flex-row sm:items-center sm:gap-2">
+          <button type="button" disabled={!canIssue} onClick={onIssue} className="min-h-[44px] w-full shrink-0 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-40 sm:w-auto" data-testid={`issue-${docKey}`}>{label}</button>
+          {reason && <p className="text-[12px] leading-snug text-muted sm:min-w-0 sm:flex-1" data-testid="issue-reason">{reason}</p>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -699,10 +718,14 @@ function ProofList({ proof, proofView, setProofView, docKey }) {
 const NOT_PRINTED_GROUPS = [
   ["schedule", "In the Technical Selections Schedule instead"],
   ["client", "The client's choices (in the client's brief)"],
+  ["waiting", "Still open, with no one named (in the Actions list)"],
   ["held", "Held back until fixed"],
   ["empty", "Empty"],
   ["office", "Kept for the office"],
 ];
+/** The groups "Not in this brief" lists, in order: the known ones, then any other a newer model sends (nothing hidden). */
+const notPrintedGroups = (notPrinted) => [...NOT_PRINTED_GROUPS,
+  ...[...new Set(notPrinted.map((x) => x.group))].filter((g) => !NOT_PRINTED_GROUPS.some(([k]) => k === g)).map((g) => [g, "Other records"])];
 const HELD_SHORT = { unfinished: "unfinished", disagrees: "disagrees with the room", contradicts: "contradicts its status", no_ask: "doesn't say what's needed" };
 
 /** A printed line's words. A room's "Brief to follow." is the only greyed part of its line (spec S6: only the gap). */
@@ -765,7 +788,7 @@ export function PrintList({ reg, lines, previewLines, notPrinted, marks, titles 
         <button type="button" onClick={() => setOpenNot((v) => !v)} className="flex min-h-[48px] w-full items-center justify-between px-3 text-[14px] font-semibold text-ink hover:bg-page" aria-expanded={openNot}>
           <span>Not in this brief ({notPrinted.length})</span><span aria-hidden="true">{openNot ? "▾" : "▸"}</span>
         </button>
-        {openNot && NOT_PRINTED_GROUPS.map(([g, title]) => {
+        {openNot && notPrintedGroups(notPrinted).map(([g, title]) => {
           const list = notPrinted.filter((x) => x.group === g);
           if (!list.length) return null;
           return (

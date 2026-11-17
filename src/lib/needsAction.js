@@ -266,17 +266,30 @@ export const isOverdue = (due, today = todayIso()) => /^\d{4}-\d{2}-\d{2}$/.test
 /** The toast after a Who tap: "Architect · next drawing issue — added to Actions". */
 export const addedWords = (choice, due) => `${choice.short || choice.label}${dueWords(due) ? ` · ${dueWords(due)}` : ""} — added to Actions`;
 
-/** Where it prints, under the sheet's input. */
+export const FOOTNOTE_ARCHITECT = "Prints in the architect's brief under “Needed for the next drawing issue”.";
+export const FOOTNOTE_CLIENT = "Prints in the client's brief under “Decisions to make”.";
+export const FOOTNOTE_BLUE_LEAF = "Not in the architect's brief. The client's brief lists it under “Decisions to make”.";
+export const FOOTNOTE_OURS = "Our list only — doesn't print.";
+
+/**
+ * Where it prints, under the sheet's input: what the two briefs really do with the point, never more.
+ *   The design team → the architect's 03 (openPoints "next_issue").
+ *   The client → the client brief's "Decisions to make" (registerDocuments clientBriefFixture; the heading is
+ *     scripts/documents/author-cpb.mjs). A requirement is never a decision there; it goes to the architect's 03 instead.
+ *   Blue Leaf → never the architect's 03 (owner decision D3: forNextIssue leaves responsibility "blue_leaf" out), but the
+ *     client brief lists Blue Leaf's decisions under "Decisions to make" after the client's own (its design is locked, so
+ *     the footnote says so, finding R16). A requirement isn't a decision there either: that one is our list only.
+ * Asked of the same rules (forNextIssue, the brief's requirement rule), so the footnote can't say otherwise.
+ */
 export function footnoteFor(item, whoKey) {
-  const ARCHITECT = "Prints in the architect's brief under “Needed for the next drawing issue”.";
-  if (DESIGN_TEAM_KEYS.has(whoKey)) return ARCHITECT;
-  // The client brief's heading for these (scripts/documents/author-cpb.mjs).
-  if (whoKey === "client") return "Prints in the client's brief under “Decisions to make”.";
+  if (DESIGN_TEAM_KEYS.has(whoKey)) return FOOTNOTE_ARCHITECT;
+  const choice = WHO_CHOICES.find((c) => c.key === whoKey);
+  const asWho = item && choice ? { ...item, responsibility: choice.responsibility } : null;
+  const requirement = item?.itemKind === "requirement";
+  if (whoKey === "client") return requirement && forNextIssue(asWho) ? FOOTNOTE_ARCHITECT : FOOTNOTE_CLIENT;
   if (whoKey === "blue_leaf") {
-    // Blue Leaf's own actions are our list (owner decision D3: forNextIssue leaves responsibility "blue_leaf" out of the
-    // architect's 03). Asked of the same rule, so the footnote can never say otherwise than the brief prints.
-    const choice = WHO_CHOICES.find((c) => c.key === "blue_leaf");
-    return item && forNextIssue({ ...item, responsibility: choice.responsibility }) ? ARCHITECT : "Our list only — doesn't print.";
+    if (asWho && forNextIssue(asWho)) return FOOTNOTE_ARCHITECT;
+    return requirement ? FOOTNOTE_OURS : FOOTNOTE_BLUE_LEAF;
   }
   return "";
 }

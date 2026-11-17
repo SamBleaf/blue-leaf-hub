@@ -53,10 +53,21 @@ export function ChipLine({ heading, children, labelId }) {
 }
 
 /**
- * A segmented control: one choice of a few, each segment at least 44 px tall. An option is [key, text] or
- * [key, text, ariaLabel] (a short phone label with its full words for screen readers).
+ * One segment's text: a 4-word control (New · Renovated · Altered · No change) keeps every word on one line in its
+ * quarter of a phone (spec S3p: "14 pt labels", about 82 px a segment at 390 px), 13 px under 375 px, tighter padding
+ * under 400 px; other controls keep 15 px on a phone and may wrap. Every size is at least 13 px; sm and up, 14 px.
  */
-export function Segmented({ options, value, onChange, disabled, label, full = false, minSegment = 0, testId }) {
+const SEGMENT_TEXT = {
+  oneLine: "whitespace-nowrap px-1 text-[13px] min-[375px]:text-[14px] min-[400px]:px-2 sm:text-sm",
+  wrap: "px-2 text-[15px] sm:text-sm",
+};
+
+/**
+ * A segmented control: one choice of a few, each segment at least 44 px tall. An option is [key, text] or
+ * [key, text, ariaLabel] (a short phone label with its full words for screen readers). oneLine (the default for four or
+ * more segments, the Work words) keeps each segment's words on one line (finding R14).
+ */
+export function Segmented({ options, value, onChange, disabled, label, full = false, minSegment = 0, testId, oneLine = options.length >= 4 }) {
   // A control that can wrap draws its dividers as 1 px gaps over the hairline, so a second row is ruled too.
   const wraps = !!minSegment && options.length >= 4;
   return (
@@ -67,7 +78,7 @@ export function Segmented({ options, value, onChange, disabled, label, full = fa
         const on = value === key;
         return (
           <button key={key} type="button" aria-pressed={on} aria-label={aria || undefined} disabled={disabled} onClick={() => onChange(key)}
-            className={`min-h-[44px] px-2 text-[15px] sm:text-sm ${i && !wraps ? "border-l border-hairline" : ""} ${on ? "bg-primary font-bold text-white" : "bg-surface text-ink hover:bg-page"} disabled:cursor-not-allowed disabled:opacity-60`}>
+            className={`min-h-[44px] ${oneLine ? SEGMENT_TEXT.oneLine : SEGMENT_TEXT.wrap} ${i && !wraps ? "border-l border-hairline" : ""} ${on ? "bg-primary font-bold text-white" : "bg-surface text-ink hover:bg-page"} disabled:cursor-not-allowed disabled:opacity-60`}>
             {text}
           </button>
         );

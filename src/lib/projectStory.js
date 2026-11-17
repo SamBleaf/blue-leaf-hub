@@ -471,24 +471,98 @@ export function emailMatch(rows, { name, email }) {
   return hit ? { contact: hit } : { conflict: same[0] };
 }
 
+/** A phone number for comparing: digits only, an Australian +61 written as the leading 0 ("+61 412 345 678" → "0412345678"). */
+export const phoneKey = (s) => {
+  const d = String(s == null ? "" : s).replace(/\D+/g, "");
+  return d.startsWith("61") && d.length === 11 ? `0${d.slice(2)}` : d;
+};
+
 /**
- * "+ Add someone new" with no email: the person already on this lead or job under the same name and firm (a second Save,
- * a double tap), so the save reuses them instead of adding a duplicate contact and role.
- *   roleRows  [{ status, contact: { id, first_name, last_name, company, is_archived? } }] for this lead and its job
+ * A typed email and phone agree with a stored contact: each one typed is blank on the contact or the same (email any
+ * case, phone by its digits). A firm-only contact is linked only when they agree, so a typed detail is never dropped.
+ */
+export function detailsAgree(contact, { email, phone } = {}) {
+  const mail = clean(email).toLowerCase(), tel = phoneKey(phone);
+  const theirMail = clean(contact?.email).toLowerCase(), theirTel = phoneKey(contact?.phone);
+  return (!mail || !theirMail || mail === theirMail) && (!tel || !theirTel || tel === theirTel);
+}
+
+/**
+ * The typed details a linked contact has no value for: { email?, phone? } to write onto it (never one it already has).
+ */
+export function detailsToFill(contact, { email, phone } = {}) {
+  const fill = {};
+  if (clean(email) && !clean(contact?.email)) fill.email = clean(email);
+  if (clean(phone) && !clean(contact?.phone)) fill.phone = clean(phone);
+  return fill;
+}
+
+/**
+ * "+ Add someone new" with no email: the person already on this lead or job (a second Save, a double tap, or a retry
+ * after a save whose answer was lost), so the save reuses them instead of adding a duplicate contact and role. The same
+ * name is not enough: the role row must be in the same discipline (sameDiscipline: an engineer "Tom" is never the
+ * architect "Tom"), and the person must share something that tells them apart: the same firm (not blank), the same
+ * phone or the same email. A name-only entry (no firm, phone or email typed) reuses a same-discipline contact with the
+ * same full name only when that contact has no firm, phone or email either: the earlier save of the same entry.
+ * Otherwise a new contact is made. A firm-only contact (no first or last name) goes by its firm: the name or firm typed
+ * must be that firm, and a typed phone or email must agree with it (detailsAgree).
+ *   roleRows  [{ status, role, contact: { id, first_name, last_name, company, phone, email, is_archived? } }] for this
+ *             lead and its job
+ *   role      the design-team role being named (DESIGN_TEAM_ROLES)
  * Returns the contact, or null.
  */
-export function sameNamedOnJob(roleRows, { name, company }) {
-  const key = nameKey(name), firm = nameKey(company);
-  if (!key) return null;
+export function sameNamedOnJob(roleRows, { name, company, phone, email, role } = {}) {
+  const key = nameKey(name), firm = nameKey(company), tel = phoneKey(phone), mail = clean(email).toLowerCase();
+  if (!key || !role) return null;
+  const nameOnly = !firm && !tel && !mail;
   for (const r of Array.isArray(roleRows) ? roleRows : []) {
     const c = r?.contact;
-    if (!c?.id || c.is_archived || !isOn(r.status)) continue;
-    const person = personName(c);
-    const nameOk = person ? nameKey(person) === key : nameKey(c.company) === key;   // a firm-only contact goes by its firm
-    const firmOk = nameKey(c.company) === firm || (!person && !firm);
-    if (nameOk && firmOk) return c;
+    if (!c?.id || c.is_archived || !isOn(r.status) || !sameDiscipline(r.role, role)) continue;
+    const person = personName(c), theirFirm = nameKey(c.company);
+    if (!person) {
+      // A firm-only contact: the name typed is the firm, any firm typed is the same one, a phone or email typed agrees.
+      if (theirFirm && theirFirm === key && (!firm || firm === theirFirm) && detailsAgree(c, { email, phone })) return c;
+      continue;
+    }
+    if (nameKey(person) !== key) continue;
+    const sameFirm = !!firm && firm === theirFirm;
+    const samePhone = !!tel && tel === phoneKey(c.phone);
+    const sameMail = !!mail && mail === clean(c.email).toLowerCase();
+    const bothNameOnly = nameOnly && !theirFirm && !phoneKey(c.phone) && !clean(c.email);
+    if (sameFirm || samePhone || sameMail || bothNameOnly) return c;
   }
   return null;
+}
+
+/**
+ * A practice named with no person ("Studio X Architects" as both the name and the firm, or a firm with no name): the
+ * firm's words, else "" (a person is being named). Such a contact is kept firm-only: no first or last name.
+ */
+export function firmOnlyName({ name, company } = {}) {
+  const firm = clean(company), who = clean(name);
+  if (!firm) return "";
+  return !who || nameKey(who) === nameKey(firm) ? firm : "";
+}
+
+/**
+ * The CRM contact a firm-only save links to before adding one: a contact that isn't archived or lost, with no person's
+ * name, whose firm is the same words (any case, extra spaces ignored), and whose email and phone agree with any typed
+ * (detailsAgree: blank on it, or the same). A practice with another email or phone is not linked: a new firm-only
+ * contact is added, so the typed details are never dropped. A contact whose "name" is only its firm split in two (first
+ * "Studio", last "X Architects", firm "Studio X Architects", as earlier tenders saved a practice) counts as firm-only too,
+ * after a true firm-only one. Then an "active" one, then one of the same contact type, then the oldest.
+ *   rows  crm_contacts rows that may have that firm (the caller's query may over-match: the firm is re-checked here)
+ * Returns the row, or null. The caller fills the typed details it has no value for (detailsToFill).
+ */
+export function firmOnlyMatch(rows, { company, contactType, email, phone } = {}) {
+  const want = clean(company).toLowerCase();
+  if (!want) return null;
+  const firmShaped = (r) => !personName(r) || nameKey(personName(r)) === nameKey(r.company);
+  const hits = (Array.isArray(rows) ? rows : []).filter((r) => r && r.id && !r.is_archived && r.status !== "lost"
+    && clean(r.company).toLowerCase() === want && firmShaped(r) && detailsAgree(r, { email, phone }));
+  if (!hits.length) return null;
+  const rank = (r) => (personName(r) ? 4 : 0) + (r.status === "active" ? 0 : 2) + (contactType && r.contact_type === contactType ? 0 : 1);
+  return [...hits].sort((a, b) => rank(a) - rank(b) || String(a.created_at || "").localeCompare(String(b.created_at || "")))[0];
 }
 
 /** "Ava Arch, Arch Studio": the person someone else's email belongs to, in plain words. */

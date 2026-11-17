@@ -21,8 +21,10 @@ import {
   usableNotedWords, adelaideDay, timeOfDay, saveWords, onFloor, addFloorOptions, notAllowedOption, ACTION_PROMPT,
   floorBlocks, roomPosition, actionsPillText, removeRoomText, addedText, duplicatedText, movedText, tickMoveLabel, tickCount, storeysNote, roomSaveState,
   flushWithin, isExistingWorksRow, existingWorksFor, existingWorkSeed, actionSeed,
-  savedFloors, withFloor, pruneFloors, floorsPatch, removalBlocked, canRemoveRoom, readdIfGone,
+  savedFloors, withFloor, pruneFloors, floorsPatch, removalBlocked, canRemoveRoom, readdIfGone, pointRecordCount, edgeBleed, sameBleed,
 } from "../../src/lib/roomScreen.js";
+import { openPoints } from "../../src/lib/briefModel.js";
+import { actionPoints } from "../../src/lib/needsAction.js";
 import { dialogFocusTarget, focusReturnTarget, segmentColumns } from "../../src/components/sales/lead-detail/register/useRoomUi.js";
 import { realJob } from "../documents/fixtures/real-extension-job.mjs";
 
@@ -201,6 +203,22 @@ ok("an existing engineered-stone value is recognised as not allowed", notAllowed
 section("Actions in this room");
 ok("Laundry's actions are its own open records (i61)", flat(roomActionPoints(register, context, room("ld")).map((p) => p.ids)) === flat([["i61"]]));
 ok("a whole-house point never shows in a room (the rangehood action is Throughout)", !rooms.some((r) => roomActionPoints(register, context, r).some((p) => p.ids.includes("i46"))));
+// R15 (N13): two elements still in or out in one room are one printed line ("Retaining and pool: are they part of this
+// job?"), but two rows here, as in the Actions list and its pill; the Rooms list row counts them as 2 whatever it is given.
+{
+  const inRoom = { ...register, items: register.items.map((i) => (["i71", "i72"].includes(i.id) ? makeItem({ ...i, roomId: "ld", section: "room" }) : i)) };
+  const own = roomActionPoints(inRoom, context, room("ld"));
+  const listAll = actionPoints(inRoom, context, "all").filter((p) => p.place.kind === "room" && p.place.key === "ld");
+  const merged = openPoints(inRoom, context, { scope: "all" }).filter((p) => p.place.kind === "room" && p.place.key === "ld");
+  ok("'Actions in this room' is one row per record: Retaining and Pool are two rows (merge off)", own.length === 3 && own.every((p) => p.ids.length === 1)
+    && ["i61", "i71", "i72"].every((id) => own.some((p) => p.ids.includes(id))), flat(own.map((p) => p.ids)));
+  ok("…the same rows, in the same order, as the Actions list's 'everything' for this room", flat(own.map((p) => p.ids)) === flat(listAll.map((p) => p.ids)));
+  ok("…while the printed brief still asks them once (the merged list has one point holding both)", merged.length === 2 && merged.some((p) => p.ids.length === 2));
+  ok("the Rooms list row counts records, given merged or unmerged points (3 either way)", roomListRow(inRoom, context, room("ld"), openPoints(inRoom, context, { scope: "all" })).actions === 3
+    && roomListRow(inRoom, context, room("ld"), openPoints(inRoom, context, { scope: "all", merge: false })).actions === 3 && roomListRow(inRoom, context, room("ld")).actions === 3);
+  ok("the room screen's layout takes the same rows", roomLayout(inRoom, context, room("ld"), ctx).actions.length === 3);
+  ok("pointRecordCount counts every record of a merged point", pointRecordCount(merged) === 3 && pointRecordCount([]) === 0 && pointRecordCount(null) === 0);
+}
 
 section("The room brief");
 ok("the seed is the build contract's", flat(briefSeed(kt, "x")) === flat({ id: "x", roomId: "kt", promptKey: "R-004", itemKind: "requirement", category: "layout", section: "room" }));
@@ -255,6 +273,14 @@ ok("on close: back to what had focus, or the trigger when the tap never focused 
   && focusReturnTarget({ before: trigger, now: firstItem, panel: menuPanel, body }) === trigger
   && focusReturnTarget({ before: trigger, now: elsewhere, panel: menuPanel, body }) === null
   && focusReturnTarget({ before: { ...trigger, isConnected: false }, fallback: null, now: body, panel: menuPanel, body }) === null);
+// R13: the phone room bar and footer reach the window's edges, measured from the room screen's box. At 390 px the lead
+// page puts the room 30 px in on each side (main px-4 16 + stage card border 1 + p-4 16, the register frame -mx-3 -12 +
+// border 1, the step's p-2 8): the margins are -30 / -30, so the bar runs 0 → 390.
+ok("edge bleed at 390 px: 30 px each side, so the bar spans the whole window", flat(edgeBleed({ left: 30, right: 360 }, 390)) === flat({ left: 30, right: 30 }));
+ok("…it follows whatever chain a stage has (uneven or fractional too), never past the edge, and nothing without a layout",
+  flat(edgeBleed({ left: 21.5, right: 368 }, 390)) === flat({ left: 21.5, right: 22 }) && flat(edgeBleed({ left: -4, right: 400 }, 390)) === flat({ left: 0, right: 0 })
+  && edgeBleed({ left: 0, right: 0 }, 390) === null && edgeBleed(null, 390) === null && edgeBleed({ left: 10, right: 300 }, 0) === null);
+ok("…and an unchanged measure is the same (no re-render)", sameBleed({ left: 30, right: 30 }, { left: 30, right: 30 }) && !sameBleed({ left: 30, right: 30 }, { left: 30, right: 29 }) && sameBleed(null, null) && !sameBleed(null, { left: 0, right: 0 }));
 // N8: the Work control wraps to 2 × 2 rather than drop under 96 px a segment (spec S3); other controls never wrap.
 ok("segment columns: 4 equal columns that wrap to 2 × 2 under 4 × 96 px; a plain control stays one row",
   segmentColumns(4, 96) === "repeat(auto-fit, minmax(clamp(calc(25.0000% - 1px), (384px - 100%) * 999, calc(50.0000% - 1px)), 1fr))"
@@ -361,6 +387,14 @@ section("'Other things recorded here' › Show details (M13: no codes, no Record
   const shop = readFileSync(join(REG, "RegisterWorkshop.jsx"), "utf8");
   const rows = parts.match(/<PromptRow\b[^>]*/g) || [];
   ok("the room screen's only PromptRow is the office one (Product details)", rows.length > 0 && rows.every((r) => /\boffice\b/.test(r)), flat(rows));
+  ok("R13: the phone room bar and the footer take the measured edge margins (full-bleed), from the room screen's own box",
+    /const bleed = useEdgeBleed\(rootRef, narrow\)/.test(screenSrc) && /grid-cols-\[44px_minmax\(0,1fr\)_44px\][^"]*"\s*style=\{bleedStyle\(bleed\)\}/.test(screenSrc)
+    && /style=\{bleedStyle\(bleed, stageInset \? \{ bottom: stageInset \} : undefined\)\} data-testid="room-footer"/.test(screenSrc)
+    && /edgeBleed\(el\.getBoundingClientRect\(\), document\.documentElement\.clientWidth\)/.test(screenSrc));
+  ok("R15: the room screen asks for one row per record", /openPoints\(reg, context, \{ scope: "all", merge: false \}\)/.test(screenSrc));
+  ok("Undo of a removal (Other things, the earlier-answer banner) puts the same record back with undeleteItem when the store has it",
+    /if \(undeleteItem\) return \(\) => \{ undeleteItem\(item\); \};/.test(parts) && /<OtherRecorded[^>]*undeleteItem=\{undeleteItem\}/s.test(screenSrc)
+    && /<EarlierAnswerBanner[^>]*undeleteItem=\{undeleteItem\}/s.test(screenSrc) && /<RoomBriefCard[^>]*undeleteItem=\{undeleteItem\}/s.test(screenSrc));
   ok("Show details opens the edit drawer with Product details open", /onOpenRecord\(item\.id, \{ details: true \}\)/.test(parts) && /<OtherRecorded[^>]*onOpenRecord=\{onOpenRecord\}/s.test(screenSrc)
     && /onOpenRecord=\{\(id, opts\) => setRecordDrawer\(\{ kind: "record", ids: \[id\], \.\.\.\(opts\?\.details \? \{ details: true \} : \{\}\) \}\)\}/.test(shop));
 }
@@ -372,13 +406,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import RoomsList from ${JSON.stringify(join(REG, "RoomsList.jsx"))};
 import RoomScreen from ${JSON.stringify(join(REG, "RoomScreen.jsx"))};
 import RoomBriefCard from ${JSON.stringify(join(REG, "RoomBriefCard.jsx"))};
-import { MenuItem, ChoiceChip } from ${JSON.stringify(join(REG, "RoomUi.jsx"))};
+import { MenuItem, ChoiceChip, Segmented } from ${JSON.stringify(join(REG, "RoomUi.jsx"))};
+import BaselineGuide, { PerformanceReview } from ${JSON.stringify(join(REG, "BaselineGuide.jsx"))};
+import { EarlierAnswerBanner } from ${JSON.stringify(join(REG, "RoomBriefCard.jsx"))};
 import { WorkControl } from ${JSON.stringify(join(REG, "RoomBriefCard.jsx"))};
 const noop = () => {};
 const store = { mutateMeta: noop, replaceItems: noop, upsertItem: noop, updateItem: noop, deleteItem: noop, addItem: noop, saveState: () => "saved", flush: async () => true };
 export const list = (props) => renderToStaticMarkup(<RoomsList openRoom={noop} readOnly={false} {...store} {...props} />);
 export const screen = (props) => renderToStaticMarkup(<RoomScreen stage="consultants" actor={{ id: "u1" }} onBack={noop} onOpenRoom={noop} onPortalItem={noop} {...store} {...props} />);
 export const card = (props) => renderToStaticMarkup(<RoomBriefCard {...store} {...props} />);
+export const guide = (props) => renderToStaticMarkup(<BaselineGuide mutateMeta={noop} actor={{ id: "u1" }} readOnly={false} {...props} />);
+export const review = (props) => renderToStaticMarkup(<PerformanceReview {...props} />);
+export const banner = (props) => renderToStaticMarkup(<EarlierAnswerBanner mutateMeta={noop} deleteItem={noop} readOnly={false} {...props} />);
 export const ui = () => ({
   radioOn: renderToStaticMarkup(<MenuItem checked onClick={noop}>Renovated</MenuItem>),
   radioOff: renderToStaticMarkup(<MenuItem checked={false} onClick={noop}>New</MenuItem>),
@@ -387,6 +426,7 @@ export const ui = () => ({
   bad: renderToStaticMarkup(<ChoiceChip tone="bad" title="Engineered stone can't be used. Tap to take it off, then choose another with the client." onClick={noop}>Engineered stone · not allowed</ChoiceChip>),
   workWrap: renderToStaticMarkup(<WorkControl full room={{ id: "r", scope: "new" }} onChange={noop} minSegment={96} />),
   workPlain: renderToStaticMarkup(<WorkControl full room={{ id: "r", scope: "new" }} onChange={noop} />),
+  threeWay: renderToStaticMarkup(<Segmented full label="Show rooms" value="all" onChange={noop} options={[["all", "All"], ["brief", "Brief needed"], ["check", "Check work"]]} />),
 });
 `);
 try {
@@ -434,6 +474,16 @@ try {
     /role="menuitemradio" aria-checked="true"[^>]*>.*Renovated/.test(ui.radioOn) && /role="menuitemradio" aria-checked="false"/.test(ui.radioOff)
     && /role="menuitemcheckbox" aria-checked="true"/.test(ui.check) && /role="menuitem"/.test(ui.plain) && !/aria-checked/.test(ui.plain), flat(ui));
   ok("the not-allowed chip reads as chosen and says it can't be used", /aria-pressed="true"/.test(ui.bad) && /aria-label="Engineered stone can&#x27;t be used/.test(ui.bad), ui.bad);
+  // R14: the phone Work control keeps 'No change' (and every word) on one line, 4 in a row, 44 px tall, 14 px from 375 px.
+  const segs = (h) => [...h.matchAll(/<button[^>]*class="([^"]*)"[^>]*>([^<]*)</g)].map((m) => ({ cls: m[1], text: m[2] }));
+  const workSegs = segs(ui.workPlain);
+  ok("R14: the Work words never wrap: 4 segments in one row, each whitespace-nowrap, 44 px, 13 px under 375 px, 14 px from 375 px, tighter padding under 400 px",
+    workSegs.length === 4 && workSegs.map((x) => x.text).join("|") === "New|Renovated|Altered|No change"
+    && workSegs.every((x) => /\bwhitespace-nowrap\b/.test(x.cls) && /\bmin-h-\[44px\]/.test(x.cls) && /\btext-\[13px\]/.test(x.cls) && /min-\[375px\]:text-\[14px\]/.test(x.cls)
+      && /\bpx-1\b/.test(x.cls) && /min-\[400px\]:px-2/.test(x.cls) && /sm:text-sm/.test(x.cls) && !/text-\[1[0-2]px\]|text-xs/.test(x.cls))
+    && /grid-template-columns:repeat\(4, minmax\(0, 1fr\)\)/.test(ui.workPlain), flat(workSegs));
+  ok("…the tablet 2 × 2 control keeps them on one line too; a 3-way control keeps 15 px and may wrap", segs(ui.workWrap).every((x) => /whitespace-nowrap/.test(x.cls))
+    && segs(ui.threeWay).every((x) => /text-\[15px\]/.test(x.cls) && !/whitespace-nowrap/.test(x.cls)));
   ok("the Work control can wrap 2 × 2 (dividers as 1 px gaps); the plain one keeps its rules", /gap-px bg-hairline/.test(ui.workWrap) && /auto-fit/.test(ui.workWrap) && !/gap-px/.test(ui.workPlain) && /border-l border-hairline/.test(ui.workPlain));
   const th2 = text(R.list({ reg: withRooms(tick.rooms), context }));
   ok("two floors: both headers with '+ Add room here', and no banner", th2.includes("Ground floor · 11") && th2.includes("Upper floor · 5") && (th2.match(/\+ Add room here/g) || []).length === 2 && !th2.includes("Is anything upstairs?"));
@@ -493,6 +543,26 @@ try {
   ok("Not in this job: only the bar, 'This room isn't part of the job. Bring it back', and what's still recorded", oj.includes("This room isn't part of the job.") && oj.includes("Bring it back")
     && !oj.includes("Room brief") && !oj.includes("Actions in this room") && !oj.includes("Same as the rest of the house") && oj.includes(`Other things recorded here (${answerCount(register, "kt")})`));
   ok("a removed room says so", text(R.screen({ reg: register, context, roomId: "gone" })).includes("This room has been removed."));
+
+  section("Rendered: Throughout's pricing guide and review list (R17: 44 px controls, 13 px text at least)");
+  {
+    const gReg = { ...register, meta: { ...register.meta, baseline: { projectTier: "standard" } } };
+    const gh = R.guide({ reg: gReg });
+    const rh = R.review({ item: makeItem({ promptKey: "W-016", itemKind: "requirement", answer: { v: 1, selected: [{ optionId: "airtightness", label: "Airtightness" }, { optionId: "passive_house_target", label: "Passive House target" }] } }) });
+    const controls = [...gh.matchAll(/<(button|summary)\b[^>]*class="([^"]*)"/g)].map((m) => ({ tag: m[1], cls: m[2] }));
+    const tiers = [...gh.matchAll(/data-testid="baseline-(?:project|[a-z_]+)-(standard|upgraded|premium)"/g)];
+    ok("every control (the project tiers, each category's tiers, 'Use … for the …', 'By category') is at least 44 px", controls.length >= 6 && controls.every((c) => /\bmin-h-\[44px\]/.test(c.cls) && !/min-h-\[(?:30|40)px\]/.test(c.cls))
+      && controls.some((c) => c.tag === "summary") && /data-testid="baseline-use-project"/.test(gh) && tiers.length >= 6, flat(controls.filter((c) => !/min-h-\[44px\]/.test(c.cls))));
+    ok("no text under 13 px in either (no 10, 11 or 12 px, no text-xs)", !/text-\[(?:10|11|12)px\]|\btext-xs\b/.test(gh + rh), (gh + rh).match(/text-\[(?:10|11|12)px\]|\btext-xs\b/)?.[0]);
+    const gt = text(gh), rt = text(rh);
+    ok("the wording is kept: 'Blue Leaf pricing guide', Staff only, 'Project guide', Standard · Upgraded · Premium, 'By category', 'Use Standard for the …'",
+      gt.includes("Blue Leaf pricing guide") && gt.includes("Staff only") && gt.includes("Project guide") && ["Standard", "Upgraded", "Premium"].every((w) => gt.includes(w))
+      && gt.includes("By category") && /Use Standard for the \d+ categor/.test(gt) && gt.includes("isn't a client choice, an approval or a price"), gt.slice(0, 400));
+    ok("the review list keeps its wording and test id", /data-testid="review-W-016"/.test(rh) && rt.includes("For technical review") && rt.includes("Review required") && rt.includes("Staff only") && rt.includes("Confirm for this project:"));
+  }
+
+  section("Rendered: the earlier-answer banner offers Undo with the store's undeleteItem alone");
+  ok("the banner still draws with undeleteItem and no addItem", text(R.banner({ reg: register, room: kt, undeleteItem: () => null })).includes("Keep Renovated"));
 
   section("Rendered: the room brief card in the Documents drawer (compact)");
   const ch = text(R.card({ reg: register, room: kt, context, compact: true, onOpenRoom: () => {} }));

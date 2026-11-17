@@ -2108,7 +2108,12 @@ export default function LeadDetail() {
                   />
                 </div>
 
-                <InlineField label="Budget confirmed" value={lead.wo_budget_confirmed || ""} onSave={v => patch({ wo_budget_confirmed: v || null })} placeholder="e.g. $1.3M–$1.5M approved finance" />
+                {/* The brief reads this free text as confirmed only when it starts with a plain yes (projectStory.budgetConfirmedOn,
+                    B2). The hint sits inside the row's divider, under the value. */}
+                <div className="border-b border-hairline [&>div]:border-0">
+                  <InlineField label="Budget confirmed" value={lead.wo_budget_confirmed || ""} onSave={v => patch({ wo_budget_confirmed: v || null })} placeholder="e.g. Yes — approved finance" />
+                  <p className="-mt-1 pb-1.5 pl-[9.5rem] text-xs text-muted" data-testid="budget-confirmed-hint">Starts with Yes = confirmed for the brief.</p>
+                </div>
                 <InlineField label="Target timeline" value={lead.wo_timeline_confirmed || ""} onSave={v => patch({ wo_timeline_confirmed: v || null })} placeholder="e.g. Start March 2026, move-in by Christmas" />
                 <InlineField label="Decision makers" value={lead.wo_decision_makers || ""} onSave={v => patch({ wo_decision_makers: v || null })} placeholder="e.g. Bill + Sarah — both need to sign off" />
                 <InlineField label="Most excited about" value={lead.wo_most_excited_about || ""} onSave={v => patch({ wo_most_excited_about: v || null })} placeholder="e.g. The kitchen and outdoor entertaining area" />

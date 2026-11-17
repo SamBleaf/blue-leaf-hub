@@ -127,8 +127,9 @@ function AddLeadDrawer({ open, onClose, onCreated }) {
 
 /* ─────────────────────────── Architect Tender drawer ─────────────────────────── */
 // The architect typed here is kept where the register and the brief read it (owner decision 6): once the lead exists it
-// is named on the lead's design team (POST …/design-team), which also keeps leads.architect_name in step. If that save
-// fails the lead still opens; the register shows the typed name as "Noted in Sales" and offers it as the search.
+// is named on the lead's design team (POST …/design-team, as a firm-only contact for the practice), which also keeps
+// leads.architect_name in step. If that save fails the lead still opens; the register shows the typed name as "Noted in
+// Sales" and offers it as the search.
 const tenderInput = "focus-ring w-full rounded-lg border border-hairline bg-page px-3 py-2 text-[16px] text-ink sm:text-sm";
 function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
   const EMPTY = { first_name: "", last_name: "", site_address: "", architect_name: "", project_type: "", estimated_value: "" };
@@ -152,7 +153,9 @@ function AddArchitectTenderDrawer({ open, onClose, onCreated }) {
       const lead = r.data.lead;
       const architect = form.architect_name.trim();
       if (lead?.id && architect) {
-        await apiPost(`/api/sales/leads/${lead.id}/design-team`, { role: "architect", name: architect, company: architect });
+        // A practice, not a person: the server links the CRM's firm-only contact for that firm (or adds one, with no
+        // first or last name), so repeat tenders from the same practice never add another "Studio X Architects" person.
+        await apiPost(`/api/sales/leads/${lead.id}/design-team`, { role: "architect", company: architect });
       }
       setForm(EMPTY);
       onCreated(lead);

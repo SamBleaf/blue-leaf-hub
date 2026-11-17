@@ -11,8 +11,8 @@
  *   List words      removeRoomText, addedText, duplicatedText, movedText, tickMoveLabel, tickCount
  *   Earlier answers earlierWords, workWordFor, keepWorkPlan, changeWorkPlan, readdable, readdIfGone
  *   Room screen     roomPromptSet, roomLayout (which prompt goes in which group, and what no row shows), houseLinesFor,
- *                   stripView, exceptionSeedFrom, roomActionPoints, roomPosition, existingWorksFor, existingWorkSeed,
- *                   actionSeed, roomSaveState, flushWithin
+ *                   stripView, exceptionSeedFrom, roomActionPoints, pointRecordCount, roomPosition, existingWorksFor,
+ *                   existingWorkSeed, actionSeed, roomSaveState, flushWithin, edgeBleed, sameBleed
  *   Room brief      briefSeed, standardBriefText, toggleAnswerList, connectedFrom, connectCandidates, usableNotedWords
  *   Words           adelaideDay, timeOfDay, saveWords, shortName
  *
@@ -294,17 +294,40 @@ export function briefPreview(register, room) {
   return { text: has ? text : "", needed: work && !has, unfinished, mustHaves: has ? "" : mustHaveWords(register, room) };
 }
 
-/** The room's open points under the Actions rule (spec S4): its own records only. */
+/**
+ * The room's open points under the Actions rule (spec S4): its own records only, one row per record (merge: false),
+ * exactly as the Actions list and the header pill count them (needsAction.actionPoints, finding N13): Retaining and
+ * Pool are two rows here too. points: openPoints(…, { scope: "all", merge: false }) computed once by the caller.
+ */
 export function roomActionPoints(register, context, room, points = null) {
-  return (points || openPoints(register, context, { scope: "all" })).filter((p) => p.place?.kind === "room" && p.place.key === room.id);
+  return (points || openPoints(register, context, { scope: "all", merge: false })).filter((p) => p.place?.kind === "room" && p.place.key === room.id);
 }
+/** How many records a list of points holds: a merged point (two elements asked once) counts each of its records. */
+export const pointRecordCount = (points) => (points || []).reduce((n, p) => n + (p?.ids?.length || 0), 0);
 
-/** Everything a row on the Rooms list shows. points: openPoints(…, { scope: "all" }) computed once for the list. */
+/**
+ * Everything a row on the Rooms list shows. points: openPoints(…, { scope: "all" }) computed once for the list, merged
+ * or not: the action count is records, so it matches the room's "Actions in this room" rows and the Actions list.
+ */
 export function roomListRow(register, context, room, points = null) {
   const preview = briefPreview(register, room);
-  const actions = roomActionPoints(register, context, room, points).length;
+  const actions = pointRecordCount(roomActionPoints(register, context, room, points));
   return { ...preview, checkWork: disagreeingScope(register, room).length > 0, actions };
 }
+
+/**
+ * Phone room bar and footer (spec S3p "Full width"): the negative margins that take a bar from the room screen's own
+ * box to the window's edges, whatever padding the lead page, its stage card and the register frame put around it (the
+ * chain differs by stage, so it is measured, never assumed). rect: the room screen's getBoundingClientRect();
+ * viewportWidth: document.documentElement.clientWidth (so a page scrollbar is never covered and the page never scrolls
+ * sideways). { left, right } in px, or null when there is no layout (a hidden copy, server rendering).
+ */
+export function edgeBleed(rect, viewportWidth) {
+  const l = Number(rect?.left), r = Number(rect?.right), w = Number(viewportWidth);
+  if (![l, r, w].every(Number.isFinite) || w <= 0 || r <= l) return null;
+  return { left: Math.max(0, l), right: Math.max(0, w - r) };
+}
+export const sameBleed = (a, b) => (a === b) || (!!a && !!b && a.left === b.left && a.right === b.right);
 
 /** The filter counts: All · Brief needed · Check work. */
 export function listCounts(register) {

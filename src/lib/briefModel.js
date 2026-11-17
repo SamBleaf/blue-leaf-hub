@@ -24,6 +24,7 @@ import {
   questionById, resolvePromptId, categoryLabel, natureOf, roomDefaultsFor, answerConfigFor, isClientSelection,
   ROOM_SCOPES, ROOM_SCOPES_WITH_WORK, ROOM_SCOPE_DISPOSITION, ROOM_TYPES, HIDDEN_ROOM_SCOPE_PROMPTS, ROOM_BRIEF_PROMPT, ROOM_MUST_HAVES,
   DRAWING_IMPACT, ACTION_ROLES, ROOM_USED_BY, PROJECT_TYPE_LABELS, DELIVERY_MODELS, UNRESOLVED_REASONS, ANSWER_SCHEMA_VERSION, HIDDEN_OPTION_IDS,
+  OPEN_OPTION_IDS, statedText, configForRow,
 } from "./register.js";
 import { LEAD_FINANCE_STATUS_LABELS } from "./constants.js";
 
@@ -214,16 +215,32 @@ const evidenced = (item) => !!(item?.evidence?.at && item?.evidence?.by) || !!it
 /** An element whose place in the job is still open ("Retaining: in or out of this job?"). */
 export const isInOut = (item) => !!item?.answer?.element && item.disposition === "undecided" && natureOf(item) === "scope" && !liveSelected(item).length;
 
-// Answer keys a blank row is seeded with (the question's zone, the areas it covers, its version): they say nothing.
-const ANSWER_SEED_KEYS = new Set(["v", "state", "nature", "configVersion", "selected", "zone", "areaIds", "sourceQuestionIds"]);
+// Answer keys a blank row is seeded with (the areas it covers, its version and state): they say nothing. The zone is
+// weighed on its own (zoneSaysSomething).
+const ANSWER_SEED_KEYS = new Set(["v", "state", "nature", "configVersion", "selected", "areaIds", "sourceQuestionIds", "zone"]);
 const filled = (v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === "object" ? Object.keys(v).length > 0 : typeof v === "number" ? true : !!clean(v));
+/**
+ * Does the record's zone say anything? An Other zone does only once words are typed on it ("Rear studio walls": the only
+ * copy of what was said, review R6); the bare "Other zone" says nothing. A zone that came with the row says nothing: where
+ * each zone is laid out as its own row (a floor per zone, paint per surface, the kitchen and wet-area standards), the row
+ * is seeded with its zone, so a row tapped and then cleared is still empty. A zone picked on a question whose zones are a
+ * choice (cladding, roof) does say something, as does one this screen doesn't know.
+ */
+function zoneSaysSomething(item) {
+  const z = item?.answer?.zone;
+  if (!z || !(clean(z.key) || clean(z.label))) return false;
+  if (OPEN_OPTION_IDS.has(z.key)) return !!clean(statedText(clean(z.label)));
+  const cfg = configForRow(resolvePromptId(item.promptKey), item);
+  return !(cfg?.repeat?.eachZone && (cfg.zones || []).some((o) => o.id === z.key));
+}
 
 /**
- * Does the record hold nothing at all? Only then is it offered for deletion ("Delete all … empty answers"), so anything
- * a person put on it counts: words in any field, a room brief's links, users and rough size, a measured quantity, a
- * status, evidence, a by-when, a link to a document, or a portal or contract state. Fields a blank row is seeded with
- * (the question's owner and check, its zone, areas and answer version) don't. An answer from a newer screen this one
- * can't read is never empty.
+ * Does the record hold nothing at all? Only then can it be offered for deletion ("Delete all … empty answers", which
+ * also needs nothing to point at it: deletableEmpty), so anything a person put on it counts: words in any field, a zone
+ * picked or typed, a room brief's links, users and rough size, a measured quantity, a status, evidence, a by-when, a link
+ * to a document, or a portal or contract state. Fields a blank row is seeded with (the question's owner and check, its
+ * areas and answer version, the zone of a row laid out one per zone) don't. An answer from a newer screen this one can't
+ * read is never empty.
  */
 export function isEmptyRecord(item) {
   if (!item) return true;
@@ -239,8 +256,34 @@ export function isEmptyRecord(item) {
   const a = item.answer;
   if (!a) return true;
   if (!(Number(a.v) <= ANSWER_SCHEMA_VERSION)) return false;
-  if (liveSelected(item).length || a.element || ["unresolved", "client_unsure", "not_applicable"].includes(a.state)) return false;
+  if (liveSelected(item).length || a.element || zoneSaysSomething(item) || ["unresolved", "client_unsure", "not_applicable"].includes(a.state)) return false;
   return !Object.entries(a).some(([k, v]) => !ANSWER_SEED_KEYS.has(k) && filled(v));
+}
+
+/**
+ * The ids other records point at: a row with rows linked under it (gutters under a roof, answer.linkedItemIds), a
+ * whole-house default a room's own answer overrides (overridesDefaultId) and a default a room confirmed
+ * (room.defaultConfirmations). Deleting one of these would orphan what points at it, even if it holds nothing itself.
+ */
+export function referencedIds(register) {
+  const out = new Set();
+  for (const i of register?.items || []) {
+    for (const id of Array.isArray(i?.answer?.linkedItemIds) ? i.answer.linkedItemIds : []) if (id && id !== i.id) out.add(id);
+    if (i?.overridesDefaultId && i.overridesDefaultId !== i.id) out.add(i.overridesDefaultId);
+  }
+  for (const r of register?.meta?.rooms || []) {
+    const c = r?.defaultConfirmations;
+    if (c && typeof c === "object") for (const id of Object.keys(c)) out.add(id);
+  }
+  return out;
+}
+/**
+ * The records "Delete all … empty answers" may delete: a question's record that holds nothing (isEmptyRecord) and that
+ * nothing points at (referencedIds). keep: more ids held elsewhere, such as a received document's linked records.
+ */
+export function deletableEmpty(register, { keep = [] } = {}) {
+  const refs = referencedIds(register), held = new Set(keep || []);
+  return (register?.items || []).filter((i) => isEmptyRecord(i) && !!resolvePromptId(i.promptKey) && !refs.has(i.id) && !held.has(i.id));
 }
 
 /**
@@ -287,7 +330,7 @@ export function isOpenPoint(item) {
 }
 /**
  * Is an open point for the next drawing issue? Everything but a client's finish choice (that goes to the client and the
- * schedule) and Blue Leaf's own actions: those are our list only and never print (owner decision D3, 17 Nov 2026).
+ * schedule) and Blue Leaf's own actions: those are our list only and never print in 03 (owner decision D3, 17 Nov 2026).
  */
 export function forNextIssue(item) {
   if (item.responsibility === "blue_leaf") return false;
@@ -295,6 +338,13 @@ export function forNextIssue(item) {
   if (DRAWING_IMPACT[resolvePromptId(item.promptKey)] || item.itemKind === "requirement" || isInOut(item)) return true;
   return false;
 }
+/**
+ * Does an open record wait for 03 or the Actions list instead of printing as settled in 01, 04, 05 or 06? Every open point
+ * does (a point for the next drawing issue, or one still waiting on the client or on no one: "Demolish the rear shed"
+ * isn't settled work while the client is still to confirm it), except Blue Leaf's own: those never print in 03 (D3), so
+ * their content prints where it belongs (review R2).
+ */
+export const waitsAsPoint = (item) => isOpenPoint(item) && item.responsibility !== "blue_leaf";
 const reasonWords = (item) => {
   const key = item.answer?.unresolved?.reason;
   if (key === "designer_to_confirm") return "designer to confirm";
@@ -472,6 +522,9 @@ export function roomRow(register, context, room, { taken = new Set(), houseDefau
       continue;
     }
     if (isEmptyRecord(i)) continue;
+    // An open record never prints as settled here (review R2): it is a point in 03 (already taken) or it waits in the
+    // Actions list. Only Blue Leaf's own points print where they belong (D3).
+    if (waitsAsPoint(i)) continue;
     const mustHave = (ROOM_MUST_HAVES[room.roomType] || []).includes(qid) || i.itemKind === "requirement";
     const impact = drawingImpactOf(i);
     if (mustHave) {
@@ -483,7 +536,7 @@ export function roomRow(register, context, room, { taken = new Set(), houseDefau
     if (impact) {
       const w = recordWords(i, { impact });
       if (w) { fittings.push(`${clean(i.answer?.element?.label) || plainShort(i)}: ${lowerFirst(w)}`); cover(i); }
-    } else if (isWorkRecord(i) && !(isOpenPoint(i) && forNextIssue(i))) {      // a point in 03 isn't said twice
+    } else if (isWorkRecord(i)) {
       const w = recordWords(i) || DISPOSITION_WORDS[i.disposition];
       fittings.push(`${clean(i.answer?.element?.label) || plainShort(i)}: ${lowerFirst(w)}`); cover(i);
     }
@@ -556,9 +609,9 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   const rooms = (register?.meta?.rooms || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const printed = new Set();
   const take = (ids) => ids.forEach((id) => printed.add(id));
-  // A record that prints as a point in 03 isn't said again in 01, 04 or 05. Blue Leaf's own open points don't print in 03
-  // (D3), so their content prints where it belongs.
-  const inPoints = (i) => isOpenPoint(i) && forNextIssue(i);
+  // An open record never prints as settled in 01, 04, 05 or 06: it is a point in 03, or it waits in the Actions list (and the
+  // client's brief) until it is settled. Blue Leaf's own open points don't print in 03 (D3), so their content prints
+  // where it belongs (waitsAsPoint).
 
   // Cover.
   const architect = namedArchitect(context);
@@ -591,7 +644,7 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   // What the design must achieve, house-wide, once settled (open ones are points in 03): each under its own subject.
   for (const i of items) {
     const qid = resolvePromptId(i.promptKey);
-    if (i.roomId || i.itemKind !== "requirement" || ["P-005", "W-009"].includes(qid) || inPoints(i) || heldBackReason(register, i) || isEmptyRecord(i) || officeOnly(i)) continue;
+    if (i.roomId || i.itemKind !== "requirement" || ["P-005", "W-009"].includes(qid) || waitsAsPoint(i) || heldBackReason(register, i) || isEmptyRecord(i) || officeOnly(i)) continue;
     const w = recordWords(i);
     if (!w) continue;
     project.push({ key: `req:${i.id}`, label: labelOf(i), text: sentence(`${w.replace(/\.$/, "")}${approvalNote(i)}`), source: { kind: "record" }, ids: [i.id] });
@@ -654,7 +707,7 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   // House-wide and site work (demolition, a new opening …): it changes the drawings, so it prints here too.
   let hasWork = false;
   for (const i of items) {
-    if (i.roomId || printed.has(i.id) || !isWorkRecord(i) || drawingImpactOf(i) || inPoints(i) || heldBackReason(register, i) || isEmptyRecord(i)) continue;
+    if (i.roomId || printed.has(i.id) || !isWorkRecord(i) || drawingImpactOf(i) || waitsAsPoint(i) || heldBackReason(register, i) || isEmptyRecord(i)) continue;
     sel(`work:${i.id}`, labelOf(i), recordWords(i) || DISPOSITION_WORDS[i.disposition], [i.id]);
     hasWork = true;
   }
@@ -667,12 +720,14 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
   selectionRows.forEach((r) => take(r.ids));
 
   // 06 Outside this job: rooms not in the job, and work by others, supplied by the client or left out, not said above.
+  // An open record isn't settled here either ("Supplied by the client" while the client is still to confirm it): it
+  // waits in the Actions list, like in 01, 04 and 05 (waitsAsPoint, review R2).
   const outside = [];
   const notIn = rooms.filter((r) => r.scope === "not_in_scope");
   if (notIn.length) outside.push({ label: "Rooms not in this job", text: sentence(andList(notIn.map((r) => clean(r.name)))), ids: [], source: { kind: "room", key: "not_in_scope" } });
   const OUT = { excluded: "Not in this job", deferred: "A possible later stage", by_others: "By others" };
   for (const i of items) {
-    if (printed.has(i.id) || isHiddenScope(i) || heldBackReason(register, i) || isEmptyRecord(i) || i.itemKind === "selection" && !drawingImpactOf(i)) continue;
+    if (printed.has(i.id) || isHiddenScope(i) || waitsAsPoint(i) || heldBackReason(register, i) || isEmptyRecord(i) || i.itemKind === "selection" && !drawingImpactOf(i)) continue;
     const kind = OUT[i.disposition] || (i.supplyBy === "client" ? "Supplied by the client" : null);
     if (!kind || natureOf(i) === "fact") continue;
     const room = roomById(register, i.roomId);
@@ -690,7 +745,9 @@ export function architectBriefModel(register, context = {}, { recipientName = ""
     else if (isEmptyRecord(i)) notPrinted.push({ id: i.id, group: "empty", reason: "empty" });
     else if (isClientSelection(i) || i.itemKind === "selection") notPrinted.push({ id: i.id, group: "schedule", reason: "schedule" });
     else if (isOpenPoint(i) && i.responsibility === "blue_leaf") notPrinted.push({ id: i.id, group: "office", reason: "office" });
-    else if (isOpenPoint(i) && !forNextIssue(i)) notPrinted.push({ id: i.id, group: "client", reason: "client" });
+    else if (isOpenPoint(i) && i.responsibility === "client") notPrinted.push({ id: i.id, group: "client", reason: "client" });
+    // Still open with no one named to settle it (and not for the next drawing issue): it waits in the Actions list.
+    else if (isOpenPoint(i)) notPrinted.push({ id: i.id, group: "waiting", reason: "waiting" });
     else notPrinted.push({ id: i.id, group: "office", reason: "office" });
   }
 

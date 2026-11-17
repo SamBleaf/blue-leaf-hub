@@ -11,6 +11,12 @@
  * for every staff member, rate-limited (N16); plain errors from the facts service (N25); "+ Add someone new" never links
  * the wrong person or saves twice (N24, M6); the roster written against what is stored (N29); the architect typed in Sales
  * stays visible (M14); "Not named" never cut (N30); no stray separators in the identity line and gap strip (P9).
+ * Round 2: a skipped Re-check never says "Updated" (R5; the route itself: register-site-recheck.test.mjs); a no-email
+ * save reuses someone only in the same discipline with the same firm, phone or email (R7); a practice named with no
+ * person is a firm-only contact, linked to the CRM's (R8); "During the works" segments are 44 px and wrap on a phone (R10).
+ * Round 3: a name-only entry saved again (a retry after a lost answer) reuses the name-only contact of that discipline
+ * (P2); a firm-only save links the CRM's practice only when the typed email and phone agree, and fills its blanks (P3);
+ * the Sales 'Budget confirmed' hint is 12 px (P5).
  *
  *   node scripts/tests/register-project-step.test.mjs
  */
@@ -24,7 +30,8 @@ import {
   startParts, startValue, startYears, MONTH_NAMES, normaliseStoryPatch, prioritiesFromNote, projectGaps, siteRows, siteSummary,
   mergeConsultants, rosterAdd, rosterRemove, rosterNeedsRole, sameDiscipline, storageRolesFor, teamRows, contactLabel, splitName,
   searchWords, contactMatches, STORY_COLUMNS, BUDGET_FIELD_KEYS, STORY_FIELD_KEYS, PHONE_MORE_KEYS, DESIGN_TEAM_ROLES, OTHER_CONSULTANT_ROLES,
-  budgetPairError, emailMatch, sameNamedOnJob, conflictWords, contactNameOf, nameKey,
+  budgetPairError, emailMatch, sameNamedOnJob, firmOnlyName, firmOnlyMatch, phoneKey, conflictWords, contactNameOf, nameKey,
+  detailsAgree, detailsToFill,
 } from "../../src/lib/projectStory.js";
 import { siteSource, siteFacts, recheckDue, RECHECK_MIN_MS } from "../../server/lib/registerContext.mjs";
 import { BUDGET_BANDS, budgetLine, designTeam, namedArchitect } from "../../src/lib/briefModel.js";
@@ -227,7 +234,12 @@ ok("looked up 10 minutes ago or more → due", recheckDue(new Date(NOW_MS - RECH
 const regRoutesSrc = readFileSync(new URL("../../server/lib/registerRoutes.mjs", import.meta.url), "utf8");
 const recheckRoute = regRoutesSrc.slice(regRoutesSrc.indexOf("/site/recheck`"), regRoutesSrc.indexOf("/promote`"));
 ok("the staff route needs a sign-in but no admin role", /app\.post\(`\$\{base\}\/site\/recheck`, requireAuth, async/.test(regRoutesSrc) && !/requireRole/.test(recheckRoute));
-ok("it answers { context } and never sends the lookup's reason", /ok\(res, \{ context \}\)/.test(recheckRoute) && !/result\?\.reason\)\s*\)/.test(recheckRoute.replace(/recheckFailureWords\(result\?\.reason\)/g, "")) && /recheckFailureWords/.test(recheckRoute));
+const failedBranch = recheckRoute.slice(recheckRoute.indexOf('if (out.status === "failed")'), recheckRoute.indexOf("const context = await loadRegisterContext"));
+ok("it answers { context, skipped }; a skip says why in plain words", /ok\(res, \{ context, skipped: false \}\)/.test(recheckRoute)
+  && /ok\(res, \{ context, skipped: true, reason: out\.reason, message: recheckSkipWords\(out\.reason\) \}\)/.test(recheckRoute));
+ok("a failure sends only the plain words, never the lookup's reason", /return err\(res, out\.retrySoon \? 429 : 502, recheckFailureWords\(out\.reason\), "SITE_LOOKUP"\);/.test(failedBranch)
+  && (failedBranch.match(/out\.reason/g) || []).length === 2, failedBranch);
+ok("…through runSiteRecheck (stored values read first, the lookup look-only; register-site-recheck.test.mjs)", /runSiteRecheck\(sb, leadId, \{ running: recheckRunning, failedAt: recheckFailedAt \}\)/.test(recheckRoute) && !/enrichSite\(/.test(recheckRoute));
 ok("the plain-English failure line", /Couldn't reach the mapping service\. Nothing changed\./.test(regRoutesSrc));
 const regCtxSrc = readFileSync(new URL("../../server/lib/registerContext.mjs", import.meta.url), "utf8");
 ok("a failed fact write logs the database text and sends a plain line", /Could not save the project fact\. Nothing changed\./.test(regCtxSrc) && !/new Error\(r\?\.error/.test(regCtxSrc));
@@ -334,16 +346,140 @@ ok("the route links by email only through emailMatch, archived contacts left out
 
 section("'+ Add someone new' twice: the second save reuses the person");
 const onJob = [
-  { id: "r1", status: "active", contact: { id: "c-dup", first_name: "BLH TEST Dup", last_name: "Archer", company: "Dup Studio" } },
-  { id: "r2", status: "inactive", contact: { id: "c-off", first_name: "Old", last_name: "Hand", company: null } },
-  { id: "r3", status: "active", contact: { id: "c-firm", first_name: "", last_name: null, company: "Studio X" } },
+  { id: "r1", status: "active", role: "architect", contact: { id: "c-dup", first_name: "BLH TEST Dup", last_name: "Archer", company: "Dup Studio" } },
+  { id: "r2", status: "inactive", role: "architect", contact: { id: "c-off", first_name: "Old", last_name: "Hand", company: null, phone: "0400 000 001" } },
+  { id: "r3", status: "active", role: "architect", contact: { id: "c-firm", first_name: "", last_name: null, company: "Studio X" } },
 ];
-ok("the same name and firm already on this job → that contact (no duplicate)", sameNamedOnJob(onJob, { name: "blh test dup  archer", company: "Dup Studio" })?.id === "c-dup");
-ok("the same name with another firm is someone else", sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Other Studio" }) === null);
-ok("someone who has left the job is not reused", sameNamedOnJob(onJob, { name: "Old Hand", company: "" }) === null);
-ok("a firm-only contact is matched by its firm", sameNamedOnJob(onJob, { name: "Studio X", company: "" })?.id === "c-firm");
-ok("no name → nothing", sameNamedOnJob(onJob, { name: " ", company: "Dup Studio" }) === null && sameNamedOnJob(null, { name: "A" }) === null);
-ok("the route reuses the same-named person when no email is given", /sameNamedOnJob\(onJob, \{ name, company: text\(b\.company\) \}\)/.test(salesSrc));
+ok("the same name and firm already on this job, same discipline → that contact (no duplicate)", sameNamedOnJob(onJob, { name: "blh test dup  archer", company: "Dup Studio", role: "architect" })?.id === "c-dup");
+ok("…a designer is the architect's discipline", sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "dup studio", role: "designer" })?.id === "c-dup");
+ok("the same name with another firm is someone else", sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Other Studio", role: "architect" }) === null);
+ok("someone who has left the job is not reused", sameNamedOnJob(onJob, { name: "Old Hand", company: "", phone: "0400 000 001", role: "architect" }) === null);
+ok("a firm-only contact is matched by its firm", sameNamedOnJob(onJob, { name: "Studio X", company: "", role: "architect" })?.id === "c-firm"
+  && sameNamedOnJob(onJob, { name: "studio x", company: "Studio X", role: "architect" })?.id === "c-firm");
+ok("…but not under another firm typed", sameNamedOnJob(onJob, { name: "Studio X", company: "Studio Y", role: "architect" }) === null);
+ok("no name or no role → nothing", sameNamedOnJob(onJob, { name: " ", company: "Dup Studio", role: "architect" }) === null && sameNamedOnJob(null, { name: "A", role: "architect" }) === null
+  && sameNamedOnJob(onJob, { name: "BLH TEST Dup Archer", company: "Dup Studio" }) === null);
+ok("the route reuses the person only through sameNamedOnJob, with the role, firm, phone and email", /sameNamedOnJob\(onJob, \{ name, company, phone, email, role \}\)/.test(salesSrc)
+  && /\.select\("id, status, role, contact:crm_contacts\(\*\)"\)/.test(salesSrc));
+
+section("No email: an engineer 'Tom' is never the architect 'Tom' (R7)");
+const toms = [
+  { id: "r-arch", status: "active", role: "architect", contact: { id: "c-arch", first_name: "Tom", last_name: null, company: null, phone: "0412 345 678", email: "tom@arch.test" } },
+  { id: "r-eng", status: "active", role: "engineer", contact: { id: "c-eng", first_name: "Tom", last_name: null, company: "Beam Co", phone: null, email: null } },
+  { id: "r-energy", status: "active", role: "consultant", contact: { id: "c-nrg", first_name: "Tom", last_name: null, company: "Star Rate", phone: null } },
+];
+ok("an engineer 'Tom' with no firm (phone typed) → a new contact, not the architect", sameNamedOnJob(toms, { name: "Tom", company: "", phone: "0499 111 222", role: "engineer" }) === null);
+ok("…even with the architect's phone: another discipline is never reused", sameNamedOnJob(toms, { name: "Tom", company: "", phone: "0412 345 678", role: "engineer" }) === null);
+ok("the architect 'Tom' with nothing typed, while the one on the job has a phone and email → a new contact (a blank firm is not the same firm)", sameNamedOnJob(toms, { name: "Tom", company: "", role: "architect" }) === null);
+ok("the architect 'Tom', same phone (written another way) → reused", sameNamedOnJob(toms, { name: "tom", company: "", phone: "+61 412 345 678", role: "architect" })?.id === "c-arch");
+ok("the architect 'Tom', same email (any case) → reused", sameNamedOnJob(toms, { name: "Tom", email: "TOM@arch.test", role: "architect" })?.id === "c-arch");
+ok("the engineer 'Tom' of Beam Co, same firm → reused", sameNamedOnJob(toms, { name: "Tom", company: "beam co", role: "engineer" })?.id === "c-eng");
+ok("…and not as an architect", sameNamedOnJob(toms, { name: "Tom", company: "Beam Co", role: "architect" }) === null);
+ok("an energy assessor (stored as 'consultant') of the same firm → reused; as an engineer → not", sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "energy" })?.id === "c-nrg"
+  && sameNamedOnJob(toms, { name: "Tom", company: "Star Rate", role: "engineer" }) === null);
+ok("a phone compares by its digits", phoneKey("+61 (412) 345-678") === "0412345678" && phoneKey("08 8123 4567") === "0881234567" && phoneKey(null) === "");
+
+section("A practice named with no person is a firm-only contact, linked to the CRM's (R8)");
+ok("the name is the firm → the firm", firmOnlyName({ name: "Studio X Architects", company: "studio x  architects" }) === "studio x architects");
+ok("only a firm → the firm", firmOnlyName({ company: " Studio X Architects " }) === "Studio X Architects" && firmOnlyName({ name: "", company: "Studio X" }) === "Studio X");
+ok("a person at a firm, or no firm → not firm-only", firmOnlyName({ name: "Ava Arch", company: "Studio X" }) === "" && firmOnlyName({ name: "Ava Arch", company: "" }) === "" && firmOnlyName({}) === "");
+const crm = [
+  { id: "p-ava", first_name: "Ava", last_name: "Arch", company: "Studio X Architects", status: "active", contact_type: "architect", created_at: "2026-01-01" },
+  { id: "p-old", first_name: "", last_name: null, company: "Studio X Architects", status: "active", contact_type: "architect", is_archived: true, created_at: "2025-01-01" },
+  { id: "p-lost", first_name: "", last_name: null, company: "Studio X Architects", status: "lost", contact_type: "architect", created_at: "2025-02-01" },
+  { id: "p-split", first_name: "Studio", last_name: "X Architects", company: "Studio X Architects", status: "active", contact_type: "architect", created_at: "2026-10-01" },
+  { id: "p-firm", first_name: "", last_name: null, company: "STUDIO X ARCHITECTS", status: "active", contact_type: "architect", created_at: "2026-11-01" },
+  { id: "p-other", first_name: "", last_name: null, company: "Studio X Architects Pty Ltd", status: "active", contact_type: "architect", created_at: "2024-01-01" },
+];
+ok("the CRM's firm-only contact with the same firm (any case) is linked", firmOnlyMatch(crm, { company: "studio x architects", contactType: "architect" })?.id === "p-firm");
+ok("…a person at that firm, an archived or lost one, or a longer firm name never is", firmOnlyMatch(crm.filter((r) => r.id !== "p-firm" && r.id !== "p-split"), { company: "Studio X Architects", contactType: "architect" }) === null);
+ok("…an earlier tender's split-name practice counts, after a true firm-only one", firmOnlyMatch(crm.filter((r) => r.id !== "p-firm"), { company: "Studio X Architects" })?.id === "p-split");
+ok("…an over-matched query is re-checked exactly", firmOnlyMatch([{ id: "w", first_name: "", company: "StudioXArchitects", status: "active" }], { company: "Studio_X_Architects" }) === null);
+ok("…no firm, or nothing stored → nothing", firmOnlyMatch(crm, { company: " " }) === null && firmOnlyMatch(null, { company: "Studio X" }) === null);
+ok("of two, the 'active' one, then the oldest", firmOnlyMatch([
+  { id: "a-new", first_name: "", company: "Arc", status: "new", created_at: "2025-01-01" },
+  { id: "a-act2", first_name: "", company: "Arc", status: "active", created_at: "2026-02-01" },
+  { id: "a-act1", first_name: "", company: "Arc", status: "active", created_at: "2026-01-01" },
+], { company: "arc" })?.id === "a-act1");
+const dtRoute = salesSrc.slice(salesSrc.indexOf('app.post("/api/sales/leads/:id/design-team"'), salesSrc.indexOf('app.delete("/api/sales/leads/:id/design-team/:roleId"'));
+ok("the route: a firm-only save looks the firm up in the CRM (archived left out) before adding", /if \(!contact && firmOnly\)/.test(dtRoute)
+  && /\.ilike\("company", pattern\)\.not\("is_archived", "is", true\)\.limit\(20\)/.test(dtRoute) && /firmOnlyMatch\(cErr \? \[\] : firms, \{ company: firmOnly, contactType: roles\.contactType, email, phone \}\)/.test(dtRoute)
+  && dtRoute.indexOf("firmOnlyMatch(") < dtRoute.indexOf('.from("crm_contacts").insert('));
+ok("…and adds it with no first or last name (never 'Studio' + 'X Architects')", /const who = firmOnly \? \{ first_name: "", last_name: null \} : splitName\(name\);/.test(dtRoute));
+ok("…the database's own words never reach the browser", !/err\(res, 400, cErr/.test(dtRoute) && /translateDbError\(cErr\)/.test(dtRoute));
+const pipeSrc = readFileSync(new URL("../../src/pages/SalesPipeline.jsx", import.meta.url), "utf8");
+const leadPageSrc = readFileSync(new URL("../../src/pages/LeadDetail.jsx", import.meta.url), "utf8");
+ok("the Sales 'Budget confirmed' hint is 12 px, as the Sales labels beside it (P5)", /className="[^"]*\btext-xs\b[^"]*" data-testid="budget-confirmed-hint"/.test(leadPageSrc)
+  && !/text-\[11px\][^"]*" data-testid="budget-confirmed-hint"/.test(leadPageSrc));
+ok("the Architect Tender drawer names the practice as a firm, not a person", /apiPost\(`\/api\/sales\/leads\/\$\{lead\.id\}\/design-team`, \{ role: "architect", company: architect \}\)/.test(pipeSrc)
+  && !/design-team`, \{[^}]*name: architect/.test(pipeSrc));
+
+section("A name-only entry saved twice: the second save reuses the first (P2)");
+{
+  // The route's no-email path, twice: the first answer is lost (a gateway timeout after it landed) and the user retries.
+  const saved = [];
+  const save = (entry) => {
+    const c = sameNamedOnJob(saved, entry);
+    if (c) return c;
+    const made = { id: `c-${saved.length + 1}`, ...splitName(entry.name), company: entry.company || null, phone: entry.phone || null, email: entry.email || null };
+    saved.push({ id: `r-${saved.length + 1}`, status: "active", role: storageRolesFor(entry.role).dbRole, contact: made });
+    return made;
+  };
+  const first = save({ name: "Tom Smith", role: "architect" });
+  const again = save({ name: "Tom Smith", role: "architect" });
+  ok("the same name-only entry saved again → the same contact, one role row (no second 'Tom Smith' architect)", again.id === first.id && saved.length === 1, flat(saved));
+  const retyped = save({ name: "  tom   SMITH ", company: " ", phone: "", email: null, role: "architect" });
+  ok("…blank firm, phone and email typed, and the name in another case → still the same one", retyped.id === first.id && saved.length === 1);
+  const engineer = save({ name: "Tom Smith", role: "engineer" });
+  ok("the same name-only entry as the engineer → a new contact and role (two disciplines, two people)", engineer.id !== first.id && saved.length === 2);
+  ok("…and each discipline's second save finds its own", save({ name: "Tom Smith", role: "engineer" }).id === engineer.id && save({ name: "Tom Smith", role: "architect" }).id === first.id && saved.length === 2);
+  ok("…a designer is the architect's discipline", save({ name: "Tom Smith", role: "designer" }).id === first.id && saved.length === 2);
+}
+{
+  const named = [
+    { id: "r-n1", status: "active", role: "architect", contact: { id: "c-bare", first_name: "Tom", last_name: "Smith", company: null, phone: null, email: null } },
+    { id: "r-n2", status: "active", role: "architect", contact: { id: "c-tel", first_name: "Jo", last_name: "Lane", company: null, phone: "0412 000 111", email: null } },
+    { id: "r-n3", status: "inactive", role: "engineer", contact: { id: "c-left", first_name: "Tom", last_name: "Smith", company: "", phone: "", email: "" } },
+    { id: "r-n4", status: "active", role: "architect", contact: { id: "c-cher", first_name: "Cher", last_name: null, company: null } },
+  ];
+  ok("name only, on the job with no firm, phone or email, same discipline → reused", sameNamedOnJob(named, { name: "Tom Smith", role: "architect" })?.id === "c-bare");
+  ok("name only, but the one on the job has a phone → a new contact (R7: nothing tells them apart)", sameNamedOnJob(named, { name: "Jo Lane", role: "architect" }) === null);
+  ok("a phone typed, the one on the job has none → a new contact (R7 unchanged)", sameNamedOnJob(named, { name: "Tom Smith", phone: "0499 111 222", role: "architect" }) === null);
+  ok("a firm typed, the one on the job has none → a new contact", sameNamedOnJob(named, { name: "Tom Smith", company: "Beam Co", role: "architect" }) === null);
+  ok("name only, someone of that name who has left the job → not reused", sameNamedOnJob(named, { name: "Tom Smith", role: "engineer" }) === null);
+  ok("the full name must match: 'Cher Smith' is not 'Cher'", sameNamedOnJob(named, { name: "Cher Smith", role: "architect" }) === null && sameNamedOnJob(named, { name: "cher", role: "architect" })?.id === "c-cher");
+  ok("Tom the architect is never reused for Tom the engineer, name only or not", sameNamedOnJob(named, { name: "Tom Smith", role: "engineer" }) === null
+    && sameNamedOnJob(toms, { name: "Tom", role: "engineer" }) === null && sameNamedOnJob(toms, { name: "Tom", company: "Beam Co", role: "architect" }) === null);
+}
+
+section("A firm-only save links the CRM's practice only when the typed email and phone agree (P3)");
+const practice = { id: "f-1", first_name: "", last_name: null, company: "Studio X Architects", email: "old@studiox.test", phone: "08 8123 4567", status: "active", contact_type: "architect", created_at: "2026-01-01" };
+const bare = { id: "f-2", first_name: "", last_name: null, company: "Studio X Architects", email: null, phone: null, status: "active", contact_type: "architect", created_at: "2026-02-01" };
+ok("detailsAgree: nothing typed, blank on the contact, or the same (email any case, phone by digits)", detailsAgree(practice, {}) && detailsAgree(bare, { email: "new@studiox.test", phone: "0400 000 000" })
+  && detailsAgree(practice, { email: "OLD@StudioX.test", phone: "+61 8 8123 4567" }) === true);
+ok("…another email, or another phone → they don't", !detailsAgree(practice, { email: "new@studiox.test" }) && !detailsAgree(practice, { phone: "08 8999 0000" }));
+ok("detailsToFill: only what the contact has none of", eq(detailsToFill(bare, { email: " new@studiox.test ", phone: "0400 000 000" }), { email: "new@studiox.test", phone: "0400 000 000" })
+  && eq(detailsToFill(practice, { email: "new@studiox.test", phone: "0400 000 000" }), {}) && eq(detailsToFill(bare, {}), {}) && eq(detailsToFill({ ...bare, email: "a@b.test" }, { email: "c@d.test", phone: "0400" }), { phone: "0400" }));
+ok("a new email typed, the CRM's practice has another → not linked (a new firm-only contact keeps what was typed)", firmOnlyMatch([practice], { company: "Studio X Architects", email: "new@studiox.test" }) === null);
+ok("a new phone typed, the CRM's practice has another → not linked", firmOnlyMatch([practice], { company: "Studio X Architects", phone: "08 8999 0000" }) === null);
+ok("the same phone written another way → linked", firmOnlyMatch([practice], { company: "studio x architects", phone: "+61 8 8123 4567" })?.id === "f-1");
+ok("the practice has no email or phone → linked (the route fills them in)", firmOnlyMatch([bare], { company: "Studio X Architects", email: "new@studiox.test", phone: "0400 000 000" })?.id === "f-2");
+ok("of two practices, the one whose details agree", firmOnlyMatch([practice, bare], { company: "Studio X Architects", email: "new@studiox.test" })?.id === "f-2"
+  && firmOnlyMatch([practice, { ...bare, phone: "0400 000 000" }], { company: "Studio X Architects", phone: "0400 000 000" })?.id === "f-2");
+ok("nothing typed but the firm → linked as before (the 'active' one, then the oldest)", firmOnlyMatch([bare, practice], { company: "Studio X Architects" })?.id === "f-1");
+const firmOnJob = [{ id: "r-f", status: "active", role: "architect", contact: practice }];
+ok("on this job: the practice with another phone typed → not reused (goes to the CRM check, then a new one)", sameNamedOnJob(firmOnJob, { name: "Studio X Architects", phone: "08 8999 0000", role: "architect" }) === null);
+ok("…the same phone, or none typed → reused", sameNamedOnJob(firmOnJob, { name: "Studio X Architects", phone: "(08) 8123-4567", role: "architect" })?.id === "f-1"
+  && sameNamedOnJob(firmOnJob, { name: "Studio X Architects", role: "architect" })?.id === "f-1");
+{
+  const fillAt = dtRoute.indexOf("if (contact && firmOnly)");
+  const fillBlock = dtRoute.slice(fillAt, dtRoute.indexOf("if (!contact) {", fillAt));
+  ok("the route: a linked practice gets the typed email or phone it has none of, before anything else is written", fillAt > dtRoute.indexOf("firmOnlyMatch(")
+    && /const fill = detailsToFill\(contact, \{ email, phone \}\);/.test(fillBlock) && /\.from\("crm_contacts"\)\.update\(\{ \.\.\.fill, updated_at: now \}\)\.eq\("id", contact\.id\)/.test(fillBlock)
+    && fillAt < dtRoute.indexOf('.from("job_contact_roles").select("id, job_id, lead_id, status")'));
+  ok("…a failed write says so in plain words (never the database's), and nothing else is saved", /if \(uErr\) return err\(res, 400, translateDbError\(uErr\)\);/.test(fillBlock));
+  ok("…and a firm-only contact that isn't linked is added with what was typed", /const row = \{ \.\.\.who, email, phone, company: company \|\| null,/.test(dtRoute));
+}
 
 section("The roster is written against what is stored now (no lost update)");
 ok("the roster write is conditional on the lead being unchanged", /\.eq\("updated_at", current\.updated_at\)/.test(salesSrc) && /current = fresh;/.test(salesSrc));
@@ -397,6 +533,10 @@ try {
     && tx.includes("Slope Not known") && tx.includes("Site complexity High") && tx.includes("Access Standard driveway"), tx);
   ok("'Re-check' is offered to every staff member, not only an admin", tx.includes("Re-check") && text(R.step({ reg: real.register, context: real.context, lead: real.lead, actor: { role: "admin" } })).includes("Re-check"));
   const stepSrc = readFileSync(join(REG, "ProjectStep.jsx"), "utf8");
+  const recheckFn = stepSrc.slice(stepSrc.indexOf("async function recheck()"), stepSrc.indexOf("const showInSales"));
+  ok("Re-check: a skipped lookup shows the server's words, never 'Updated'", /if \(r\.ok && r\.data\?\.skipped\) \{\s*setSiteMsg\(clean\(r\.data\.message\) \|\| RECHECK_SKIPPED\);/.test(recheckFn)
+    && recheckFn.indexOf("skipped") < recheckFn.indexOf("Updated ") && stepSrc.includes('const RECHECK_SKIPPED = "Checked less than 10 minutes ago, so it wasn\'t run again.";'), recheckFn);
+  ok("…'Updated' only after a lookup that ran, with the lookup's day; a failure shows the plain line", /Updated \$\{adelaideDay\(at && Number\.isFinite\(Date\.parse\(at\)\)/.test(recheckFn) && /r\.error \|\| RECHECK_FAILED/.test(recheckFn));
   ok("…through the staff route, not the admin geo route", stepSrc.includes("/site/recheck`") && !stepSrc.includes("/api/geo/enrich"));
   // P9: each "·" rides inside its item (and is clipped at a line start), so no line starts or ends with a stray dot.
   const idLine = h.slice(h.indexOf("overflow-x-clip", h.indexOf("for the architect&#x27;s brief <span")), h.indexOf("Change in Sales"));
@@ -404,7 +544,15 @@ try {
     && !/<span aria-hidden="true">·<\/span>/.test(h), idLine.slice(0, 500));
   ok("…and the line is shifted and clipped by the separator's width", /class="min-w-0 flex-1 overflow-x-clip[^"]*"><p class="m-0 -ml-\[12px\] flex flex-wrap/.test(h));
   ok("the gap strip's links keep a 44 px tap without 44 px lines", /data-testid="project-gaps"[\s\S]*?min-h-0 py-\[11px\] -my-\[11px\] font-bold/.test(h));
-  ok("'During the works': Moving out · Partly lived in ✓ · Living there", /aria-pressed="false"[^>]*>Moving out</.test(h) && /aria-pressed="true"[^>]*>(<svg[\s\S]*?<\/svg>)?Partly lived in</.test(h) && h.includes(">Living there<"));
+  ok("'During the works': Moving out · Partly lived in ✓ · Living there", /aria-pressed="false"[^>]*>Moving out</.test(h) && /aria-pressed="true"[^>]*>(<svg[\s\S]*?<\/svg>)?Partly lived\u00a0in</.test(h) && h.includes(">Living there<"));
+  const works = h.slice(h.indexOf('data-testid="works-segments"'), h.indexOf(">Living there<") + 20);
+  const worksOpen = h.slice(h.lastIndexOf("<div", h.indexOf('data-testid="works-segments"')), h.indexOf('data-testid="works-segments"'));
+  const segBtns = works.match(/<button[^>]*>/g) || [];
+  ok("'During the works': no fixed-height row, so the border never takes 2 px off a segment (N8)", works.length > 0 && !/\bh-11\b|\bh-\[/.test(worksOpen), worksOpen);
+  ok("…each segment is at least 44 px tall", segBtns.length === 3 && segBtns.every((b) => /\bmin-h-\[44px\]/.test(b)), segBtns.join("\n"));
+  ok("…and on a phone 'Partly lived in' fits: 15 px, tight lines, allowed two lines (never cut or squeezed out)", segBtns.every((b) => /\btext-\[15px\]/.test(b) && /\bleading-tight\b/.test(b) && /\bmin-w-0\b/.test(b) && /\btext-center\b/.test(b)
+    && !/\btruncate\b|\boverflow-hidden\b|\bwhitespace-nowrap\b/.test(b)), segBtns[1]);
+  ok("…wrapping as 'Partly / lived in' (its last two words kept together), the two-word labels free to wrap", works.includes("Partly lived\u00a0in") && works.includes(">Moving out<") && !works.includes("Moving\u00a0out"));
   ok("the earlier site note, with 'Tidy up'", tx.includes("Earlier note: “not sure if they want to live in - shouldn't -” Tidy up"));
   ok("the design team: Architect not named, 'Name the architect', engineer and energy assessor '+ Add'", tx.includes("Architect Not named Name the architect") && tx.includes("Engineer Not named Add") && tx.includes("Energy assessor Not named Add") && tx.includes("Another consultant"));
   ok("the earlier design note sits in the design team card, with 'Edit'", tx.includes("Noted earlier: “client architect - and blue leaf aid” Edit"));

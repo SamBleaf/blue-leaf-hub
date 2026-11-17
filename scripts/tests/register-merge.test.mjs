@@ -2,12 +2,13 @@
  * register-merge.test.mjs — the register store's pure rules in src/lib/registerMerge.js:
  *   - two rooms added at once on two screens never share an order after the merge (finding P10);
  *   - a failed save never shows the browser's own error text, and offline reads "Not saved — retrying" (N6);
- *   - the brief's own details (rooms, floors, work words) report their own save state to the room bar (N5).
+ *   - the brief's own details (rooms, floors, work words) report their own save state to the room bar (N5);
+ *   - Undo of several deletes, in any order, puts the records back in their old order (round 3, S3).
  * No server, no database. Run: node scripts/tests/register-merge.test.mjs
  */
 import { readFileSync } from "node:fs";
-import { emptyMeta, makeRoom } from "../../src/lib/register.js";
-import { mergeMeta, distinctRoomOrder, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS } from "../../src/lib/registerMerge.js";
+import { emptyMeta, makeRoom, makeItem } from "../../src/lib/register.js";
+import { mergeMeta, distinctRoomOrder, planRegisterRestore, saveFailure, metaSaveState, SAVE_RETRY_WORDS, deletedPlaces, planUndelete } from "../../src/lib/registerMerge.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -81,6 +82,59 @@ section("The room bar's save state for the brief's own details (N5)");
   ok("the save failed: error", metaSaveState({ seq: 4, sent: 4, saved: 3, saving: false, state: "error" }) === "error");
   ok("another record failed but the details saved: still saved", metaSaveState({ seq: 4, sent: 4, saved: 4, saving: false, state: "error" }) === "saved");
   ok("no arguments: saved", metaSaveState() === "saved");
+}
+
+section("Undo of several deletes keeps the old order (S3)");
+{
+  // The store's own steps, without React: a delete remembers its place (deletedPlaces, counting earlier deletes not yet
+  // undone), an Undo puts the record back there (planUndelete with before) and forgets it.
+  const shelf = () => {
+    let list = [...ORIGINAL].map((id) => makeItem({ id }));
+    const places = new Map();
+    const ghosts = () => [...places].map(([id, before]) => ({ id, before }));
+    return {
+      ids: () => list.map((i) => i.id).join(""),
+      del(ids) {
+        for (const [id, before] of deletedPlaces(list, ids, ghosts())) places.set(id, before);
+        list = list.filter((i) => !ids.includes(i.id));
+      },
+      undo(id) {
+        const plan = planUndelete(makeItem({ id }), { current: { items: list }, before: places.get(id) ?? null });
+        if (plan) list = plan.items;
+        places.delete(id);
+      },
+      gone: () => [...places.keys()],
+    };
+  };
+  const ORIGINAL = "abcdefg";
+  const s1 = shelf(); s1.del(["b"]); s1.del(["d"]); s1.undo("b"); s1.undo("d");
+  ok("abcdefg: b then d deleted, undone b then d → abcdefg (the old rule gave abdc…)", s1.ids() === ORIGINAL, s1.ids());
+  const s2 = shelf(); s2.del(["b"]); s2.del(["c"]); s2.undo("b"); s2.undo("c");
+  ok("…b then c (next to each other), undone in the same order → abcdefg", s2.ids() === ORIGINAL, s2.ids());
+  ok("a record that was first goes back first", (() => { const s = shelf(); s.del(["a"]); s.del(["b"]); s.undo("b"); s.undo("a"); return s.ids(); })() === ORIGINAL);
+  ok("deletedPlaces leaves out an id not on the list", deletedPlaces([makeItem({ id: "a" })], ["zz"]).size === 0);
+  ok("with no place known the record goes to the end, as before", planUndelete(makeItem({ id: "x" }), { current: { items: [makeItem({ id: "a" })] } }).items.map((i) => i.id).join("") === "ax");
+
+  // Any mix of single deletes, bulk removals and Undos, in any order, ends in the old order once everything is undone.
+  let seed = 7;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  let bad = null;
+  for (let run = 0; run < 400 && !bad; run++) {
+    const s = shelf();
+    for (let step = 0; step < 12; step++) {
+      const on = s.ids().split("").filter(Boolean), gone = s.gone();
+      const pick = rnd(3);
+      if (on.length && pick === 0) s.del([on[rnd(on.length)]]);
+      else if (on.length > 1 && pick === 1) { const a = on[rnd(on.length)], b = on[rnd(on.length)]; s.del([...new Set([a, b])]); }
+      else if (gone.length) s.undo(gone[rnd(gone.length)]);
+      const mid = s.ids();
+      if (mid !== [...ORIGINAL].filter((c) => mid.includes(c)).join("")) { bad = `run ${run}: out of order on the way: ${mid}`; break; }
+    }
+    let gone = s.gone();
+    while (gone.length) { s.undo(gone[rnd(gone.length)]); gone = s.gone(); }
+    if (!bad && s.ids() !== ORIGINAL) bad = `run ${run}: ${s.ids()}`;
+  }
+  ok("400 random runs of deletes, bulk removals and Undos: always in the old order, on the way and at the end", !bad, bad);
 }
 
 section("The store and the header use them");

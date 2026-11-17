@@ -29,6 +29,69 @@
 - The real-job fixture
 - Tests
 
+**Screens: checkpoint** (`a776786`). Built by three builders and the lead:
+- The project
+- Rooms and the room screen
+- Needs action and the Actions list
+- Documents and the edit drawer
+- The new frame
+
+**Fix round 1** (`3953d8c`).
+- Four browser checkers drove the real job in the loopback sandbox at phone, tablet, Hub column and Expand widths.
+- Three code reviewers read it, one each for the spec, data integrity, and copy and accessibility.
+- Triage confirmed 61 findings (3 blockers, 14 major, 32 minor, 12 polish), all fixed by six fixers.
+- Re-checked in the browser: Documents 20/20; screens 29/33. The rest went to round 2.
+
+**Fix round 2** (8 regressions plus the 4 left over).
+- Fixes:
+  - The register's "on screen" flag is no longer stuck, so the body flags turn on.
+  - Typing an approved record's words back restores the approval.
+  - Floors carry over when a screen doesn't send them.
+  - The meta revision after a save.
+  - Re-check never wipes stored values, and says when it skipped.
+  - Delete-all and Undo keep the original ids.
+  - Open work never prints as settled.
+  - The design-team reuse rules.
+  - A practice name becomes a company-only contact.
+  - Phone layout and target sizes.
+- Re-checked in the browser: 22/22.
+- Round 3 fixes what round 2 introduced (2 medium, 6 low), plus the CRM view so firm-only contacts show their firm's name.
+
+**SOPs** (CLAUDE.md law).
+- 21-01 v2.0 (22 test cases)
+- 21-02 v2.0 (12)
+- 21-03 v2.0 (20)
+- 21-05 v1.0, new (16)
+- SOP_INDEX and SOP_CHANGELOG updated
+- Every step and test case checked against the code
+
+## Decisions taken by the lead (17 Nov 2026; for the owner to confirm or overrule)
+
+- **D1** The brief's cover lines (Site, Client, Project) stay read-only in the edit drawer, with "Change in Sales ›". They are canonical Sales facts with geocoding side effects.
+- **D2** A choice row's ⋯ menu follows S3: Not decided yet · Not needed here · Note for the office · Product details… · Remove answer. By others, Excluded, Deferred and Existing to remain move into Product details and the Register table.
+- **D3** Blue Leaf's own follow-ups are our list and don't print in the architect's brief. The client's brief still lists them under "Decisions to make" (its design is locked), and the ⚑ footnote says exactly that.
+- **D4** One combined note prints: "(agreed with the client; for consultant review)".
+- **Lead header.** While a capture tab is open, the lead header and the project bar scroll away at every width. Otherwise they would collide with the register's own sticky bars.
+
+## Still open (owner)
+
+- **Page count.** The architect's brief on the real job runs to 3 pages, with 05 alone on page 3. Getting it to 2 needs tighter spacing in the shared document design system, which affects every document. Owner sign-off needed.
+- **`jobs.architect_name`.** It is still writable from the fee-proposal wizard and the job PATCH (decision 6 says one place). Make the wizard field read-only, or route it through the design-team contact?
+- **Chip size on a tablet.** Chips are 44 px on a tablet; the drawing shows 40 px.
+- **House-strip wording.** The strip summary's wording differs from the artboard ("Floor: timber, engineered" against "engineered timber").
+- **Spec copy.** REGISTER_SCREENS_SPEC.md S4 footnotes still say "Decisions we need from you" and "Our list only — doesn't print". The code says "Decisions to make", and the Blue Leaf footnote names the client brief.
+
+## Release notes
+
+- Ship step 1 of "Altered" (`fix/room-scope-keep-unknown`, `ee55a1d`, off main) a few days before this branch.
+- The document-suite release gate (Lato on Railway) still applies.
+- Migrations: none for C1–C5. Round 3 adds one additive view migration (v_crm_people shows a firm-only contact's company), written and not applied.
+- **Deploy effects:**
+  - The issue fingerprint now includes room fields and facts, so a preview taken before deploy is refused once at issue.
+  - A gateway 5xx save now retries every 5 s.
+- **Stale sandbox suites.** The sandbox e2e suites (`scripts/tests/sandbox-register-*`, register-e2e) target the pre-rebuild screens and need rewriting before they're run again.
+- **Tests.** `npm run test:register-rebuild` runs the new suites.
+
 ## Shared modules (use these; don't re-derive rules in components)
 
 **`src/lib/briefModel.js`**
@@ -45,7 +108,15 @@
   - `BUDGET_BANDS`, `budgetWords`, `floorLabel`, `namedArchitect`, `designTeam`
 
 **`src/lib/registerQuality.js`**
-- `contentChecks(docType, reg, context, model)` returns `[{ key, text, targets: [{ kind, id?, key? }], action? }]`.
+- `contentChecks(docType, reg, context, model, { keepIds })` returns `[{ key, text, targets: [{ kind, id?, key? }], action? }]`.
+- `releaseBlockers(docType, reg, { recipientName, drawingBasis })`: the pure release blockers the server also uses.
+- `restrictedGuidance` (in `registerQuality.js`).
+- In `briefModel.js`: `openPoints(…, { merge })`, `briefSectionTitles(model)`, `offeredChipWords`, `budgetInverted`.
+- In `registerMerge.js`: `approvalStep`, `approvalRestore`, `planUndelete`, `metaAfterSave`.
+- In `useRegister.js`: `undeleteItem` in the store; `useShown`, `watchShown`.
+- In `src/lib/overlayFlag.js`: `useBodyFlag`, `useEscapeLayer`.
+- In `useRoomUi.js`: `useDialogFocus`.
+- `src/lib/sectionLayout.js`: the Throughout and Site layout.
 - `roomsNeedingBrief(reg)`, `roomBriefBlocker(reg)`, `upperFloorHint(reg)`.
 
 **`src/lib/register.js` lists:**
@@ -132,14 +203,11 @@ Also passed down:
 - **Don't run:** git commits, dev servers, or e2e/playwright/batch-a suites (they target production).
 - **Node tests** for pure helpers go in `scripts/tests/`.
 
-## Still to do (lead)
+## Still to do
 
-1. Documents step (S5): the red and amber boxes with Fix buttons, the "What will print" list, "Not in this brief", the edit drawer, the stale overlay, and the issue bar.
-2. `RegisterWorkshop` integration:
-   - tabs: The project · Rooms · Throughout · Site & existing · Documents | Register · Tender
-   - the Actions pill
-   - hide the stage bar on a phone while a room is open
-   - retire "Show detailed prompts"
-3. Sandbox verification of the real job on desktop, tablet and phone, then screenshots.
-4. SOPs: rewrite 21-0x for Project, Rooms, Actions and Documents, each with Section 14, plus the index and changelog.
-5. Later (documented, not in this release): the client brief, tender notes and baseline print room scope from `room.scope`.
+1. Fix round 3, its final browser check, then commit.
+2. The owner reviews the screens on the real job (the sandbox walkthrough screenshots) and answers the "Still open" questions.
+3. Push the branch only with the owner's OK. Release after the Lato gate and step 1 of "Altered".
+4. Later (documented, not in this release):
+   - The client brief, the tender notes and the baseline print each room's scope from `room.scope`.
+   - Rewrite the sandbox e2e suites for the new screens.

@@ -12,6 +12,7 @@ import {
 import { buildRegisterFixture, selectionRecords } from "../../server/lib/registerDocuments.mjs";
 import { makeItem, makeRoom, emptyMeta, writeRegister, readRegister, stableStringify } from "../../src/lib/register.js";
 import { INTERNAL_MARK, buildStructuredRegister, LEGACY_ROWS } from "./lib/registerStructuredFixture.mjs";
+import { META_FIELDS } from "../../src/lib/registerMerge.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? `\n    ${String(detail).slice(0, 600)}` : ""}`); } };
@@ -23,6 +24,7 @@ function pgJsonb(v) {
   return v;
 }
 const clone = (v) => JSON.parse(JSON.stringify(v));
+const flat2 = (...v) => JSON.stringify(v);
 
 const LEAD_ID = "11111111-1111-1111-1111-111111111111", JOB_ID = "22222222-2222-2222-2222-222222222222", PROJECT_ID = "33333333-3333-3333-3333-333333333333";
 
@@ -51,6 +53,12 @@ function world({ lead = {}, project = null } = {}) {
   const rpc = async (name, args) => {
     rpcCalls.push({ name, args: clone(args) });
     const conflicts = [];
+    // meta_set is rev-checked before anything is written, as register_apply does (migration 213).
+    for (const op of args.p_ops) {
+      const stored = db.projects[0]?.register_meta;
+      if (op.op === "meta_set" && stored && (Number(stored.rev) || 0) !== (op.base_rev ?? -1)) conflicts.push({ item_id: "__meta__", reason: "meta_stale" });
+    }
+    if (conflicts.length) return { data: { ok: false, conflicts }, error: null };
     for (const op of args.p_ops) {
       if (op.op === "meta_init") db.projects[0].register_meta = pgJsonb({ ...op.meta, rev: 1, promotion: { status: "complete", at: "2026-11-10" } });
       else if (op.op === "meta_set") db.projects[0].register_meta = pgJsonb({ ...op.meta, rev: (db.projects[0].register_meta.rev || 0) + 1, promotion: db.projects[0].register_meta.promotion });
@@ -402,6 +410,48 @@ console.log("\nLead-mode save");
   const r3 = await saveRegister(w.sb, LEAD_ID, { meta: { ...r2.register.meta, rooms } }, {});
   ok("nor erase a room confirmation", Object.keys(r3.register.meta.rooms.find((r) => r.id === fx.rooms.bed1.id).defaultConfirmations).length === 2);
   ok("emptyMeta and makeRoom agree", makeRoom(emptyMeta({ rooms: [fx.rooms.bed1] }).rooms[0]).id === fx.rooms.bed1.id);
+}
+
+console.log("\nThe room list saved twice in a row, project mode (R18)");
+{
+  const w = world({ lead: { selections_schedule: clone(writeRegister(reg)) }, project: {} });
+  await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { name: "Staff" } });
+  const l = await loadRegister(w.sb, LEAD_ID);
+  const r0 = l.register.meta.rev;
+  const s1 = await saveRegister(w.sb, LEAD_ID, { meta: { ...l.register.meta, planRev: "DA rev 4" } }, { actor: { name: "Staff" } });
+  ok("the answer to a meta save carries the new rev (read after the save, not before it)", s1.register.meta.rev === r0 + 1 && w.db.projects[0].register_meta.rev === r0 + 1, flat2(s1.register.meta.rev, w.db.projects[0].register_meta.rev));
+  ok("…and the room list just saved, not the one from before", s1.register.meta.planRev === "DA rev 4");
+  const s2 = await attemptBody(w, { meta: { ...s1.register.meta, floors: ["Upper", "Loft"] } });
+  ok("a second meta save sent on that answer's rev is accepted (no 'room list was changed elsewhere')", s2 === null, s2?.message);
+  ok("…and saved", w.db.projects[0].register_meta.rev === r0 + 2 && same(w.db.projects[0].register_meta.floors, ["Upper", "Loft"]));
+  const before = w.rpcCalls.length;
+  const stale = await attemptBody(w, { meta: { ...s1.register.meta, planRev: "DA rev 5" } });
+  ok("a save on an old rev is still refused as changed elsewhere, and writes nothing", stale?.status === 409 && stale.conflicts?.[0]?.reason === "meta_stale" && w.db.projects[0].register_meta.planRev === "DA rev 4" && w.rpcCalls.length === before + 1, stale?.message);
+  const noMeta = await saveRegister(w.sb, LEAD_ID, { changes: [] }, { actor: { name: "Staff" } });
+  ok("a save without meta answers with the rev as it is", noMeta.register.meta.rev === r0 + 2);
+}
+
+console.log("\nFloors kept from a screen that doesn't know them (R4)");
+{
+  const w = world({ lead: { selections_schedule: clone(writeRegister(reg)) }, project: {} });
+  await promoteRegisterToProject(w.sb, { leadId: LEAD_ID, projectId: PROJECT_ID, actor: { name: "Staff" } });
+  const l = await loadRegister(w.sb, LEAD_ID);
+  const s1 = await saveRegister(w.sb, LEAD_ID, { meta: { ...l.register.meta, floors: ["Upper"] } }, { actor: { name: "Staff" } });
+  const { floors: _f, ...oldScreen } = s1.register.meta;
+  const s2 = await saveRegister(w.sb, LEAD_ID, { meta: { ...oldScreen, lastStep: "rooms" } }, { actor: { name: "Staff" } });
+  ok("project mode: meta with no floors key keeps the stored floors", same(w.db.projects[0].register_meta.floors, ["Upper"]) && same(s2.register.meta.floors, ["Upper"]) && s2.register.meta.lastStep === "rooms", flat2(w.db.projects[0].register_meta.floors));
+  await saveRegister(w.sb, LEAD_ID, { meta: { ...s2.register.meta, floors: [] } }, { actor: { name: "Staff" } });
+  ok("project mode: an explicit floors: [] still clears them", same(w.db.projects[0].register_meta.floors, []));
+
+  const lw = world({ lead: { job_id: null, selections_schedule: clone(writeRegister(reg)) } });
+  const ll = await loadRegister(lw.sb, LEAD_ID);
+  const t1 = await saveRegister(lw.sb, LEAD_ID, { meta: { ...ll.register.meta, floors: ["Upper"] } }, {});
+  const { floors: _g, ...oldLead } = t1.register.meta;
+  const t2 = await saveRegister(lw.sb, LEAD_ID, { meta: { ...oldLead, lastStep: "documents" } }, {});
+  ok("lead mode: meta with no floors key keeps the stored floors", same(t2.register.meta.floors, ["Upper"]) && same(readRegister(lw.db.leads[0]).meta.floors, ["Upper"]) && t2.register.meta.lastStep === "documents");
+  const t3 = await saveRegister(lw.sb, LEAD_ID, { meta: { ...t2.register.meta, floors: [] } }, {});
+  ok("lead mode: an explicit floors: [] still clears them", same(t3.register.meta.floors, []) && same(readRegister(lw.db.leads[0]).meta.floors, []));
+  ok("the merge carries floors as a meta field", META_FIELDS.includes("floors"));
 }
 
 console.log(`\nregister-structured-store: ${pass} passed, ${fail} failed`);

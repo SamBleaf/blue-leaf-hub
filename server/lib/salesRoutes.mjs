@@ -35,7 +35,7 @@ import { CONTRACT_DOC_TYPE, withContractEvidence, decodePdfUpload } from "./lead
 import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
 import {
   normaliseStoryPatch, budgetPairError, storageRolesFor, rosterAdd, rosterRemove, rosterNeedsRole, splitName, searchWords, contactMatches, CONTACT_TYPE_WORDS,
-  emailMatch, sameNamedOnJob, conflictWords, contactNameOf,
+  emailMatch, sameNamedOnJob, firmOnlyName, firmOnlyMatch, detailsToFill, conflictWords, contactNameOf,
 } from "../../src/lib/projectStory.js";
 import { loadRegisterContext } from "./registerContext.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
@@ -1089,16 +1089,20 @@ export function registerSalesRoutes(app) {
     const text = (v) => (v == null ? "" : String(v).trim());
 
     // 1 · The contact: the one picked, or someone new (linked to an existing contact only when the email and the name
-    //     both match, or when the same name and firm are already on this lead or job).
+    //     both match, or when the same person is already on this lead or job in the same discipline). A practice named
+    //     with no person (the name is the firm, or only a firm) is a firm-only contact, linked to the CRM's existing one.
     let contact = null;
     if (b.contactId) {
       const { data } = await sb.from("crm_contacts").select("*").eq("id", b.contactId).maybeSingle();
       if (!data) return err(res, 404, "That contact couldn't be found. Search again, or add them as someone new.", "NOT_FOUND");
       contact = data;
     } else {
-      const name = text(b.name);
+      const company = text(b.company);
+      const firmOnly = firmOnlyName({ name: b.name, company });
+      const name = firmOnly || text(b.name);
       if (!name) return err(res, 400, "Add the person's name. Nothing was saved.");
       const email = text(b.email) || null;
+      const phone = text(b.phone) || null;
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(res, 400, "That email address doesn't look right. Nothing was saved.");
       if (email) {
         // The same email, any case, archived contacts left out. The pattern only narrows the query ('*' is PostgREST's
@@ -1115,17 +1119,38 @@ export function registerSalesRoutes(app) {
         }
         contact = m.contact || null;
       } else {
-        // No email: the person already on this lead or job under the same name and firm (a second Save, a double tap)
-        // is reused, so the save never adds a second contact and role.
+        // No email: the person already on this lead or job is reused (a second Save, a double tap, a retry after a lost
+        // answer), so the save never adds a second contact and role. sameNamedOnJob needs the same discipline and the
+        // same firm, phone or email (or, for a name only, a contact with none of them either).
         const ors = [`lead_id.eq.${lead.id}`]; if (lead.job_id) ors.push(`job_id.eq.${lead.job_id}`);
         const { data: onJob } = await sb.from("job_contact_roles")
-          .select("id, status, contact:crm_contacts(*)").or(ors.join(","));
-        contact = sameNamedOnJob(onJob, { name, company: text(b.company) });
+          .select("id, status, role, contact:crm_contacts(*)").or(ors.join(","));
+        contact = sameNamedOnJob(onJob, { name, company, phone, email, role });
+      }
+      if (!contact && firmOnly) {
+        // A practice: the CRM's firm-only contact with the same firm (any case), before adding another one. The pattern
+        // only narrows the query; firmOnlyMatch re-checks the firm exactly, and links it only when a typed email or phone
+        // is blank on it or the same (another email or phone → a new firm-only contact, so nothing typed is dropped).
+        const pattern = firmOnly.replace(/[\\%_]/g, "\\$&").replace(/\*/g, "_");
+        const { data: firms, error: cErr } = await sb.from("crm_contacts").select("*").ilike("company", pattern).not("is_archived", "is", true).limit(20);
+        if (cErr && cErr.code !== "42703") return err(res, 400, translateDbError(cErr));   // pre-mig-180: no company column
+        contact = firmOnlyMatch(cErr ? [] : firms, { company: firmOnly, contactType: roles.contactType, email, phone });
+      }
+      if (contact && firmOnly) {
+        // A practice linked: the email or phone typed that it has none of is written onto it (never over one it has).
+        const fill = detailsToFill(contact, { email, phone });
+        if (Object.keys(fill).length) {
+          const { data: filled, error: uErr } = await sb.from("crm_contacts").update({ ...fill, updated_at: now }).eq("id", contact.id).select("*").maybeSingle();
+          if (uErr) return err(res, 400, translateDbError(uErr));
+          contact = filled || { ...contact, ...fill };
+        }
       }
       if (!contact) {
-        const row = { ...splitName(name), email, phone: text(b.phone) || null, company: text(b.company) || null, contact_type: roles.contactType, status: "active", created_by: actorId };
+        // first_name is required by the table: a firm-only contact has an empty one and no last name.
+        const who = firmOnly ? { first_name: "", last_name: null } : splitName(name);
+        const row = { ...who, email, phone, company: company || null, contact_type: roles.contactType, status: "active", created_by: actorId };
         let { data, error } = await sb.from("crm_contacts").insert(row).select("*").single();
-        if (error?.code === "42703") { const { company: _company, ...rest } = row; ({ data, error } = await sb.from("crm_contacts").insert(rest).select("*").single()); }
+        if (error?.code === "42703") { const { company: _company, ...rest } = row; ({ data, error } = await sb.from("crm_contacts").insert(firmOnly ? { ...rest, ...splitName(name) } : rest).select("*").single()); }
         if (error) return err(res, 400, translateDbError(error));
         contact = data;
       }

@@ -224,7 +224,9 @@ const hook = readFileSync(new URL("../../src/components/sales/lead-detail/regist
 const merge = readFileSync(new URL("../../src/lib/registerMerge.js", import.meta.url), "utf8");
 ok("autosave's field list comes from makeItem, so it includes answer", /Object\.keys\(makeItem\(\{\}\)\)/.test(merge) && "answer" in makeItem({}) && /from "\.\.\/\.\.\/\.\.\/\.\.\/lib\/registerMerge\.js"/.test(hook));
 ok("the conflict merge keeps room confirmations", /ROOM_FIELDS = \[[^\]]*"defaultConfirmations"/.test(merge));
-ok("an approved item steps back through the tested rule above", /if \(editOutrunsApproval\(item, partial\)\)/.test(hook));
+// Round 2 (R3): the step-back moved into registerMerge.approvalStep (which also restores on typing the approved words
+// back); the hook calls it, and the rule inside is still the tested editOutrunsApproval. End to end: register-store-hook.
+ok("an approved item steps back through the tested rule above", /approvalStep\(item, partial/.test(hook) && /if \(editOutrunsApproval\(item, partial\)\)/.test(merge));
 
 console.log(`\nregister-structured-model: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
