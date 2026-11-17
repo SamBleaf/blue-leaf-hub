@@ -1,6 +1,6 @@
 # Opening framing rules for the Walls screen: plan (no build)
 
-Date: 17 Nov 2026. Author: planner. Status: PLAN ONLY. Nothing here is built, committed or run.
+Date: 17 Nov 2026. Author: planner. Status: BUILT 18 Nov 2026 (HUB 031 steps 4 to 6) as changed by `OWNER_ANSWERS_17NOV.md`. Original status: PLAN ONLY.
 Repo: /Users/samuelmorris/Desktop/blh-takeoff-walls.nosync (HEAD 56a8bc5 at time of sweep).
 
 Rules this plan serves: the takeoff must be simple onsite (fewest taps, plain English) AND accurate; do not rebuild what exists; never guess silently.

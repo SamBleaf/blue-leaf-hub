@@ -1,6 +1,6 @@
 # HUB 031: wet-area walls at 450, cavity sliders and full-height openings (build plan)
 
-**Status:** plan only. Nothing is built. Written 17 Nov 2026 on branch `takeoff/wet-walls-cavity-doors` at `56a8bc5` (same as `origin/main`).
+**Status:** BUILT 18 Nov 2026 on this branch (local commits, not pushed), steps 1 to 3 of the build, as changed by `OWNER_ANSWERS_17NOV.md` (per-wall centres through the Select tools, pocket side picked while drawing, no capabilities gate: client and server ship together). Original status: plan only. Written 17 Nov 2026 on branch `takeoff/wet-walls-cavity-doors` at `56a8bc5` (same as `origin/main`).
 **Owner:** Sam. The build starts once Sam answers the 3 questions in section 10. Each question has a default, so a one-line "yes to the defaults" is enough.
 **Owner rule:** the takeoff must be simple to use onsite. That means the fewest taps, plain English, advanced detail hidden, phone and iPad first, and 44 px targets. TC-R04 was judged overbuilt, so anything Sam didn't ask for goes under **Later** (section 11).
 
