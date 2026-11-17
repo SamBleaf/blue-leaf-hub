@@ -1826,6 +1826,32 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   }
   assert.equal(await rev(), before, "nothing saved");
   assert.deepEqual(mine((await S(`/workspaces/${w}`)).data.computed), mine(again.computed), "the lines are unchanged");
+  // HUB 031 (Sam, 17 Nov 2026) through the REAL routes and the local Postgres: a wall's own centres and loadBearing, a door that is a
+  // cavity slider and full height, a typed lintel and the roof width an opening carries all come back; taking them away leaves the
+  // keys ABSENT (never null); a nonsense value is refused plainly with nothing saved
+  const live = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  const wallNow = live.find((m) => m.id === w1), doorNow = live.find((m) => m.id === d1), winNow = live.find((m) => m.id === o1);
+  const sent = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [
+    { ...wallNow, inputs: { ...wallNow.inputs, studCentresMm: 450, loadBearing: false } },
+    { ...doorNow, inputs: { ...doorNow.inputs, widthMm: 1860, heightMm: 2700, fullHeight: true, cavityLeafMm: 920, cavityPocket: "left" } },
+    { ...winNow, inputs: { ...winNow.inputs, cavityLeafMm: 920, lintel: { depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" }, loadRlwMm: 4500 } }] } } });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  const got = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  const gi = (mid) => got.find((m) => m.id === mid).inputs;
+  assert.deepEqual([gi(w1).studCentresMm, gi(w1).loadBearing], [450, false]);
+  assert.deepEqual([gi(d1).fullHeight, gi(d1).cavityLeafMm, gi(d1).cavityPocket, gi(d1).widthMm], [true, 920, "left", 1860]);
+  assert.ok(!("cavityLeafMm" in gi(o1)), "a window drops the slider fields");
+  assert.deepEqual([gi(o1).lintel, gi(o1).loadRlwMm], [{ depthMm: 190, breadthMm: 45, plies: 2, grade: "LVL13" }, 4500]);
+  const bad31 = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [{ ...wallNow, inputs: { ...wallNow.inputs, studCentresMm: 50 } }] } } });
+  assert.equal(bad31.status, 400);
+  assert.match(bad31.data.error, /Stud centres must be between 100 and 1,200 mm/);
+  const cleared = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: { measurements: { upsert: [
+    { ...wallNow, inputs: Object.fromEntries(Object.entries(wallNow.inputs).filter(([k]) => !["studCentresMm", "loadBearing"].includes(k))) },
+    { ...doorNow, inputs: Object.fromEntries(Object.entries(doorNow.inputs).filter(([k]) => !["fullHeight", "cavityLeafMm", "cavityPocket"].includes(k))) }] } } });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.data));
+  const after = (await S(`/workspaces/${w}`)).data.snapshot.measurements;
+  for (const k of ["studCentresMm", "loadBearing"]) assert.ok(!(k in after.find((m) => m.id === w1).inputs), `${k} absent`);
+  for (const k of ["fullHeight", "cavityLeafMm", "cavityPocket"]) assert.ok(!(k in after.find((m) => m.id === d1).inputs), `${k} absent`);
 });
 
 await t("HUB 029 step 1: a traced wall on a re-scaled page is held with its cladding and listed by the rescale review with its length; the REAL server keeps the review's re-stamp and refuses the gable the review holds back", async () => {

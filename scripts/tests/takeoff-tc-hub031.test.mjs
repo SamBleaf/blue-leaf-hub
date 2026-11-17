@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { CALCULATION_VERSION, CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { cleanMaterialContent, cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
 import { OPENING_JAMBS_MIN, TRIMMER_STACK_RULE, expandOpening, trimmerStackCount } from "../../shared/takeoff/engine/openingRules.js";
-import { fixedWidthOpening } from "../../src/components/takeoff/measure/geometry.js";
+import { buildCalibration } from "../../shared/takeoff/index.js";
+import { fixedWidthOpening, planCavityOpening } from "../../src/components/takeoff/measure/geometry.js";
 import { NOTE_CODES } from "../../shared/takeoff/fixes.js";
 import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, selectJambs, selectLintel, tableRecord } from "../../shared/takeoff/standards/index.js";
 import MGP10 from "../../shared/takeoff/standards/data/as1684-mgp10-n1n2.js";
@@ -183,6 +184,23 @@ t("server whitelist: cavityLeafMm and cavityPocket stay on a door only; 200 is r
   assert.ok(!("cavityLeafMm" in win) && !("cavityPocket" in win));
   assert.throws(() => cleanMeasurementInputs("opening", { ...base, type: "door", cavityLeafMm: 200 }, null), /Door width must be between 300 and 1,500 mm/);
   assert.ok(!("cavityPocket" in cleanMeasurementInputs("opening", { ...base, type: "door", cavityLeafMm: 920, cavityPocket: "up" }, null)));
+});
+
+t("on the plan: two taps on a calibrated wall give the slider, the pocket side from the second tap, refusals keep the first tap", () => {
+  const k = 0.05, X0 = 100, Y0 = 100;
+  const cal = { id: "cal", documentId: "d", pageIndex: 0, ...buildCalibration({ basisRotation: 0, horizontal: { p1: { x: X0, y: Y0 - 40 }, p2: { x: X0 + 12000 * k, y: Y0 - 40 }, knownMm: 12000 },
+    vertical: { p1: { x: X0 - 40, y: Y0 }, p2: { x: X0 - 40, y: Y0 + 8000 * k }, knownMm: 8000 } }).calibration };
+  const at = (x, y) => ({ x: X0 + x * k, y: Y0 + y * k });
+  const walls = [{ id: "w1", points: [at(0, 0), at(6000, 0)], cal }];
+  const opts = { pxPerUnit: 0.06 / k };
+  const r = planCavityOpening(walls, at(603, 3), at(2000, 2), 1860, new Map(), opts);
+  assert.deepEqual([r.ok, r.wallId, r.xMm, r.widthMm, r.pocket, r.movedMm], [true, "w1", 600, 1860, "right", 0]);
+  const l = planCavityOpening(walls, at(3000, 0), at(1000, 0), 1860, new Map(), opts);
+  assert.deepEqual([l.ok, l.xMm, l.pocket], [true, 1140, "left"], "the doorway end is the first tap; the pocket runs back towards the wall start");
+  const hit = planCavityOpening(walls, at(500, 0), at(900, 0), 1860, new Map([["w1", [{ x0: 1800, x1: 2400, label: "W1" }]]]), opts);
+  assert.deepEqual([hit.ok, hit.reason, hit.label], [false, "overlap", "W1"]);
+  assert.equal(planCavityOpening(walls, at(5000, 0), at(5600, 0), 1860, new Map(), opts).reason, "past_end");
+  assert.equal(planCavityOpening(walls, at(100, 3000), at(900, 3000), 1860, new Map(), opts).reason, "no_wall", "a tap off every wall");
 });
 
 // ══ Step 3: full height (opening height = wall height, stored as a flag) ═════════════════════════════════════════
@@ -521,6 +539,16 @@ t("server whitelist: a typed lintel (section, pieces, grade), the roof width an 
 
 t("NOTE_CODES: the opening rules' notes are notes (never a fix row)", () => {
   for (const c of ["jambs_minimum_used", "trimmer_stack_default", "lintel_not_sized", "lintel_no_fit", "lintel_bearing"]) assert.ok(NOTE_CODES.includes(c), c);
+});
+
+t("a lintel that can't be sized leaves the quantity 'incomplete' (not blocking); once sized it is 'calculated'", () => {
+  const un = ruled(SAM(), { carriesRoof: true });
+  assert.equal(WR(un).status.quantity, "incomplete");
+  assert.ok(!WR(un).problems.some((p) => p.blocking));
+  const sized = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)]);
+  assert.equal(WR(sized).status.quantity, "calculated");
+  const none = ruled(SAM(), { carriesRoof: false });
+  assert.equal(WR(none).status.quantity, "calculated", "a wall that doesn't carry the roof has no lintel to size");
 });
 
 console.log(`takeoff-tc-hub031: ${pass} passed, ${fail} failed`);

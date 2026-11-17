@@ -338,7 +338,7 @@ const fail = (status, error, code) => ({ __status: status, body: { ok: false, er
  * Wall inputs exactly as the server keeps them (takeoffService.mjs cleanInputs): known keys only, so a field the
  * server would drop is dropped here too. HUB 022: runId + seq are kept only as a valid pair (a uuid and 1–1,000).
  */
-const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon"];
+const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon", "studCentresMm", "loadBearing"];
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function serverWallInputs(i) {
   if (!i) return i;
@@ -352,7 +352,7 @@ function serverWallInputs(i) {
  * Opening inputs as the server keeps them (cleanInputs "opening"): the entered numbers, label, type and framing detail
  * only — an opening drawn on the plan (HUB 022 step 2) carries nothing else, and a field the server drops goes here too.
  */
-const OPENING_INPUT_KEYS = ["xMm", "sillMm", "widthMm", "heightMm", "label", "type", "detail"];
+const OPENING_INPUT_KEYS = ["xMm", "sillMm", "widthMm", "heightMm", "label", "type", "detail", "fullHeight", "cavityLeafMm", "cavityPocket", "lintel", "loadRlwMm"];
 function serverOpeningInputs(i) {
   if (!i) return i;
   const out = {};
@@ -360,6 +360,12 @@ function serverOpeningInputs(i) {
   out.label = typeof out.label === "string" && out.label.trim() ? out.label.trim().slice(0, 40) : null;
   out.type = ["window", "door", "other"].includes(out.type) ? out.type : "window";
   if (out.detail == null) delete out.detail;
+  // HUB 031: as the server keeps them (cleanInputs): full height only as true, a slider only on a door, the pocket side only left or right
+  if (out.fullHeight !== true) delete out.fullHeight;
+  if (out.type !== "door" || !(out.cavityLeafMm > 0)) { delete out.cavityLeafMm; delete out.cavityPocket; }
+  else if (out.cavityPocket !== "left" && out.cavityPocket !== "right") delete out.cavityPocket;
+  if (out.lintel == null) delete out.lintel;
+  if (out.loadRlwMm == null) delete out.loadRlwMm;
   return out;
 }
 

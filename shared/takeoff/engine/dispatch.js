@@ -509,7 +509,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     for (const id of here) notCounted.push({ name: nameOf.get(id) ?? id, tag, measurementId: m.id, openingId: id });
     // HUB 031: what the opening rules used or couldn't do, in plain words (notes, never blocking; said once for the item)
     for (const n of ruleNotes) {
-      const q = { code: n.code, message: n.code === "jambs_minimum_used" || n.code === "trimmer_stack_default" ? n.message : onWall(n.message), blocking: false, refs: [{ measurementId: m.id, openingId: n.openingId, openingLabel: nameOf.get(n.openingId) }] };
+      const q = { code: n.code, message: n.code === "jambs_minimum_used" || n.code === "trimmer_stack_default" ? n.message : onWall(n.message), blocking: false, ...(n.code === "lintel_not_sized" ? { framingGap: true } : {}), refs: [{ measurementId: m.id, openingId: n.openingId, openingLabel: nameOf.get(n.openingId) }] };
       if (once(q)) problems.push(q);
     }
     // an explicit framing detail adds its own members (kings …) on top of the studs beside the opening
@@ -545,7 +545,10 @@ function runWallFraming(mat, n, items, ctx, sink) {
             lintelsToSize: [...ruled.values()].filter((r) => ["unsized", "engineer"].includes(r.lintel.status)).length,
             noFit: [...ruled.values()].filter((r) => r.lintel.noFit).length } } : {}) } },
       problems,
-      status: { quantity: three.every((r) => r.status.quantity === "calculated") ? "calculated" : "incomplete", installation: studs.status.installation, procurement: "draft" },
+      // HUB 031: a lintel the rules couldn't size (or that needs an engineer) leaves the quantity "incomplete", as an opening
+      // with no framing detail always did: it is said on the Walls line and in a note, never a silent gap
+      status: { quantity: three.every((r) => r.status.quantity === "calculated") && ![...ruled.values()].some((r) => ["unsized", "engineer"].includes(r.lintel.status)) ? "calculated" : "incomplete",
+        installation: studs.status.installation, procurement: "draft" },
       explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],
     });
   }
