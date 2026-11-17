@@ -1,37 +1,44 @@
 /**
  * RegisterWorkshop — the Master Register (Tab 18 / R03): the staff-operated, room-by-room project brief.
  *
- * Lives INSIDE the existing lead stages (no new page, stage or department). One component, every stage:
- *   Project → Whole house → Site & existing → Rooms → Register (office) → Documents
+ * Lives INSIDE the existing lead stages (no new page, stage or department). One component, every stage
+ * (REGISTER_SCREENS_SPEC.md, owner approval 17 Nov 2026):
+ *   The project · Rooms · Throughout · Site & existing · Documents | Register · Tender (office)
+ * An "Actions" pill opens every point waiting on someone (the same rule as the architect's brief's next-issue list).
  * Storage is stage-aware and invisible to staff (useRegister → /api/register): the lead scratchpad before a
  * project exists, the canonical project records afterwards — saved automatically, no sync button.
  * Sales facts (client, site, type, budget, consultants, drawings) are shown read-only and never re-asked.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { resumePointer, outstandingItems, siteLine, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
+import { resumePointer, siteLine, PROJECT_TYPE_LABELS, DELIVERY_MODELS } from "../../../../lib/register.js";
 import { STAGES } from "../../../../lib/salesPipeline.js";
+import { SHOW_IN_SALES } from "../../../../lib/projectStory.js";
 import { apiFetch, apiPut } from "../../../../lib/apiFetch.js";
 import { useAuth } from "../../../../lib/useAuth.js";
 import { useRegister } from "./useRegister.js";
-import ContextStep from "./ContextStep.jsx";
+import ProjectStep from "./ProjectStep.jsx";
 import SectionStep from "./SectionStep.jsx";
-import RoomsStep from "./RoomsStep.jsx";
+import RoomsList from "./RoomsList.jsx";
+import RoomScreen from "./RoomScreen.jsx";
+import ActionsPanel, { actionsSummary } from "./ActionsPanel.jsx";
+import { NeedsActionProvider } from "./NeedsAction.jsx";
+import EditDrawer from "./EditDrawer.jsx";
 import RegisterTable from "./RegisterTable.jsx";
 import DocumentsStep from "./DocumentsStep.jsx";
 import TenderPanel from "./TenderPanel.jsx";
 import HandoverPanel from "./HandoverPanel.jsx";
 import LegacyScheduleRows from "./LegacyScheduleRows.jsx";
-import OutstandingSummary from "./OutstandingSummary.jsx";
 
+// Capture tabs first, then the office tabs after a divider (spec F2).
 const STEPS = [
-  { key: "context", label: "Project" },
-  { key: "whole_house", label: "Whole house" },
-  { key: "site", label: "Site & existing" },
+  { key: "context", label: "The project" },
   { key: "rooms", label: "Rooms" },
-  { key: "register", label: "Register" },
+  { key: "whole_house", label: "Throughout" },
+  { key: "site", label: "Site & existing" },
   { key: "documents", label: "Documents" },
-  { key: "tender", label: "Tender", stages: ["consultants", "tender", "won"] },
-  { key: "handover", label: "Handover", stages: ["won"], contract: true },
+  { key: "register", label: "Register", office: true },
+  { key: "tender", label: "Tender", office: true, stages: ["consultants", "tender", "won"] },
+  { key: "handover", label: "Handover", office: true, stages: ["won"], contract: true },
 ];
 const OPEN_BY_DEFAULT = new Set(["winning_offer", "consultants", "tender"]);
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
@@ -61,7 +68,9 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   const [open, setOpen] = useState(() => lsGet(`register.open.${lead.id}`, OPEN_BY_DEFAULT.has(stage) ? "1" : "0") === "1");
   const [step, setStep] = useState(null);
   const [activeRoomId, setActiveRoomId] = useState(null);
-  const [showDetail, setShowDetail] = useState(() => lsGet("register.showDetail", "0") === "1");
+  const [roomOpen, setRoomOpen] = useState(false);        // the Rooms tab opens on the list; a room opens over it
+  const [actionsOpen, setActionsOpen] = useState(null);   // null | the Actions list's starting filter
+  const [recordDrawer, setRecordDrawer] = useState(null); // a record opened from the Actions list
   const [factError, setFactError] = useState(null);
   const [baseline, setBaseline] = useState(null);
   const [expanded, setExpanded] = useState(false);
@@ -80,6 +89,13 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     document.body.style.overflow = "hidden";
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
   }, [expanded]);
+  // "Change in Sales ›" / "Upload in Files ›" (Project step) show a LeadDetail tab: leave full width so it can be seen.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onShow = () => setExpanded(false);
+    document.addEventListener(SHOW_IN_SALES, onShow);
+    return () => document.removeEventListener(SHOW_IN_SALES, onShow);
+  }, [expanded]);
 
   const loadContext = useCallback(async () => {
     const r = await apiFetch(`/api/register/leads/${lead.id}/context`);
@@ -95,7 +111,14 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     setActiveRoomId(p.roomId);
   }, [reg, step]);
 
-  const outstanding = useMemo(() => (reg ? outstandingItems(reg) : []), [reg]);
+  // The header's Actions pill: next-issue points, with an amber dot while any has no one named (spec F1, S4).
+  const actions = useMemo(() => (reg && context ? actionsSummary(reg, context) : { count: 0, unnamed: 0 }), [reg, context]);
+  // On a phone the Hub's stage bar is hidden while a room is open (spec S3p): a view rule only, nothing stored.
+  useEffect(() => {
+    const on = step === "rooms" && roomOpen && open;
+    try { if (on) document.body.dataset.registerRoom = "open"; else delete document.body.dataset.registerRoom; } catch { /* no DOM */ }
+    return () => { try { delete document.body.dataset.registerRoom; } catch { /* no DOM */ } };
+  }, [step, roomOpen, open]);
   function toggleOpen(v) { setOpen(v); lsSet(`register.open.${lead.id}`, v ? "1" : "0"); }
   function gotoStep(s) {
     setStep(s);
@@ -105,16 +128,19 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
     setActiveRoomId(id);
     if (reg && reg.meta.lastRoomId !== id) store.mutateMeta({ lastRoomId: id, lastStep: "rooms" });
   }
+  function openRoom(id) { selectRoom(id); setRoomOpen(true); setStep("rooms"); }
   function continueBrief() {
     toggleOpen(true);
     if (reg) { const p = resumePointer(reg); setStep(p.step === "setup" ? "context" : p.step); setActiveRoomId(p.roomId); }
   }
+  const reloadContext = loadContext;
   async function setDeliveryModel(v) {
     setFactError(null);
     const r = await apiPut(`/api/register/leads/${lead.id}/facts`, { deliveryModel: v });
     if (r.ok) setContext(r.data.context); else setFactError(r.error);
   }
-  async function patchLead(partial) { await patch(partial); loadContext(); }
+  // Returns patch()'s result (the saved lead, or null on failure) so StoryFields and the project-type select can say "Not saved".
+  async function patchLead(partial) { const r = await patch(partial); loadContext(); return r; }
   async function onPortalItem(item, action, evidence) {
     if (action === "approve") { store.updateItem(item.id, { certainty: "client_approved", evidence }); await store.flush(); return; }
     await store.portal(action, [item]);
@@ -135,6 +161,8 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
   if (!loaded && !store.error) return <div ref={rootRef} />; // first load — nothing shows until the switch is known
 
   return (
+    // Every ⚑ below (PromptRow in older screens passes no reg/context) reads the register, Sales context and staff member here.
+    <NeedsActionProvider reg={reg} context={context} actor={profile}>
     <div ref={rootRef} className={expanded ? "fixed inset-0 z-40 overflow-y-auto bg-page px-2 py-3 sm:px-6 sm:py-4" : "-mx-3 sm:mx-0"}>
       <div className={`rounded-card border border-hairline bg-surface ${expanded ? "mx-auto max-w-[1180px]" : ""}`} data-testid="register-workshop">
       {expanded && (
@@ -149,24 +177,31 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-xs font-bold uppercase tracking-wide text-primary">Project brief &amp; register</p>
+            <p className="text-[13px] font-bold text-primary">Project brief</p>
             <span title={modeBadge.h} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${modeBadge.c}`} data-testid="register-mode">{modeBadge.t}</span>
           </div>
           <p className="truncate text-[11px] text-muted">
             {context?.projectType ? PROJECT_TYPE_LABELS[context.projectType] : "Project type —"}
             {context?.deliveryModel ? ` · ${DELIVERY_MODELS[context.deliveryModel]}` : ""}
             {reg?.meta.planRev ? ` · Drawings ${reg.meta.planRev}` : " · Drawings —"}
+            {context?.identity?.suburb ? ` · ${context.identity.suburb}` : ""}
             {` · ${rooms.length} room${rooms.length === 1 ? "" : "s"}`}
-            {outstanding.length ? ` · ${outstanding.length} outstanding` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {saveText && <span className={`text-[11px] ${save.state === "error" || save.state === "rejected" ? "text-red-600" : save.state === "saved" ? "text-green-600" : "text-amber-600"}`} data-testid="register-save-state">{saveText}</span>}
-          {open && <button type="button" onClick={() => store.flush()} disabled={save.state === "saving"} className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40">Save</button>}
-          {open && !expanded && <button type="button" onClick={() => setExpanded(true)} className="hidden rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page sm:inline-block" data-testid="register-expand" title="Open the register in a full-width workspace">⤢ Expand</button>}
+          {open && <button type="button" onClick={() => store.flush()} disabled={save.state === "saving"} className="min-h-[44px] rounded-lg border border-hairline px-3 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40">Save</button>}
+          {open && (
+            <button type="button" onClick={() => setActionsOpen("next_issue")} className="relative inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-hairline px-3 text-xs font-semibold text-ink hover:bg-page" data-testid="actions-pill"
+              title={actions.unnamed ? `${actions.unnamed} with no one named yet` : "Everything waiting on someone"}>
+              Actions {actions.count}
+              {actions.unnamed > 0 && <span className="h-2 w-2 rounded-full bg-warning" aria-label="Some have no one named" />}
+            </button>
+          )}
+          {open && !expanded && <button type="button" onClick={() => setExpanded(true)} className="hidden min-h-[44px] rounded-lg border border-hairline px-3 text-xs font-semibold text-ink hover:bg-page sm:inline-block" data-testid="register-expand" title="Open the register in a full-width workspace">⤢ Expand</button>}
           {!open
             ? <button type="button" onClick={continueBrief} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" data-testid="continue-brief">{reg && (reg.items.length || rooms.length) ? "Continue brief →" : "Start brief →"}</button>
-            : <button type="button" onClick={() => { setExpanded(false); toggleOpen(false); }} className="text-[11px] text-muted hover:text-ink">Collapse</button>}
+            : <button type="button" onClick={() => { setExpanded(false); toggleOpen(false); }} className="min-h-[44px] px-2 text-[11px] text-muted hover:text-ink">Collapse</button>}
         </div>
       </div>
 
@@ -200,47 +235,35 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
           )}
           {factError && <p className="border-b border-red-200 bg-red-50 px-4 py-1.5 text-[11px] text-red-700">{factError}</p>}
 
-          <div className="flex flex-wrap items-center gap-1 border-b border-hairline px-3 py-2">
-            {steps.map((s) => (
-              <button key={s.key} type="button" onClick={() => gotoStep(s.key)} data-testid={`step-${s.key}`}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${step === s.key ? "bg-primary text-white" : "border border-hairline text-ink hover:bg-page"}`}>
-                {s.label}{s.key === "register" && outstanding.length ? ` (${outstanding.length})` : ""}
-              </button>
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-hairline px-3 py-2 sm:flex-wrap">
+            {steps.map((s, k) => (
+              <span key={s.key} className="contents">
+                {s.office && !steps[k - 1]?.office && <span className="mx-1 h-5 w-px bg-hairline" aria-hidden="true" />}
+                <button type="button" onClick={() => { gotoStep(s.key); if (s.key === "rooms") setRoomOpen(false); }} data-testid={`step-${s.key}`}
+                  className={`min-h-[44px] shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${step === s.key ? "bg-primary text-white" : s.office ? "text-muted hover:bg-page hover:text-ink" : "border border-hairline text-ink hover:bg-page"}`}>
+                  {s.label}
+                </button>
+              </span>
             ))}
-            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-muted" title="Detailed prompts are normally for after the PTSA is signed — staff may work ahead at any time.">
-              <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={showDetail} onChange={(e) => { setShowDetail(e.target.checked); lsSet("register.showDetail", e.target.checked ? "1" : "0"); }} />
-              Show detailed prompts
-            </label>
           </div>
-
-          {reg && ["context", "whole_house", "site", "rooms"].includes(step) && (
-            <OutstandingSummary reg={reg} onGo={(place) => { if (place.roomId) { selectRoom(place.roomId); setStep("rooms"); } else gotoStep(place.step); }} />
-          )}
 
           <div className="p-2 sm:p-4">
             {(store.loading && !reg) && <p className="text-sm text-muted">Loading the brief…</p>}
             {reg && step === "context" && (
-              <ContextStep reg={reg} context={context} lead={lead} stage={stage} actor={profile} patchLead={patchLead} setDeliveryModel={setDeliveryModel}
-                mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} upsertItem={store.upsertItem} updateItem={store.updateItem}
-                deleteItem={store.deleteItem} addItem={store.addItem} openRoom={(id) => { selectRoom(id); setStep("rooms"); }} saveState={store.saveStateOf} />
+              <ProjectStep reg={reg} context={context} lead={lead} stage={stage} actor={profile} patchLead={patchLead} reloadContext={reloadContext} setDeliveryModel={setDeliveryModel}
+                mutateMeta={store.mutateMeta} upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem} saveState={store.saveStateOf} onOpenRecord={(id) => setRecordDrawer({ kind: "record", ids: [id] })} />
             )}
             {reg && (step === "whole_house" || step === "site") && (
-              <SectionStep section={step === "site" ? "site" : "project"} reg={reg} context={context} stage={stage} showDetail={showDetail} actor={profile}
+              <SectionStep section={step === "site" ? "site" : "project"} reg={reg} context={context} stage={stage} showDetail={false} actor={profile}
                 upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} saveState={store.saveStateOf} mutateMeta={store.mutateMeta} />
             )}
-            {reg && step === "rooms" && (
-              <RoomsStep reg={reg} context={context} stage={stage} showDetail={showDetail} activeRoomId={activeRoomId} setActiveRoomId={selectRoom}
-                actor={profile} upsertItem={store.upsertItem} updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
-                mutateMeta={store.mutateMeta} gotoContext={() => gotoStep("context")} onPortalItem={onPortalItem} saveState={store.saveStateOf}
-                onPrev={() => { const i = rooms.findIndex((r) => r.id === activeRoomId); if (i > 0) selectRoom(rooms[i - 1].id); }}
-                onSaveNext={async () => {
-                  // Flush BEFORE advancing: on a 409/500 the save fails (flush -> false) and we stay on the
-                  // room so the rejected/conflict indicator is seen in context — no silent loss, no stale green.
-                  const okSaved = await store.flush();
-                  const i = rooms.findIndex((r) => r.id === activeRoomId);
-                  const next = rooms[i + 1];
-                  if (okSaved && next) selectRoom(next.id);
-                }} />
+            {reg && step === "rooms" && (!roomOpen || !rooms.some((r) => r.id === activeRoomId)) && (
+              <RoomsList reg={reg} context={context} mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} openRoom={openRoom} readOnly={false} />
+            )}
+            {reg && step === "rooms" && roomOpen && rooms.some((r) => r.id === activeRoomId) && (
+              <RoomScreen reg={reg} context={context} stage={stage} roomId={activeRoomId} actor={profile} upsertItem={store.upsertItem} updateItem={store.updateItem}
+                deleteItem={store.deleteItem} addItem={store.addItem} replaceItems={store.replaceItems} mutateMeta={store.mutateMeta} saveState={store.saveStateOf}
+                onPortalItem={onPortalItem} flush={store.flush} onBack={() => setRoomOpen(false)} onOpenRoom={(id) => openRoom(id)} />
             )}
             {reg && step === "register" && (
               <RegisterTable reg={reg} context={context} stage={stage} info={info} actor={profile} baseline={baseline}
@@ -254,12 +277,25 @@ export default function RegisterWorkshop({ lead, patch, stage }) {
               <HandoverPanel lead={lead} reg={reg} info={info} flush={store.flush} portal={store.portal} onBaseline={setBaseline} />
             )}
             {reg && step === "documents" && (
-              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flushAll} updateItem={store.updateItem} />
+              <DocumentsStep lead={lead} reg={reg} info={info} context={context} stage={stage} flush={store.flushAll} updateItem={store.updateItem} deleteItem={store.deleteItem} addItem={store.addItem}
+                upsertItem={store.upsertItem} mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} patchLead={patchLead} reloadContext={reloadContext}
+                saveStateOf={store.saveStateOf} actor={profile} onPortalItem={onPortalItem} onOpenRoom={openRoom} onOpenActions={(f) => setActionsOpen(f || "next_issue")} saveText={saveText} />
             )}
           </div>
+          {reg && actionsOpen && (
+            <ActionsPanel reg={reg} context={context} actor={profile} updateItem={store.updateItem} upsertItem={store.upsertItem} addItem={store.addItem} initialFilter={actionsOpen}
+              onOpenRecord={(id, ids) => setRecordDrawer({ kind: "record", ids: ids?.length ? ids : [id] })} onClose={() => setActionsOpen(null)} />
+          )}
+          {reg && recordDrawer && (
+            <EditDrawer target={recordDrawer} lead={lead} reg={reg} context={context} actor={profile} readOnly={false} saveStateOf={store.saveStateOf} updateItem={store.updateItem} addItem={store.addItem}
+              deleteItem={store.deleteItem} upsertItem={store.upsertItem} mutateMeta={store.mutateMeta} replaceItems={store.replaceItems} patchLead={patchLead}
+              reloadContext={reloadContext} onPortalItem={onPortalItem} onClose={() => setRecordDrawer(null)} onPreview={() => { setRecordDrawer(null); setActionsOpen(null); gotoStep("documents"); }}
+              onOpenRoom={(id) => { setRecordDrawer(null); setActionsOpen(null); openRoom(id); }} saveText={saveText} />
+          )}
         </>
       )}
       </div>
     </div>
+    </NeedsActionProvider>
   );
 }

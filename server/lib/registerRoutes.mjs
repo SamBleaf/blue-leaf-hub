@@ -8,7 +8,7 @@
  *   GET  /api/register/leads/:leadId                 register + mode (+ automatic promotion if due)
  *   PUT  /api/register/leads/:leadId                 save { meta?, changes[], deletes[] }  (409 + conflicts ⇒ nothing written)
  *   GET  /api/register/leads/:leadId/context         read-only Sales/project context (prefill)
- *   PUT  /api/register/leads/:leadId/facts           { deliveryModel } → lead (pre-job) or job fact (post-job)
+ *   PUT  /api/register/leads/:leadId/facts           { deliveryModel?, projectType?, estimatedValue? } → lead (pre-job) or job fact (post-job)
  *   POST /api/register/leads/:leadId/promote         explicit promotion / recovery (normally automatic)
  *   POST /api/register/leads/:leadId/portal/:action  issue | withdraw | return  { items:[{id,sync}], note }
  *   GET  /api/register/leads/:leadId/history         item history (?itemId=)
@@ -19,7 +19,7 @@ import { ok, err } from "./apiResponse.mjs";
 import {
   loadRegister, saveRegister, promoteRegisterToProject, portalAction, itemHistory, RegisterError, registerEnabledFor,
 } from "./registerStore.mjs";
-import { loadRegisterContext, setDeliveryModel } from "./registerContext.mjs";
+import { loadRegisterContext, setDeliveryModel, setProjectFacts } from "./registerContext.mjs";
 import {
   previewDocument, issueDocument, listDocuments, documentUrl, supplierPack, addSourceDocument, updateSourceDocument,
 } from "./registerDocuments.mjs";
@@ -93,10 +93,15 @@ export function registerRegisterRoutes(app) {
     if (!sb) return err(res, 503, "Database not configured.");
     try {
       const b = req.body || {};
-      if (!("deliveryModel" in b)) return err(res, 400, "Nothing to update.");
-      const out = await setDeliveryModel(sb, req.params.leadId, b.deliveryModel || null, { actorId: req.caller?.id || null });
+      const facts = Object.fromEntries(["projectType", "estimatedValue"].filter((k) => k in b).map((k) => [k, b[k]]));
+      if (!("deliveryModel" in b) && !Object.keys(facts).length) return err(res, 400, "Nothing to update.");
+      const actorId = req.caller?.id || null;
+      let owner = null;
+      // Each fact goes to its owner (the lead before a job exists, the job's facts service after), never both.
+      if ("deliveryModel" in b) owner = (await setDeliveryModel(sb, req.params.leadId, b.deliveryModel || null, { actorId })).owner;
+      if (Object.keys(facts).length) owner = (await setProjectFacts(sb, req.params.leadId, facts, { actorId })).owner || owner;
       const context = await loadRegisterContext(sb, req.params.leadId);
-      ok(res, { context, owner: out.owner });
+      ok(res, { context, owner });
     } catch (e) { sendRegisterError(res, e, "Could not save the project fact."); }
   });
 

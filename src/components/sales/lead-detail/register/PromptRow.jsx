@@ -10,6 +10,11 @@
  *   • technical "verified" can only be set together with a drawing / consultant reference;
  *   • a project-wide default is inherited by rooms until a room exception is recorded explicitly;
  *   • portal actions on a selection are explicit buttons, never side effects of editing.
+ *
+ * Needs action from… (REGISTER_SCREENS_SPEC.md S4): every row carries the ⚑ (NeedsAction.jsx) in its header box. It stays
+ * mounted in that one box; once an action is set the box only restyles (under the row on a phone) so its sheet stays open.
+ * reg / context come from these props or from <NeedsActionProvider>. actionFlag={false} leaves it off (the Register
+ * table's expanded row, whose table row already has one).
  */
 import { useRef, useState } from "react";
 import {
@@ -20,6 +25,8 @@ import {
 } from "../../../../lib/register.js";
 import { Chip, Mini, Select } from "./ui.jsx";
 import ProgressiveChoiceCard from "./ProgressiveChoiceCard.jsx";
+import { NeedsActionFlag } from "./NeedsAction.jsx";
+import { flagState } from "../../../../lib/needsAction.js";
 
 const KIND_TONE = { scope: "slate", requirement: "violet", selection: "blue", action: "amber" };
 const QUICK = [["na", "N/A"], ["excluded", "Excluded"], ["by_others", "By others"], ["undecided", "Undecided"]];
@@ -40,6 +47,7 @@ function portalBadge(item) {
 
 export default function PromptRow({
   question: questionProp, item, seed, onChange, onDelete, actor, onPortal, readOnlyReason, compact, saveState, rowTitle, fixedZone, usedZones, assumptionOf, meeting, areaOptions, coveredQuestions,
+  reg, context, actionFlag = true,
 }) {
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState(null);          // 'approve' | 'verify' | 'portal_approve'
@@ -82,12 +90,14 @@ export default function PromptRow({
   const title = rowTitle || config?.linkedLabel || wording.short || (it.overridesDefaultId ? "Room exception" : "Custom item");
   const locked = !!it.sync?.locked;
   const disabled = !!readOnlyReason;
+  // The ⚑: in the header box while nothing is set; once set, the same box drops under the row on a phone for the pill.
+  const flagSet = actionFlag && ["set", "done"].includes(flagState(item || null));
 
   return (
     <div className={`relative rounded-lg border p-2.5 ${started ? "border-hairline bg-page" : "border-dashed border-hairline bg-surface"}`} data-testid={`prompt-${qid}`}>
-      <div className="flex items-start gap-2">
+      <div className={`flex items-start gap-2 ${flagSet ? "flex-wrap sm:flex-nowrap" : ""}`}>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5 pr-24 sm:pr-0">
+          <div className={`flex flex-wrap items-center gap-1.5 ${actionFlag && !flagSet ? "pr-36" : flagSet ? "" : "pr-24"} sm:pr-0`}>
             <Chip tone={KIND_TONE[kind]}>{guided ? ANSWER_NATURES[config.nature] : ITEM_KINDS[kind]}</Chip>
             <span className="text-xs font-semibold text-ink">{title}</span>
             {question?.id && <span className="text-[10px] text-muted">{question.id}</span>}
@@ -197,7 +207,12 @@ export default function PromptRow({
           {readOnlyReason && <p className="mt-1 text-[10px] text-muted">{readOnlyReason}</p>}
           {locked && <p className="mt-1 text-[10px] text-muted">Approved under the contract — product changes go through a variation.</p>}
         </div>
-        <div className="absolute right-2.5 top-2.5 flex items-center gap-2 sm:static sm:shrink-0 sm:flex-col sm:items-end sm:gap-1">
+        <div className={flagSet ? "flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:flex-col sm:items-end sm:gap-1"
+          : "absolute right-2.5 top-2.5 flex items-center gap-2 sm:static sm:shrink-0 sm:flex-col sm:items-end sm:gap-1"}>
+          {actionFlag && (
+            <NeedsActionFlag reg={reg} context={context} item={item || null} seed={seed || it} actor={actor} readOnly={disabled}
+              updateItem={(_id, partial) => onChange(partial)} upsertItem={(_seed, partial) => onChange(partial)} />
+          )}
           {<button type="button" onClick={() => setOpen((o) => !o)} className="text-[11px] text-primary hover:underline">{open ? "Less" : guided ? "Office fields" : "More"}</button>}
           {onDelete && !disabled && <button type="button" onClick={onDelete} title="Remove this item" className="text-xs text-red-500 hover:text-red-700">×</button>}
         </div>

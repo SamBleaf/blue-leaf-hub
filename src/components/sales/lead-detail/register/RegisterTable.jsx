@@ -3,6 +3,9 @@
  * filterable, inline-editable list. Edits write the same canonical records as the room walkthrough —
  * there is no parallel office copy. Also hosts the technical-coordination library (Tab 21 §12: office /
  * consultant actions, never an onsite questionnaire) and bulk "issue to client portal".
+ *
+ * Needs action from… (REGISTER_SCREENS_SPEC.md S4): each row has the ⚑. The old outstanding count stays here as an office
+ * filter, "Not finished" (outstandingReasons); the Actions list is the other thing, openPoints.
  */
 import { useMemo, useState } from "react";
 import {
@@ -12,6 +15,7 @@ import {
 } from "../../../../lib/register.js";
 import { Chip, Select } from "./ui.jsx";
 import PromptRow from "./PromptRow.jsx";
+import { NeedsActionFlag } from "./NeedsAction.jsx";
 
 const REASON_LABEL = { decision: "Decision", verification: "Verification", action: "Action" };
 const NON_WORK_NATURES = new Set(["fact", "risk", "technical", "action", "requirement"]);
@@ -73,7 +77,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
       <div className="space-y-1.5 text-xs">
         <div className="flex flex-wrap items-center gap-1.5">
           <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Search item, product, ref…" className="inp w-44 text-[11px]" />
-          <label className="flex items-center gap-1 text-ink"><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={f.open} onChange={(e) => set("open", e.target.checked)} /> Outstanding only</label>
+          <label className="flex items-center gap-1 text-ink"><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={f.open} onChange={(e) => set("open", e.target.checked)} /> Not finished</label>
           <Select value={f.room} onChange={(v) => set("room", v)} options={[["__project", "Whole house / site"], ...rooms.map((r) => [r.id, r.name])]} placeholder="All rooms" className="w-36" />
           <Select value={f.cert} onChange={(v) => set("cert", v)} options={CERTAINTY_ORDER.map((k) => [k, REGISTER_CERTAINTY[k]])} placeholder="Any client status" className="w-36" />
           <button type="button" onClick={() => setAdvanced((v) => !v)} className="rounded-lg border border-hairline px-2 py-1 text-[11px] text-muted hover:text-ink" data-testid="register-advanced-toggle">{advanced ? "Fewer filters" : "Advanced filters"}{activeAdvanced ? ` · ${activeAdvanced}` : ""}</button>
@@ -101,7 +105,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
         </div>
       )}
 
-      {rows.length === 0 ? <p className="text-sm text-muted">Nothing matches{f.open ? " — no outstanding items" : ""}.</p> : (
+      {rows.length === 0 ? <p className="text-sm text-muted">Nothing matches{f.open ? " — nothing unfinished" : ""}.</p> : (
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]" data-testid="register-table">
             <thead><tr className="border-b border-hairline text-left text-muted">
@@ -134,6 +138,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                       {(i.itemKind === "selection" || i.itemKind === "scope") && <div className="text-muted">Price: {PRICING_STATUSES[i.pricingStatus].toLowerCase()}{i.pricingRef ? ` · ${i.pricingRef}` : ""}</div>}
                     </td>
                     <td className="py-1 pr-2">
+                      <NeedsActionFlag reg={reg} context={context} item={i} updateItem={updateItem} readOnly={readOnly} actor={actor} />
                       <Select value={i.responsibility} onChange={(v) => updateItem(i.id, { responsibility: v })} options={Object.entries(RESPONSIBILITIES)} placeholder="owner —" disabled={readOnly} />
                       <input value={i.nextAction} disabled={readOnly} onChange={(e) => updateItem(i.id, { nextAction: e.target.value, resolved: false })} placeholder="next action" className="inp mt-1 w-full min-w-[8rem] text-[11px]" />
                       {!i.responsibility && (reasons.includes("action") || reasons.includes("verification")) && <div className="mt-0.5 text-[10px] font-medium text-amber-700">Assign an owner</div>}
@@ -148,7 +153,7 @@ export default function RegisterTable({ reg, context, stage, info, actor, baseli
                   </tr>,
                   expanded === i.id && (
                     <tr key={`${i.id}-x`}><td colSpan={9} className="pb-2">
-                      <PromptRow question={null} item={i} actor={actor} compact readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState}
+                      <PromptRow question={null} item={i} actor={actor} compact readOnlyReason={readOnly ? "Read-only" : null} saveState={saveState} actionFlag={false}
                         onChange={(partial) => updateItem(i.id, partial)} onDelete={() => deleteItem(i.id)} onPortal={(a, ev) => onPortalItem(i, a, ev)} />
                     </td></tr>
                   ),

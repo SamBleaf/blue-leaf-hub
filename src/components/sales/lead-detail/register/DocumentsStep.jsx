@@ -1,24 +1,28 @@
 /**
  * DocumentsStep — controlled documents from the register (Tab 22 §A, D-031/D-035) + consultant/supplier
- * coordination (Tab 18 §1D, D-003).
+ * coordination (Tab 18 §1D, D-003). REGISTER_SCREENS_SPEC.md S5 (owner approval 17 Nov 2026).
  *
  *   • Preview renders the REAL document (existing engine → PDF) from the current register — no hand edits.
- *   • Issue stores an immutable revision (P01, P02 …); earlier revisions stay retrievable.
- *   • Pre-issue checks block missing identity / drawing revision / recipient, unevidenced approvals and any
- *     dollar figure. Nothing is emailed from here — download the issued PDF and send it yourself.
- *   • Received consultant / supplier PDFs are kept intact, linked to register items and reconciled by staff;
- *     nothing in them is applied to an approved item automatically.
- *   • "Check wording" asks Blueprint to proofread the draft just previewed: suggestions are listed and highlighted on
- *     a copy of the draft. Nothing is changed and the issue is unaffected; staff fix the wording in the register.
+ *   • Two boxes: red "Can't issue yet" (the release blockers, each saying why) and amber "Before you send" (content
+ *     checks that never block). Every entry has a Fix that opens what fixes it.
+ *   • The architect's brief lists every line as it will print, beside the PDF; a line opens its source in the edit
+ *     drawer, and "Not in this brief" reaches every record that didn't print, with the reason. The line list and the
+ *     amber box recompute in the browser from the same shared modules the server uses (briefModel, registerQuality),
+ *     so a fix shows at once; the red box is re-checked by the server on "Preview again".
+ *   • Issue stores an immutable revision (R01, R02 …) only from a current preview; nothing is emailed from here.
+ *   • "Check wording" asks Blueprint to proofread the draft just previewed: suggestions only, nothing is changed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../../../../lib/apiFetch.js";
 import { roomLabel, refCode, outstandingReasons, isClientSelection, itemTitle } from "../../../../lib/register.js";
+import { architectBriefModel, architectBriefLines, BRIEF_SECTION_TITLES, namedArchitect, placeOf } from "../../../../lib/briefModel.js";
+import { contentChecks, roomsNeedingBrief } from "../../../../lib/registerQuality.js";
 import { Chip, Mini, Section, Select } from "./ui.jsx";
+import EditDrawer from "./EditDrawer.jsx";
 
 const DOCS = [
   { key: "client_brief", label: "Preliminary Client Project Brief", hint: "Concept presentation — issue record only, no signature.", stages: ["winning_offer", "discovery", "fee_proposal"] },
-  { key: "architect_brief", label: "Architect Design Brief", hint: "Design coordination — client intent vs technical items to verify.", stages: ["consultants", "fee_proposal", "winning_offer"] },
+  { key: "architect_brief", label: "Architect Design Brief", hint: "The brief to design from, and what the next drawing issue needs.", stages: ["consultants", "fee_proposal", "winning_offer"] },
   // Two documents from the same register records (docs/documents/SELECTIONS_SPEC.md), each with its own revisions.
   { key: "selections_schedule", label: "Technical Selections Schedule", hint: "For the design team, estimator, suppliers and trades: the selections by trade, with codes, sources and open actions. No prices.", stages: ["consultants", "tender", "won"] },
   { key: "client_presentation", label: "Client Selections Presentation", hint: "For the client: their selections room by room, and what we need from them. No codes, references or prices.", stages: ["consultants", "tender", "won"] },
@@ -34,11 +38,81 @@ function b64ToBlobUrl(b64, type = "application/pdf") {
   return URL.createObjectURL(new Blob([bytes], { type }));
 }
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—");
+const fmtTime = (d) => d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Adelaide" }).replace(/\s/g, " ").toLowerCase();
+const rev = (n) => `R${String(n).padStart(2, "0")}`;
+/** What the brief prints from, in one string: any change to it makes the preview stale. */
+const printKey = (reg, context) => JSON.stringify([reg.items, reg.meta.rooms, reg.meta.planRev, reg.meta.occupancy, context?.goals, context?.budget, context?.consultants, context?.site, context?.identity, context?.projectType, context?.deliveryModel]);
+/** The recipient the brief opens with: the named architect and firm (design-team order), else blank. */
+function architectRecipient(context) {
+  const a = namedArchitect(context);
+  if (!a) return "";
+  return [a.name, a.company && a.company !== a.name ? a.company : ""].filter(Boolean).join(", ");
+}
 
-export default function DocumentsStep({ lead, reg, info, context, stage, flush, updateItem }) {
+// Where a printed line comes from, said in a few words beside it.
+function sourceTag(reg, line) {
+  const k = line.source?.kind;
+  if (k === "fact") return ["site", "client", "project"].includes(line.source.key) ? "Sales" : "The project";
+  if (k === "site") return "Public mapping";
+  if (k === "meta") return "The project";
+  if (k === "consultant") return "Design team";
+  if (k === "room") {
+    const ids = String(line.source.key || "").split(",").filter((x) => (reg.meta.rooms || []).some((r) => r.id === x));
+    if (!ids.length) return "Rooms";
+    if (ids.length > 1) return `${ids.length} rooms`;
+    const extra = line.ids.length ? ` + ${line.ids.length} record${line.ids.length === 1 ? "" : "s"}` : "";
+    return `${(reg.meta.rooms || []).find((r) => r.id === ids[0])?.name || "Room"}${extra}`;
+  }
+  const places = [...new Set(line.ids.map((id) => reg.items.find((i) => i.id === id)).filter(Boolean).map((i) => placeOf(reg, i).label))];
+  return `${places.join(" · ") || "Record"}${line.ids.length > 1 ? ` · ${line.ids.length} records` : ""}`;
+}
+/** The drawer target a printed line opens. Computed lines (what's planned) open the Rooms list. */
+function lineTarget(line) {
+  const s = line.source || {};
+  const base = { line: line.text, lineKey: `${line.section}|${line.label}` };
+  if (s.kind === "record") return { ...base, kind: "record", ids: line.ids };
+  if (s.kind === "room") {
+    if (s.key === "rooms" || s.key === "not_in_scope") return { ...base, kind: "rooms" };
+    return { ...base, kind: "room", roomIds: String(s.key || "").split(",").filter(Boolean) };
+  }
+  if (s.kind === "fact") return ["site", "client", "project"].includes(s.key) ? { ...base, kind: "sales" } : { ...base, kind: "fact", key: s.key };
+  if (s.kind === "site") return { ...base, kind: "site", text: line.text };
+  if (s.kind === "meta") return { ...base, kind: "meta", key: s.key };
+  if (s.kind === "consultant") return { ...base, kind: "architect" };
+  return { ...base, kind: "template" };
+}
+/** The drawer target a check's Fix opens. */
+function checkTarget(t, text) {
+  if (!t) return null;
+  if (t.kind === "record") return { kind: "record", ids: [t.id], line: text };
+  if (t.kind === "room") return { kind: "room", roomIds: [t.id], line: text };
+  if (t.kind === "rooms") return { kind: "rooms", key: t.key, line: text };
+  if (t.kind === "fact") return { kind: "fact", key: t.key, line: text };
+  if (t.kind === "architect") return { kind: "architect", line: text };
+  if (t.kind === "meta") return { kind: "meta", key: t.key, line: text };
+  return null;
+}
+const FIX_WORDS = { story: "Add them", architect: "Name the architect", floors: "Choose upstairs rooms", rooms: "Go room by room", actions: "Name who", delete_empty: "Review" };
+
+function useWidth(ref) {
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(([e]) => setW(e.contentRect.width)) : null;
+    ro?.observe(el); setW(el.getBoundingClientRect().width);
+    return () => ro?.disconnect();
+  }, [ref]);
+  return w;
+}
+
+export default function DocumentsStep({
+  lead, reg, info, context, stage, flush, updateItem, deleteItem, upsertItem, addItem, mutateMeta, replaceItems, patchLead, reloadContext, saveStateOf, actor,
+  onPortalItem, onOpenRoom, onOpenActions, saveText,
+}) {
   const [docs, setDocs] = useState({ issued: [], sources: [], schemaReady: true });
   const [active, setActive] = useState(null);           // doc key being previewed
-  const [preview, setPreview] = useState(null);         // { url, checks, revision }
+  const [preview, setPreview] = useState(null);         // { url, checks, revision, lines, notPrinted, key, at }
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [recipient, setRecipient] = useState({ name: "", email: "" });
@@ -46,6 +120,14 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
   const [proofView, setProofView] = useState("marked");  // which copy the preview shows: "marked" | "clean"
   const [proofBusy, setProofBusy] = useState(false);
   const proofSeq = useRef(0);                           // a check's answer is shown only if it's still for this preview
+  const [drawer, setDrawer] = useState(null);           // the edit drawer's target
+  const [pane, setPane] = useState("lines");            // narrow column: "lines" | "pdf"
+  const [onlyWarned, setOnlyWarned] = useState(false);
+  const [moreAmber, setMoreAmber] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const box = useRef(null);
+  const width = useWidth(box);
+  const wide = width >= 1000, phone = width > 0 && width < 600;
 
   const load = useCallback(async () => {
     const r = await apiFetch(`/api/register/leads/${lead.id}/documents`);
@@ -60,15 +142,13 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
 
   function defaultRecipient(key) {
     if (DOCS.find((d) => d.key === key)?.internal) return { name: "Blue Leaf estimating", email: "" };
-    if (key === "architect_brief" || key === "selections_schedule") {
-      const a = (context?.consultants || []).find((c) => ["architect", "designer"].includes(c.role));
-      return { name: a?.name || "", email: "" };
-    }
+    if (key === "architect_brief" || key === "selections_schedule") return { name: architectRecipient(context), email: "" };
     return { name: context?.identity?.clientName || "", email: context?.identity?.email || "" };
   }
 
-  async function openPreview(key) {
+  async function openPreview(key, { keepDrawer = false } = {}) {
     setMsg(null); setBusy(true); setActive(key); dropProof();
+    if (!keepDrawer) setDrawer(null);
     const rec = recipient.name && active === key ? recipient : defaultRecipient(key);
     setRecipient(rec);
     // Render from what is on screen — but SAVE it first. If the save does not land (conflict / guard / offline)
@@ -80,8 +160,8 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     if (!r.ok) { setMsg({ tone: "red", text: r.error }); return; }
     if (preview?.url) URL.revokeObjectURL(preview.url);
     dropProof();   // a wording check belongs to the draft it read
-    // The layout is kept with the preview, so the wording check reads the same layout (review PROOF-05).
-    setPreview({ url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name, itemVersions: r.data.itemVersions, layout: key === "selections_schedule" ? layout : undefined });
+    setPreview({ key, url: b64ToBlobUrl(r.data.pdf), checks: r.data.checks, revision: r.data.revision, previewedFor: rec.name, itemVersions: r.data.itemVersions,
+      lines: r.data.lines || null, notPrinted: r.data.notPrinted || null, at: new Date(), printKey: printKey(reg, context) });
   }
 
   // Blueprint proofreads the draft just previewed (spelling, grammar, wording a reader would stumble on). It reads the
@@ -90,7 +170,7 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     if (!active || !preview?.itemVersions) return;
     const seq = ++proofSeq.current;
     setProofBusy(true); setMsg(null);
-    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/proofread`, { layout: preview.layout, recipientName: preview.previewedFor, expectedVersions: preview.itemVersions });
+    const r = await apiPost(`/api/register/leads/${lead.id}/documents/${active}/proofread`, { recipientName: preview.previewedFor, expectedVersions: preview.itemVersions });
     // A newer preview, a close or an issue since then: this answer is for a draft no longer on screen (review PROOF-04).
     if (seq !== proofSeq.current) return;
     setProofBusy(false);
@@ -162,6 +242,25 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
     return m;
   }, [docs]);
 
+  // The architect's brief, live: the same model and checks the server uses, recomputed on every change.
+  const liveModel = useMemo(() => (context ? architectBriefModel(reg, context, { recipientName: recipient.name }) : null), [reg, context, recipient.name]);
+  const liveLines = useMemo(() => (liveModel ? architectBriefLines(liveModel, { siteAddress: [context?.identity?.siteAddress, context?.identity?.suburb].filter(Boolean).join(", "), clientName: context?.identity?.clientName, drawingBasis: reg.meta.planRev }) : []), [liveModel, context, reg.meta.planRev]);
+  const liveContent = useMemo(() => (context ? contentChecks("architect_brief", reg, context, liveModel) : []), [reg, context, liveModel]);
+  const needBrief = useMemo(() => roomsNeedingBrief(reg), [reg]);
+  const stale = !!preview && preview.printKey !== printKey(reg, context);
+
+  // Lines that carry a check: red where a release blocker targets them, amber where a content check does.
+  const marks = useMemo(() => {
+    const red = new Set(), amber = new Set();
+    const put = (set, t) => { if (t.kind === "record") set.add(`r:${t.id}`); if (t.kind === "room") set.add(`m:${t.id}`); if (t.kind === "fact") set.add(`f:${t.key}`); if (t.kind === "architect") set.add("a"); };
+    for (const e of preview?.checks?.errorTargets || []) for (const t of e.targets) put(red, t);
+    for (const c of liveContent) for (const t of c.targets) put(amber, t);
+    if (needBrief.length) needBrief.forEach((r) => red.add(`m:${r.id}`));
+    const keysOf = (l) => [...l.ids.map((id) => `r:${id}`), ...(l.source?.kind === "room" ? String(l.source.key || "").split(",").map((id) => `m:${id}`) : []),
+      ...(l.source?.kind === "fact" ? [`f:${l.source.key}`, ...(l.source.key === "budget" ? ["f:story"] : [])] : []), ...(l.source?.kind === "consultant" ? ["a"] : [])];
+    return (l) => { const k = keysOf(l); return k.some((x) => red.has(x)) ? "red" : k.some((x) => amber.has(x)) || (l.placeholder && l.source?.kind !== "room") ? "amber" : ""; };
+  }, [preview, liveContent, needBrief]);
+
   const roomsCount = reg.meta.rooms?.length || 0;
   function scopeSummary(key) {
     if (key === "selections_schedule" || key === "client_presentation") {
@@ -170,99 +269,193 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
         ? `${n} client selection${n === 1 ? "" : "s"} by trade, with the requirements they must meet, open actions and source documents. No prices.`
         : `${n} client selection${n === 1 ? "" : "s"} room by room, and the decisions we need from the client. No codes, references, technical states or prices.`;
     }
-    if (key === "architect_brief") {
-      const tech = reg.items.filter((i) => i.itemKind === "action" || i.technicalStatus === "needs_verification").length;
-      return `Client intent and scope plus ${tech} technical item${tech === 1 ? "" : "s"} to verify, across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No prices.`;
-    }
     if (DOCS.find((d) => d.key === key)?.internal) return `Internal. Scope, systems, risks, Blue Leaf assumptions and staff notes across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No prices or quantities.`;
     return `Scope and client preferences across ${roomsCount} room${roomsCount === 1 ? "" : "s"}. No internal notes or prices.`;
   }
+  // The architect's brief's readiness before a preview: what we can tell in the browser.
+  function readiness(key) {
+    if (key !== "architect_brief" || !context) return "";
+    const red = (needBrief.length ? 1 : 0) + (architectRecipient(context) ? 0 : 1);
+    return [red ? `${red} to fix before issuing` : "", liveContent.length ? `${liveContent.length} worth checking` : ""].filter(Boolean).join(" · ");
+  }
+
+  // The edit drawer: next warning, and the next room without a brief.
+  const warnedLines = liveLines.filter((l) => marks(l));
+  function nextAfter(current) {
+    if (current?.kind === "room" && needBrief.length) {
+      const at = needBrief.findIndex((r) => current.roomIds?.includes(r.id));
+      const next = needBrief[(at + 1) % needBrief.length];
+      return { label: "Next room without a brief ›", go: () => setDrawer({ kind: "room", roomIds: [next.id], line: `${next.name}: brief to follow` }) };
+    }
+    if (!warnedLines.length) return null;
+    const at = warnedLines.findIndex((l) => `${l.section}|${l.label}` === current?.lineKey);
+    const next = warnedLines[(at + 1) % warnedLines.length];
+    return { label: "Next warning ›", go: () => setDrawer(lineTarget(next)) };
+  }
+  function fix(check) {
+    if (check.action === "actions") { onOpenActions?.("unnamed"); return; }
+    if (check.action === "delete_empty") { setConfirmDelete(check); return; }
+    if (check.key === "room_briefs" || check.action === "rooms") { setDrawer(checkTarget(check.targets[0], check.text)); return; }
+    const t = check.targets.find((x) => x.kind !== "actions");
+    if (t?.kind === "recipient") { document.querySelector("[data-testid=issue-to]")?.focus(); return; }
+    setDrawer(checkTarget(t, check.text));
+  }
+
+  const red = preview ? preview.checks.errors.map((text) => ({ text, ...(preview.checks.errorTargets || []).find((e) => e.text === text) })) : [];
+  const amber = preview ? [
+    ...(preview.key === "architect_brief" ? liveContent : (preview.checks.content || [])),
+    ...preview.checks.warnings.map((text) => ({ key: text, text, targets: [] })),
+  ] : [];
+  const blockReason = !preview ? "" : stale ? "Preview again to issue what you see." : red.length ? `Fix the ${red.length === 1 ? "item" : `${red.length} items`} in red first.` : !recipient.name.trim() ? "Say who it's going to." : "";
+  const canIssue = !!preview && !busy && !blockReason && !(preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim());
 
   return (
-    <div className="space-y-3">
+    <div ref={box} className="space-y-3">
       {!docs.schemaReady && <p className="rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">Document issuing needs migration 213 — drafts still preview.</p>}
-      {msg && <p className={`rounded border p-2 text-[11px] ${msg.tone === "green" ? "border-green-200 bg-green-50 text-green-800" : msg.tone === "amber" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-red-200 bg-red-50 text-red-700"}`} data-testid="doc-message">{msg.text}</p>}
+      {msg && <p className={`rounded border p-2 text-[12px] ${msg.tone === "green" ? "border-green-200 bg-green-50 text-green-800" : msg.tone === "amber" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-red-200 bg-red-50 text-red-700"}`} data-testid="doc-message">{msg.text}</p>}
 
       {DOCS.map((d) => {
         const history = byType[d.key] || [];
         const current = history.find((h) => h.status === "current");
+        const isActive = active === d.key && preview;
         return (
-          <div key={d.key} className={`rounded-lg border p-3 ${d.stages[0] === stage ? "border-primary/40 bg-primary/[0.03]" : "border-hairline bg-surface"}`} data-testid={`doc-card-${d.key}`}>
+          <div key={d.key} className={`rounded-card border p-3 ${d.stages[0] === stage ? "border-primary/40 bg-primary/[0.03]" : "border-hairline bg-surface"}`} data-testid={`doc-card-${d.key}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>} {d.internal && <Chip tone="amber">Internal only</Chip>}</p>
-                <p className="text-[11px] text-muted">{d.hint} {current ? `Recorded: ${current.revision_label} (current) · ${fmtDate(current.issued_at)} · for ${current.recipient_name || "—"} · not emailed` : "Draft — not issued yet."}</p>
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-ink">{d.label} {d.stages[0] === stage && <Chip tone="blue">This stage</Chip>} {d.internal && <Chip tone="amber">Internal only</Chip>}</p>
+                <p className="text-[12px] text-muted">
+                  {current ? `Issued ${current.revision_label} · ${fmtDate(current.issued_at)} · to ${current.recipient_name || "—"} · not emailed` : "Draft — not issued"}
+                  {!isActive && readiness(d.key) ? ` · ${readiness(d.key)}` : ""}
+                </p>
+                {!isActive && <p className="text-[11px] text-muted">{d.hint}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <button type="button" disabled={busy} onClick={() => openPreview(d.key)} className="rounded border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page disabled:opacity-40" data-testid={`preview-${d.key}`}>Preview draft</button>
-              </div>
+              {!isActive && <button type="button" disabled={busy} onClick={() => openPreview(d.key)} className="min-h-[44px] rounded-lg border border-hairline px-4 text-sm font-semibold text-ink hover:bg-page disabled:opacity-40" data-testid={`preview-${d.key}`}>{busy && active === d.key ? "Previewing…" : "Preview"}</button>}
             </div>
 
-            {active === d.key && preview && (
-              <div className="mt-2 space-y-2">
-                <div className="rounded border border-primary/30 bg-primary/[0.04] p-2 text-[11px]" data-testid={`pre-issue-${d.key}`}>
-                  <p className="font-semibold text-primary">Preview of the draft — not a controlled record until you issue it as R{String(preview.revision).padStart(2, "0")}.</p>
-                  <dl className="mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                    <div><span className="text-muted">Project: </span><span className="text-ink">{[context?.identity?.clientName, context?.identity?.siteAddress].filter(Boolean).join(" — ") || "—"}</span></div>
-                    <div><span className="text-muted">Recipient: </span><span className="text-ink">{recipient.name || "— enter below"}</span></div>
-                    <div><span className="text-muted">Drawing basis: </span><span className="text-ink">{reg.meta.planRev || "— not set"}</span></div>
-                    <div><span className="text-muted">Document: </span><span className="text-ink">{d.label} · R{String(preview.revision).padStart(2, "0")}</span></div>
-                    <div className="sm:col-span-2"><span className="text-muted">Includes: </span><span className="text-ink">{scopeSummary(d.key)}</span></div>
-                  </dl>
+            {isActive && (
+              <div className="mt-3 space-y-3">
+                {/* B · Title bar */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="min-w-0 flex-1 text-[12px] text-muted">Draft {rev(preview.revision)} · from the register as it is now · previewed {fmtTime(preview.at)}</p>
+                  <button type="button" disabled={busy} onClick={() => openPreview(d.key)} className={`min-h-[44px] rounded-lg px-3 text-sm font-semibold disabled:opacity-40 ${stale ? "bg-primary text-white" : "border border-hairline text-ink hover:bg-page"}`} data-testid={`preview-again-${d.key}`}>{busy ? "Previewing…" : "Preview again"}</button>
+                  {stale ? <span className="text-[12px] text-muted">Preview again to download</span> : (
+                    <a href={preview.url} download={`${d.label} - DRAFT (not issued) - ${new Date().toISOString().slice(0, 10)}.pdf`}
+                      className="flex min-h-[44px] items-center rounded-lg border border-hairline px-3 text-sm font-semibold text-ink hover:bg-page" data-testid={`download-draft-${d.key}`}>Download draft PDF</a>
+                  )}
+                  {/* Safari shows a PDF in a frame with no toolbar, so the draft can't be saved from the frame itself. */}
+                  <a href={preview.url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-primary hover:underline">Open in new tab</a>
+                  <button type="button" disabled={busy || proofBusy || stale} onClick={checkWording} title="Blueprint proofreads this draft for spelling, grammar and wording. Nothing is changed."
+                    className="min-h-[44px] rounded-lg border border-primary/40 px-3 text-sm font-semibold text-primary hover:bg-primary/5 disabled:opacity-40" data-testid={`proofread-${d.key}`}>{proofBusy ? "Checking the wording…" : proof ? "Check wording again" : "Check wording"}</button>
+                  <button type="button" onClick={() => { setActive(null); setPreview(null); setDrawer(null); dropProof(); }} className="min-h-[44px] px-2 text-[12px] text-muted hover:text-ink">Close</button>
                 </div>
-                {(preview.checks.errors.length > 0 || preview.checks.warnings.length > 0) && (
-                  <ul className="space-y-0.5 text-[11px]">
-                    {preview.checks.errors.map((e) => <li key={e} className="text-red-700">✕ {e}</li>)}
-                    {preview.checks.warnings.map((w) => <li key={w} className="text-amber-700">! {w}</li>)}
-                  </ul>
-                )}
-                {proof?.url && (
-                  <div className="flex items-center gap-1 text-[11px]" role="group" aria-label="Which copy to show">
-                    {[["marked", "Highlighted copy"], ["clean", "Clean draft"]].map(([k, l]) => (
-                      <button key={k} type="button" onClick={() => setProofView(k)} aria-pressed={proofView === k}
-                        className={`rounded border px-2 py-0.5 font-semibold ${proofView === k ? "border-primary bg-primary/10 text-primary" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
-                    ))}
+
+                {/* C · Can't issue yet */}
+                {red.length > 0 && (
+                  <div className="rounded-card border border-red-200 bg-red-50 p-3" data-testid={`cant-issue-${d.key}`}>
+                    <p className="text-[14px] font-semibold text-red-700">Can&apos;t issue yet ({red.length})</p>
+                    <ol className="mt-1 space-y-1">
+                      {red.map((e, k) => (
+                        <li key={e.text} className="flex min-h-[44px] items-start gap-2 text-[13px] text-red-700">
+                          <span className="font-semibold">{k + 1}.</span><span className="flex-1">{e.text}</span>
+                          {e.targets?.length > 0 && (
+                            <button type="button" onClick={() => fix({ key: e.targets[0].kind === "room" ? "room_briefs" : "error", targets: e.targets, text: e.text, action: e.targets[0].kind === "room" ? "rooms" : undefined })}
+                              className="min-h-[36px] shrink-0 rounded-lg border border-red-300 bg-surface px-3 text-[13px] font-semibold text-red-700 hover:bg-red-100">
+                              {e.targets[0].kind === "room" ? "Go room by room" : e.targets[0].kind === "architect" ? "Name the architect" : "Fix"}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
                   </div>
                 )}
-                <iframe title={`${d.label} draft`} src={proof?.url && proofView === "marked" ? proof.url : preview.url} className="h-[28rem] w-full rounded border border-hairline bg-white" />
-                {proof && (
-                  <div className="rounded border border-hairline bg-page p-2 text-[11px]" data-testid={`proof-issues-${d.key}`}>
-                    <p className="font-semibold text-ink">{proof.issues.length ? `Blueprint's wording check: ${proof.issues.length} suggestion${proof.issues.length === 1 ? "" : "s"}` : "Blueprint's wording check found nothing to fix."}</p>
-                    <p className="text-muted">Suggestions only — nothing has been changed. Fix the wording in the register (fixed template wording: tell the office), then preview again. The issued document is never marked{proof.issues.length ? "; the highlighted copy's page breaks can shift slightly" : ""}.</p>
-                    {proof.truncated && <p className="text-amber-700">This document is very long: only the first part of its text was checked.</p>}
-                    {proof.issues.length > 0 && (
-                      <ol className="mt-1 space-y-1">
-                        {proof.issues.map((i) => (
-                          <li key={i.n} className="flex gap-2">
-                            <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{i.n}</span>
-                            <span>
-                              <span className="text-ink">“{i.text}” → <span className="font-semibold">“{i.suggestion}”</span></span>
-                              <span className="text-muted"> — {i.reason} <Chip tone="slate">{i.kind}</Chip>{!i.marked && " (not marked on the page)"}</span>
+
+                {/* D · Before you send */}
+                {amber.length > 0 && (
+                  <div className="rounded-card border border-warning bg-warning/10 p-3" data-testid={`before-send-${d.key}`}>
+                    <p className="text-[14px] font-semibold text-ink">Before you send ({amber.length})</p>
+                    <p className="text-[12px] text-muted">These don&apos;t stop you issuing.</p>
+                    <ol className="mt-1 space-y-1">
+                      {(moreAmber ? amber : amber.slice(0, 5)).map((c, k) => (
+                        <li key={c.key || c.text} className="flex min-h-[44px] items-start gap-2 text-[13px] text-ink">
+                          <span className="font-semibold">{k + 1}.</span><span className="flex-1">{c.text}</span>
+                          {c.targets?.length > 0 && (
+                            <span className="flex shrink-0 gap-1">
+                              {c.action === "delete_empty" && <button type="button" onClick={() => setConfirmDelete(c)} className="min-h-[36px] rounded-lg border border-hairline bg-surface px-3 text-[13px] font-semibold text-ink hover:bg-page">Delete all {c.targets.length}</button>}
+                              <button type="button" onClick={() => (c.action === "delete_empty" ? setDrawer({ kind: "record", ids: c.targets.map((t) => t.id), line: c.text }) : fix(c))}
+                                className="min-h-[36px] rounded-lg border border-hairline bg-surface px-3 text-[13px] font-semibold text-ink hover:bg-page">{FIX_WORDS[c.action] || (c.targets.length > 1 && c.targets[0].kind === "record" ? `Fix ${c.targets.length}` : "Fix")}</button>
                             </span>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                    {amber.length > 5 && <button type="button" onClick={() => setMoreAmber((v) => !v)} className="mt-1 min-h-[36px] text-[13px] font-semibold text-primary hover:underline">{moreAmber ? "Show fewer" : `Show ${amber.length - 5} more`}</button>}
                   </div>
                 )}
-                <div className="flex flex-wrap items-end gap-2">
-                  <Mini label="Issue to (name)"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} className="inp w-48 text-[11px]" /></Mini>
-                  <Mini label="Email (record only — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} className="inp w-56 text-[11px]" /></Mini>
-                  <button type="button" disabled={busy || preview.checks.errors.length > 0 || !recipient.name.trim() || (preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim())} onClick={issue}
-                    className="rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue revision R{String(preview.revision).padStart(2, "0")}</button>
-                  <button type="button" disabled={busy || proofBusy} onClick={checkWording} title="Blueprint proofreads this draft for spelling, grammar and wording. Nothing is changed."
-                    className="rounded border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/5 disabled:opacity-40" data-testid={`proofread-${d.key}`}>{proofBusy ? "Checking the wording…" : proof ? "Check wording again" : "Check wording"}</button>
-                  {/* Safari shows a PDF in a frame with no toolbar, so the draft can't be saved from the frame itself. A draft
-                      download is for review only (always the clean draft, never the marked proofread copy); a copy to send
-                      comes from the issued record below. */}
-                  <a href={preview.url} download={`${d.label} - DRAFT (not issued) - ${new Date().toISOString().slice(0, 10)}.pdf`}
-                    className="rounded border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-page" data-testid={`download-draft-${d.key}`}>Download draft PDF</a>
-                  <a href={preview.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary hover:underline">Open in new tab</a>
-                  <button type="button" onClick={() => { setActive(null); setPreview(null); dropProof(); }} className="text-[11px] text-muted hover:text-ink">Close preview</button>
-                </div>
-                {preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim() && (
-                  <p className="text-[11px] text-amber-700">Recipient changed since this preview — <button type="button" onClick={() => openPreview(d.key)} className="font-semibold underline">preview again</button> to re-check the release blockers before issuing.</p>
+                {confirmDelete && (
+                  <div className="rounded-card border border-hairline bg-surface p-3 text-[13px]" role="alertdialog">
+                    <p className="text-ink">Delete {confirmDelete.targets.length} empty answer{confirmDelete.targets.length === 1 ? "" : "s"}? They hold nothing.</p>
+                    <div className="mt-2 flex gap-2">
+                      <button type="button" onClick={() => { replaceItems((cur) => ({ ...cur, items: cur.items.filter((i) => !confirmDelete.targets.some((t) => t.id === i.id)) })); setConfirmDelete(null); }}
+                        className="min-h-[44px] rounded-lg bg-red-600 px-4 font-semibold text-white">Delete</button>
+                      <button type="button" onClick={() => setConfirmDelete(null)} className="min-h-[44px] rounded-lg border border-hairline px-4 font-semibold text-ink">Cancel</button>
+                    </div>
+                  </div>
                 )}
+
+                {proof && <ProofList proof={proof} proofView={proofView} setProofView={setProofView} docKey={d.key} />}
+
+                {/* E · What will print, beside the PDF (architect's brief); the PDF alone for the other documents. */}
+                {d.key === "architect_brief" && preview.lines ? (
+                  <>
+                    {!wide && !phone && (
+                      <div className="grid grid-cols-2 gap-1 rounded-lg bg-page p-1" role="group" aria-label="Show">
+                        {[["lines", "What will print"], ["pdf", "PDF"]].map(([k, l]) => (
+                          <button key={k} type="button" aria-pressed={pane === k} onClick={() => setPane(k)} className={`min-h-[40px] rounded-md text-sm font-semibold ${pane === k ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>{l}</button>
+                        ))}
+                      </div>
+                    )}
+                    <div className={wide ? "grid grid-cols-[58fr_42fr] gap-3" : ""}>
+                      {!phone && (wide || pane === "pdf") && (
+                        <div className="relative">
+                          {stale && (
+                            <div className="absolute inset-x-0 top-0 z-10 flex min-h-[56px] items-center justify-between gap-2 rounded-t border-b border-hairline bg-white/90 px-3">
+                              <span className="text-[13px] text-ink">Changed since this preview</span>
+                              {!drawer && <button type="button" onClick={() => openPreview(d.key)} className="min-h-[40px] rounded-lg bg-primary px-3 text-sm font-semibold text-white">Preview again</button>}
+                            </div>
+                          )}
+                          <iframe title={`${d.label} draft`} src={proof?.url && proofView === "marked" ? proof.url : preview.url} className="h-[calc(100vh-14rem)] min-h-[28rem] w-full rounded border border-hairline bg-white" />
+                        </div>
+                      )}
+                      {(wide || phone || pane === "lines") && (
+                        <PrintList reg={reg} lines={liveLines} previewLines={preview.lines} notPrinted={liveModel?.notPrinted || []} marks={marks} onlyWarned={onlyWarned} setOnlyWarned={setOnlyWarned}
+                          onOpen={(t) => setDrawer(t)} />
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  !phone && (
+                    <div className="relative">
+                      {stale && <div className="absolute inset-x-0 top-0 z-10 flex min-h-[48px] items-center justify-between gap-2 rounded-t bg-white/90 px-3 text-[13px]"><span>Changed since this preview</span><button type="button" onClick={() => openPreview(d.key)} className="min-h-[40px] rounded-lg bg-primary px-3 font-semibold text-white">Preview again</button></div>}
+                      <iframe title={`${d.label} draft`} src={proof?.url && proofView === "marked" ? proof.url : preview.url} className="h-[28rem] w-full rounded border border-hairline bg-white" />
+                      <p className="mt-1 text-[11px] text-muted">Includes: {scopeSummary(d.key)}</p>
+                    </div>
+                  )
+                )}
+
+                {/* F · Issue bar */}
+                <div className="sticky bottom-0 z-20 -mx-3 border-t border-hairline bg-surface px-3 py-2">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Mini label="Issue to"><input value={recipient.name} onChange={(e) => setRecipient((r) => ({ ...r, name: e.target.value }))} placeholder={d.key === "architect_brief" ? "Name of the architect or firm" : "Name"}
+                      className="inp min-h-[44px] w-56 text-[16px] sm:text-[13px]" data-testid="issue-to" /></Mini>
+                    <Mini label="Email (kept on the record — nothing is sent)"><input value={recipient.email} onChange={(e) => setRecipient((r) => ({ ...r, email: e.target.value }))} className="inp min-h-[44px] w-60 text-[16px] sm:text-[13px]" /></Mini>
+                    <div>
+                      <button type="button" disabled={!canIssue} onClick={issue} className="min-h-[44px] rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-40" data-testid={`issue-${d.key}`}>Issue {rev(preview.revision)}</button>
+                      {(blockReason || (preview.previewedFor != null && recipient.name.trim() !== (preview.previewedFor || "").trim())) && (
+                        <p className="mt-0.5 text-[12px] text-muted">{blockReason || "Recipient changed since this preview — preview again to re-check before issuing."}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -287,6 +480,17 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
         );
       })}
 
+      {drawer && (() => {
+        const next = nextAfter(drawer);
+        return (
+          <EditDrawer target={drawer} lead={lead} reg={reg} context={context} actor={actor} readOnly={false} saveStateOf={saveStateOf} updateItem={updateItem} deleteItem={deleteItem}
+            upsertItem={upsertItem} addItem={addItem} mutateMeta={mutateMeta} replaceItems={replaceItems} patchLead={patchLead} reloadContext={reloadContext} onPortalItem={onPortalItem}
+            onClose={() => setDrawer(null)} onPreview={() => openPreview(active || "architect_brief", { keepDrawer: true })} onNext={next?.go} nextLabel={next?.label}
+            onOpenRoom={onOpenRoom ? (id) => { if (window.confirm(`This closes the preview — open the ${(reg.meta.rooms || []).find((r) => r.id === id)?.name || "room"}?`)) { setDrawer(null); onOpenRoom(id); } } : undefined}
+            saveText={saveText} />
+        );
+      })()}
+
       <Section title="Coordination requests (draft packs from the same register)" defaultOpen={false}>
         <p className="text-[11px] text-muted">A filtered schedule of the items tagged for each consultant or supplier — current drawings, room, product direction, status and open questions. A working document, not an issued record.</p>
         <div className="flex flex-wrap gap-1.5">
@@ -295,6 +499,112 @@ export default function DocumentsStep({ lead, reg, info, context, stage, flush, 
       </Section>
 
       <SourceDocuments lead={lead} reg={reg} info={info} sources={docs.sources} reload={load} openFile={openFile} updateItem={updateItem} />
+    </div>
+  );
+}
+
+/** Blueprint's wording check, under the boxes. */
+function ProofList({ proof, proofView, setProofView, docKey }) {
+  return (
+    <div className="rounded-card border border-hairline bg-page p-3 text-[12px]" data-testid={`proof-issues-${docKey}`}>
+      {proof.url && (
+        <div className="mb-1 flex items-center gap-1" role="group" aria-label="Which copy to show">
+          {[["marked", "Highlighted copy"], ["clean", "Clean draft"]].map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setProofView(k)} aria-pressed={proofView === k}
+              className={`rounded border px-2 py-0.5 font-semibold ${proofView === k ? "border-primary bg-primary/10 text-primary" : "border-hairline text-muted hover:text-ink"}`}>{l}</button>
+          ))}
+        </div>
+      )}
+      <p className="font-semibold text-ink">{proof.issues.length ? `Blueprint's wording check: ${proof.issues.length} suggestion${proof.issues.length === 1 ? "" : "s"}` : "Blueprint's wording check found nothing to fix."}</p>
+      <p className="text-muted">Suggestions only — nothing has been changed. Fix the wording in the register (fixed template wording: tell the office), then preview again. The issued document is never marked{proof.issues.length ? "; the highlighted copy's page breaks can shift slightly" : ""}.</p>
+      {proof.truncated && <p className="text-amber-700">This document is very long: only the first part of its text was checked.</p>}
+      {proof.issues.length > 0 && (
+        <ol className="mt-1 space-y-1">
+          {proof.issues.map((i) => (
+            <li key={i.n} className="flex gap-2">
+              <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{i.n}</span>
+              <span>
+                <span className="text-ink">“{i.text}” → <span className="font-semibold">“{i.suggestion}”</span></span>
+                <span className="text-muted"> — {i.reason} <Chip tone="slate">{i.kind}</Chip>{!i.marked && " (not marked on the page)"}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+const NOT_PRINTED_GROUPS = [
+  ["schedule", "In the Technical Selections Schedule instead"],
+  ["client", "The client's choices (in the client's brief)"],
+  ["held", "Held back until fixed"],
+  ["empty", "Empty"],
+  ["office", "Kept for the office"],
+];
+const HELD_SHORT = { unfinished: "unfinished", disagrees: "disagrees with the room", contradicts: "contradicts its status", no_ask: "doesn't say what's needed" };
+
+/** The architect's brief, line by line as it will print; each line opens its source. */
+function PrintList({ reg, lines, previewLines, notPrinted, marks, onlyWarned, setOnlyWarned, onOpen }) {
+  const [openNot, setOpenNot] = useState(false);
+  const before = useMemo(() => new Set((previewLines || []).map((l) => `${l.section}|${l.label}|${l.text}`)), [previewLines]);
+  const shown = onlyWarned ? lines.filter((l) => marks(l)) : lines;
+  const sections = [...new Set(shown.map((l) => l.section))];
+  return (
+    <div className="rounded-card border border-hairline bg-surface" data-testid="what-will-print">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-3 py-2">
+        <p className="text-[14px] font-semibold text-ink">What will print · {lines.length} lines</p>
+        <button type="button" aria-pressed={onlyWarned} onClick={() => setOnlyWarned((v) => !v)}
+          className={`min-h-[36px] rounded-full border px-3 text-[12px] font-semibold ${onlyWarned ? "border-warning bg-warning/15 text-ink" : "border-hairline text-muted"}`}>Only lines with a warning</button>
+      </div>
+      {sections.map((sec) => (
+        <div key={sec}>
+          <p className="sticky top-0 z-[1] bg-page px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{BRIEF_SECTION_TITLES[sec] || sec}</p>
+          {shown.filter((l) => l.section === sec).map((l, k) => {
+            const mark = marks(l);
+            const changed = previewLines && !before.has(`${l.section}|${l.label}|${l.text}`);
+            const t = lineTarget(l);
+            return (
+              <button key={`${sec}-${k}-${l.label}`} type="button" onClick={() => onOpen(t)} data-testid="print-line"
+                className={`flex min-h-[44px] w-full items-start gap-2 border-b border-hairline/70 px-3 py-2 text-left hover:bg-page ${mark === "red" ? "border-l-[3px] border-l-red-500" : mark === "amber" ? "border-l-[3px] border-l-warning" : "border-l-[3px] border-l-transparent"}`}>
+                <span className="min-w-0 flex-1">
+                  {l.group && <span className="block text-[11px] uppercase tracking-wide text-muted">{l.group}</span>}
+                  <span className={`line-clamp-2 text-[14px] ${l.placeholder ? "italic text-muted" : "text-ink"}`}>
+                    {l.placeholder && <span aria-hidden="true">○ </span>}{l.label && <span className="font-semibold">{l.label}{/^\d+$/.test(l.label) ? ". " : ": "}</span>}{l.text}
+                  </span>
+                </span>
+                <span className="shrink-0 pt-0.5 text-right text-[12px] text-muted">{sourceTag(reg, l)}{changed && <span className="ml-1 rounded bg-accent/10 px-1 text-accent">changed</span>} ›</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+      <div className="border-t border-hairline">
+        <button type="button" onClick={() => setOpenNot((v) => !v)} className="flex min-h-[48px] w-full items-center justify-between px-3 text-[14px] font-semibold text-ink hover:bg-page" aria-expanded={openNot}>
+          <span>Not in this brief ({notPrinted.length})</span><span aria-hidden="true">{openNot ? "▾" : "▸"}</span>
+        </button>
+        {openNot && NOT_PRINTED_GROUPS.map(([g, title]) => {
+          const list = notPrinted.filter((x) => x.group === g);
+          if (!list.length) return null;
+          return (
+            <div key={g}>
+              <p className="bg-page px-3 py-1.5 text-[12px] font-semibold text-muted">{title} ({list.length})</p>
+              {list.map((x) => {
+                const i = reg.items.find((it) => it.id === x.id);
+                if (!i) return null;
+                return (
+                  <button key={x.id} type="button" onClick={() => onOpen({ kind: "record", ids: [x.id], reasons: { [x.id]: x.reason }, line: itemTitle(i) })}
+                    className="flex min-h-[44px] w-full items-center gap-2 border-b border-hairline/70 px-3 text-left text-[13px] hover:bg-page">
+                    <span className="min-w-0 flex-1 truncate text-ink">{roomLabel(reg, i) === "Whole house" ? "Throughout" : roomLabel(reg, i)}: “{itemTitle(i)}”</span>
+                    {g === "held" && <span className="shrink-0 text-[12px] text-muted">{HELD_SHORT[x.reason] || ""}</span>}
+                    <span className="text-muted">›</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

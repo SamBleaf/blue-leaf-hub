@@ -69,6 +69,9 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
   const legacyNa = item.disposition === "na" && !view.notApplicable;
   const pillShows = !disabled && (item.disposition === "na" ? !view.ownNotApplicable : settleOptions(config, { showDetail: true }).some(([d]) => d === item.disposition));
   const shownOnCard = item.disposition === "undecided" || (item.disposition === "na" && view.notApplicable) || pillShows || view.chosenDisposition === item.disposition;
+  // An action says what needs to happen, so "Not decided" and "N/A" mean nothing on it (REGISTER_SCREENS_SPEC.md S4): it is
+  // closed with Done or the ⚑ instead. One already set still shows, so it can be taken off.
+  const actionQuestion = config.nature === "action";
 
   return (
     <div className="mt-1.5 space-y-1.5" data-testid={`card-${qid}`}>
@@ -147,8 +150,8 @@ export default function ProgressiveChoiceCard({ question, config, item, disabled
 
       {!disabled && (
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="No answer yet">
-          <Choice label="Not decided" on={view.notDecided} tone={quiet} testId={`notdecided-${qid}`} onClick={() => write(toggleNotDecided(config, item.answer))} />
-          {!view.ownNotApplicable && <Choice label="N/A" on={view.notApplicable || legacyNa} tone={quiet} testId={`na-${qid}`} onClick={() => (legacyNa ? send({ disposition: "undecided" }) : write(toggleNotApplicable(config, item.answer)))} />}
+          {(!actionQuestion || view.notDecided) && <Choice label="Not decided" on={view.notDecided} tone={quiet} testId={`notdecided-${qid}`} onClick={() => write(toggleNotDecided(config, item.answer))} />}
+          {!view.ownNotApplicable && (!actionQuestion || view.notApplicable || legacyNa) && <Choice label="N/A" on={view.notApplicable || legacyNa} tone={quiet} testId={`na-${qid}`} onClick={() => (legacyNa ? send({ disposition: "undecided" }) : write(toggleNotApplicable(config, item.answer)))} />}
           {settle.map(([d, label]) => <Choice key={d} label={label} on={item.disposition === d} tone={quiet} testId={`settle-${qid}-${d}`} onClick={() => send(settlePatch(item, config, d))} />)}
           {hasMore && <button type="button" aria-expanded={more} onClick={() => setMore((m) => !m)} className={textLink} data-testid={`more-${qid}`}>{more ? "− Less detail" : "+ More detail"}</button>}
           {!showNote && <button type="button" onClick={() => setNoteOpen(true)} className={textLink} data-testid={`note-${qid}`}>+ Note</button>}

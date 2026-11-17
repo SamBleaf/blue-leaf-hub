@@ -4,20 +4,23 @@
  * shown, grouped by topic; nothing is compulsory.
  */
 import { useState } from "react";
-import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, partAssumptionFor, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
+import { promptsFor, standardPrompts, resolvePromptId, answerConfigFor, isLinkedRow, assumptionFor, partAssumptionFor, questionById, HIDDEN_SITE_PROMPTS, PROJECT_TOPICS, SITE_TOPICS } from "../../../../lib/register.js";
 import { Section } from "./ui.jsx";
 import PromptRow, { RepeatRows } from "./PromptRow.jsx";
 import BaselineGuide, { PerformanceReview } from "./BaselineGuide.jsx";
 
 const tierOf = (q) => { const c = answerConfigFor(q.id); return c?.standard?.tier || c?.tier || "essential"; };
-const topicOf = (q) => answerConfigFor(q.id)?.standard?.topic || q.topic;
+// "Areas in the project" (P-006) moved here from the Project step (REGISTER_SCREENS_SPEC.md S1): it sits with the existing building.
+const topicOf = (q) => (q.id === "P-006" ? "existing" : answerConfigFor(q.id)?.standard?.topic || q.topic);
 
 export default function SectionStep({ section, reg, context, stage, showDetail, actor, upsertItem, updateItem, deleteItem, readOnly, saveState, mutateMeta }) {
   const [showConnection, setShowConnection] = useState(false);
   const projectType = context?.projectType || "";
   const qs = [...promptsFor(section === "site" ? "site" : "project", {
     projectType, deliveryModel: context?.deliveryModel, renovationOverlay: reg.meta.renovationOverlay, stage, showDetail,
-  }).filter((q) => q.topic !== "brief"), ...(section === "site" ? [] : standardPrompts())];
+  }).filter((q) => q.topic !== "brief"), ...(section === "site" ? [questionById("P-006")].filter(Boolean) : standardPrompts())]
+    // "Living on site during works" (W-007) is the Project step's "During the works" now; an earlier record still shows here.
+    .filter((q) => !HIDDEN_SITE_PROMPTS.has(q.id) || reg.items.some((i) => !i.roomId && resolvePromptId(i.promptKey) === q.id));
   const topics = section === "site" ? SITE_TOPICS : PROJECT_TOPICS.filter((t) => t.key !== "brief");
   const secKey = section === "site" ? "site" : "project";
   const allFor = (qid) => reg.items.filter((i) => !i.roomId && resolvePromptId(i.promptKey) === qid && !i.overridesDefaultId);

@@ -168,6 +168,9 @@ export async function setFact(jobId, key, value, opts = {}) {
   const def = getFactDef(key);
   if (!def) return { ok: false, error: `Unknown fact: ${key}` };
   if (def.type === "generated") return { ok: false, error: `'${key}' is a generated fact and cannot be written directly.` };
+  // Lead-spine facts (plans supplied, the client's story and budget) are stored on the lead and change only through the
+  // lead's own routes (PATCH /api/sales/leads/:id). Written here they would land on a job table keyed by a job id.
+  if (def.spine !== "job") return { ok: false, error: `'${key}' is kept on the lead: change it in the lead's details.` };
 
   const valueType = inferValueType(def, value);
   const status = resolveStatus(def, opts);

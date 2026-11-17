@@ -41,3 +41,9 @@ body {
 /* Takeoff focused windows (plan viewer, calibration, profile editor) own the whole screen:
    hide global floating buttons while one is open. */
 body.takeoff-focus-open .blueprint-fab { display: none !important; }
+
+/* Master Register (REGISTER_SCREENS_SPEC.md S3p): on a phone or tablet the lead page's sticky stage bar is hidden while
+   a room is open, so the room's own "Next" bar and the keyboard have the space. RegisterWorkshop sets the body flag. */
+@media (max-width: 1023px) {
+  body[data-register-room="open"] [data-stage-bar] { display: none !important; }
+}

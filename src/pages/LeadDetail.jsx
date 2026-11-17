@@ -12,6 +12,7 @@ import { STAGE_ORDER, showsQualifyingScorecard, gateRows, nextStageFor, stageApp
 import EngagementPathwayCard from "../components/sales/lead-detail/EngagementPathwayCard.jsx";
 import StageDrawings from "../components/sales/lead-detail/StageDrawings.jsx";
 import { computeLeadNextAction, focusLeadControl, WON_HANDOFF_TARGET } from "../lib/leadNextAction.js";
+import { SHOW_IN_SALES } from "../lib/projectStory.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -1404,6 +1405,17 @@ export default function LeadDetail() {
   const [signedDownloadUrl, setSignedDownloadUrl] = useState(null);
   const [ptsaSiteAddressWarning, setPtsaSiteAddressWarning] = useState(false);
   const [mobileTab, setMobileTab] = useState("action"); // "summary" | "action" | "activity" | "files" | "notes"
+  // The register's "Change in Sales ›" and "Upload in Files ›" (SHOW_IN_SALES, detail "details" | "files"): show the tab
+  // that holds it on a phone or tablet, then land on it (focusLeadControl opens any closed section around it).
+  useEffect(() => {
+    const onShow = (e) => {
+      const files = e?.detail === "files";
+      setMobileTab(files ? "files" : "summary");
+      requestAnimationFrame(() => requestAnimationFrame(() => focusLeadControl(files ? "lead_documents" : "project_details")));
+    };
+    document.addEventListener(SHOW_IN_SALES, onShow);
+    return () => document.removeEventListener(SHOW_IN_SALES, onShow);
+  }, []);
   const [ownerOptions, setOwnerOptions] = useState([]); // [{ value: userId, label: name }]
 
   const [advancing, setAdvancing] = useState(false);
@@ -1720,10 +1732,12 @@ export default function LeadDetail() {
   const showSiteAddressWarning = !lead.job_id && !hasSiteAddress && (ptsaSiteAddressWarning || lead.ptsa_status === "signed");
   const showJobMissing = !lead.job_id && hasSiteAddress && lead.ptsa_status === "signed";
   const isArchTender = lead.lead_type === "architect_tender";
-  const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  // "consultants" sits between fee_proposal and tender: the client's story, budget and paying-by fields stay visible there,
+  // so Sales shows what the register's Project step edits (REGISTER_SCREENS_SPEC.md S1).
+  const showDiscovery = !isArchTender && ["discovery","winning_offer","fee_proposal","consultants","accepted","tender","won"].includes(lead.stage);
   const plansSupplied = resolveEngagementPathway(lead) === "plans_supplied";
-  const showWinningOffer = !isArchTender && !plansSupplied && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
-  const showPreTender = !plansSupplied && ["winning_offer","fee_proposal","accepted","tender","won"].includes(lead.stage);
+  const showWinningOffer = !isArchTender && !plansSupplied && ["winning_offer","fee_proposal","consultants","accepted","tender","won"].includes(lead.stage);
+  const showPreTender = !plansSupplied && ["winning_offer","fee_proposal","consultants","accepted","tender","won"].includes(lead.stage);
 
   // ── Option A refactor ──────────────────────────────────────────────
   // Each block below is the EXISTING JSX, copied verbatim (same handlers,
@@ -1767,7 +1781,7 @@ export default function LeadDetail() {
   );
 
   const projectBlock = (
-            <div className="rounded-card border border-hairline bg-surface p-4">
+            <div data-next-target="project_details" className="rounded-card border border-hairline bg-surface p-4 transition-shadow">
               <h3 className="section-label mb-3">Project</h3>
               <InlineField label="Project type" value={lead.project_type} options={PROJECT_TYPES} onSave={v => patch({ project_type: v })} />
               <InlineField label="Suburb" value={lead.suburb} onSave={v => patch({ suburb: v })} />
@@ -2487,7 +2501,7 @@ export default function LeadDetail() {
   const trustSection = <LeadStageSection title="Trust & context"><LeadTrustRail leadId={leadId} lead={lead} bare /></LeadStageSection>;
   const blueprintSection = <LeadStageSection title="Blueprint Insight" onToggle={openBlueprint}>{blueprintBlock}</LeadStageSection>;
   const notesSection = <LeadStageSection title="Notes"><LeadNotesPanel leadId={leadId} bare /></LeadStageSection>;
-  const documentsSection = <LeadStageSection title="Documents"><LeadDocumentsPanel leadId={leadId} bare /></LeadStageSection>;
+  const documentsSection = <div data-next-target="lead_documents"><LeadStageSection title="Documents"><LeadDocumentsPanel leadId={leadId} bare /></LeadStageSection></div>;
   const nurtureSection = nurtureBlock && <LeadStageSection title="Nurture">{nurtureBlock}</LeadStageSection>;
 
   // Stage stepper now rendered via <LeadStageStepper /> in the header (Pass 3A).
@@ -2760,18 +2774,20 @@ export default function LeadDetail() {
             </div>
           )}
           {mobileTab === "activity" && activityGroup}
-          {mobileTab === "files" && <LeadDocumentsPanel leadId={leadId} />}
+          {mobileTab === "files" && <div data-next-target="lead_documents"><LeadDocumentsPanel leadId={leadId} /></div>}
           {mobileTab === "notes" && <LeadNotesPanel leadId={leadId} />}
         </div>
         {/* Sticky next-action pointer — sits clearly above the mobile bottom nav (~75px);
             flush at md+ where the nav is hidden. AppShell collapses its FABs on this
             page so nothing overlaps. */}
         {primaryAction && (
-          <StickyActionBar position="fixed" className="!bottom-[78px] md:!bottom-0">
-            <button type="button" onClick={primaryAction.onClick} className="w-full truncate rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">
-              {primaryAction.label}
-            </button>
-          </StickyActionBar>
+          <div data-stage-bar="1" className="contents">
+            <StickyActionBar position="fixed" className="!bottom-[78px] md:!bottom-0">
+              <button type="button" onClick={primaryAction.onClick} className="w-full truncate rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">
+                {primaryAction.label}
+              </button>
+            </StickyActionBar>
+          </div>
         )}
         {/* AppShell <main> already adds pb-24 (mobile) / pb-10 (tablet); this only needs
             to clear the sticky bar above that. */}

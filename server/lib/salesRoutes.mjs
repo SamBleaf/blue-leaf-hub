@@ -33,6 +33,10 @@ import {
 } from "../../src/lib/stageGates.js";
 import { CONTRACT_DOC_TYPE, withContractEvidence, decodePdfUpload } from "./leadContractEvidence.mjs";
 import { LEAD_STAGE_LABELS } from "../../src/lib/constants.js";
+import {
+  normaliseStoryPatch, storageRolesFor, rosterAdd, rosterRemove, rosterNeedsRole, splitName, searchWords, contactMatches, CONTACT_TYPE_WORDS,
+} from "../../src/lib/projectStory.js";
+import { loadRegisterContext } from "./registerContext.mjs";
 import { getUserSignature, formatSignatureFooter } from "./emailSignature.mjs";
 import { geocodeToFacts } from "./geocodeService.mjs";
 import { enrichSite } from "./siteEnrichmentService.mjs";
@@ -994,6 +998,181 @@ export function registerSalesRoutes(app) {
     ok(res, { consultants: (data || []).map(rowToCamel) });
   });
 
+  // ── Design team (Master Register, "The project" step; REGISTER_SCREENS_SPEC.md S1, owner decision 6) ─────────────
+  // The architect, engineer, energy assessor and other consultants are kept in ONE place: the crm_contacts row (Party spine)
+  // linked to the lead and job through job_contact_roles. The lead's consultant_roster (the Consultants stage's deliverables)
+  // is kept in step. Non-admin, and never reads or writes job_contact_roles.fee_amount (the admin-only cost we pay).
+  // Disciplines the role check doesn't allow (energy, land surveyor, soil / geotech, lighting, sanitary) are stored as
+  // "consultant"; the discipline itself is kept on the roster entry. Both write endpoints return the merged design team.
+
+  // Search people and firms (results after 2 letters; up to 10, design disciplines first).
+  app.get("/api/sales/contacts/search", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const words = searchWords(req.query.q);
+    if (words.join(" ").length < 2) return ok(res, { contacts: [] });
+    const key = words.reduce((a, w) => (w.length > a.length ? w : a), "");   // the longest word narrows the query best
+    const run = (cols, withCompany) => sb.from("crm_contacts").select(cols).not("is_archived", "is", true)
+      .or([`first_name.ilike.%${key}%`, `last_name.ilike.%${key}%`, `email.ilike.%${key}%`, ...(withCompany ? [`company.ilike.%${key}%`] : [])].join(","))
+      .limit(40);
+    let { data, error } = await run("id, first_name, last_name, company, email, phone, contact_type", true);
+    if (error?.code === "42703") ({ data, error } = await run("id, first_name, last_name, email, phone, contact_type", false));   // pre-mig-180: no company
+    if (error) return err(res, 400, translateDbError(error));
+    const DESIGN = new Set(["architect", "designer", "interior_designer", "engineer"]);
+    const nameOf = (c) => [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
+    const contacts = (data || []).filter((c) => contactMatches(c, words))
+      .sort((a, b) => (Number(DESIGN.has(b.contact_type)) - Number(DESIGN.has(a.contact_type))) || nameOf(a).localeCompare(nameOf(b)))
+      .slice(0, 10)
+      .map((c) => ({ id: c.id, name: nameOf(c) || c.company || "", company: c.company || null, email: c.email || null, phone: c.phone || null,
+        contactType: c.contact_type || null, typeLabel: CONTACT_TYPE_WORDS[c.contact_type] || null }));
+    ok(res, { contacts });
+  });
+
+  const roleBelongsToLead = (row, lead) => !!row && (row.lead_id === lead.id || (!!lead.job_id && row.job_id === lead.job_id));
+  // The architect's name on the job (fee proposals and RFQ packages read jobs.architect_name) follows the design-team
+  // contact: through the facts service once a job exists, on the lead before (it stamps forward at conversion).
+  async function setArchitectName(sb, lead, value, actorId) {
+    try {
+      if (lead.job_id) {
+        const r = await setFact(lead.job_id, "architect_name", value, { source: "manual", reason: "master_register", actorId });
+        if (!r?.ok) console.warn("[design-team] architect_name:", r?.error);
+      } else {
+        const { error } = await sb.from("leads").update({ architect_name: value }).eq("id", lead.id);
+        if (error) console.warn("[design-team] lead architect_name:", error.message);
+      }
+    } catch (e) { console.warn("[design-team] architect_name:", e?.message || e); }
+  }
+  async function saveRoster(sb, lead, next) {
+    if (JSON.stringify(next) === JSON.stringify(lead.consultant_roster || [])) return;
+    const { error } = await sb.from("leads").update({ consultant_roster: next, updated_at: new Date().toISOString() }).eq("id", lead.id);
+    if (error) console.warn("[design-team] consultant_roster:", error.message);   // pre-mig-193: the role row still holds the person
+  }
+  const designTeamOf = async (sb, leadId) => (await loadRegisterContext(sb, leadId))?.consultants || [];
+
+  // Name someone: { contactId? | name, company?, email?, phone?, role, replaces?: { roleId?, contactId? } } → { consultants, roleId, contactId }
+  app.post("/api/sales/leads/:id/design-team", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const b = req.body || {};
+    const role = b.role || "architect";
+    const roles = storageRolesFor(role);
+    if (!roles) return err(res, 400, "That isn't a design-team role. Nothing was saved.");
+    const { data: lead, error: lErr } = await sb.from("leads").select("*").eq("id", req.params.id).maybeSingle();
+    if (lErr) return err(res, 400, translateDbError(lErr));
+    if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+    const actorId = req.caller?.id || null;
+    const now = new Date().toISOString();
+    const text = (v) => (v == null ? "" : String(v).trim());
+
+    // 1 · The contact: the one picked, or someone new (linked to the existing contact with the same email, if any).
+    let contact = null;
+    if (b.contactId) {
+      const { data } = await sb.from("crm_contacts").select("*").eq("id", b.contactId).maybeSingle();
+      if (!data) return err(res, 404, "That contact couldn't be found. Search again, or add them as someone new.", "NOT_FOUND");
+      contact = data;
+    } else {
+      const name = text(b.name);
+      if (!name) return err(res, 400, "Add the person's name. Nothing was saved.");
+      const email = text(b.email) || null;
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(res, 400, "That email address doesn't look right. Nothing was saved.");
+      if (email) {
+        const { data: same } = await sb.from("crm_contacts").select("*").ilike("email", email.replace(/[\\%_]/g, "\\$&")).limit(1);
+        contact = same?.[0] || null;
+      }
+      if (!contact) {
+        const row = { ...splitName(name), email, phone: text(b.phone) || null, company: text(b.company) || null, contact_type: roles.contactType, status: "active", created_by: actorId };
+        let { data, error } = await sb.from("crm_contacts").insert(row).select("*").single();
+        if (error?.code === "42703") { const { company: _company, ...rest } = row; ({ data, error } = await sb.from("crm_contacts").insert(rest).select("*").single()); }
+        if (error) return err(res, 400, translateDbError(error));
+        contact = data;
+      }
+    }
+
+    // 2 · The role: one row per person and role, on the lead (and the job once there is one).
+    const ors = [`lead_id.eq.${lead.id}`]; if (lead.job_id) ors.push(`job_id.eq.${lead.job_id}`);
+    const { data: found, error: fErr } = await sb.from("job_contact_roles").select("id, job_id, lead_id, status")
+      .eq("contact_id", contact.id).eq("role", roles.dbRole).or(ors.join(",")).limit(1);
+    if (fErr) return err(res, 400, translateDbError(fErr));
+    let roleId = found?.[0]?.id || null;
+    if (roleId) {
+      const base = { status: "active", end_date: null, updated_at: now };
+      let { error } = await sb.from("job_contact_roles").update({ ...base, lead_id: lead.id, ...(lead.job_id && !found[0].job_id ? { job_id: lead.job_id } : {}) }).eq("id", roleId);
+      if (error && /duplicate key|unique constraint/i.test(String(error.message))) ({ error } = await sb.from("job_contact_roles").update(base).eq("id", roleId));
+      if (error) return err(res, 400, translateDbError(error));
+    } else {
+      const { data, error } = await sb.from("job_contact_roles")
+        .insert({ job_id: lead.job_id || null, lead_id: lead.id, contact_id: contact.id, role: roles.dbRole, status: "active", created_by: actorId })
+        .select("id").single();
+      if (error) return err(res, 400, translateDbError(error));
+      roleId = data.id;
+    }
+
+    // 3 · "Change": the person being replaced takes the new person's place on the roster (keeping that discipline's
+    //     documents), and their role row ends unless another of their disciplines on this job still uses it.
+    const rep = b.replaces && typeof b.replaces === "object" ? b.replaces : {};
+    let replacedContactId = text(rep.contactId) || null;
+    let oldRow = null;
+    if (rep.roleId && rep.roleId !== roleId) {
+      const { data: old } = await sb.from("job_contact_roles").select("id, role, contact_id, lead_id, job_id").eq("id", rep.roleId).maybeSingle();
+      if (roleBelongsToLead(old, lead)) { oldRow = old; replacedContactId = replacedContactId || old.contact_id; }
+    }
+    if (replacedContactId === contact.id) replacedContactId = null;
+    const nextRoster = rosterAdd(lead.consultant_roster, { contactId: contact.id, rosterRole: roles.rosterRole, replacesContactId: replacedContactId }, now);
+    if (oldRow && !rosterNeedsRole(nextRoster, oldRow.contact_id, oldRow.role)) {
+      const { error } = await sb.from("job_contact_roles").update({ status: "inactive", updated_at: now }).eq("id", oldRow.id);
+      if (error) console.warn("[design-team] replace:", error.message);
+    }
+
+    // 4 · The roster, then the architect's name on the job.
+    await saveRoster(sb, lead, nextRoster);
+    if (["architect", "designer"].includes(role)) {
+      await setArchitectName(sb, lead, text(contact.company) || [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || null, actorId);
+    }
+    ok(res, { consultants: await designTeamOf(sb, lead.id), roleId, contactId: contact.id });
+  });
+
+  // Remove someone from this job: DELETE …/design-team/:roleId (the role row ends: status inactive), or
+  // DELETE …/design-team/roster?contactId=&role= for someone who is only on the roster. → { consultants }
+  app.delete("/api/sales/leads/:id/design-team/:roleId", requireAuth, async (req, res) => {
+    const sb = getServiceSupabase();
+    if (!sb) return err(res, 503, "Supabase not configured");
+    const { data: lead, error: lErr } = await sb.from("leads").select("*").eq("id", req.params.id).maybeSingle();
+    if (lErr) return err(res, 400, translateDbError(lErr));
+    if (!lead) return err(res, 404, "Lead not found", "NOT_FOUND");
+    const now = new Date().toISOString();
+    let contactId = req.query.contactId ? String(req.query.contactId) : null;
+    let role = req.query.role ? String(req.query.role) : null;
+    let row = null;
+    if (req.params.roleId !== "roster") {
+      const { data } = await sb.from("job_contact_roles").select("id, role, contact_id, lead_id, job_id").eq("id", req.params.roleId).maybeSingle();
+      if (!roleBelongsToLead(data, lead)) return err(res, 404, "That person isn't on this job's design team.", "NOT_FOUND");
+      row = data;
+      contactId = row.contact_id;
+      role = role || row.role;
+    } else if (!contactId) {
+      return err(res, 400, "Say who to remove. Nothing was changed.");
+    }
+    const rosterRole = (role && storageRolesFor(role)?.rosterRole) || null;
+    const nextRoster = rosterRemove(lead.consultant_roster, { contactId, rosterRole }, now);
+    // The role row ends (status inactive, never deleted) unless another of this person's disciplines still uses it.
+    if (row && !rosterNeedsRole(nextRoster, row.contact_id, row.role)) {
+      const { error } = await sb.from("job_contact_roles").update({ status: "inactive", updated_at: now }).eq("id", row.id);
+      if (error) return err(res, 400, translateDbError(error));
+    }
+    await saveRoster(sb, lead, nextRoster);
+    // The architect's name on the job goes too, when it was this person's.
+    if (["architect", "designer"].includes(role)) {
+      try {
+        const { data: c } = await sb.from("crm_contacts").select("*").eq("id", contactId).maybeSingle();
+        const label = String(c?.company || [c?.first_name, c?.last_name].filter(Boolean).join(" ") || "").trim();
+        let current = lead.architect_name;
+        if (lead.job_id) { const { data: job } = await sb.from("jobs").select("architect_name").eq("id", lead.job_id).maybeSingle(); current = job?.architect_name; }
+        if (label && String(current || "").trim() === label) await setArchitectName(sb, lead, null, req.caller?.id || null);
+      } catch (e) { console.warn("[design-team] remove architect_name:", e?.message || e); }
+    }
+    ok(res, { consultants: await designTeamOf(sb, lead.id) });
+  });
+
   // ── Consent spine (CW-1) — job-keyed (mig 196). Resolve lead.job_id → job_consents. The consent
   // facts are snake_case throughout, matching how the sales module reads the lead object. ──────────
   const CONSENT_FIELDS = [
@@ -1609,6 +1788,11 @@ export function registerSalesRoutes(app) {
     const ownedRejection = serverOwnedFieldRejection(body);
     if (ownedRejection) return err(res, 400, ownedRejection, "SERVER_OWNED_FIELD");
     if ("stage" in body && !MOVABLE_STAGES.has(body.stage)) return err(res, 400, "That isn't a stage a lead can be moved to.");
+    // The client's story and budget (Sales and the register's Project step both write them, REGISTER_SCREENS_SPEC.md S1):
+    // "Paying by" must be a known value (LEAD_FINANCE_STATUS_LABELS), amounts are numbers ex GST, blanks are stored as nothing.
+    const story = normaliseStoryPatch(body);
+    if (story.error) return err(res, 400, story.error, "INVALID_FIELD");
+    Object.assign(body, story.updates);
     if (body.contract_status !== undefined && body.contract_status !== null && !["prepared", "sent"].includes(body.contract_status)) {
       return err(res, 400, "Invalid contract status.");
     }
