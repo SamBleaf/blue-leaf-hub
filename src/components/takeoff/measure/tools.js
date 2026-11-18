@@ -25,7 +25,7 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
+import { CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, wallHasDoubleTop, cavityLeafFromOpening, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -469,7 +469,7 @@ export function wallsNotCounted(result, measurements, contributions, materialId)
 
 /**
  * "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)" (HUB 028). Mixed heights
- * read "21 studs (13 at 2,700, 8 at 3,000)", lowest first; Double top plate reads "top plate 2 × 10.00 m"; rows read
+ * read "21 studs (13 at 2,700, 8 at 3,000)", lowest first; Double top plate on every wall reads "top plate 2 × 10.00 m", on some walls "top plate 10.00 m + second 4.00 m" (only the walls that have it count); rows read
  * "(1 row)", "(2 rows)" or "(1–2 rows)". `label` (the item's or the wall's name) leads it; without one it starts at
  * the studs. `notCounted` (wallsNotCounted) ends it with "· Wall 1 not counted", so a blocked wall is never a quiet
  * gap in the totals ("Walls: Wall 1 not counted" when no wall is worked out). Empty for no totals and nothing left out.
@@ -485,7 +485,7 @@ export function wallFramingText(t, label = null, notCounted = []) {
   const jn = ((t.junctionStuds || 0) > 0 ? ` + ${n(t.junctionStuds)} junction stud${t.junctionStuds === 1 ? "" : "s"}` : "")
     + ((t.junctionBlocks || 0) > 0 ? ` + ${n(t.junctionBlocks)} junction block${t.junctionBlocks === 1 ? "" : "s"}` : "");
   const two = t.secondTopPlateMm;
-  const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + ${m(two)}`;
+  const top = two == null ? m(t.topPlateMm) : Math.abs(two - t.topPlateMm) < 0.5 ? `2 × ${m(t.topPlateMm)}` : `${m(t.topPlateMm)} + second ${m(two)}`;
   const rows = t.rows || [];
   const rowText = !rows.length ? "" : rows.length === 1 ? ` (${rows[0]} row${rows[0] === 1 ? "" : "s"})` : ` (${rows[0]}–${rows[rows.length - 1]} rows)`;
   // HUB 031: "· 3 walls at 450" only when some wall has its own centres; otherwise the line reads exactly as before
@@ -616,6 +616,45 @@ export function wetWallsOf(measurements, contributions, materialId) {
   return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && wallOwnCentresMm(m))
     .map((m) => ({ id: m.id, name: m.inputs?.name || "Wall", centresMm: wallOwnCentresMm(m) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+}
+
+// ── Double top plate per wall (Sam, 18 Nov 2026) ────────────────────────────────────────────────────────────
+// A wall's own setting is `inputs.doubleTopPlate` (true / false). No key = it follows the Walls item's Double top plate. Setting a wall to
+// what the item already says DELETES the key, so toggling on and off leaves the inputs exactly as they were (as with the wall's centres).
+
+/** This wall's own Double top plate: true, false, or null (follows the item). */
+export const wallOwnDoubleTop = (wall) => (wall?.inputs?.doubleTopPlate === true ? true : wall?.inputs?.doubleTopPlate === false ? false : null);
+/** Does this wall carry a second top plate (its own setting, else the item's)? */
+export const wallDoubleTopOn = (wall, material) => wallHasDoubleTop(wallOwnDoubleTop(wall), material?.rules);
+/** A wall's inputs with Double top plate set to `on`: the same as the item's = no key of its own. */
+export function withWallDoubleTop(inputs, on, material) {
+  const rest = { ...(inputs || {}) };
+  delete rest.doubleTopPlate;
+  return on === (material?.rules?.doubleTopPlate === true) ? rest : { ...rest, doubleTopPlate: on === true };
+}
+/** One tap on the chip of ONE wall: flips what the wall shows now. */
+export const toggleWallDoubleTop = (wall, material) => withWallDoubleTop(wall?.inputs, !wallDoubleTopOn(wall, material), material);
+/** The traced walls of one material: { total, on, off, state: "on" | "off" | "mixed" | "none", own } (own = walls with a setting of their own). */
+export function doubleTopState(measurements, contributions, material) {
+  const mine = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === material?.id).map((c) => c.measurementId));
+  const walls = (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && !isOutline(m));
+  const on = walls.filter((w) => wallDoubleTopOn(w, material)).length;
+  const own = walls.filter((w) => wallOwnDoubleTop(w) !== null).length;
+  return { total: walls.length, on, off: walls.length - on, own, state: !walls.length ? "none" : on === walls.length ? "on" : on === 0 ? "off" : "mixed", walls };
+}
+/**
+ * A tap on the chip for several walls at once: mixed or off → all on; all on → all off. Returns only the walls that change, as
+ * { before, next } pairs (one Undo puts every one back).
+ */
+export function setAllDoubleTop(measurements, contributions, material) {
+  const s = doubleTopState(measurements, contributions, material);
+  const to = s.state !== "on";
+  return s.walls.filter((w) => wallDoubleTopOn(w, material) !== to).map((w) => ({ before: w, next: { ...w, inputs: withWallDoubleTop(w.inputs, to, material) } }));
+}
+/** The Walls item's Double top plate changed: "Apply to every wall? Yes" clears every wall's own setting (returns those walls as { before, next }). */
+export function clearDoubleTopOverrides(measurements, contributions, material) {
+  return doubleTopState(measurements, contributions, material).walls.filter((w) => wallOwnDoubleTop(w) !== null)
+    .map((w) => { const rest = { ...(w.inputs || {}) }; delete rest.doubleTopPlate; return { before: w, next: { ...w, inputs: rest } }; });
 }
 
 // ── openings (HUB 022 step 2: + Window / + Door on the plan; the same record as the wall's elevation makes) ──────

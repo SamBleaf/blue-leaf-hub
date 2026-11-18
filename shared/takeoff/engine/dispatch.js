@@ -20,7 +20,7 @@ import { EPS_MM, demandId, identityKey } from "./contract.js";
 import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js";
 import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
-  SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
+  SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallHasDoubleTop, wallPinePlateMaxMm } from "./families.js";
 import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
@@ -178,6 +178,8 @@ function resolveWall(m, ctx) {
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
     // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
     studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null,
+    // Sam, 18 Nov 2026: this wall's own Double top plate (true / false), or the item's (null)
+    doubleTopPlate: inp.doubleTopPlate === true ? true : inp.doubleTopPlate === false ? false : null,
     // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
     loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null,
     // Sam, 18 Nov 2026: hoop iron is on for every wall; this wall's switch turns it off
@@ -414,7 +416,7 @@ const isPartIdentityProblem = (p) => p.code === "timber_identity_incomplete" && 
  *  - 2 full-length studs each side of every opening (window, door, other), merged with any closer than a stud
  *    thickness; centre studs inside an opening come out; nothing under sills or over heads;
  *  - a bottom and a top plate the FULL wall length (no door gaps: the crew cuts the doorway out after standing the
- *    frame), a second top plate on every wall when Double top plate is on; a plate longer than the plates' longest
+ *    frame), a second top plate on a wall when it has Double top plate (its own setting, else the item's); a plate longer than the plates' longest
  *    length is ONE long plate (90 × 45 LVL by default, its own line and cut list), joined over a stud only past the
  *    long plates' longest length;
  *  - noggins on the counted studs, clear bay = gap less half of each bordering stud (the stud's thickness), 1 row at
@@ -555,8 +557,10 @@ function runWallFraming(mat, n, items, ctx, sink) {
     });
     const myCrossings = jPlan.crossings.filter((c) => c.wallIds.includes(m.id));
     const centres = counted.map((t) => t.positionMm);
+    // Sam, 18 Nov 2026: a second top plate on THIS wall: its own setting beats the item's Double top plate
+    const doubleTop = wallHasDoubleTop(w.wall.doubleTopPlate, rules);
     const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
-      layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
+      layers: [{ tag: "bottom" }, { tag: "top" }, ...(doubleTop ? [{ tag: "top-2" }] : [])],
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
     // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
     const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
@@ -648,6 +652,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
       layout: { ...studs.layout, openings: studs.layout.openings.map((lo) => (ruled.has(lo.id) ? { ...lo, rule: ruled.get(lo.id) } : lo)),
         method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item", loadBearing: wallCarries,
+        doubleTop, doubleTopFrom: w.wall.doubleTopPlate === null ? "item" : "wall", plateThickMm: plateThick,
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,

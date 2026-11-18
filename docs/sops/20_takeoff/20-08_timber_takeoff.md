@@ -1,5 +1,5 @@
 ---
-sop_version: 2.2
+sop_version: 2.3
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
@@ -132,7 +132,9 @@ This is the normal way to take off wall framing (HUB 028). One **Walls** item gi
 5. Tap the start of the run, then each corner. Double-tap the last point, or tap it and press **Finish**. To go right round a building, double-tap the start. While you trace, the Walls line and the settings hide, so **Finish** stays in view. All the walls save together with one Undo. The card says, for example, "Run 1 · 2 walls · 2,700".
 6. **+ Door**: type **Height** (only the first door needs it), then tap both door edges on the wall. **+ Window**: type **Height** and **Sill height**, then tap both window edges. They are labelled D1, W1 and so on (SOP 20-09 Section C2). Tap **Trace more walls** when the openings are in.
 7. Read the **Walls line** under the settings, for example "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)".
-   - With Double top plate on, the top plate reads "top plate 2 × 10.00 m".
+   - With Double top plate on every wall, the top plate reads "top plate 2 × 10.00 m". With it on for some walls only, it reads "top plate 10.00 m + second 4.00 m", and only those walls count the second plate.
+   - **Double top plate on one wall (Select).** You do not have to decide before you draw. Tap **Select**, tap a wall, then tap the **Double top plate** chip (blue = on). Tap it again to take it off. The wall shows a small **2T** on the plan, and its elevation draws the second plate along the top. To do many walls, tap **Double top plate walls** (with nothing selected), then tap each wall, or tap the chip to set every wall: if some are on and some off, one tap puts all on, the next puts all off. The wall page has the same switch. Each tap is one **Undo**.
+   - The **Double top plate** box on the Line panel is now the default for walls with no setting of their own. If some walls have their own setting when you change it, it asks **Apply to every wall?** **Yes, every wall** clears their own settings, so all follow the box. **No, keep theirs** changes only the walls without their own setting. An item saved with the box ticked still has every wall double.
    - Walls of different heights read "21 studs (13 at 2,700, 8 at 3,000)" and "(1–2 rows)".
    - A wall that can't be worked out adds nothing to the totals and is named: "… · Wall 1 not counted". The reason shows straight under the line, for example "Wall 1: enter the Wall height.".
 8. **Details ›** opens the **Walls** card. A new Walls item starts with Blue Leaf's framing (Sam, 25 Oct 2026), so there is nothing to fix:

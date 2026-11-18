@@ -73,7 +73,7 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
-import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
+import { COLORS, clearDoubleTopOverrides, doubleTopState, setAllDoubleTop, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
@@ -212,6 +212,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // first end tapped. Handlers read sizes + first end through refs: a tap straight after typing commits the field first.
   const [wetMat, setWetMat] = useState(null);              // HUB 031: the Walls item whose "Wet-area walls at 450" mode is on (Select only)
   const wetLast = useRef(null);
+  const [dtMat, setDtMat] = useState(null);                // Sam, 18 Nov 2026: the Walls item whose "Double top plate walls" mode is on (Select only)
+  const [dtNote, setDtNote] = useState(null);
+  const dtLast = useRef(null);
+  const [dtAsk, setDtAsk] = useState(null);                // the item's Double top plate was changed while some walls have their own: { matId, on, walls }
   const [braceMat, setBraceMat] = useState(null);          // Sam, 18 Nov 2026: the Walls item whose "Add bracing" mode is on (Select only)
   const [braceType, setBraceType] = useState("ply");       // "ply" (1,200 mm sheet) | "cross" (hoop iron cross brace)
   const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
@@ -1039,6 +1043,50 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const on = wallOwnCentresMm({ inputs: next });
     setWetNote(on ? `${m.inputs?.name || "Wall"} now at ${WET_WALL_CENTRES_MM}` : `${m.inputs?.name || "Wall"} back to ${itemCentresMm(material)}`);
   }
+  /** Select → Double top plate on ONE wall (Sam, 18 Nov 2026): flips what the wall shows now; matching the item's setting deletes the key. One edit, one Undo. */
+  function setWallDoubleTop(m, mat) {
+    record({ redo: partial({ measurements: [{ ...m, inputs: toggleWallDoubleTop(m, mat) }] }), undo: partial({ measurements: [m] }) });
+  }
+  /** A tap in Double top plate mode: that wall of THIS Walls item flips. */
+  function dtTap(p) {
+    const walls = materialWalls();
+    const opts = { pxPerUnit: pxPerUnit() };
+    const hit = nearestWall(walls.filter((w) => w.shown), p, opts);
+    if (!hit) {
+      setMsg({ tone: "warn", text: nearestWall(walls.filter((w) => !w.shown), p, opts) ? "That wall is hidden on this plan. Tap Show all to change it." : `No ${material.name} wall here. Tap on a wall you traced.` });
+      return;
+    }
+    const now = performance.now();
+    if (dtLast.current && dtLast.current.id === hit.wall.id && now - dtLast.current.t < BURST_MS) return;   // a double-tap changes it once
+    dtLast.current = { id: hit.wall.id, t: now };
+    const m = measNow(hit.wall.id);
+    if (!m) return;
+    const next = toggleWallDoubleTop(m, material);
+    record({ redo: partial({ measurements: [{ ...m, inputs: next }] }), undo: partial({ measurements: [m] }) });
+    setDtNote(`${m.inputs?.name || "Wall"} ${wallDoubleTopOn({ inputs: next }, material) ? "now has a double top plate" : "back to one top plate"}`);
+  }
+  /** The chip for every wall of the item: mixed or off → all on; all on → all off. One Undo. */
+  function dtAll() {
+    const ch = setAllDoubleTop(view.measurements, view.contributions, material);
+    if (!ch.length) return;
+    record({ redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) });
+    setDtNote(`${ch.length} wall${ch.length === 1 ? "" : "s"} ${wallDoubleTopOn(ch[0].next, material) ? "now with" : "now without"} a double top plate`);
+  }
+  /** The item's Double top plate (the default). Some walls with a setting of their own → ask "Apply to every wall?" first. */
+  function setItemDoubleTop(mat, on) {
+    const st = doubleTopState(view.measurements, view.contributions, mat);
+    setRule(mat, { doubleTopPlate: on });
+    if (st.own > 0) setDtAsk({ matId: mat.id, on, walls: st.own });
+    else setDtAsk(null);
+  }
+  /** Yes: every wall's own setting is cleared (so all follow the item). No: leave them; only walls without their own follow. */
+  function dtApplyAll(yes) {
+    const ask = dtAsk;
+    setDtAsk(null);
+    if (!yes || !ask) return;
+    const ch = clearDoubleTopOverrides(view.measurements, view.contributions, material);
+    if (ch.length) record({ redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) });
+  }
   /** A tap in Add bracing mode: a 1,200 mm ply sheet or a hoop iron cross brace is clicked out on that wall. One tap, one Undo. */
   function braceTap(p) {
     const walls = materialWalls();
@@ -1195,6 +1243,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     setMsg(null);
     if (hl.ids.length) setHl((h) => ({ ...h, ids: [] }));
     if (mode === "select" && wetOn) { wetTap(p); return; }
+    if (mode === "select" && dtOn) { dtTap(p); return; }
     if (mode === "select" && braceOn) { braceTap(p); return; }
     if (mode === "select") { selectTap(sp); return; }
     if (openKind) { openingTap(p, sp); return; }
@@ -1241,8 +1290,13 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // Wet-area walls mode (HUB 031): Select with nothing picked, on a Walls item, until Done / another tool / another item
   const wetOn = mode === "select" && canEdit && wallsItem && wetMat === material?.id;
   useEffect(() => { if (wetMat && (mode !== "select" || wetMat !== material?.id)) setWetMat(null); }, [mode, material?.id, wetMat]);
+  // Double top plate mode (Sam, 18 Nov 2026): the same, tap each wall to flip its second top plate
+  const dtOn = mode === "select" && canEdit && wallsItem && dtMat === material?.id && !wetOn;
+  useEffect(() => { if (dtMat && (mode !== "select" || dtMat !== material?.id)) setDtMat(null); }, [mode, material?.id, dtMat]);
+  useEffect(() => { if (dtAsk && (!material || dtAsk.matId !== material.id)) setDtAsk(null); }, [material, dtAsk]);
+  const dtSt = wallsItem ? doubleTopState(view.measurements, view.contributions, material) : null;
   // Add bracing mode (Sam, 18 Nov 2026): Select with nothing picked, on a Walls item, until Done / another tool / another item
-  const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn;
+  const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn && !dtOn;
   useEffect(() => { if (braceMat && (mode !== "select" || braceMat !== material?.id)) setBraceMat(null); }, [mode, material?.id, braceMat]);
   const wetWalls = wallsItem ? wetWallsOf(view.measurements, view.contributions, material.id) : [];
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
@@ -1397,12 +1451,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       const len = pathLengthMm(pts, wc);
       // HUB 031: on a Walls item a wall with its own centres is drawn cyan and says so ("450 ctrs"): colour is never the only cue
       const own = isWallsItem(matOf(m)) ? wallOwnCentresMm(m) : null;
+      // Sam, 18 Nov 2026: a wall with a second top plate carries a small "2T" tag, next to its centres tag (text, never colour alone)
+      const twoT = isWallsItem(matOf(m)) && wallDoubleTopOn(m, matOf(m));
       // a short wall on a phone can't fit "Wall 2 · 4,000 · 450 ctrs": short on screen keeps the name and the centres, the length drops
       const s0 = toScr(pts[0]), s1 = toScr(pts[pts.length - 1]);
       const tight = Math.hypot(s1.x - s0.x, s1.y - s0.y) < 150;
       const wallLabel = tight
-        ? `${m.inputs?.name || "Wall"}${own ? ` · ${fmtMm(own)}` : len ? ` · ${fmtMm(Math.round(len))}` : ""}`
-        : `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}${own ? ` · ${fmtMm(own)} ctrs` : ""}`;
+        ? `${m.inputs?.name || "Wall"}${own ? ` · ${fmtMm(own)}` : len ? ` · ${fmtMm(Math.round(len))}` : ""}${twoT ? " · 2T" : ""}`
+        : `${m.inputs?.name || "Wall"}${len ? ` · ${fmtMm(Math.round(len))}` : ""}${own ? ` · ${fmtMm(own)} ctrs` : ""}${twoT ? " · 2T" : ""}`;
       const shape = <PolylineShape key={m.id} measurementId={m.id} kind="wall" points={pts} toScreen={toScr} color={own ? COLORS.wetWall : COLORS.wall} selected={isSel} label={wallLabel} />;
       // its windows and doors (HUB 022 step 2), where they are along the wall from its start, labelled clear of its name
       const ops = pts.length === 2 && m.inputs?.kind !== "polygon" ? openingsByWall.get(m.id) || [] : [];
@@ -1782,15 +1838,24 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 {/* HUB 028 Walls: Stud centres and Double top plate apply to every wall of the item (one change, one Undo).
                     They only change the line after Finish, so they hide while tracing, like the line (Finish stays in view) */}
                 {wallsItem && canEdit && !drawing && (
-                  <div className="flex items-center gap-3" data-walls-rules="">
-                    <div className="min-w-0 flex-1" data-stud-centres="">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-walls-rules="">
+                    <div className="min-w-[14rem] flex-1" data-stud-centres="">
                       <NumberField inline label="Stud centres" value={material.rules?.centresMm ?? WALL_FRAMING_RULES.centresMm} min={1} max={MAX_WALL_MM} onCommit={(n) => setRule(material, { centresMm: n })} />
                     </div>
-                    <label className="flex min-h-[44px] w-40 shrink-0 items-center gap-2 text-sm font-medium text-ink" data-double-top-plate="">
+                    <label className="flex min-h-[44px] shrink-0 items-center gap-2 text-sm font-medium text-ink" data-double-top-plate="">
                       <input type="checkbox" className="h-5 w-5 rounded text-primary" checked={material.rules?.doubleTopPlate === true}
-                        onChange={(e) => setRule(material, { doubleTopPlate: e.target.checked })} />
+                        onChange={(e) => setItemDoubleTop(material, e.target.checked)} />
                       Double top plate
                     </label>
+                    {dtAsk && dtAsk.matId === material.id && (
+                      <div className="w-full space-y-1 rounded-lg bg-page px-3 py-2 text-sm" role="group" aria-label="Apply to every wall?" data-double-top-ask="">
+                        <p className="text-ink">Apply to every wall? {dtAsk.walls} wall{dtAsk.walls === 1 ? " has" : "s have"} a setting of {dtAsk.walls === 1 ? "its" : "their"} own.</p>
+                        <div className="flex gap-2">
+                          <Btn kind="primary" onClick={() => dtApplyAll(true)} data-double-top-ask-yes="">Yes, every wall</Btn>
+                          <Btn onClick={() => dtApplyAll(false)} data-double-top-ask-no="">No, keep theirs</Btn>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {/* the Walls line only changes after Finish, so it hides while tracing (Finish stays in view); the parts'
@@ -1935,11 +2000,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             </div>
           )}
 
-          {mode === "select" && !sel && !wetOn && !braceOn && (
+          {mode === "select" && !sel && !wetOn && !braceOn && !dtOn && (
             <div className="space-y-2">
               <p className="text-sm text-muted">Tap a run, line, wall or count mark to select it.{ticksBy.size ? " Tap a tick to change one member." : ""}</p>
               {wallsItem && canEdit && itemCentresMm(material) !== WET_WALL_CENTRES_MM && (
                 <Btn onClick={() => { setWetMat(material.id); setWetNote(null); wetLast.current = null; setMsg(null); }} data-wet-start="">Wet-area walls at {WET_WALL_CENTRES_MM}</Btn>
+              )}
+              {wallsItem && canEdit && (
+                <Btn onClick={() => { setDtMat(material.id); setDtNote(null); dtLast.current = null; setMsg(null); }} data-dt-start="">Double top plate walls</Btn>
               )}
               {wallsItem && canEdit && (
                 <Btn onClick={() => { setBraceMat(material.id); setBraceNote(null); braceLast.current = null; setMsg(null); }} data-brace-start="">Add bracing</Btn>
@@ -1953,6 +2021,19 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               <p data-wet-count="">{wetWalls.length ? `${wetWalls.length} wall${wetWalls.length === 1 ? "" : "s"} at ${WET_WALL_CENTRES_MM}: ${wetWalls.slice(0, 6).map((w) => w.name).join(", ")}${wetWalls.length > 6 ? ` … and ${wetWalls.length - 6} more` : ""}` : `No walls at ${WET_WALL_CENTRES_MM} yet.`}</p>
               {wetNote && <p className="text-[12px] text-muted" data-wet-last="">{wetNote}. Undo puts it back.</p>}
               <Btn kind="primary" onClick={() => { setWetMat(null); setWetNote(null); }}>Done</Btn>
+            </div>
+          )}
+
+          {dtOn && !sel && (
+            <div className="space-y-2 text-sm" data-dt-panel="">
+              <p className="font-medium text-ink">Double top plate · {material.name}</p>
+              <p className="text-muted">Tap each wall to give it a second top plate (it shows 2T). Tap it again to take it off. Or tap the chip to change every wall.</p>
+              <button type="button" aria-pressed={dtSt?.state === "on"} onClick={dtAll} data-dt-all=""
+                className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${dtSt?.state === "on" ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>
+                Double top plate · {dtSt?.state === "on" ? "all walls" : dtSt?.state === "mixed" ? "some walls" : "no walls"}</button>
+              <p data-dt-count="">{dtSt?.total ? `${dtSt.on} of ${dtSt.total} wall${dtSt.total === 1 ? "" : "s"} with a double top plate.` : "No walls traced yet."}</p>
+              {dtNote && <p className="text-[12px] text-muted" data-dt-last="">{dtNote}. Undo puts it back.</p>}
+              <Btn kind="primary" onClick={() => { setDtMat(null); setDtNote(null); }}>Done</Btn>
             </div>
           )}
 
@@ -2074,6 +2155,15 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                       return <button key={mm} type="button" aria-pressed={on} onClick={() => setWallCentres(sel, mm === itemCentresMm(selMat) ? null : mm)}
                         className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{mm}</button>;
                     })}
+                  </div>
+                </div>
+              )}
+              {rect && canEdit && isWallsItem(selMat) && (
+                <div className="space-y-1" data-wall-doubletop="">
+                  <p className="text-[11px] text-muted">Top plate (this wall only){wallOwnDoubleTop(sel) === null ? ` · follows the item (${selMat.rules?.doubleTopPlate === true ? "double" : "single"})` : ""}</p>
+                  <div className="flex gap-2">
+                    <button type="button" aria-pressed={wallDoubleTopOn(sel, selMat)} onClick={() => setWallDoubleTop(sel, selMat)} data-wall-doubletop-chip=""
+                      className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${wallDoubleTopOn(sel, selMat) ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Double top plate</button>
                   </div>
                 </div>
               )}
