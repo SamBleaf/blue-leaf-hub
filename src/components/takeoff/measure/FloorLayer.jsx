@@ -1,7 +1,7 @@
 // =============================================================================
 // measure/FloorLayer.jsx — the Floor frame drawn on the plan (Phase 1: a simple overlay, not the full layout drawing).
 // Reads the engine's layout (plan-frame millimetres) and draws it back onto the page: truss lines, ring beams, end strongbacks (dashed),
-// mid-span strongbacks, stair trimmers, and a number on every truss-end edge so the beams list matches the plan.
+// mid-span strongbacks, stair trimmers, and a letter on every truss-end edge so the beams list matches the plan.
 // =============================================================================
 import { mmToPoint } from "../../../../shared/takeoff/engine/floor/geometry.js";
 import { COLORS } from "./tools.js";
@@ -29,7 +29,7 @@ export function FloorLayer({ layout, cal, toScreen }) {
       {layout.beams.map((b) => <g key={b.edgeId} data-floor-beam={b.edgeId}>{seg(b.a, b.b, { stroke: COLORS.floorBeam, strokeWidth: 6, strokeOpacity: 0.85 })}</g>)}
       {layout.edges.filter((e) => e.kind === "end" || e.beam).map((e) => {
         const m = P({ x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 });
-        return <Dot key={e.id} x={m.x} y={m.y} n={e.n} />;
+        return <Dot key={e.id} x={m.x} y={m.y} n={e.label} />;
       })}
     </g>
   );

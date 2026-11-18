@@ -2,11 +2,11 @@
 //   node scripts/tests/takeoff-tc-floor.test.mjs
 import assert from "node:assert/strict";
 import { buildCalibration, CALCULATION_VERSION, computeWorkspace, methodFor, buildSupplierGroups, floorFramingDefaults, FLOOR_FRAMING_RULES, wallFramingDefaults, WALL_FRAMING_RULES } from "../../shared/takeoff/index.js";
-import { layoutFloor, parseSize, STRONGBACK_SPAN_RULE, mmToPoint } from "../../shared/takeoff/engine/floor/geometry.js";
+import { layoutFloor, edgeLabel, TRUSS_COUNT_TOLERANCE_MM, parseSize, STRONGBACK_SPAN_RULE, mmToPoint } from "../../shared/takeoff/engine/floor/geometry.js";
 import { methodReads } from "../../shared/takeoff/engine/dispatch.js";
 import { cleanMaterialContent, cleanMeasurementInputs, _test } from "../../server/lib/takeoff/takeoffService.mjs";
 import { pointToMm } from "../../shared/takeoff/calibration.js";
-import { isFloorItem, isWallsItem, toolsFor, usesWalls } from "../../src/components/takeoff/measure/tools.js";
+import { withoutFloorBeams, isFloorItem, isWallsItem, toolsFor, usesWalls } from "../../src/components/takeoff/measure/tools.js";
 
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); pass++; if (process.env.TAKEOFF_TEST_VERBOSE) console.log(`  ✓ ${name}`); } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 3).join("\n    ")}`); } }
@@ -108,7 +108,7 @@ t("a beam on an end edge replaces that edge's end strongback; a beam with no siz
   assert.deepEqual(sized.beamsBySize ?? sized.totals.beamsBySize, [{ size: "445x63", lm: 6 }]);
   assert.ok(!sized.problems.some((p) => p.blocking));
   const unsized = layoutFloor({ ...base, rules: { ...base.rules, beams: { e0: "unsized" } } });
-  assert.ok(unsized.problems.some((p) => p.code === "floor_beam_unsized" && p.blocking && /Edge 1/.test(p.message)));
+  assert.ok(unsized.problems.some((p) => p.code === "floor_beam_unsized" && p.blocking && /Edge A/.test(p.message)));
   assert.equal(unsized.beams.length, 0);
   assert.ok(layoutFloor({ ...base, rules: { ...base.rules, beams: { e9: "445x63" } } }).problems.some((p) => p.code === "floor_beam_stale"));
   assert.ok(layoutFloor({ ...base, rules: { ...base.rules, beams: { e0: "big" } } }).problems.some((p) => p.code === "floor_beam_unsized" && /isn't a beam size/.test(p.message)));
@@ -161,7 +161,7 @@ t("engine: a beam with no size makes the order Incomplete with a clear line, and
   const r = run([floorArea()], { beams: { e0: "unsized" } });
   assert.equal(r.res.status.quantity, "incomplete");
   const p = r.res.problems.find((x) => x.code === "floor_beam_unsized");
-  assert.ok(p && p.blocking && /Edge 1 has a beam with no size/.test(p.message));
+  assert.ok(p && p.blocking && /Edge A has a beam with no size/.test(p.message));
   assert.ok(!r.groups.some((g) => g.heading === "BEAMS"));
   assert.ok(r.lines.every((l) => l.problems.some((m) => /no size/.test(m))), "every floor line carries the problem");
 });
@@ -280,6 +280,54 @@ t("review fixes: short void-cut pieces get no mid-span row; bad row override is 
   assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
 });
 t("version: the calculation is stamped takeoff-calc@10 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@10$/); });
+
+// ── P1 owner decisions, 18 Nov 2026 (Sam approved all six recommendations) ──────────────────────────────────
+t("tolerance: a traced width within 5 mm over a centres multiple adds no truss; 6 mm over does", () => {
+  assert.equal(TRUSS_COUNT_TOLERANCE_MM, 5);
+  const n = (w) => layoutFloor({ outline: rect(w, 3000), rules: { centresMm: 450 } }).totals.trussCount;
+  assert.equal(n(5400), 13); assert.equal(n(5403), 13); assert.equal(n(5405), 13); assert.equal(n(5406), 14);
+  assert.equal(n(5395), 13, "under a multiple is unchanged");
+});
+t("edge labels: truss-end edges are A, B, C ... (never the outline edge number); stale and unsized messages use the letter", () => {
+  assert.deepEqual([1, 2, 26, 27, 28, 52, 53].map(edgeLabel), ["A", "B", "Z", "AA", "AB", "AZ", "BA"]);
+  const r = layoutFloor({ outline: rect(6000, 4200), rules: { centresMm: 450, beams: { e2: "445x63" } } });
+  assert.deepEqual(r.edges.filter((e) => e.kind === "end").map((e) => e.label), ["A", "B"]);
+  assert.equal(r.beams[0].label, "B"); assert.equal(r.endStrongbacks[0].label, "A");
+  const l = layoutFloor({ outline: L_SHAPE, rules: { centresMm: 450 } });
+  const ends = l.edges.filter((e) => e.kind === "end").map((e) => e.label);
+  assert.deepEqual(ends, ["A", "B", "C", "D"].slice(0, ends.length));
+  assert.ok(!r.edges.some((e) => e.label === "" || e.label === undefined));
+});
+t("engine: order notes and explain use the edge letter, not the outline number", () => {
+  const r = run([floorArea()], { beams: { e2: "445x63" } });
+  assert.ok(r.res.demands.some((d) => /Beam on edge B \(445x63\)/.test(d.label || d.note || JSON.stringify(d))));
+  assert.ok(r.res.demands.some((d) => /End strongback, edge A/.test(JSON.stringify(d))));
+  assert.ok(r.res.explain.some((x) => /Beams: edge B 445x63/.test(x)));
+  assert.ok(!r.res.demands.some((d) => /edge [0-9]/.test(JSON.stringify(d))));
+});
+t("redrawing the floor outline clears the beam marks only (rules kept); the old material is untouched so one Undo restores it", () => {
+  const mat = { id: "m1", rules: { centresMm: 600, beams: { e0: "445x63" }, lastBeamSize: "445x63" } };
+  const out = withoutFloorBeams(mat);
+  assert.equal(out.rules.beams, undefined); assert.equal(out.rules.centresMm, 600); assert.equal(out.rules.lastBeamSize, "445x63");
+  assert.deepEqual(mat.rules.beams, { e0: "445x63" });
+  assert.deepEqual(withoutFloorBeams({ id: "m2" }).rules, {});
+});
+t("engine: a wet area drawn on a floor item is allowed and ignored with a non-blocking note", () => {
+  const base = run([floorArea()], {});
+  const wet = run([floorArea(), { ...floorArea(), id: "w1", inputs: { role: "wet", name: "Bathroom" } }], {});
+  const p = wet.res.problems.find((x) => x.code === "floor_wet_ignored");
+  assert.ok(p && p.blocking === false && /Wet areas are used in the sheets phase/.test(p.message));
+  assert.ok(!wet.res.problems.some((x) => x.code === "measurement_unused"));
+  assert.equal(wet.res.status.quantity, base.res.status.quantity);
+  assert.deepEqual(wet.res.demands.map((d) => [d.role, d.lengthMm, d.quantity]), base.res.demands.map((d) => [d.role, d.lengthMm, d.quantity]));
+});
+t("decisions confirmed: beams/trimmers LVL Smart 10 H2 longest 11,000; strongbacks MGP10 H2 longest 6,000; cut stair void counts its pieces", () => {
+  const d = floorFramingDefaults();
+  const txt = JSON.stringify(d);
+  assert.match(txt, /11000/); assert.match(txt, /6000/);
+  const r = layoutFloor({ outline: rect(6000, 4200), voids: [{ id: "v1", stair: true, points: rect(1000, 2400, 2000, 900) }], rules: { centresMm: 450 } });
+  assert.ok(r.totals.trussCount > 15, "trusses cut by a void are counted as their pieces");
+});
 
 console.log(`takeoff-tc-floor: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

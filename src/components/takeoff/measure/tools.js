@@ -46,6 +46,12 @@ export const familyOf = (m) => (m?.spec?.family && m.spec.family !== "flashing" 
 export const isFlashingMaterial = (m) => !!m && !familyOf(m);
 /** Floor frame (Sam, 18 Nov 2026): one timber item framing a traced floor outline (trusses, strongbacks, beams, trimmers together). */
 export const isFloorItem = (m) => m?.methodKey === "floor_framing" || (m?.spec?.family === "timber" && m?.spec?.purpose === FLOOR_PURPOSE);
+/** Sam, 18 Nov 2026: redrawing the floor outline clears the beam marks (beams belong to the old edges; never silently re-mapped onto new ones). Returns a NEW material; the old one is what Undo restores. */
+export function withoutFloorBeams(material) {
+  const rules = { ...(material?.rules || {}) };
+  delete rules.beams;
+  return { ...material, rules };
+}
 /** HUB 028: a Walls item (one timber item framing its traced walls: studs, plates and noggins together). */
 export const isWallsItem = (m) => m?.methodKey === "wall_framing" || (m?.spec?.family === "timber" && m?.spec?.purpose === WALLS_PURPOSE);
 /** Materials measured as walls (+ openings) rather than plan lines — same rule as TakeoffApp. */

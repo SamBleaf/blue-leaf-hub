@@ -173,10 +173,10 @@ export default function FloorPanel({ material, layout, results, floor, voids, ca
               return (
                 <div key={e.id} className="space-y-1 rounded-lg border border-hairline bg-white px-2 py-1" data-floor-edge-row={e.id}>
                   <div className="flex items-center gap-2">
-                    <p className="min-w-0 flex-1 text-ink"><b>Edge {e.n}</b> · {m(e.lengthMm)} m</p>
+                    <p className="min-w-0 flex-1 text-ink"><b>Edge {e.label}</b> · {m(e.lengthMm)} m</p>
                     <Chip on={on} disabled={!canEdit} onClick={() => (on ? clearBeam(e.id) : setBeam(e.id, last || BEAM_UNSIZED))} data-floor-beam-toggle={e.id}>{on ? "Beam" : "No beam"}</Chip>
                   </div>
-                  {on && <SizeChips chips={BEAM_SIZE_CHIPS} value={size} disabled={!canEdit} onPick={(s) => setBeam(e.id, s)} ariaLabel={`Edge ${e.n} beam size`} testId={e.id} />}
+                  {on && <SizeChips chips={BEAM_SIZE_CHIPS} value={size} disabled={!canEdit} onPick={(s) => setBeam(e.id, s)} ariaLabel={`Edge ${e.label} beam size`} testId={e.id} />}
                   {on && !size && <p className="text-[11px] font-medium text-amber-800" data-floor-beam-needs-size="">Choose this beam&apos;s size. It&apos;s set by the engineer.</p>}
                   {!on && <p className="text-[11px] text-muted">A 120 × 35 strongback ties these truss ends.</p>}
                 </div>

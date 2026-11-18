@@ -9,7 +9,7 @@
 // Rules (Sam's answers 18 Nov 2026 win over the plan where they differ):
 //   Trusses    span the short way by default ("Span the short way" / "Span the long way"), at the chosen centres (450 default).
 //              First truss on the first edge, then every `centres`, and ALWAYS a truss on the far edge:
-//              count = ceil(width / centres) + 1 (a short last bay is fine; flooring is cut off flush at the overhang).
+//              count = ceil((width - 5 mm) / centres) + 1 (5 mm tracing tolerance; a short last bay is fine; flooring is cut off flush at the overhang).
 //              Each line is clipped to the outline and to the voids; a truss a void interrupts becomes two shorter trusses that end
 //              at the header trimmers (flagged for the truss supplier). Lengths are rounded UP to the next 10 mm.
 //   Beams      ring / perimeter beams are marked per edge, each with a size the user picks (no default): an edge marked with no size
@@ -41,6 +41,14 @@ export const TRIMMER_SIZE_CHIPS = Object.freeze(["445x63", "400x63"]);
 export const TRIMMER_DEFAULT_SIZE = "445x63";
 /** A beam marked with no size yet. */
 export const BEAM_UNSIZED = "unsized";
+/** Sam, 18 Nov 2026: a traced width within this of a centres multiple does not add a truss (tracing noise: 5,405 mm at 450 is 12 bays, not 13). */
+export const TRUSS_COUNT_TOLERANCE_MM = 5;
+/** Sam, 18 Nov 2026: edges are labelled A, B, C ... (Z then AA, AB ...) on the plan, the sheet and the order notes, never by outline edge number. */
+export function edgeLabel(n) {
+  let i = Math.max(1, Math.floor(n)), s = "";
+  while (i > 0) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); }
+  return s;
+}
 
 import { pointToMm } from "../../calibration.js";
 
@@ -208,7 +216,7 @@ export function layoutFloor(input) {
   }
 
   // ── truss lines ──
-  const count = Math.ceil(widthU / centres - 1e-9) + 1;
+  const count = Math.ceil((widthU - TRUSS_COUNT_TOLERANCE_MM) / centres - 1e-9) + 1;
   // the grid, plus a truss on every OUTLINE edge that runs along the trusses (a step in an L-shaped floor needs its edge truss too)
   const us = [];
   for (let k = 0; k < count; k++) us.push(k === count - 1 ? maxU : minU + k * centres);
@@ -262,8 +270,10 @@ export function layoutFloor(input) {
     if (L < TOL) continue;
     const along = Math.abs(b.v - a.v) / L;   // 1 = parallel to the trusses
     const kind = along >= Math.cos((SIDE_EDGE_DEG * Math.PI) / 180) ? "side" : "end";
-    edges.push({ id: `e${i}`, n: i + 1, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y }, lengthMm: round3(L), kind });
+    edges.push({ id: `e${i}`, n: i + 1, label: "", a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y }, lengthMm: round3(L), kind });
   }
+  // labels: the truss-end edges first (A, B, C ... in outline order), then any side edge, so a label depends only on the shape
+  [...edges.filter((e) => e.kind === "end"), ...edges.filter((e) => e.kind !== "end")].forEach((e, i) => { e.label = edgeLabel(i + 1); });
   const edgeById = new Map(edges.map((e) => [e.id, e]));
   const beams = [], endStrongbacks = [];
   for (const e of edges) {
@@ -271,9 +281,9 @@ export function layoutFloor(input) {
     if (raw !== undefined && raw !== null && raw !== false && raw !== "") {
       const size = raw === BEAM_UNSIZED ? null : parseSize(raw);
       e.beam = size || BEAM_UNSIZED;
-      if (!size) fail("floor_beam_unsized", raw === BEAM_UNSIZED ? `Edge ${e.n} has a beam with no size. Choose its size (400x63, 445x63, or type one).` : `Edge ${e.n}: "${String(raw).slice(0, 20)}" isn't a beam size like 445x63.`);
-      else beams.push({ edgeId: e.id, n: e.n, size, lengthMm: e.lengthMm, a: e.a, b: e.b, kind: e.kind });
-    } else if (e.kind === "end") endStrongbacks.push({ edgeId: e.id, n: e.n, lengthMm: e.lengthMm, a: e.a, b: e.b });
+      if (!size) fail("floor_beam_unsized", raw === BEAM_UNSIZED ? `Edge ${e.label} has a beam with no size. Choose its size (400x63, 445x63, or type one).` : `Edge ${e.label}: "${String(raw).slice(0, 20)}" isn't a beam size like 445x63.`);
+      else beams.push({ edgeId: e.id, n: e.n, label: e.label, size, lengthMm: e.lengthMm, a: e.a, b: e.b, kind: e.kind });
+    } else if (e.kind === "end") endStrongbacks.push({ edgeId: e.id, n: e.n, label: e.label, lengthMm: e.lengthMm, a: e.a, b: e.b });
   }
   for (const id of Object.keys(beamsIn)) if (!edgeById.has(id)) note("floor_beam_stale", "A beam was marked on an edge that no longer exists (the outline was redrawn). Mark the beams again.");
 

@@ -1,6 +1,6 @@
 # HUB: Floor Framing module (implementation plan, no code)
 
-**Status:** Sam answered 18 Nov 2026 (section 0 below, authoritative). **Phase 1 BUILT** on branch `takeoff/floor-framing` (merged with main `88b7233`), local, not pushed; calculation version `takeoff-calc@9`. Phases 2 to 6 not started.
+**Status:** Sam answered 18 Nov 2026 (section 0 below, authoritative). **Phase 1 BUILT** on branch `takeoff/floor-framing` (merged with main `88b7233`), local, not pushed; calculation version `takeoff-calc@10`. Phases 2 to 6 not started.
 **Owner rule:** simple onsite. Fewest taps, advanced detail hidden, sensible defaults, derive don't ask, accurate counts, one phase at a time.
 **Builds on:** the Hub takeoff Walls function (not the Bestimator repo; its rules are reused as knowledge, not code).
 
@@ -19,6 +19,14 @@
 | 7 | Last truss bay (Q7) | **Always a truss at the far edge**; flooring is cut off flush at the overhang. Short last bay is fine | **Supersedes** the "short-bay warning / split the difference" recommendation: count = ceil(width / centres) + 1, no warning, no split option. Built (P1) |
 | 8 | Hebel floor height (Q8) | A one-line note that it raises the floor 75 mm | P3 |
 | 9 | Thickness from centres (Q9) | Automatic | P2+ |
+
+**P1 follow-up decisions, 18 Nov 2026 (Sam approved all six recommendations; built):**
+1. A truss cut by a stair void counts as its pieces (kept as built).
+2. Truss-count tolerance 5 mm: count = ceil((width - 5 mm) / centres) + 1.
+3. Redrawing the floor outline clears the beam marks (no silent re-mapping onto new edges); one Undo restores.
+4. Wet areas drawn on a floor item are allowed and ignored (non-blocking note "Wet areas are used in the sheets phase") until P2.
+5. Truss-end edges with beams are labelled A, B, C (plan, sheet, order notes) instead of outline edge numbers.
+6. Defaults confirmed: beams/trimmers LVL Smart 10 H2 longest 11,000; strongbacks MGP10 H2 longest 6,000.
 
 **Superseded text below:** section 4 step 4 ("Beam size default per section 12"), section 6.3 ("If the last bay is under 200 mm, warn"), section 7.7's "last bay 150 mm (warn)" column, section 12 Q2 and Q7 recommendations, and the risk row about the last bay. Left in place for the record.
 

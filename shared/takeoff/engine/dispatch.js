@@ -750,7 +750,10 @@ function runFloorFraming(mat, n, items, ctx, sink) {
   const roleOf = (x) => x.m.inputs?.role;
   const byId = (a, b) => (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0);
   const floors = areas.filter((x) => roleOf(x) === "floor").sort(byId);
-  const others = areas.filter((x) => roleOf(x) !== "floor" && roleOf(x) !== "void");
+  const wets = areas.filter((x) => roleOf(x) === "wet");
+  const others = areas.filter((x) => roleOf(x) !== "floor" && roleOf(x) !== "void" && roleOf(x) !== "wet");
+  // Sam, 18 Nov 2026: wet areas drawn on a floor item are allowed and ignored until the sheets phase (P2): a note, never a block
+  if (wets.length) sink.problems.push({ code: "floor_wet_ignored", message: "Wet areas are used in the sheets phase.", blocking: false });
   for (const x of others) { sink.measProblems.set(x.m.id, [...(sink.measProblems.get(x.m.id) || []), "measurement_unused"]); sink.problems.push({ code: "measurement_unused", message: "That area isn't a floor outline or an opening, so the Floor frame can't use it. Remove it.", blocking: true }); }
   if (!floors.length) { if (!sink.problems.length) sink.problems.push({ code: "floor_outline_missing", message: "Draw the floor outline for this Floor frame item.", blocking: false }); return []; }
   if (floors.length > 1) sink.problems.push({ code: "floor_outline_many", message: "A Floor frame item takes one floor outline. Remove the extra outlines, or add another Floor frame item for another floor.", blocking: true });

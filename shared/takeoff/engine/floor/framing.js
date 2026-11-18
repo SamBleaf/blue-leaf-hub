@@ -71,18 +71,18 @@ export function computeFloorFraming(input) {
     if (ps.length > 1) joined += ps.length - 1;
     ps.forEach((len, i) => demands.push(linear("strongback", "floor strongback", `${kind}-${id}-${i}`, len, 1, sbSection, "floorStrongback", `${label}${ps.length > 1 ? ` (piece ${i + 1} of ${ps.length})` : ""}`, true)));
   };
-  for (const e of lay.endStrongbacks) strongback("end", e.edgeId, e.lengthMm, `End strongback, edge ${e.n}`);
+  for (const e of lay.endStrongbacks) strongback("end", e.edgeId, e.lengthMm, `End strongback, edge ${e.label}`);
   lay.midRows.forEach((row, ri) => row.runs.forEach((run, k) => strongback("mid", `${ri}-${k}`, run.lengthMm, `Mid-span strongback, row ${ri + 1}${row.runs.length > 1 ? ` run ${k + 1}` : ""}`)));
   if (joined) problems.push({ code: "floor_strongback_joined", message: `${joined} strongback join${joined === 1 ? "" : "s"} over a truss (a run is longer than the longest stock length). No lap is added.`, blocking: false });
 
   // beams: one demand per marked edge, its own size
-  for (const b of lay.beams) demands.push(linear("beam", "floor beam", b.edgeId, b.lengthMm, 1, b.size, "floorBeam", `Beam on edge ${b.n} (${b.size})`, false));
+  for (const b of lay.beams) demands.push(linear("beam", "floor beam", b.edgeId, b.lengthMm, 1, b.size, "floorBeam", `Beam on edge ${b.label} (${b.size})`, false));
   // trimmers: per stair void
   for (const t of lay.trimmers) demands.push(linear("trimmer", "floor trimmer", `${t.voidId}-${t.kind}-${t.at}`, t.lengthMm, 1, t.size, "floorTrimmer", `${t.voidName} ${t.kind} trimmer (${t.size})`, false));
 
   explain.push(`Floor frame: ${fmt(lay.frame.widthMm)} wide across the trusses, trusses span ${fmt(lay.frame.spanMm)} at ${lay.totals.centresMm} centres = ${lay.totals.trussCount} trusses (a truss on the far edge always)`);
   explain.push(`Strongbacks: ${lay.totals.endStrongbackLm} lm at truss ends with no beam, ${lay.totals.midStrongbackLm} lm mid-span (${lay.totals.strongbackRows} row${lay.totals.strongbackRows === 1 ? "" : "s"}${rules.strongbackRows == null ? ", from the span" : ", set for this job"})`);
-  if (lay.beams.length) explain.push(`Beams: ${lay.beams.map((b) => `edge ${b.n} ${b.size} ${(b.lengthMm / 1000).toFixed(2)} m`).join(", ")}`);
+  if (lay.beams.length) explain.push(`Beams: ${lay.beams.map((b) => `edge ${b.label} ${b.size} ${(b.lengthMm / 1000).toFixed(2)} m`).join(", ")}`);
   if (lay.trimmers.length) explain.push(`Trimmers: ${lay.voids.filter((v) => v.stair).length} stair void(s), ${lay.totals.trimmerLm} lm`);
   problems.push({ code: "floor_supplier_layout", message: "The truss supplier designs the floor truss layout and spans. These counts are for ordering and checking, and the supplier confirms the final lengths.", blocking: false });
   const strongbackSize = sbSection ? sizeParts(sbSection) : null;
