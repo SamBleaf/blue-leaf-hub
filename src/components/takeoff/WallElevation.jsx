@@ -40,6 +40,7 @@ const RECT_STYLE = {
   blocked: { fill: "#fca5a5", stroke: "#991b1b" },
   area: { fill: "#e0f2fe", stroke: "#0369a1" },
   block: { fill: "#a5f3fc", stroke: "#0e7490" },
+  plate2: { fill: "#fde68a", stroke: "#92400e" },   // Sam, 18 Nov 2026: a second top plate
 };
 const LINE_STYLE = {
   support: { stroke: "#0f766e", width: 3 },
@@ -182,7 +183,7 @@ export default function WallElevation({
     }
     if (bracingHit && !placing) {
       for (const m of bracing) {
-        const x0 = frame.X(m.xMm), x1 = frame.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+        const x0 = frame.X(m.xMm), x1 = frame.X(m.xMm + (m.type === "ply" ? (m.widthMm > 0 && m.widthMm < 1200 ? m.widthMm : 1200) : m.spanMm));
         if (p.x >= Math.min(x0, x1) - 4 && p.x <= Math.max(x0, x1) + 4 && p.y >= frame.Y(frame.bb.y1) - 4 && p.y <= frame.Y(frame.bb.y0) + 4) return { kind: "bracing", id: m.id };
       }
     }
@@ -400,7 +401,7 @@ export default function WallElevation({
           })}
           {/* Sam, 18 Nov 2026: bracing marks: a ply sheet is a green panel the wall's height, a cross brace is two hoop iron diagonals */}
           {bracing.map((m) => {
-            const x0 = F.X(m.xMm), x1 = F.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+            const x0 = F.X(m.xMm), x1 = F.X(m.xMm + (m.type === "ply" ? (m.widthMm > 0 && m.widthMm < 1200 ? m.widthMm : 1200) : m.spanMm));
             const yTop = F.Y(F.bb.y1), yBot = F.Y(F.bb.y0);
             const sel = m.id === selectedBracingId;
             return (

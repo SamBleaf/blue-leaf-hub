@@ -240,6 +240,8 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}),
       // HUB 031 (Sam, 17 Nov 2026): this wall's own stud centres (wet areas at 450). Absent = the Walls item's centres.
       ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }) } : {}),
+      // Sam, 18 Nov 2026: this wall's own Double top plate (true / false); absent = the Walls item's. Anything else is refused, never guessed.
+      ...(i.doubleTopPlate != null && i.doubleTopPlate !== "" ? { doubleTopPlate: (must(typeof i.doubleTopPlate === "boolean", "Double top plate on a wall is on or off."), i.doubleTopPlate) } : {}),
       // HUB 031: does this wall carry the roof (true / false); absent = the Walls item's answer
       ...(i.loadBearing === true || i.loadBearing === false ? { loadBearing: i.loadBearing } : {}),
       // Sam, 18 Nov 2026: hoop iron is on for every wall; true = this wall's switch is off

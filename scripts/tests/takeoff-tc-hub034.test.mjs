@@ -61,7 +61,7 @@ t("adding a mark: a ply sheet is centred on the tap and kept inside the wall; ov
   assert.equal(addBracingMark(a.inputs, { type: "ply", atMm: 3200, lengthMm: 6000 }).ok, false, "overlaps p1");
   const b = addBracingMark(a.inputs, { type: "ply", atMm: 100, lengthMm: 6000, id: "p2" });
   assert.equal(b.mark.xMm, 0, "kept inside the wall");
-  assert.equal(addBracingMark(base, { type: "ply", atMm: 900, lengthMm: 900 }).ok, false, "wall shorter than a sheet");
+  assert.equal(addBracingMark(base, { type: "ply", atMm: 900, lengthMm: 900 }).mark.widthMm, 900, "wall shorter than a sheet: ripped, not refused (Sam, 18 Nov)");
   const c = addBracingMark(base, { type: "cross", atMm: 5900, lengthMm: 6000, id: "x1" });
   assert.deepEqual(c.mark, { id: "x1", type: "cross", xMm: 3300, spanMm: 2700 }, "default span 2,700, kept inside");
   assert.equal(addBracingMark(base, { type: "cross", atMm: 1000, lengthMm: 2000 }).ok, false, "cross longer than the wall");

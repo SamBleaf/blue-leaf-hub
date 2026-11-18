@@ -279,7 +279,7 @@ t("review fixes: short void-cut pieces get no mid-span row; bad row override is 
   const cross = layoutFloor({ outline: L, voids: [{ id: "v", name: "Hole", stair: true, points: [{ x: 2000, y: 1000 }, { x: 4000, y: 1000 }, { x: 4000, y: 3000 }, { x: 2000, y: 3000 }] }], rules: {} });
   assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
 });
-t("version: the calculation is stamped takeoff-calc@9 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/); });
+t("version: the calculation is stamped takeoff-calc@10 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@10$/); });
 
 console.log(`takeoff-tc-floor: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

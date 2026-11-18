@@ -16,15 +16,15 @@
 // =============================================================================
 import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
-import { demandId, identityKey } from "./contract.js";
+import { EPS_MM, demandId, identityKey } from "./contract.js";
 import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js";
 import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
-  SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
-import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
+  SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm , wallHasDoubleTop } from "./families.js";
+import { STOCK_MAX_UNSET_NOTE, framingDetailMissing, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
-import { selectStock } from "./stock.js";
+import { selectStock, stockLengthsFrom } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { expandOpening } from "./openingRules.js";
@@ -44,6 +44,15 @@ const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pa
  */
 export const JOB_GENERATED_LIMIT = 20000;
 const fmt = (mm) => formatMm(mm, 1);
+/**
+ * An opening's own framing detail "wins" over the automatic framing only when it is COMPLETE by the engine's own check
+ * (timber.js framingDetailMissing: source, reference, regions answered, members listed, each member with a length and
+ * product). Any unfinished detail, whatever its shape (even members: [] with no reference), is ignored for counting: the
+ * automatic rules frame the opening and a note says the override isn't used. Sam, 18 Nov 2026 (W1 with a half-ticked detail).
+ */
+const detailComplete = (d, levels) => !!d && typeof d === "object" && framingDetailMissing(d, levels).length === 0;
+/** Has anything been put in a stored detail (a bare {} says nothing, so needs no "unfinished" note)? */
+const detailTouched = (d) => !!d && typeof d === "object" && Object.values(d).some((v) => v !== null && v !== undefined && v !== "" && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length));
 
 /** Measurement kinds each generic method READS. Anything else assigned to the material would be silently ignored —
  *  so it is refused by the server and flagged by the engine (never dropped). */
@@ -181,6 +190,8 @@ function resolveWall(m, ctx) {
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
     // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
     studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null,
+    // Sam, 18 Nov 2026: this wall's own Double top plate (true / false), or the item's (null)
+    doubleTopPlate: inp.doubleTopPlate === true ? true : inp.doubleTopPlate === false ? false : null,
     // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
     loadBearing: inp.loadBearing === true ? true : inp.loadBearing === false ? false : null,
     // Sam, 18 Nov 2026: hoop iron is on for every wall; this wall's switch turns it off
@@ -418,7 +429,7 @@ const isPartIdentityProblem = (p) => p.code === "timber_identity_incomplete" && 
  *  - 2 full-length studs each side of every opening (window, door, other), merged with any closer than a stud
  *    thickness; centre studs inside an opening come out; nothing under sills or over heads;
  *  - a bottom and a top plate the FULL wall length (no door gaps: the crew cuts the doorway out after standing the
- *    frame), a second top plate on every wall when Double top plate is on; a plate longer than the plates' longest
+ *    frame), a second top plate on a wall when it has Double top plate (its own setting, else the item's); a plate longer than the plates' longest
  *    length is ONE long plate (90 × 45 LVL by default, its own line and cut list), joined over a stud only past the
  *    long plates' longest length;
  *  - noggins on the counted studs, clear bay = gap less half of each bordering stud (the stud's thickness), 1 row at
@@ -452,6 +463,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
   const seen = new Set();
   const once = (p) => { const k = `${p.blocking !== false}|${p.message}`; if (seen.has(k)) return false; seen.add(k); return true; };
+  let autoOff = false; // some wall has openings but the automatic framing can't run for this item
   const notCounted = []; // openings with no framing detail, so no lintel, jacks or trimmers: { name, tag, measurementId, openingId }
   const noMax = new Set(); // the parts with no longest length (studs on a new Walls item: Sam stated none)
   // walls in a fixed order (by their names), so the notes and every line read the same whatever order they were traced
@@ -506,13 +518,15 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const wallCarries = w.wall.loadBearing ?? (typeof rules.carriesRoof === "boolean" ? rules.carriesRoof : null);
     const ruled = new Map();
     const ruleNotes = [];
+    if (openings.length && !(autoFraming && plateThick > 0)) autoOff = true;
     const framed = autoFraming && plateThick > 0 ? openings.map((o) => {
-      if (o.detail) return o;
+      if (o.detail && detailComplete(o.detail, { sillMm: o.sillMm, headMm: Math.min(o.headMm, H), studLengthMm: H })) return o;
+      if (detailTouched(o.detail)) ruleNotes.push({ code: "framing_override_unfinished", blocking: false, message: `${o.label} has an unfinished framing override that isn't used. Finish it or clear it.`, openingId: o.id });
       const src = w.openings.find((x) => x.id === o.id) || {};
       const e = expandOpening({ ctx: { ...ruleCtx, studLengthMm: H, loadBearing: wallCarries, ...openingSelectors({ rules, parts, wall: { heightMm: H, loadBearing: wallCarries }, opening: src }) },
         opening: { id: o.id, label: o.label, type: src.type, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: src.sillMm, headMm: src.sillMm + src.heightMm,
           fullHeight: !!src.fullHeight, cavity: src.cavityLeafMm ? { leafMm: src.cavityLeafMm, pocket: src.cavityPocket || "right" } : null, lintel: src.lintel || null } });
-      ruled.set(o.id, e.rule);
+      ruled.set(o.id, { ...e.rule, cripples: { below: !!e.detail.belowSill?.required, above: !!e.detail.aboveHead?.required } });
       ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
       return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };
     }) : openings;
@@ -559,8 +573,10 @@ function runWallFraming(mat, n, items, ctx, sink) {
     });
     const myCrossings = jPlan.crossings.filter((c) => c.wallIds.includes(m.id));
     const centres = counted.map((t) => t.positionMm);
+    // Sam, 18 Nov 2026: a second top plate on THIS wall: its own setting beats the item's Double top plate
+    const doubleTop = wallHasDoubleTop(w.wall.doubleTopPlate, rules);
     const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
-      layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
+      layers: [{ tag: "bottom" }, { tag: "top" }, ...(doubleTop ? [{ tag: "top-2" }] : [])],
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
     // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
     const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
@@ -634,8 +650,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
     if (w.wall.bracing?.length) {
       const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), L);
       const ref = [{ measurementId: m.id, wallId: m.id, role: "bracing" }];
-      if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm,
-        identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
+      if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm, ripText: b.ply.ripText ? `${tag}: ${b.ply.ripText}` : null,
+        identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}${b.ply.ripText ? ` (${b.ply.ripText})` : ""}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
       if (b.cross) {
         demands.push({ id: demandId(mat.id, "brace-cross-hoop", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "roll", quantity: b.cross.metres / rollM, hoopMetres: b.cross.metres, hoopPart: "cross",
           identity: hoopIdentity, label: `${tag} cross braces: ${b.cross.count} × 2 diagonals = ${b.cross.metres} m of hoop iron`, itemDescription: hoopProduct.name, sourceRefs: ref, provenance: "calculated" });
@@ -652,6 +668,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
       layout: { ...studs.layout, openings: studs.layout.openings.map((lo) => (ruled.has(lo.id) ? { ...lo, rule: ruled.get(lo.id) } : lo)),
         method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item", loadBearing: wallCarries,
+        doubleTop, doubleTopFrom: w.wall.doubleTopPlate === null ? "item" : "wall", plateThickMm: plateThick,
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,
@@ -688,6 +705,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // two calibrations of one page that really disagree: junctions and corners on that page are not worked out, said in a note
   for (const k of jPlan.skipped) sink.problems.push({ code: "junction_calibration_conflict", message: `Page ${Number(k.pageIndex) + 1}: the walls on it are calibrated to different scales, so their junctions and corners weren't worked out. Check the calibration.`, blocking: false, refs: k.wallIds.map((id) => ({ measurementId: id })) });
   for (const c of jPlan.corners) if (c.multi) sink.problems.push({ code: "wall_corner_unclear", message: `${c.wallIds.map((id) => jWallName(id)).join(", ")} all end at one point: no corner stud is added there. Check it on the plan.`, blocking: false, refs: c.wallIds.map((id) => ({ measurementId: id })) });
+  if (autoOff) {
+    sink.problems.push({ code: "framing_auto_unavailable", blocking: false, framingGap: true,
+      message: autoFraming ? "Lintels, jacks and trimmers aren't worked out automatically: the plates section has no width. Set the Plates section (e.g. 90 × 45) in Setup and they are counted for you."
+        : "Opening framing is switched off for this item, so lintels, jacks and trimmers are only counted from a framing detail you finish on each opening. Turn automatic opening framing back on in Setup to have them worked out." });
+  }
   if (notCounted.length) {
     // "D1, W1"; a label on two walls is named with its wall ("W1 on Wall 1, W1 on Wall 2")
     const twice = new Set(notCounted.map((o) => o.name).filter((nm, i, all) => all.indexOf(nm) !== i));
@@ -1015,6 +1037,37 @@ function allocateWithShortSharing(linear, opts) {
     totals: Object.fromEntries(Object.keys(second.totals).map((k) => [k, (first.totals[k] || 0) + second.totals[k]])) };
 }
 
+/**
+ * Sam, 18 Nov 2026: top and bottom plate pieces under 3,000 mm are pooled across the whole Walls item and cut out of full 6,000 mm
+ * sticks (first-fit-decreasing with branch-and-bound by the shared allocator, 5 mm kerf per cut), instead of each piece buying its own
+ * grid length. Plates of 3,000 mm and over keep their own stock lengths. Per plate product (section, grade, treatment, species, supplier).
+ * A product whose longest length (or available stock) is under 6,000 uses its longest available length. Pure.
+ */
+export const SHORT_PLATE_BELOW_MM = 3000;
+export const SHORT_PLATE_STICK_MM = 6000;
+export const SHORT_PLATE_KERF_MM = 5;
+const isPlateRole = (role) => /(^|[-\s])plate$/i.test(String(role || ""));
+/** The stick a product's short plates are cut from: 6,000, else its longest available length under 6,000; null when it has none. */
+export function shortPlateStickMm(policy) {
+  let stick = null;
+  for (const l of stockLengthsFrom(0, policy)) { if (l > SHORT_PLATE_STICK_MM + EPS_MM) break; stick = l; }
+  return stick;
+}
+/** Is this demand a short top/bottom plate piece of a Walls item that is pooled (see above)? */
+export function isShortPlate(d) {
+  return !!d && d.kind === "linear" && d.identity?.component === "plates" && isPlateRole(d.role) && d.stockPolicy?.kind === "grid"
+    && d.lengthMm > 0 && d.lengthMm < SHORT_PLATE_BELOW_MM - EPS_MM;
+}
+/** A spare-sticks percentage from a Walls item's rules: 0 (default) to 100, anything else is 0. */
+export const shortPlateSparePct = (rules) => { const v = Number(rules?.shortPlateSparePct); return Number.isFinite(v) && v > 0 ? Math.min(v, 100) : 0; };
+/** The pooled copy of a short plate demand: its own identity flag (own line and cut list), one fixed stick, 5 mm kerf, pieces shared. */
+function pooledPlate(d, stickMm) {
+  const p = d.stockPolicy;
+  return { ...d, identity: { ...d.identity, shortPlates: true },
+    stockPolicy: { kind: "fixed", lengthMm: stickMm, kerfMm: p.kerfMm > 0 ? p.kerfMm : SHORT_PLATE_KERF_MM, kerfConfirmed: true, sharePieces: true,
+      ...(p.endTrimMm !== undefined ? { endTrimMm: p.endTrimMm } : {}), ...(p.finalEndAcceptable !== undefined ? { finalEndAcceptable: p.finalEndAcceptable } : {}) } };
+}
+
 const isUnresolved = (identity) => !identity || String(identity.family || "").startsWith("unresolved:");
 const timberText = (id) => [id.section ? String(id.section).replace("x", " × ") : "section?", id.grade, id.species, id.treatment].filter(Boolean).join(" ");
 
@@ -1050,6 +1103,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       // HUB 028 Walls: the part a line buys (studs, plates, long plates or noggins), on the line and on its order item, so
       // an out-of-date stud line is never offered a plate line of the same length
       if (WALL_PARTS.includes(identity?.component)) { l.component = identity.component; l.item = { ...l.item, component: identity.component }; }
+      if (identity?.shortPlates) l.shortPlates = true;
       // the supplier take-off groups a timber order by member role (stud, king, jack, lintel, plate, noggin …): what each
       // line was bought FOR, so the export can print "STUDS", "JAMB STUDS", "T&B PLATES" (supplierOrder.js). The product
       // is the line's own timber identity (section, grade, treatment, species).
@@ -1088,7 +1142,26 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       offcuts.push({ id: o.id, lengthMm: o.lengthMm, identity: linear[0].identity, label: o.label });
     }
     const offcutById = new Map(offcuts.map((o) => [o.id, o]));
-    allocation = allocateWithShortSharing(linear, { existingOffcuts: offcuts });
+    // Sam, 18 Nov 2026: short top/bottom plates are pooled into 6,000 mm sticks (see shortPlateStickMm); everything else is allocated as before
+    const stickOf = new Map();
+    const shortSet = new Set();
+    for (const d of linear) {
+      if (!isShortPlate(d)) continue;
+      const k = identityKey(d.identity);
+      if (!stickOf.has(k)) stickOf.set(k, shortPlateStickMm(d.stockPolicy));
+      const stick = stickOf.get(k);
+      // a piece that cannot fit the stick with its kerf/end trim (product max under 6,000) stays on the normal grid path
+      const kerf = d.stockPolicy.kerfMm > 0 ? d.stockPolicy.kerfMm : SHORT_PLATE_KERF_MM;
+      if (stick != null && d.lengthMm + kerf + (d.stockPolicy.endTrimMm > 0 ? d.stockPolicy.endTrimMm : 0) <= stick + EPS_MM) shortSet.add(d.id);
+    }
+    const pooledDemands = linear.filter((d) => shortSet.has(d.id)).map((d) => pooledPlate(d, stickOf.get(identityKey(d.identity))));
+    for (const d of pooledDemands) demById.set(d.id, d);
+    allocation = allocateWithShortSharing(linear.filter((d) => !shortSet.has(d.id)), { existingOffcuts: offcuts });
+    if (pooledDemands.length) {
+      const pool = allocateLinear(pooledDemands, {});
+      allocation = { ...allocation, groups: [...allocation.groups, ...pool.groups], rejected: [...allocation.rejected, ...pool.rejected], problems: [...allocation.problems, ...pool.problems],
+        totals: Object.fromEntries(Object.keys(allocation.totals).map((k) => [k, (allocation.totals[k] || 0) + (pool.totals[k] || 0)])) };
+    }
     const unit = n.family === "aluminium" ? "bar" : "piece";
     for (const g of allocation.groups) {
       for (const u of g.unavailable || []) sink.problems.push({ code: "unavailable_stock", message: `${demById.get(u.demandId)?.label || u.demandId}: ${u.message || u.reason}`, blocking: true });
@@ -1098,7 +1171,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
         const first = demById.get(ids[0]);
         // a bar shared across a product's parts is bought as its longest cut's part (the line keeps that part and its roles)
         add(`${unit}|${b.stockLengthMm}|${first?.identity ? identityKey(first.identity) : g.identityKey}`, unit, 1, b.stockLengthMm,
-          { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity, first?.role);
+          { description: `${first?.itemDescription || itemText(first || {}, n, recipeLabels)} — ${fmt(b.stockLengthMm)} mm length${n.family === "aluminium" ? " (no joins)" : ""}${first?.identity?.shortPlates ? " (short plates, pooled)" : ""}`, stockLengthMm: b.stockLengthMm }, ids, first?.identity, first?.role);
       }
     }
     if (n.family === "aluminium") {
@@ -1115,9 +1188,9 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       const lists = new Map();
       const listOf = (demandId) => {
         const d = demById.get(demandId);
-        const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : WALL_PARTS.includes(d?.identity?.component) ? d.identity.component : "";
+        const f = FOLLOWER_KINDS.includes(d?.follower) ? d.follower : d?.identity?.shortPlates ? "shortPlates" : WALL_PARTS.includes(d?.identity?.component) ? d.identity.component : "";
         if (!lists.has(f)) lists.set(f, { title: f === "battens" ? `battens cut list (${FOLLOWER_TEXT.battens})` : f === "hflashing" ? `H-flashing cut list (${FOLLOWER_TEXT.hflashing})`
-          : WALL_PART_LABELS[f] ? `${WALL_PART_LABELS[f]} cut list` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
+          : f === "shortPlates" ? "Short plates cut list (pooled into full sticks)" : WALL_PART_LABELS[f] ? `${WALL_PART_LABELS[f]} cut list` : n.family === "timber" ? "timber cut list" : "cut list", rows: new Map() });
         return lists.get(f).rows;
       };
       for (const g of allocation.groups) {
@@ -1141,9 +1214,12 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       const natural = (a, b) => plain(a).localeCompare(plain(b), "en", { numeric: true });
       // the material's own list first, then a Walls item's parts in their order (studs, plates, long plates, noggins), then
       // the followers
-      const listRank = (k) => (k === "" ? -1 : WALL_PARTS.includes(k) ? WALL_PARTS.indexOf(k) : WALL_PARTS.length);
+      const listRank = (k) => (k === "" ? -1 : k === "shortPlates" ? WALL_PARTS.indexOf("plates") + 0.5 : WALL_PARTS.includes(k) ? WALL_PARTS.indexOf(k) : WALL_PARTS.length);
       for (const [f, l] of [...lists.entries()].sort(([a], [b]) => listRank(a) - listRank(b) || (a < b ? -1 : a > b ? 1 : 0))) {
-        appendix.timber.push({ ...(f || n.family !== "timber" ? { title: l.title } : {}), rows: [...l.rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm) });
+        // the pooled short plates also list each stick: which cuts come out of it and what is left (Sam, 18 Nov 2026)
+        const sticks = f === "shortPlates" ? allocation.groups.filter((g) => g.identity?.shortPlates).flatMap((g) => g.bars.map((b) => ({ stockMm: b.stockLengthMm,
+          cuts: b.cuts.map((c) => ({ label: c.label, lengthMm: c.lengthMm })), kerfLossMm: b.kerfLossMm, offcutMm: b.residualMm }))).map((x, i) => ({ n: i + 1, ...x })) : null;
+        appendix.timber.push({ ...(f || n.family !== "timber" ? { title: l.title } : {}), rows: [...l.rows.values()].map((r) => ({ ...r, labels: [...r.labels].sort(natural) })).sort((a, b) => b.cutMm - a.cutMm), ...(sticks ? { sticks } : {}) });
       }
     }
   }
@@ -1191,6 +1267,11 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       const straps = part("straps"), cross = part("cross"), total = Number((straps + cross).toFixed(2));
       l.item = { ...l.item, hoopMetres: total, note: `${total} m of hoop iron${cross ? ` (${straps} m wall straps + ${cross} m cross braces)` : " (wall straps, 2 straps of 0.7 m per 1,200 mm of wall)"} → ${l.quantity} ${l.quantity === 1 ? "roll" : "rolls"} of ${l.hoop.rollM} m` };
     }
+    if (l.bracing) {
+      // Sam, 18 Nov 2026: a sheet ripped down to a short wall (or the last sheet of a wall) is still ordered as a full sheet; the cut list says so
+      const rips = l.demandIds.map((id) => demById.get(id)?.ripText).filter(Boolean);
+      if (rips.length) l.item = { ...l.item, note: `Ordered as full sheets; ${rips.join("; ")}` };
+    }
     if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null && !l.bracing) l.problems.push("A timber line has no stock length.");
     if (l.follower === "battens" || l.follower === "hflashing") {
       const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);
@@ -1237,6 +1318,30 @@ function purchaseLines(mat, n, demands, matKey, sink) {
   if (pack) for (const l of spareable.filter((x) => !x.follower)) {   // the cladding's pack size is never the battens'
     const packed = Math.ceil(l.quantity / pack - 1e-9) * pack;
     if (packed !== l.quantity) { l.item = { ...l.item, note: [l.item?.note, `rounded up to full packs of ${pack} (+${packed - l.quantity})`].filter(Boolean).join(" · ") }; l.quantity = packed; }
+  }
+  // Sam, 18 Nov 2026: the pooled short plates, said on their line: how many pieces, which sticks, what is left over; plus the item's
+  // optional spare sticks % (rules.shortPlateSparePct, default 0, kept under More on the Walls card), taken on top of the calculated sticks
+  const sparePct = shortPlateSparePct(mat.rules);
+  for (const l of all.filter((x) => x.shortPlates)) {
+    const ds = l.demandIds.map((id) => demById.get(id)).filter(Boolean);
+    const stickMm = l.finishedLengthMm;
+    const sticks = l.quantity;
+    const usedMm = ds.reduce((a, d) => a + d.lengthMm, 0);
+    const kerfMm = ds[0]?.stockPolicy?.kerfMm ?? SHORT_PLATE_KERF_MM;
+    const leftMm = Math.max(0, Math.round(sticks * stickMm - usedMm - ds.length * kerfMm));
+    const spare = sparePct ? Math.ceil(sticks * sparePct / 100 - 1e-9) : 0;
+    const longest = ds[0]?.stockPolicy?.lengthMm === stickMm && stickMm < SHORT_PLATE_STICK_MM;
+    // the line's roles name every plate role pooled into it (top and bottom), the sticks shared out by length
+    if (l.roles && usedMm > 0) {
+      const byRole = {};
+      for (const d of ds) byRole[d.role || "other"] = (byRole[d.role || "other"] || 0) + d.lengthMm;
+      l.roles = Object.fromEntries(Object.entries(byRole).map(([r, mm]) => [r, Math.round(sticks * mm / usedMm * 100) / 100]));
+    }
+    l.shortPlatePool = { pieces: ds.length, sticks, stickMm, offcutMm: leftMm, kerfMm, ...(spare ? { spare, sparePct } : {}) };
+    l.item = { ...l.item, note: [`${ds.length} short plate${ds.length === 1 ? "" : "s"} (under ${fmt(SHORT_PLATE_BELOW_MM)} mm) pooled across the walls and cut from ${sticks} × ${fmt(stickMm)} mm stick${sticks === 1 ? "" : "s"}, ${kerfMm} mm saw cut each, ${fmt(leftMm)} mm of offcut left`,
+      longest ? `${fmt(stickMm)} mm is this product's longest available length (under ${fmt(SHORT_PLATE_STICK_MM)} mm)` : null,
+      spare ? `+ ${spare} spare stick${spare === 1 ? "" : "s"} (${sparePct}%)` : null].filter(Boolean).join(" · ") };
+    if (spare) { l.spareQuantity = (l.spareQuantity || 0) + spare; l.quantity += spare; }
   }
   if (omitted.length) {
     const names = [...new Set(omitted)];
@@ -1446,6 +1551,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       status: { quantity: quantityStatus, installation: installs.includes("source-pending") ? "source-pending" : installs[0] || "unspecified", procurement },
       problems: [...blocking, ...advisory], explain: methodResults.flatMap((r) => r.explain || []),
       layouts: methodResults.map((r) => r.layout).filter(Boolean), demands, allocation: pl.allocation, appendix: pl.appendix,
+      ...(pl.lines.find((l) => l.shortPlatePool) ? { shortPlatePool: pl.lines.find((l) => l.shortPlatePool).shortPlatePool } : {}),
     };
     out.lines.push(...pl.lines);
     if (pooled.length && n) pool.push({ mat, n, matKey, demands: pooled, key: followerKey || depKey, blocking, advisory, measCodes, contribOf, resById, ownLines: pl.lines });

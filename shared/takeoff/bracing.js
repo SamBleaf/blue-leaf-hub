@@ -2,7 +2,9 @@
 // shared/takeoff/bracing.js — wall bracing marks ("Add bracing" in Walls; Sam, 18 Nov 2026).
 //
 // A mark is kept on its wall (wall input `bracing`, a list), so it moves, undoes and is removed with that wall's own edits:
-//   { id, type: "ply",   xMm }            one 1,200 mm wide sheet starting xMm along the wall; its length follows the wall height
+//   { id, type: "ply",   xMm, widthMm?, whole? }  one 1,200 mm wide sheet starting xMm along the wall; its length follows the wall height.
+//        widthMm (under 1,200) = the sheet is still ORDERED as a full 1,200 sheet but ripped down to that width (a short wall, or the last
+//        sheet of a wall; Sam, 18 Nov 2026). whole:true = laid by "Ply whole wall" (switching that off removes exactly these).
 //   { id, type: "cross", xMm, spanMm }    a hoop iron cross brace over spanMm of wall (default 2,700), two diagonals
 // Ply sheets: the SMALLEST stocked sheet length that covers the wall height (BRACE OS H2 6 x 1200 x 2745 or 3050, seeds, flagged to confirm).
 // Cross braces: each diagonal = sqrt(span² + height²); a cross = 2 diagonals; tensioners = 2 per cross (one per diagonal). The hoop iron
@@ -51,6 +53,10 @@ export function crossBraceHoop(spanMm, heightMm) {
     angleDeg: Number(((Math.atan2(h, s) * 180) / Math.PI).toFixed(1)), tensioners: BRACING_RULE.tensionersPerCross };
 }
 
+/** A ply sheet's cut width: 1,200 unless it is ripped narrower. */
+export const plyWidthOf = (m) => (Number(m?.widthMm) > 0 && Number(m.widthMm) < BRACING_RULE.plyWidthMm ? Math.round(Number(m.widthMm)) : BRACING_RULE.plyWidthMm);
+const mmText = (v) => Math.round(v).toLocaleString("en-AU");
+
 /** The marks on a wall's inputs (always an array). */
 export const bracingOf = (inputs) => (Array.isArray(inputs?.bracing) ? inputs.bracing : []);
 
@@ -60,7 +66,7 @@ const newMarkId = () => `br-${Date.now().toString(36)}-${(seq++).toString(36)}${
 
 /**
  * Add a mark at the tapped place. Returns the wall's new inputs, or a plain-words refusal. A ply sheet is centred on the tap and
- * kept inside the wall; it cannot overlap another sheet. A cross brace is centred on the tap over `spanMm` and kept inside the wall.
+ * kept inside the wall; on a wall shorter than 1,200 it is ripped to the wall; it cannot overlap another sheet (beside one, it is ripped to what is left). A cross brace is centred on the tap over `spanMm` and kept inside the wall.
  * @returns {{ ok:true, inputs:object, mark:object } | { ok:false, error:string }}
  */
 export function addBracingMark(inputs, { type, atMm, lengthMm, spanMm = BRACING_RULE.crossSpanDefaultMm, id = newMarkId() }) {
@@ -71,11 +77,31 @@ export function addBracingMark(inputs, { type, atMm, lengthMm, spanMm = BRACING_
   let mark;
   if (type === "ply") {
     const W = BRACING_RULE.plyWidthMm;
-    if (L < W) return { ok: false, error: `This wall is ${Math.round(L)} mm long, shorter than a ${W} mm brace sheet.` };
-    const xMm = snap10(Math.min(Math.max(Number(atMm) - W / 2, 0), L - W));
-    const clash = marks.find((m) => m.type === "ply" && xMm < m.xMm + W && m.xMm < xMm + W);
-    if (clash) return { ok: false, error: "That sheet would overlap another brace sheet. Tap further along the wall." };
-    mark = { id, type: "ply", xMm };
+    const overlaps = (x, w) => marks.find((m) => m.type === "ply" && x < m.xMm + plyWidthOf(m) && m.xMm < x + w);
+    // A wall shorter than a sheet takes one sheet ripped to the wall (still ordered as a full sheet).
+    if (L < W) {
+      if (overlaps(0, Math.round(L))) return { ok: false, error: "That wall already has its brace sheet." };
+      mark = { id, type: "ply", xMm: 0, widthMm: Math.round(L) };
+    } else {
+      const raw = Number(atMm) - W / 2;
+      const xMm = snap10(Math.min(Math.max(raw, 0), L - W));
+      const clash = overlaps(xMm, W);
+      if (!clash) mark = { id, type: "ply", xMm };
+      else if (raw >= 0 && raw + W <= L) return { ok: false, error: "That sheet would overlap another brace sheet. Tap further along the wall." };
+      else {
+        // Tapped past a wall end onto a sheet already there: the nearest free place, either a full sheet on its left or the next sheet starting where it ends,
+        // ripped to what is left of the wall.
+        const cands = [];
+        for (const m of marks.filter((q) => q.type === "ply")) {
+          const end = m.xMm + plyWidthOf(m);
+          if (m.xMm - W >= 0) cands.push({ x: m.xMm - W, w: W });
+          if (L - end >= 1) cands.push({ x: end, w: Math.min(W, L - end) });
+        }
+        const free = cands.filter((c) => !overlaps(c.x, c.w)).sort((p, q) => Math.abs(p.x + p.w / 2 - Number(atMm)) - Math.abs(q.x + q.w / 2 - Number(atMm)));
+        if (!free.length) return { ok: false, error: "There is no room for another brace sheet on this wall." };
+        mark = { id, type: "ply", xMm: Math.round(free[0].x), ...(free[0].w < W ? { widthMm: Math.round(free[0].w) } : {}) };
+      }
+    }
   } else if (type === "cross") {
     const S = Number(spanMm);
     if (!(S >= BRACING_RULE.crossSpanMinMm)) return { ok: false, error: `A cross brace spans at least ${BRACING_RULE.crossSpanMinMm} mm.` };
@@ -83,6 +109,34 @@ export function addBracingMark(inputs, { type, atMm, lengthMm, spanMm = BRACING_
     mark = { id, type: "cross", xMm: snap10(Math.min(Math.max(Number(atMm) - S / 2, 0), L - S)), spanMm: Math.round(S) };
   } else return { ok: false, error: "Choose a ply sheet or a cross brace." };
   return { ok: true, mark, inputs: { ...(inputs || {}), bracing: [...marks, mark] } };
+}
+
+/** True when "Ply whole wall" is on for this wall. */
+export const plyWholeWallOn = (inputs) => bracingOf(inputs).some((m) => m.type === "ply" && m.whole);
+
+/**
+ * "Ply whole wall": the wall is covered end to end with ceil(L / 1,200) sheets, the last one ripped to the remainder. ON replaces every
+ * ply sheet already on the wall (cross braces stay); OFF removes only those (sheets placed one at a time stay). The key is deleted when no marks are left.
+ * @returns {{ ok:true, inputs:object, sheets:number, rippedMm:number|null } | { ok:false, error:string }}
+ */
+export function setPlyWholeWall(inputs, lengthMm, on, newId = newMarkId) {
+  // ON replaces every ply sheet on the wall (hand-placed ones would overlap the full run); OFF removes only the whole-wall sheets.
+  const keep = bracingOf(inputs).filter((m) => (on ? m.type !== "ply" : !(m.type === "ply" && m.whole)));
+  const out = { ...(inputs || {}) };
+  if (!on) { if (keep.length) out.bracing = keep; else delete out.bracing; return { ok: true, inputs: out, sheets: 0, rippedMm: null }; }
+  const L = Math.round(Number(lengthMm));
+  const W = BRACING_RULE.plyWidthMm;
+  if (!(L > 0)) return { ok: false, error: "Set the wall's length first." };
+  const n = Math.max(1, Math.ceil((L - 5) / W)); // a sliver under 5 mm is rounding, not another sheet
+  if (keep.length + n > BRACING_RULE.maxMarksPerWall) return { ok: false, error: `A wall can have at most ${BRACING_RULE.maxMarksPerWall} bracing marks.` };
+  const made = [];
+  for (let i = 0; i < n; i++) {
+    const x = i * W, w = Math.max(1, Math.min(W, L - x));
+    made.push({ id: newId(), type: "ply", xMm: x, ...(w < W ? { widthMm: w } : {}), whole: true });
+  }
+  out.bracing = [...keep, ...made];
+  const last = made[made.length - 1];
+  return { ok: true, inputs: out, sheets: n, rippedMm: last.widthMm || null };
 }
 
 /** The wall's inputs without one mark. When none are left the key is DELETED, so removing the last leaves the inputs as they were. */
@@ -96,7 +150,7 @@ export function removeBracingMark(inputs, id) {
 /** Plain words for one mark (the wall page and the plan). */
 export function bracingMarkText(m, heightMm = null) {
   const n = (v) => Math.round(v).toLocaleString("en-AU");
-  if (m.type === "ply") { const p = plyBraceFor(heightMm); return `Ply sheet at ${n(m.xMm)} mm${p ? ` · ${p.lengthMm.toLocaleString("en-AU")} long` : ""}`; }
+  if (m.type === "ply") { const p = plyBraceFor(heightMm); return `Ply sheet at ${n(m.xMm)} mm${p ? ` · ${p.lengthMm.toLocaleString("en-AU")} long` : ""}${m.widthMm > 0 && m.widthMm < BRACING_RULE.plyWidthMm ? ` · ripped to ${n(m.widthMm)} mm` : ""}${m.whole ? " · whole wall" : ""}`; }
   const h = crossBraceHoop(m.spanMm, heightMm);
   return `Cross brace at ${n(m.xMm)} mm, spans ${n(m.spanMm)} mm${h ? ` · ${h.metres.toFixed(2)} m hoop iron, ${h.tensioners} tensioners` : ""}`;
 }
@@ -115,7 +169,11 @@ export function cleanBracing(list) {
     ids.add(id);
     const xMm = Number(m.xMm);
     if (!(xMm >= 0 && xMm <= 200000)) return { ok: false, error: "A bracing mark is outside the wall." };
-    if (m.type === "ply") marks.push({ id, type: "ply", xMm: Math.round(xMm) });
+    if (m.type === "ply") {
+      const w = m.widthMm == null ? null : (typeof m.widthMm === "number" ? m.widthMm : NaN);
+      if (w != null && !(w >= 1 && w <= BRACING_RULE.plyWidthMm)) return { ok: false, error: "A ply sheet's ripped width is invalid." };
+      marks.push({ id, type: "ply", xMm: Math.round(xMm), ...(w != null && w < BRACING_RULE.plyWidthMm ? { widthMm: Math.round(w) } : {}), ...(m.whole === true ? { whole: true } : {}) });
+    }
     else if (m.type === "cross") {
       const spanMm = Number(m.spanMm);
       if (!(spanMm >= BRACING_RULE.crossSpanMinMm && spanMm <= 100000)) return { ok: false, error: `A cross brace spans at least ${BRACING_RULE.crossSpanMinMm} mm.` };
@@ -137,11 +195,12 @@ export function bracingForWall(marks, heightMm, wallLengthMm = null) {
   const plies = (marks || []).filter((m) => m.type === "ply");
   const crosses = (marks || []).filter((m) => m.type === "cross");
   let ply = null, cross = null;
+  const rips = plies.filter((m) => plyWidthOf(m) < BRACING_RULE.plyWidthMm).map((m) => plyWidthOf(m));
   if (plies.length) {
     const p = plyBraceFor(heightMm);
     if (!(Number(heightMm) > 0)) notes.push(`${plies.length} brace sheet${plies.length === 1 ? "" : "s"} not counted: set the wall height first.`);
     else if (!p) notes.push(`${plies.length} brace sheet${plies.length === 1 ? "" : "s"} not counted: the wall is ${Math.round(heightMm).toLocaleString("en-AU")} mm high and no stocked sheet is that long (${PLY_BRACE_PRODUCTS.map((x) => x.lengthMm.toLocaleString("en-AU")).join(" or ")}). Add the sheets by hand.`);
-    else ply = { product: p, count: plies.length };
+    else ply = { product: p, count: plies.length, rippedMm: rips, ripText: rips.length ? (rips.length === 1 ? `ripped to ${mmText(rips[0])} mm` : `${rips.length} ripped (${rips.map(mmText).join(", ")} mm)`) : "" };
   }
   if (crosses.length) {
     if (!(Number(heightMm) > 0)) notes.push(`${crosses.length} cross brace${crosses.length === 1 ? "" : "s"} not counted: set the wall height first.`);
@@ -153,7 +212,7 @@ export function bracingForWall(marks, heightMm, wallLengthMm = null) {
     }
   }
   if (wallLengthMm != null && Number(wallLengthMm) > 0) {
-    const out = (marks || []).filter((m) => m.xMm + (m.type === "ply" ? BRACING_RULE.plyWidthMm : Number(m.spanMm)) > Number(wallLengthMm) + 1);
+    const out = (marks || []).filter((m) => m.xMm + (m.type === "ply" ? plyWidthOf(m) : Number(m.spanMm)) > Number(wallLengthMm) + 1);
     if (out.length) notes.push(`${out.length} bracing mark${out.length === 1 ? " runs" : "s run"} past the end of the wall (the wall was shortened). Remove or re-place ${out.length === 1 ? "it" : "them"}.`);
   }
   return { ply, cross, notes };
