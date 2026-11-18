@@ -490,10 +490,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (floorMeasure && !floorDraw) { warn("To draw an opening, press + Stair void or + Opening first. Redraw replaces the floor outline."); return false; }
     const prob = outlineProblem(points, cal);
     if (prob) { warn(prob === "wall_self_intersecting" ? "The outline crosses itself. Tap the corners in order round the shape (Undo takes the last one off)." : "That outline has no area. Tap the corners round the shape."); return false; }
-    const role = floorMeasure ? "void" : "floor";
-    const stair = floorMeasure ? floorDraw.stair : null;
-    const used = new Set(floorVoids.map((v) => v.name));
-    const base = role === "floor" ? null : stair ? "Stair void" : "Opening";
+    const role = !floorMeasure ? "floor" : floorDraw.wet ? "wet" : "void";
+    const stair = role === "void" ? floorDraw.stair : null;
+    const used = new Set([...floorVoids, ...floorWets].map((v) => v.name));
+    const base = role === "floor" ? null : role === "wet" ? "Wet area" : stair ? "Stair void" : "Opening";
     let name = "Floor";
     if (base) { for (let i = 1; ; i++) { name = `${base} ${i}`; if (!used.has(name)) break; } }
     const mid = orderedId(), cid = newId();
@@ -1378,6 +1378,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const floorMeasure = floorShapes.filter((x) => x.inputs?.role === "floor").sort((a, b) => (a.id < b.id ? -1 : 1))[0] || null;
   const floorVoids = floorShapes.filter((x) => x.inputs?.role === "void").map((x) => ({ m: x, name: x.inputs?.name || "Opening", stair: x.inputs?.stair !== false }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+  const floorWets = floorShapes.filter((x) => x.inputs?.role === "wet").map((x) => ({ m: x, name: x.inputs?.name || "Wet area" }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
   const floorLayout = floorItem ? (results?.layouts || []).find((l) => l?.method === "floor_framing@1") || null : null;
   const floorOrder = floorItem ? buildSupplierGroups([{ lines: (ws.computed?.scheduleLines || []).filter((l) => l.roles && (l.jobMaterialIds || []).includes(material.id))
     .map((l) => ({ unit: l.unit, quantity: l.quantity, stockLengthMm: l.item?.stockLengthMm ?? null, roles: l.roles, product: l.product || null, description: l.item?.description, problem: (l.problems || []).length > 0 })) }]) : [];
@@ -1501,9 +1503,9 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       // Floor frame: the floor outline, or a stair void / opening (dashed)
       const wc = calsById.get(m.calibrationId);
       const a = outlineAreaM2(pts, wc);
-      const isVoid = m.inputs.role === "void";
-      return <PolylineShape key={m.id} measurementId={m.id} kind="area" points={pts} toScreen={toScr} color={isVoid ? COLORS.floorVoid : COLORS.floor} selected={isSel} closed dashed={isVoid} areaM2={a}
-        label={`${m.inputs.name || (isVoid ? "Opening" : "Floor")}${a != null ? ` · ${fmtM2(a)} m²` : ""}`} />;
+      const isVoid = m.inputs.role === "void", isWet = m.inputs.role === "wet";
+      return <PolylineShape key={m.id} measurementId={m.id} kind="area" points={pts} toScreen={toScr} color={isWet ? COLORS.floorWet : isVoid ? COLORS.floorVoid : COLORS.floor} selected={isSel} closed dashed={isVoid || isWet} areaM2={a}
+        label={`${m.inputs.name || (isWet ? "Wet area" : isVoid ? "Opening" : "Floor")}${a != null ? ` · ${fmtM2(a)} m²` : ""}`} />;
     }
     if (m.kind === "run" && pts.length === 2) {
       const s = pts.map(toScr);
@@ -1781,9 +1783,9 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
           )}
 
           {floorItem && (
-            <FloorPanel material={material} layout={floorLayout} results={results} floor={floorMeasure} voids={floorVoids} canEdit={canEdit} canDraw={canMeasure && !!cal}
+            <FloorPanel material={material} layout={floorLayout} results={results} floor={floorMeasure} voids={floorVoids} wets={floorWets} canEdit={canEdit} canDraw={canMeasure && !!cal}
               mode={mode} floorDraw={floorDraw} drawing={draft?.tool === mode && draft.points.length > 0} needScale={!cal && !stale && canMeasure} onScale={onScale ? scalePage : null}
-              onDraw={(stair) => { setFloorDraw({ stair }); if (mode === "pan") setModeSel("rect"); setMsg(null); }} onCancelDraw={() => { setFloorDraw(null); discardDraft(); }}
+              onDraw={(stair, wet) => { setFloorDraw({ stair, wet: !!wet }); if (mode === "pan") setModeSel("rect"); setMsg(null); }} onCancelDraw={() => { setFloorDraw(null); discardDraft(); }}
               onRule={setFloorRules} onStrongbackSize={setStrongbackSize} onRemoveShape={removeFloorShape} onRedrawFloor={redrawFloor} orderGroups={floorOrder} onDone={close} />
           )}
 

@@ -17,6 +17,7 @@ import { timberIdentity, timberStockPolicy } from "../timber.js";
 import { FLOOR_PART_LABELS } from "../families.js";
 import { formatMm } from "../../units.js";
 import { layoutFloor, sizeParts } from "./geometry.js";
+import { layoutSheets } from "./sheets.js";
 
 const fmt = (mm) => formatMm(mm, 1);
 const sectionOf = (p) => (p.section?.depthMm && p.section?.widthMm ? `${p.section.depthMm}x${p.section.widthMm}` : null);
@@ -31,7 +32,7 @@ export const FLOOR_TRUSS_IDENTITY = Object.freeze({ family: "floorTruss", id: "f
 export function computeFloorFraming(input) {
   const { materialId, n, refs = [] } = input;
   const rules = input.rules || {};
-  const lay = layoutFloor({ outline: input.outline, voids: input.voids, rules });
+  const lay = layoutFloor({ outline: input.outline, voids: input.voids, wets: input.wets, rules });
   const problems = [...lay.problems];
   const demands = [];
   const explain = [];
@@ -80,6 +81,17 @@ export function computeFloorFraming(input) {
   // trimmers: per stair void
   for (const t of lay.trimmers) demands.push(linear("trimmer", "floor trimmer", `${t.voidId}-${t.kind}-${t.at}`, t.lengthMm, 1, t.size, "floorTrimmer", `${t.voidName} ${t.kind} trimmer (${t.size})`, false));
 
+  // Phase 2 (Sam, 18 Nov 2026): Structaflor over the main floor (outline less openings and wet areas); wet areas are m² only until the Scyon phase
+  const sh = layoutSheets({ outline: input.outline, voids: lay.voids, wets: lay.wets, rules, lines: lay.lines, minU: lay.frame.minU, centresMm: lay.totals.centresMm });
+  if (sh) {
+    lay.sheets = sh;
+    problems.push(...sh.problems);
+    if (sh.orderedSheets > 0) demands.push({ id: demandId(materialId, "floor-sheet", sh.sheet.name), materialId, role: "floor sheet", kind: "count", unit: "piece", quantity: sh.orderedSheets, lengthMm: sh.sheet.lengthMm,
+      identity: { family: "floorSheet", id: sh.sheet.name.toLowerCase().replace(/\s+/g, "-"), name: sh.sheet.name }, label: `${sh.orderedSheets} × ${sh.sheet.name} (${sh.packedSheets} packed + ${sh.wastePct}% waste, ${sh.laidM2} m² laid)`,
+      itemDescription: sh.sheet.name, sourceRefs, provenance: "calculated" });
+    explain.push(`Flooring: ${sh.sheet.name}, ${sh.rows} rows across the trusses, ${sh.packedSheets} sheets ${sh.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}, +${sh.wastePct}% waste = ${sh.summary}`);
+  }
+  if (lay.totals.wetM2 > 0) problems.push({ code: "floor_wet_pending", message: `Wet area flooring (Scyon, phase 3): ${lay.totals.wetM2.toFixed(2)} m² — not counted yet`, blocking: false });
   explain.push(`Floor frame: ${fmt(lay.frame.widthMm)} wide across the trusses, trusses span ${fmt(lay.frame.spanMm)} at ${lay.totals.centresMm} centres = ${lay.totals.trussCount} trusses (a truss on the far edge always)`);
   explain.push(`Strongbacks: ${lay.totals.endStrongbackLm} lm at truss ends with no beam, ${lay.totals.midStrongbackLm} lm mid-span (${lay.totals.strongbackRows} row${lay.totals.strongbackRows === 1 ? "" : "s"}${rules.strongbackRows == null ? ", from the span" : ", set for this job"})`);
   if (lay.beams.length) explain.push(`Beams: ${lay.beams.map((b) => `edge ${b.label} ${b.size} ${(b.lengthMm / 1000).toFixed(2)} m`).join(", ")}`);

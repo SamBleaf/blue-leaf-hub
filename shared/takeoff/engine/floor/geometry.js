@@ -101,7 +101,7 @@ export function pointInRing(pts, p) {
 }
 
 /** The sorted v-intervals a ring covers along the line `u` (a scan line across the span axis); half-open at the ring's own u extremes. */
-function spansAt(ring, u) {
+export function spansAt(ring, u) {
   const vs = [];
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i], b = ring[(i + 1) % ring.length];
@@ -114,7 +114,7 @@ function spansAt(ring, u) {
   for (let i = 0; i + 1 < vs.length; i += 2) if (vs[i + 1] - vs[i] > TOL) out.push([vs[i], vs[i + 1]]);
   return out;
 }
-function mergeIntervals(list) {
+export function mergeIntervals(list) {
   const s = [...list].sort((x, y) => x[0] - y[0]);
   const out = [];
   for (const iv of s) {
@@ -163,6 +163,9 @@ export function trussFrame(outline, { span = "short", angleDeg = null } = {}) {
   };
 }
 
+/** The truss frame for an outline and the item's rules (shared by the frame layout and the sheet layout, so both read the same axes). */
+export const floorFrame = (outline, rules = {}) => trussFrame(outline, { span: rules.span === "long" ? "long" : "short", angleDeg: rules.trussAngleDeg == null ? null : Number(rules.trussAngleDeg) });
+
 const ceil10 = (L) => Math.ceil((L - 0.5) / TRUSS_LENGTH_STEP_MM) * TRUSS_LENGTH_STEP_MM;
 
 /**
@@ -177,7 +180,7 @@ export function layoutFloor(input) {
   const fail = (code, message) => problems.push({ code, message, blocking: true });
   const note = (code, message) => problems.push({ code, message, blocking: false });
   const outline = input.outline || [];
-  const empty = (extra = {}) => ({ problems, edges: [], lines: [], trusses: [], trussesByLength: [], voids: [], beams: [], endStrongbacks: [], midRows: [], trimmers: [], totals: null, ...extra });
+  const empty = (extra = {}) => ({ problems, edges: [], lines: [], trusses: [], trussesByLength: [], voids: [], wets: [], beams: [], endStrongbacks: [], midRows: [], trimmers: [], totals: null, ...extra });
   if (outline.length < 3) { fail("floor_outline_missing", "Draw the floor outline first."); return empty(); }
   if (outline.length > FLOOR_LIMITS.outlinePoints) { fail("floor_outline_invalid", `A floor outline can have ${FLOOR_LIMITS.outlinePoints} corners at most.`); return empty(); }
   if (ringSelfIntersects(outline)) { fail("floor_outline_invalid", "The floor outline crosses itself. Redraw it, tapping the corners in order."); return empty(); }
@@ -188,12 +191,16 @@ export function layoutFloor(input) {
     return empty();
   }
 
-  const F = trussFrame(outline, { span: rules.span === "long" ? "long" : "short", angleDeg: rules.trussAngleDeg == null ? null : Number(rules.trussAngleDeg) });
+  const F = floorFrame(outline, rules);
   const loc = (p) => ({ ...F.toLocal(p), x: p.x, y: p.y });
   const O = outline.map(loc);
   const minU = Math.min(...O.map((p) => p.u)), maxU = Math.max(...O.map((p) => p.u));
   const minV = Math.min(...O.map((p) => p.v)), maxV = Math.max(...O.map((p) => p.v));
   const widthU = maxU - minU;
+
+  /** Is this shape wholly inside the floor outline (every corner and edge midpoint inside, no edge crossing the outline)? */
+  const insideOutline = (pts) => pts.every((p, k) => pointInRing(outline, p) && pointInRing(outline, { x: (p.x + pts[(k + 1) % pts.length].x) / 2, y: (p.y + pts[(k + 1) % pts.length].y) / 2 }))
+    && !pts.some((p, k) => outline.some((o, m) => segmentsCross(p, pts[(k + 1) % pts.length], o, outline[(m + 1) % outline.length])));
 
   // ── voids ──
   const voids = [];
@@ -203,9 +210,7 @@ export function layoutFloor(input) {
     const pts = v.points || [];
     if (pts.length >= 3 && ringSelfIntersects(pts)) { fail("floor_void_invalid", `${name}: the outline crosses itself. Redraw it.`); return; }
     if (pts.length < 3 || ringAreaMm2(pts) < 1e3) { fail("floor_void_invalid", `${name}: that opening has no area. Redraw it.`); return; }
-    const wholly = pts.every((p, k) => pointInRing(outline, p) && pointInRing(outline, { x: (p.x + pts[(k + 1) % pts.length].x) / 2, y: (p.y + pts[(k + 1) % pts.length].y) / 2 }))
-      && !pts.some((p, k) => outline.some((o, m) => segmentsCross(p, pts[(k + 1) % pts.length], o, outline[(m + 1) % outline.length])));
-    if (!wholly) { fail("floor_void_outside", `${name} is outside the floor outline. Move it inside, or redraw the outline.`); return; }
+    if (!insideOutline(pts)) { fail("floor_void_outside", `${name} is outside the floor outline. Move it inside, or redraw the outline.`); return; }
     const ring = pts.map(loc);
     voids.push({ id: v.id, name, stair: v.stair !== false, ring, points: pts, u0: Math.min(...ring.map((p) => p.u)), u1: Math.max(...ring.map((p) => p.u)),
       v0: Math.min(...ring.map((p) => p.v)), v1: Math.max(...ring.map((p) => p.v)), areaMm2: ringAreaMm2(pts) });
@@ -213,6 +218,24 @@ export function layoutFloor(input) {
   for (let i = 0; i < voids.length; i++) for (let j = i + 1; j < voids.length; j++) {
     const a = voids[i], b = voids[j];
     if (a.u0 < b.u1 - TOL && b.u0 < a.u1 - TOL && a.v0 < b.v1 - TOL && b.v0 < a.v1 - TOL) fail("floor_void_overlap", `${a.name} and ${b.name} overlap. Move one of them.`);
+  }
+
+  // ── wet areas (Sam, 18 Nov 2026, P2): drawn like stair voids, must lie inside the outline (the void check), never over a void or each other ──
+  const wets = [];
+  (Array.isArray(input.wets) ? input.wets : []).forEach((w, i) => {
+    const name = w.name || `Wet area ${i + 1}`;
+    const pts = w.points || [];
+    if (pts.length >= 3 && ringSelfIntersects(pts)) { fail("floor_wet_invalid", `${name}: the outline crosses itself. Redraw it.`); return; }
+    if (pts.length < 3 || ringAreaMm2(pts) < 1e3) { fail("floor_wet_invalid", `${name}: that wet area has no area. Redraw it.`); return; }
+    if (!insideOutline(pts)) { fail("floor_wet_outside", `${name} is outside the floor outline. Move it inside, or redraw the outline.`); return; }
+    const ring = pts.map(loc);
+    wets.push({ id: w.id, name, ring, points: pts, u0: Math.min(...ring.map((p) => p.u)), u1: Math.max(...ring.map((p) => p.u)),
+      v0: Math.min(...ring.map((p) => p.v)), v1: Math.max(...ring.map((p) => p.v)), areaMm2: ringAreaMm2(pts) });
+  });
+  const boxHit = (a, b) => a.u0 < b.u1 - TOL && b.u0 < a.u1 - TOL && a.v0 < b.v1 - TOL && b.v0 < a.v1 - TOL;
+  for (let i = 0; i < wets.length; i++) {
+    for (let j = i + 1; j < wets.length; j++) if (boxHit(wets[i], wets[j])) fail("floor_wet_overlap", `${wets[i].name} and ${wets[j].name} overlap. Move one of them.`);
+    for (const v of voids) if (boxHit(wets[i], v)) fail("floor_wet_overlap", `${wets[i].name} overlaps ${v.name}. Move one of them.`);
   }
 
   // ── truss lines ──
@@ -341,12 +364,14 @@ export function layoutFloor(input) {
 
   const outlineArea = ringAreaMm2(outline);
   const voidArea = voids.reduce((a, v) => a + v.areaMm2, 0);
+  const wetArea = wets.reduce((a, w) => a + w.areaMm2, 0);
   const sumBy = (list, key) => { const m = new Map(); for (const x of list) m.set(x[key], (m.get(x[key]) || 0) + x.lengthMm); return [...m.entries()].map(([k, mm]) => ({ size: k, lm: round3(mm / 1000) })).sort((a, b) => (a.size < b.size ? -1 : 1)); };
   const midLm = round3(midRows.reduce((a, r) => a + r.runs.reduce((s, x) => s + x.lengthMm, 0), 0) / 1000);
   const endLm = round3(endStrongbacks.reduce((a, e) => a + e.lengthMm, 0) / 1000);
   const totals = {
     trussCount: trusses.length, trussLines: lines.length, centresMm: centres, longestSpanMm: longest,
-    floorAreaM2: round3((outlineArea - voidArea) / 1e6), outlineAreaM2: round3(outlineArea / 1e6), openingsM2: round3(voidArea / 1e6),
+    floorAreaM2: round3((outlineArea - voidArea) / 1e6),
+    mainAreaM2: round3((outlineArea - voidArea - wetArea) / 1e6), wetM2: round3(wetArea / 1e6), outlineAreaM2: round3(outlineArea / 1e6), openingsM2: round3(voidArea / 1e6),
     endStrongbackLm: endLm, midStrongbackLm: midLm, strongbackLm: round3(endLm + midLm), strongbackRows: rows, strongbackRowsAuto: autoRows,
     beamLm: round3(beams.reduce((a, b) => a + b.lengthMm, 0) / 1000), beamsBySize: sumBy(beams, "size"),
     trimmerLm: round3(trimmers.reduce((a, t) => a + t.lengthMm, 0) / 1000), trimmersBySize: sumBy(trimmers, "size"),
@@ -355,6 +380,7 @@ export function layoutFloor(input) {
     problems, outline: O.map((p) => ({ x: p.x, y: p.y })), frame: { alphaDeg: round3((F.alpha * 180) / Math.PI), minU, maxU, minV, maxV, widthMm: round3(widthU), spanMm: round3(maxV - minV) },
     edges, lines: lines.map((l) => ({ k: l.k + 1, uMm: round3(l.u - minU), pieces: l.pieces.length })), trusses, trussesByLength,
     voids: voids.map((v) => ({ id: v.id, name: v.name, stair: v.stair, points: v.points, areaM2: round3(v.areaMm2 / 1e6) })),
+    wets: wets.map((w) => ({ id: w.id, name: w.name, points: w.points, areaM2: round3(w.areaMm2 / 1e6) })),
     beams, endStrongbacks, midRows, trimmers, totals,
   };
 }

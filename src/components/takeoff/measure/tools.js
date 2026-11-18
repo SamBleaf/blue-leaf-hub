@@ -36,7 +36,7 @@ export const COLORS = Object.freeze({
   // HUB 031: a wet-area wall (its own stud centres), cyan-700 (5.4:1 on white); its label also says "ctrs", so colour is never the only cue
   wetWall: "#0e7490",
   // Floor frame (Sam, 18 Nov 2026): outline, openings, trusses, beams, strongbacks, trimmers (colour is never the only cue: edges are numbered, labels say what each is)
-  floor: "#0f766e", floorVoid: "#b91c1c", floorTruss: "#64748b", floorTrussCut: "#475569", floorBeam: "#0f172a", floorStrongback: "#ea580c", floorTrimmer: "#2563eb",
+  floor: "#0f766e", floorVoid: "#b91c1c", floorWet: "#0891b2", floorSheet: "#94a3b8", floorTruss: "#64748b", floorTrussCut: "#475569", floorBeam: "#0f172a", floorStrongback: "#ea580c", floorTrimmer: "#2563eb",
 });
 
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);

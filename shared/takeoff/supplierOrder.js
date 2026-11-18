@@ -28,7 +28,7 @@ const GROUPS = Object.freeze([
   ["trimmers", "HD & SILL TR"], ["lintels", "LINTELS"], ["noggins", "NOGGINS"], ["bracing", "BRACING"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"],
   // Floor frame (Sam, 18 Nov 2026): the floor roles are named "floor truss", "floor strongback", "floor beam", "floor trimmer" so they match here first
   // and a floor beam never lands in LINTELS nor a floor trimmer in HD & SILL TR
-  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "TRIMMERS"],
+  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "TRIMMERS"], ["floorsheet", "FLOORING"],
 ]);
 const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", trim: "TRIM", other: "OTHER TIMBER" };
 
@@ -42,7 +42,7 @@ const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", t
 export function memberGroup(role) {
   const r = String(role || "other").toLowerCase().trim();
   const pick = (key) => ({ key, heading: GROUPS.find(([k]) => k === key)[1], rank: GROUPS.findIndex(([k]) => k === key) });
-  if (/^floor /.test(r)) return pick(/truss/.test(r) ? "floortruss" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
+  if (/^floor /.test(r)) return pick(/truss/.test(r) ? "floortruss" : /sheet/.test(r) ? "floorsheet" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
   if (r === "tempbr") return pick("tempbr");
   if (r === "sbscrew") return pick("sbscrew");
   if (/hoop|brac|strap|tension/.test(r)) return pick("bracing");
@@ -144,6 +144,16 @@ export function buildSupplierGroups(items, manualLines = []) {
         const rowKey = `ea|truss|${L}`;
         const row = grp.rows.get(rowKey) || { product: `FLOOR TRUSS ${L ? `${L} mm` : ""}`.trim(), unit: "EA", order: -L, quantity: 0, problem: false, lvl: false, stock: L || null, cutsByLength: new Map(), lmDirect: 0 };
         grp.rows.set(rowKey, row);
+        row.quantity += n; row.problem = row.problem || !!l.problem;
+        continue;
+      }
+      // floor sheets (Sam, 18 Nov 2026): one EA row per sheet product, "STRUCTAFLOR 3600x800x19", counted in sheets
+      if (g.key === "floorsheet") {
+        const name = String(l.description || "FLOOR SHEET");
+        const grp = groups.get(g.key) || { key: g.key, heading: g.heading, rank: g.rank, rows: new Map() };
+        groups.set(g.key, grp);
+        const row = grp.rows.get(`ea|sheet|${name}`) || { product: name, unit: "EA", order: 0, quantity: 0, problem: false, lvl: false, stock: null, cutsByLength: new Map(), lmDirect: 0 };
+        grp.rows.set(`ea|sheet|${name}`, row);
         row.quantity += n; row.problem = row.problem || !!l.problem;
         continue;
       }

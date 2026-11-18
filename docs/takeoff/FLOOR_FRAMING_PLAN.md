@@ -1,6 +1,6 @@
 # HUB: Floor Framing module (implementation plan, no code)
 
-**Status:** Sam answered 18 Nov 2026 (section 0 below, authoritative). **Phase 1 BUILT** on branch `takeoff/floor-framing` (merged with main `88b7233`), local, not pushed; calculation version `takeoff-calc@10`. Phases 2 to 6 not started.
+**Status:** Sam answered 18 Nov 2026 (section 0 below, authoritative). **Phase 1 BUILT** on branch `takeoff/floor-framing` (merged with main `88b7233`), local, not pushed; calculation version `takeoff-calc@10`. **Phase 2 BUILT** on branch `takeoff/floor-p2` (from main `3dab04e`), local, not pushed; calculation version `takeoff-calc@12`. Phases 3 to 6 not started.
 **Owner rule:** simple onsite. Fewest taps, advanced detail hidden, sensible defaults, derive don't ask, accurate counts, one phase at a time.
 **Builds on:** the Hub takeoff Walls function (not the Bestimator repo; its rules are reused as knowledge, not code).
 
@@ -27,6 +27,8 @@
 4. Wet areas drawn on a floor item are allowed and ignored (non-blocking note "Wet areas are used in the sheets phase") until P2.
 5. Truss-end edges with beams are labelled A, B, C (plan, sheet, order notes) instead of outline edge numbers.
 6. Defaults confirmed: beams/trimmers LVL Smart 10 H2 longest 11,000; strongbacks MGP10 H2 longest 6,000.
+
+**P2 decisions, 18 Nov 2026 (Sam approved; built):** waste 5% applied after offcut reuse, rounded up to whole sheets, editable per job; thickness derived from truss centres (Structaflor 19 mm at 450, 22 mm at 600); always a last truss at the edge, flooring cut off at the overhang; sheets 3600x800 default (3600x600 option); wet areas default Scyon, but Scyon sheets are P3, so in P2 wet areas give m² only plus the non-blocking note "Wet area flooring (Scyon, phase 3): X m² — not counted yet". The plan's "minimum 1 spare sheet over 10 m²" rule (7.6 step 5) is NOT built. Built as: `engine/floor/sheets.js` (PACK_FIT_TOLERANCE_MM = 10 implemented as stock length 3610 for the shared allocator with a 5 mm saw cut; a rip strip is a lane, k = floor(790 / width) lanes per sheet), FLOORING order heading, `takeoff-calc@12` (a floor item with an outline gains a sheet count, so saved floor results change). Sheet ends beside a void or wet edge are cut to the edge, not extended to a truss line (plan 7.3 step 2 not built).
 
 **Superseded text below:** section 4 step 4 ("Beam size default per section 12"), section 6.3 ("If the last bay is under 200 mm, warn"), section 7.7's "last bay 150 mm (warn)" column, section 12 Q2 and Q7 recommendations, and the risk row about the last bay. Left in place for the record.
 

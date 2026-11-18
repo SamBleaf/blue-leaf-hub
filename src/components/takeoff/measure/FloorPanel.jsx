@@ -9,6 +9,8 @@
 //   4 Beams        one row per truss-end edge: Beam on/off, size chips 400x63 / 445x63 / Other (the last size used is the next beam's); no size = Incomplete
 //   5 Strongbacks  120 x 35 along truss ends with no beam + mid-span rows from the span rule: a summary line, rows and size under More
 //   6 Trimmers     one chip row per stair void (445x63 default / 400x63)
+//   7 Flooring     Structaflor over the main floor (outline less openings and wet areas): "N sheets (M m² laid, waste W%)"; sheet width, waste % and offcut reuse under More
+//   Wet areas      + Wet area beside the openings: m² only for now (the Scyon sheets are phase 3)
 // =============================================================================
 import { useState } from "react";
 import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
@@ -18,6 +20,7 @@ import { fmtM2 } from "../format.js";
 const m = (mm) => (Number(mm) / 1000).toFixed(2);
 const SB_SIZES = ["90x35", "120x35", "140x35"];
 const CENTRES = [450, 600];
+const SHEET_WIDTHS = [800, 600];
 
 function Chip({ on, onClick, children, disabled, ...p }) {
   return (
@@ -62,7 +65,7 @@ const Line = ({ label, children, testId }) => (
   </div>
 );
 
-export default function FloorPanel({ material, layout, results, floor, voids, canEdit, canDraw, mode, floorDraw, drawing, onDraw, onCancelDraw, onRule, onStrongbackSize, onRemoveShape, onRedrawFloor,
+export default function FloorPanel({ material, layout, results, floor, voids, wets = [], canEdit, canDraw, mode, floorDraw, drawing, onDraw, onCancelDraw, onRule, onStrongbackSize, onRemoveShape, onRedrawFloor,
   orderGroups, onDone, needScale, onScale }) {
   const rules = material?.rules || {};
   const beams = rules.beams && typeof rules.beams === "object" ? rules.beams : {};
@@ -73,6 +76,8 @@ export default function FloorPanel({ material, layout, results, floor, voids, ca
   const ends = (layout?.edges || []).filter((e) => e.kind === "end");
   const stairs = (voids || []).filter((v) => v.stair);
   const [more, setMore] = useState(false);
+  const [moreSheets, setMoreSheets] = useState(false);
+  const sheets = layout?.sheets || null;
   const [otherCentres, setOtherCentres] = useState(false);
   const centres = Number(rules.centresMm ?? 450);
   const span = rules.span === "long" ? "long" : "short";
@@ -116,25 +121,35 @@ export default function FloorPanel({ material, layout, results, floor, voids, ca
 
       {/* 2 Openings */}
       {floor && (
-        <Line label="2 · Openings" testId="openings">
+        <Line label="2 · Openings and wet areas" testId="openings">
           {floorDraw ? (
             <div className="space-y-1">
-              <p className="text-muted" data-floor-hint="">{floorDraw.stair ? "Draw the stair void on the plan" : "Draw the opening on the plan"} {mode === "rect" ? "(tap two opposite corners)." : "(tap each corner, then Finish)."}</p>
+              <p className="text-muted" data-floor-hint="">{floorDraw.wet ? "Draw the wet area on the plan" : floorDraw.stair ? "Draw the stair void on the plan" : "Draw the opening on the plan"} {mode === "rect" ? "(tap two opposite corners)." : "(tap each corner, then Finish)."}</p>
               <Btn kind="ghost" onClick={onCancelDraw}>Cancel</Btn>
             </div>
           ) : (
             <div className="space-y-1">
-              {voids.length === 0 && <p className="text-muted">No openings.</p>}
+              {voids.length === 0 && wets.length === 0 && <p className="text-muted">No openings or wet areas.</p>}
               {voids.map((v) => (
                 <div key={v.m.id} className="flex items-center gap-2" data-floor-void={v.m.id}>
                   <p className="min-w-0 flex-1 truncate text-ink">{v.name}{v.stair ? "" : " (no trimmers)"}</p>
                   {canEdit && <Btn kind="ghost" onClick={() => onRemoveShape(v.m)} aria-label={`Remove ${v.name}`}>Remove</Btn>}
                 </div>
               ))}
+              {wets.map((w) => {
+                const a = (layout?.wets || []).find((x) => x.id === w.m.id)?.areaM2;
+                return (
+                  <div key={w.m.id} className="flex items-center gap-2" data-floor-wet={w.m.id}>
+                    <p className="min-w-0 flex-1 truncate text-ink">{w.name}{a != null ? ` · ${fmtM2(a)} m²` : ""}</p>
+                    {canEdit && <Btn kind="ghost" onClick={() => onRemoveShape(w.m)} aria-label={`Remove ${w.name}`}>Remove</Btn>}
+                  </div>
+                );
+              })}
               {canEdit && canDraw && (
                 <div className="flex flex-wrap gap-2">
                   <Btn onClick={() => onDraw(true)} data-floor-add-stair="">+ Stair void</Btn>
                   <Btn onClick={() => onDraw(false)} data-floor-add-opening="">+ Opening</Btn>
+                  <Btn onClick={() => onDraw(false, true)} data-floor-add-wet="">+ Wet area</Btn>
                 </div>
               )}
             </div>
@@ -225,6 +240,30 @@ export default function FloorPanel({ material, layout, results, floor, voids, ca
         </Line>
       )}
 
+      {/* 7 Flooring (Structaflor over the main floor) */}
+      {floor && totals && (
+        <Line label="7 · Flooring" testId="flooring">
+          <p className="text-ink" data-floor-areas="">Main floor <b>{fmtM2(totals.mainAreaM2)} m²</b>{totals.wetM2 > 0 && <> · wet areas <b>{fmtM2(totals.wetM2)} m²</b>{(layout.wets || []).length > 1 ? ` (${layout.wets.map((w) => `${w.name} ${fmtM2(w.areaM2)}`).join(", ")})` : ""}</>}{totals.openingsM2 > 0 && <> · openings {fmtM2(totals.openingsM2)} m²</>}</p>
+          {sheets ? (
+            <>
+              <p className="text-ink" data-floor-sheets-summary=""><b>{sheets.sheet.name.replace("STRUCTAFLOR", "Structaflor")}</b> · {sheets.summary}</p>
+              {canEdit && <Btn kind="ghost" onClick={() => setMoreSheets((x) => !x)} aria-expanded={moreSheets} data-floor-sheets-more="">{moreSheets ? "Less" : "More"}</Btn>}
+              {moreSheets && (
+                <div className="space-y-2" data-floor-sheets-more-panel="">
+                  <div role="group" aria-label="Sheet size" className="flex flex-wrap items-center gap-2" data-floor-sheet-width="">
+                    <span className="text-xs text-muted">Sheet</span>
+                    {SHEET_WIDTHS.map((w) => <Chip key={w} on={sheets.sheet.widthMm === w} onClick={() => onRule({ sheetWidthMm: w === 800 ? null : w })}>3600 × {w}</Chip>)}
+                  </div>
+                  <NumberField label="Waste %" value={sheets.wastePct} min={0} max={50} onCommit={(n) => onRule({ wastePct: n === 5 ? null : n })} />
+                  <Chip on={sheets.reuseOffcuts} onClick={() => onRule({ reuseOffcuts: sheets.reuseOffcuts ? false : null })} data-floor-reuse="">Reuse offcuts {sheets.reuseOffcuts ? "on" : "off"}</Chip>
+                  <p className="text-[11px] text-muted">{sheets.packedSheets} sheets {sheets.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}{sheets.reuseOffcuts ? `, ${sheets.packedNoReuseSheets} without` : ""}, plus waste, rounded up. Thickness {sheets.sheet.thicknessMm} mm from the truss centres.</p>
+                </div>
+              )}
+            </>
+          ) : <p className="text-muted">No main floor left to sheet.</p>}
+        </Line>
+      )}
+
       {/* the order, as the supplier reads it */}
       {floor && totals && (
         <Line label="Order" testId="order">
@@ -236,7 +275,7 @@ export default function FloorPanel({ material, layout, results, floor, voids, ca
               {orderGroups.map((g) => (
                 <li key={g.key} className="py-1" data-floor-order-group={g.heading}>
                   <p className="text-[11px] font-bold tracking-wide text-ink">{g.heading} <span className="font-normal text-muted">{[g.totalLm ? `${g.totalLm.toFixed(2)} LM` : null, g.totalEa ? `${g.totalEa} EA` : null].filter(Boolean).join(" · ")}</span></p>
-                  {g.rows.map((r) => <p key={`${r.product}|${r.unit}`} className="text-xs text-muted">{r.product} · {r.unit === "EA" ? `${r.quantity} EA` : `${r.cutText} = ${r.totalLm.toFixed(2)} LM`}</p>)}
+                  {g.rows.map((r) => <p key={`${r.product}|${r.unit}`} className="text-xs text-muted">{g.heading === "FLOORING" ? `${r.product} — ${r.quantity} sheets` : <>{r.product} · {r.unit === "EA" ? `${r.quantity} EA` : `${r.cutText} = ${r.totalLm.toFixed(2)} LM`}</>}</p>)}
                 </li>
               ))}
             </ul>

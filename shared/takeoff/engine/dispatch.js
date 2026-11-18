@@ -757,10 +757,8 @@ function runFloorFraming(mat, n, items, ctx, sink) {
   const floors = areas.filter((x) => roleOf(x) === "floor").sort(byId);
   const wets = areas.filter((x) => roleOf(x) === "wet");
   const others = areas.filter((x) => roleOf(x) !== "floor" && roleOf(x) !== "void" && roleOf(x) !== "wet");
-  // Sam, 18 Nov 2026: wet areas drawn on a floor item are allowed and ignored until the sheets phase (P2): a note, never a block
   for (const x of others) { sink.measProblems.set(x.m.id, [...(sink.measProblems.get(x.m.id) || []), "measurement_unused"]); sink.problems.push({ code: "measurement_unused", message: "That area isn't a floor outline or an opening, so the Floor frame can't use it. Remove it.", blocking: true }); }
-  if (!floors.length) { if (!sink.problems.length) sink.problems.push({ code: "floor_outline_missing", message: "Draw the floor outline for this Floor frame item.", blocking: false }); if (wets.length) sink.problems.push({ code: "floor_wet_ignored", message: "Wet areas are used in the sheets phase.", blocking: false }); return []; }
-  if (wets.length) sink.problems.push({ code: "floor_wet_ignored", message: "Wet areas are used in the sheets phase.", blocking: false });
+  if (!floors.length) { if (!sink.problems.length) sink.problems.push({ code: "floor_outline_missing", message: "Draw the floor outline for this Floor frame item.", blocking: false }); return []; }
   if (floors.length > 1) sink.problems.push({ code: "floor_outline_many", message: "A Floor frame item takes one floor outline. Remove the extra outlines, or add another Floor frame item for another floor.", blocking: true });
   const floor = floors[0].m;
   const t = tracedLength(floor, ctx);
@@ -776,7 +774,15 @@ function runFloorFraming(mat, n, items, ctx, sink) {
     voids.push({ id: x.m.id, name: x.m.inputs?.name || "Opening", stair: x.m.inputs?.stair !== false, points: toMm(x.m) });
   }
   voids.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }) || (a.id < b.id ? -1 : 1));
-  const r = computeFloorFraming({ materialId: mat.id, n, rules: mat.rules || {}, outline: toMm(floor), voids, refs: [{ measurementId: floor.id, role: "floor" }] });
+  const wetShapes = [];
+  for (const x of wets) {
+    const wt = tracedLength(x.m, ctx);
+    sink.measProblems.set(x.m.id, wt.problems);
+    if (!wt.cal || wt.cal.id !== t.cal.id) { sink.problems.push({ code: "floor_wet_scale", message: `${x.m.inputs?.name || "A wet area"} is on a different scaled page from the floor outline. Draw it on the same page.`, blocking: true }); continue; }
+    wetShapes.push({ id: x.m.id, name: x.m.inputs?.name || "Wet area", points: toMm(x.m) });
+  }
+  wetShapes.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }) || (a.id < b.id ? -1 : 1));
+  const r = computeFloorFraming({ materialId: mat.id, n, rules: mat.rules || {}, outline: toMm(floor), voids, wets: wetShapes, refs: [{ measurementId: floor.id, role: "floor" }] });
   if (r.layout) r.layout = { ...r.layout, floorMeasurementId: floor.id, origin: { x: origin.x, y: origin.y }, calibrationId: t.cal.id };
   return [r];
 }
