@@ -614,6 +614,17 @@ function supportElements(entries, bbox, polygon) {
         items.push({ id: `${prefix}top2`, kind: "rect", state: "plate2", rect: { x0: Math.max(bbox.x0, 0), x1, y0: bbox.y0 + l.heightMm - l.plateThickMm, y1: bbox.y0 + l.heightMm },
           info: { title: "Second top plate", rows: [["Length", `${fmtMm(x1 - Math.max(bbox.x0, 0))} mm`]], note: l.doubleTopFrom === "wall" ? "This wall's own setting." : "From the item's Double top plate." } });
       }
+      // Sam, 18 Nov 2026: a lintel put up in the roof or floor frame is drawn above the top plate, dashed and labelled
+      for (const o of l.openings || []) {
+        const rl = o.rule;
+        if (!rl || (rl.position !== "roofFrame" && rl.position !== "floorFrame") || !(l.heightMm > 0)) continue;
+        const d = rl.lintel?.status === "sized" || rl.lintel?.status === "typed" ? Number(rl.lintel.depthMm) : 0;
+        const where = rl.position === "roofFrame" ? "roof frame" : "floor frame";
+        const top = bbox.y0 + l.heightMm;
+        items.push({ id: `${prefix}lintel-${o.id}`, kind: "rect", state: "lintelAloft", mark: `${o.label || "Opening"} lintel (${where})`,
+          rect: { x0: o.xLeftMm, x1: o.xRightMm, y0: top, y1: top + (d > 0 ? d : 150) },
+          info: { title: `${o.label || "Opening"} lintel in the ${where}`, rows: [["Sits", `above the top plate, in the ${where}`], ["Size", d > 0 ? String(rl.lintel.section).replace("x", " × ") : "to size"]], note: rl.position === "roofFrame" ? "Check the roof frame layout with the truss supplier." : "Size from the engineer (floor load)." } });
+      }
       // owner rule A: the junction blocks (laminated pairs, 300 mm tall, at 900 centres) between the two junction studs
       for (const j of l.junctions || []) {
         if (!j.blocks?.counted && !j.blocks?.shown) continue;
@@ -910,13 +921,25 @@ export function LintelLoad({ opening, rule, onSet }) {
   const text = l.status === "sized" || l.status === "typed" ? `${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}`
     : l.status === "not_needed" ? "none (this wall doesn't carry the roof; the head is framed with trimmers)" : `not sized (${l.reason})`;
   const save = (next) => onSet(next);
+  // Sam, 18 Nov 2026: where the lintel sits. Shown when it won't fit, and whenever a non-default position is stored (to change it back).
+  const position = inputs.lintelPosition === "roofFrame" || inputs.lintelPosition === "floorFrame" ? inputs.lintelPosition : "underTopPlate";
+  const showPosition = !!l.noFit || position !== "underTopPlate";
+  const setPosition = (v) => { const next = { ...inputs }; if (v === "underTopPlate") delete next.lintelPosition; else next.lintelPosition = v; save(next); };
   return (
     <div className="space-y-1" data-opening-lintel="">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-[44px] w-full items-center justify-between rounded-lg border border-hairline bg-white px-3 text-left text-sm focus-ring">
         <span><span className="text-xs text-muted">Lintel</span><br /><span className="font-medium text-ink" data-lintel-text="">{text}</span></span>
         <span aria-hidden="true">{open ? "▾" : "›"}</span>
       </button>
-      {l.noFit && <p className="text-xs font-semibold text-red-700" data-lintel-nofit="">Won&apos;t fit: it is {Math.round(l.noFit.neededMm)} deep and only {Math.round(l.noFit.freeMm)} mm is free above the head. Lower the {opening.type === "door" ? "door" : "window"}, or confirm the lintel sits in the top plate.</p>}
+      {l.noFit && <p className="text-xs font-semibold text-red-700" data-lintel-nofit="">Won&apos;t fit: it is {Math.round(l.noFit.neededMm)} deep and only {Math.round(l.noFit.freeMm)} mm is free above the head. Lower the {opening.type === "door" ? "door" : "window"}, or put it in the roof or floor frame.</p>}
+      {showPosition && (
+        <div data-lintel-position="">
+          <Chips label="Lintel position" value={position} onChange={setPosition}
+            options={[["underTopPlate", "Under top plate"], ["roofFrame", "In roof frame"], ["floorFrame", "In floor frame"]]} />
+          {position === "roofFrame" && <p className="text-[11px] text-muted">Above the top plate, so it isn&apos;t checked against the space above the head. Check the roof frame layout with the truss supplier.</p>}
+          {position === "floorFrame" && <p className="text-[11px] text-muted">Above the top plate, carrying floor load. The roof tables don&apos;t apply: type the size from the engineer.</p>}
+        </div>
+      )}
       {l.basis && <p className="text-[11px] text-muted" data-lintel-basis="">{l.basis}</p>}
       {open && (
         <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-load="">
@@ -929,7 +952,7 @@ export function LintelLoad({ opening, rule, onSet }) {
             <NumberField label="Pieces" value={dim.plies} min={1} max={4} optional onCommit={(n) => setDim((d) => ({ ...d, plies: n || 1 }))} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade ? { grade: l.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
+            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade || position === "floorFrame" ? { grade: l.grade || "LVL13" } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
             {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; save(next); }}>Use the table</Btn>}
           </div>
           <p className="text-[11px] text-muted">A size you type is used as it is: it isn&apos;t checked against a span table.</p>

@@ -268,6 +268,8 @@ function cleanInputs(kind, inp, tracedLengthMm) {
         ...(i.cavityPocket === "left" || i.cavityPocket === "right" ? { cavityPocket: i.cavityPocket } : {}) } : {}),
       // HUB 031: a lintel the office typed on this opening (beats the span table), and the roof width this opening carries
       ...(i.lintel != null ? { lintel: cleanLintel(i.lintel) } : {}),
+      // Sam, 18 Nov 2026: where the lintel sits when it won't fit under the top plate. Absent = under the top plate.
+      ...(i.lintelPosition != null && i.lintelPosition !== "underTopPlate" ? { lintelPosition: (must(["roofFrame", "floorFrame"].includes(i.lintelPosition), "The lintel position must be under the top plate, in the roof frame or in the floor frame."), i.lintelPosition) } : {}),
       ...(i.loadRlwMm != null && i.loadRlwMm !== "" ? { loadRlwMm: MM(i.loadRlwMm, "Roof width", { min: 100, max: 20000 }) } : {}),
       ...(i.detail != null ? { detail: cleanOpeningDetail(i.detail) } : {}) };
   }

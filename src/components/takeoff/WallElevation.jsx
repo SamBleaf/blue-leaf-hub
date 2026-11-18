@@ -41,6 +41,7 @@ const RECT_STYLE = {
   area: { fill: "#e0f2fe", stroke: "#0369a1" },
   block: { fill: "#a5f3fc", stroke: "#0e7490" },
   plate2: { fill: "#fde68a", stroke: "#92400e" },   // Sam, 18 Nov 2026: a second top plate
+  lintelAloft: { fill: "#ede9fe", stroke: "#6d28d9" }, // Sam, 18 Nov 2026: a lintel put up in the roof or floor frame, above the top plate (dashed)
 };
 const LINE_STYLE = {
   support: { stroke: "#0f766e", width: 3 },
@@ -108,7 +109,8 @@ export default function WallElevation({
     const bb = bboxOf(polygon);
     // the drawing also shows any opening that sticks out past the wall (the engine clips it for areas)
     const ext = bboxOf([...polygon, ...openings.flatMap((o) => [{ x: o.xMm, y: o.sillMm }, { x: o.xMm + o.widthMm, y: o.sillMm + o.heightMm }])
-      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))]);
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+      ...items.filter((it) => it.kind === "rect" && it.state === "lintelAloft").flatMap((it) => [{ x: it.rect.x0, y: it.rect.y0 }, { x: it.rect.x1, y: it.rect.y1 }])]);
     const ew = Math.max(ext.x1 - ext.x0, 1), eh = Math.max(ext.y1 - ext.y0, 1);
     const availW = Math.max(width - PAD.l - PAD.r, 40), availH = Math.max(maxHeightPx - PAD.t - PAD.b, 60);
     const fit = Math.min(availW / ew, availH / eh);
@@ -118,7 +120,7 @@ export default function WallElevation({
     const X = (x) => offX + (x - ext.x0) * s;
     const Y = (y) => PAD.t + (ext.y1 - y) * s;
     return { bb, ext, s, fit, X, Y, width: svgW, height: Math.ceil(eh * s + PAD.t + PAD.b), toMm: (px, py) => ({ x: ext.x0 + (px - offX) / s, y: ext.y1 - (py - PAD.t) / s }) };
-  }, [polygon, openings, width, maxHeightPx, zoom]);
+  }, [polygon, openings, items, width, maxHeightPx, zoom]);
 
   // smallest tappable element at the FITTED scale → whether zoom is worth offering
   const smallestPx = useMemo(() => {
@@ -345,6 +347,15 @@ export default function WallElevation({
               );
             }
             const st = RECT_STYLE[it.state] || RECT_STYLE.occupied;
+            if (it.state === "lintelAloft") {
+              // above the top plate, so not clipped to the wall: pale fill, dashed outline, labelled
+              return (
+                <g key={it.id} data-el-id={it.id} data-el-kind="rect" data-el-state={it.state}>
+                  <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={st.fill} stroke={st.stroke} strokeWidth="1.5" strokeDasharray="6 3" />
+                  {it.mark && <text x={r.x + r.w / 2} y={r.y + r.h / 2 + 4} textAnchor="middle" fontSize="11" fontWeight="700" fill={st.stroke}>{it.mark}</text>}
+                </g>
+              );
+            }
             return (
               <g key={it.id} data-el-id={it.id} data-el-kind="rect" data-el-state={it.state}>
                 <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={st.fill} clipPath={`url(#${clipId})`} />

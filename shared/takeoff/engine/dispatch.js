@@ -181,7 +181,8 @@ function resolveWall(m, ctx) {
     return { id: o.id, label: x.label || null, type: x.type || "window", xMm: x.xMm, sillMm: x.sillMm, widthMm: x.widthMm, heightMm,
       x0: x.xMm, y0: x.sillMm, x1: x.xMm + x.widthMm, y1: x.sillMm + heightMm, detail: x.detail || null,
       fullHeight, cavityLeafMm: Number(x.cavityLeafMm) > 0 ? Number(x.cavityLeafMm) : null, cavityPocket: x.cavityPocket === "left" || x.cavityPocket === "right" ? x.cavityPocket : null,
-      lintel: x.lintel && Number(x.lintel.depthMm) > 0 && Number(x.lintel.breadthMm) > 0 ? x.lintel : null, loadRlwMm: Number(x.loadRlwMm) > 0 ? Number(x.loadRlwMm) : null };
+      lintel: x.lintel && Number(x.lintel.depthMm) > 0 && Number(x.lintel.breadthMm) > 0 ? x.lintel : null, loadRlwMm: Number(x.loadRlwMm) > 0 ? Number(x.loadRlwMm) : null,
+      lintelPosition: x.lintelPosition === "roofFrame" || x.lintelPosition === "floorFrame" ? x.lintelPosition : null };
   });
   const wall = { id: m.id, kind, widthMm, heightMm: inp.heightMm, startHeightMm: inp.startHeightMm, endHeightMm: inp.endHeightMm,
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
@@ -521,7 +522,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       const src = w.openings.find((x) => x.id === o.id) || {};
       const e = expandOpening({ ctx: { ...ruleCtx, studLengthMm: H, loadBearing: wallCarries, ...openingSelectors({ rules, parts, wall: { heightMm: H, loadBearing: wallCarries }, opening: src }) },
         opening: { id: o.id, label: o.label, type: src.type, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: src.sillMm, headMm: src.sillMm + src.heightMm,
-          fullHeight: !!src.fullHeight, cavity: src.cavityLeafMm ? { leafMm: src.cavityLeafMm, pocket: src.cavityPocket || "right" } : null, lintel: src.lintel || null } });
+          fullHeight: !!src.fullHeight, cavity: src.cavityLeafMm ? { leafMm: src.cavityLeafMm, pocket: src.cavityPocket || "right" } : null, lintel: src.lintel || null, lintelPosition: src.lintelPosition || null } });
       ruled.set(o.id, { ...e.rule, cripples: { below: !!e.detail.belowSill?.required, above: !!e.detail.aboveHead?.required } });
       ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
       return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };

@@ -29,6 +29,10 @@ export const TRIMMER_STACK_RULE = Object.freeze([
 export const TRIMMER_STACK_SOURCE = "Blue Leaf default, breakpoints not yet confirmed from AS 1684 (Sam to set)";
 export const trimmerStackCount = (widthMm) => TRIMMER_STACK_RULE.find((r) => widthMm <= r.upToMm).count;
 
+/** Where an opening's lintel sits (Sam, 18 Nov 2026): under the top plate (the default), or up in the roof or the floor frame. */
+export const LINTEL_POSITIONS = Object.freeze(["underTopPlate", "roofFrame", "floorFrame"]);
+/** A cripple shorter than this isn't a stud: solid blocking is counted instead. Blue Leaf default, to confirm. */
+export const MIN_CRIPPLE_MM = 50;
 export const OPENING_RULE_REF = "Opening rules (HUB 031)";
 const EPS = 1e-6;
 const fmt = (n) => Math.round(n).toLocaleString("en-AU");
@@ -82,6 +86,10 @@ export function expandOpening({ opening: o, ctx }) {
 
   // ── head: a lintel carries the roof; trimmers frame the head of a wall that doesn't (and a slider has both) ─────
   const needsLintel = (loadBearing !== false) || !!cavity;
+  // lintel position: a lintel moved up into the roof or floor frame isn't checked against the free height above the head;
+  // the head is then framed with ONE head trimmer and cripples up to the top plate. Only where there is a lintel to move.
+  const position = LINTEL_POSITIONS.includes(o.lintelPosition) ? o.lintelPosition : "underTopPlate";
+  const aloft = position !== "underTopPlate" && needsLintel && !o.fullHeight;
   const stack = trimmerStackCount(W);
   let lintel = { status: "not_needed" };
   let lintelDepthMm = 0;
@@ -91,10 +99,13 @@ export function expandOpening({ opening: o, ctx }) {
     if (typed) {
       pick = { source: "typed", section: `${typed.depthMm}x${typed.breadthMm}`, depthMm: typed.depthMm, breadthMm: typed.breadthMm, plies: typed.plies || 1,
         grade: String(typed.grade || "").toUpperCase() || null, basis: "typed by the office" };
+    } else if (aloft && position === "floorFrame") {
+      // the floor-load lintel tables (SmartLVL 13 guide, lintels supporting floor loads) are not mapped: never invented
+      lintel = { status: "engineer", reason: "size from the engineer (floor load)" };
     } else if (loadBearing === false && cavity) {
       lintel = { status: "unsized", reason: "this wall doesn't carry the roof, so there is no span table to use: type the head size" };
     } else {
-      const r = ctx.lintels({ spanMm: W, maxDepthMm: H - headSB, opening: o });
+      const r = ctx.lintels({ spanMm: W, maxDepthMm: aloft ? null : H - headSB, opening: o });
       if (r.outcome === "ok") pick = { source: "table", section: r.section, depthMm: r.depthMm, breadthMm: r.breadthMm, plies: r.plies || 1, grade: r.grade, basis: r.basis, extraBearingMm: r.extraBearingMm || 0 };
       else lintel = { status: r.outcome === "engineer" ? "engineer" : "unsized", reason: r.reasons?.[0] || r.basis || "needs roof information" };
     }
@@ -102,15 +113,20 @@ export function expandOpening({ opening: o, ctx }) {
       lintelDepthMm = pick.depthMm;
       lintel = { status: pick.source === "typed" ? "typed" : "sized", ...pick };
       const free = H - headSB;
-      if (pick.depthMm > free + EPS) {
+      if (!aloft && pick.depthMm > free + EPS) {
         lintel.noFit = { neededMm: pick.depthMm, freeMm: Math.max(0, free) };
-        notes.push({ code: "lintel_no_fit", blocking: false, message: `${name}: a ${pick.depthMm} deep lintel won't fit. Only ${fmt(Math.max(0, free))} mm is free above the head. Lower the window, or confirm the lintel sits in the top plate.` });
+        notes.push({ code: "lintel_no_fit", blocking: false, message: `${name}: a ${pick.depthMm} deep lintel won't fit. Only ${fmt(Math.max(0, free))} mm is free above the head. Lower the window, or put it in the roof or floor frame.` });
       }
       // bearing: a lintel table may ask for more than the 35 mm minimum on the jacks
       const bearing = Math.min(ends.left.jacks, ends.right.jacks) * sw;
       if (!cavity && pick.extraBearingMm > 0 && bearing < 35 + pick.extraBearingMm) {
         notes.push({ code: "lintel_bearing", blocking: false, message: `${name}: this lintel size needs ${35 + pick.extraBearingMm} mm of bearing; the jacks give ${fmt(bearing)} mm. Add bearing or a bigger jamb.` });
       }
+    }
+    if (aloft) {
+      notes.push({ code: "lintel_aloft", blocking: false, message: position === "roofFrame"
+        ? `${name}: lintel in the roof frame — check the roof frame layout with the truss supplier.`
+        : `${name}: lintel in the floor frame, ${pick ? "check the floor frame layout and the floor load with the engineer." : "size from the engineer (floor load)."}` });
     }
     if (!pick) {
       notes.push({ code: "lintel_not_sized", blocking: false, message: `${name}: lintel not sized (${lintel.reason}). It would be ${fmt(W + jackMm.left + jackMm.right)} mm long; the studs, trimmers and cripples around it are counted.` });
@@ -121,10 +137,11 @@ export function expandOpening({ opening: o, ctx }) {
   }
 
   // ── trimmers ────────────────────────────────────────────────────────────────────────────────────────────────────
-  const wantHeadTrim = !o.fullHeight && (loadBearing === false || !!cavity);
-  const headTrim = wantHeadTrim ? stack : 0;
+  const wantHeadTrim = !o.fullHeight && (loadBearing === false || !!cavity || aloft);
+  // a lintel up in the roof or floor frame leaves the head trimmer carrying only the cripples above it: one, not a stack
+  const headTrim = wantHeadTrim ? (aloft && loadBearing !== false && !cavity ? 1 : stack) : 0;
   const sillTrim = hasSill ? stack : 0;
-  if ((headTrim || sillTrim) && stack > 1) notes.push({ code: "trimmer_stack_default", blocking: false, message: `Wide openings get stacked trimmers (${TRIMMER_STACK_RULE.slice(0, -1).map((r) => `${r.count} up to ${fmt(r.upToMm)}`).join(", ")}, then ${TRIMMER_STACK_RULE[TRIMMER_STACK_RULE.length - 1].count}). ${TRIMMER_STACK_SOURCE}.` });
+  if ((headTrim > 1 || sillTrim) && stack > 1) notes.push({ code: "trimmer_stack_default", blocking: false, message: `Wide openings get stacked trimmers (${TRIMMER_STACK_RULE.slice(0, -1).map((r) => `${r.count} up to ${fmt(r.upToMm)}`).join(", ")}, then ${TRIMMER_STACK_RULE[TRIMMER_STACK_RULE.length - 1].count}). ${TRIMMER_STACK_SOURCE}.` });
 
   // ── members ─────────────────────────────────────────────────────────────────────────────────────────────────────
   const members = [];
@@ -147,18 +164,25 @@ export function expandOpening({ opening: o, ctx }) {
   const belowDed = sillTrim * tt;
   const aboveRegion = H - headSB;
   const lintelKnown = lintel.status === "sized" || lintel.status === "typed" || lintel.status === "not_needed";
-  const aboveDed = lintelDepthMm || headTrim * tt;
+  const aboveDed = aloft ? headTrim * tt : (lintelDepthMm || headTrim * tt);
+  // aloft: the cripples above the head trimmer reach the underside of the top plate; too short to be studs → solid blocking
+  const aloftFree = aboveRegion - aboveDed;
+  const aloftBlock = aloft && aloftFree > EPS && aloftFree < MIN_CRIPPLE_MM;
+  if (aloftBlock) {
+    members.push({ id: "head-blocking", role: "blocking", quantity: 1, lengthFrom: "openingWidth", addMm: jackMm.left + jackMm.right, ...plate });
+    notes.push({ code: "lintel_aloft_blocking", blocking: false, message: `${name}: only ${fmt(aloftFree)} mm above the head trimmer, too short for cripples. Solid blocking is counted instead.` });
+  }
   const detail = {
     source: "explicit", ref: OPENING_RULE_REF, generated: true, members,
     ...(belowMm > EPS ? { belowSill: belowMm - belowDed > EPS ? { required: true, deductionMm: belowDed } : { required: false } } : {}),
-    ...(aboveRegion > EPS ? { aboveHead: lintelKnown && aboveRegion - aboveDed > EPS ? { required: true, deductionMm: aboveDed } : { required: false } } : {}),
+    ...(aboveRegion > EPS ? { aboveHead: (lintelKnown || aloft) && !aloftBlock && aboveRegion - aboveDed > EPS ? { required: true, deductionMm: aboveDed } : { required: false } } : {}),
   };
 
   const rule = {
     source: "rule", ref: OPENING_RULE_REF, loadBearing, widthMm: W, cavity: cavity ? { leafMm: cavity.leafMm, pocket } : null, fullHeight: !!o.fullHeight,
     jambsPerSide: jambs, jambTable: table.outcome === "not_needed" ? null : { outcome: table.outcome, basis: table.basis || null, jambsPerSide: table.jambsPerSide ?? null },
     kings: { left: ends.left.kings, right: ends.right.kings }, jacks: { left: ends.left.jacks, right: ends.right.jacks }, jackLengthMm: headSB,
-    lintel, trimmers: { head: headTrim, sill: sillTrim, stack }, headLevelMm: o.fullHeight ? H + bp : o.headMm, headFromStudBaseMm: headSB, sillFromStudBaseMm: sillSB,
+    lintel, position: aloft ? position : "underTopPlate", trimmers: { head: headTrim, sill: sillTrim, stack }, headLevelMm: o.fullHeight ? H + bp : o.headMm, headFromStudBaseMm: headSB, sillFromStudBaseMm: sillSB,
   };
   return { detail, sides, jackMm, levels, rule, notes, headLenMm: headLen };
 }
