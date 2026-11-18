@@ -5,9 +5,10 @@ import { execSync } from "node:child_process";
 import { WALL_FRAMING_RULES, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { ENGINEER_GRADES, FLOOR_WIDTHS_MM, LOADS_ABOVE, loadsAboveOf, parseLintelText, selectLintel } from "../../shared/takeoff/standards/index.js";
 import { cleanMeasurementInputs, _test } from "../../server/lib/takeoff/takeoffService.mjs";
+import MGP10DATA from "../../shared/takeoff/standards/data/as1684-mgp10-n1n2.js";
 
 let pass = 0, fail = 0;
-function t(name, fn) { try { fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 4).join("\n    ")}`); } }
+function t(name, fn) { try { fn(); pass++; } catch (e) { fail++; console.error(`  ✗ ${name}\n    ${e.stack?.split("\n").slice(0, 25).join("\n    ")}`); } }
 
 // ── fixtures (same shape as takeoff-tc-lintel-position) ──────────────────────────────────────────────────────────
 const product = (id, purpose, over = {}) => ({ id, name: id, isActive: true, methodKey: "linear_stock", methodVersion: 1, rules: {},
@@ -42,12 +43,15 @@ let old = null;
 try { const dir = execSync("mktemp -d").toString().trim(); execSync(`git archive 4367c84 shared | tar -x -C ${dir}`, { stdio: "ignore" }); old = await import(`${dir}/shared/takeoff/standards/index.js`); } catch { /* no such commit here: skipped */ }
 t("roof: every case the old selector answered (size or needs) is byte-identical; only old 'engineer' answers can change", () => {
   if (!old) return;
-  let same = 0, changed = [];
+  let same = 0, restored = 0, changed = [];
   for (const product of ["MGP10", "SmartLVL13"]) for (const windClass of ["N1", "N2", "N3", "N4", undefined]) for (const roofMass of ["sheet", "tile"])
     for (const rlwMm of [1500, 3000, 4500, 6000, 7500, 8000]) for (const spacingMm of [600, 1200, 1300]) for (const spanMm of [600, 1500, 2400, 3300, 4500, 6000, 9000]) {
       const q = { product, roofMass, rlwMm, spacingMm, windClass, spanMm, maxThicknessMm: 90 };
       const a = old.selectLintel(q), b = selectLintel(q);
-      if (a.outcome !== "engineer") { assert.deepEqual(b, a); same++; }
+      // 18 Nov 2026: the MGP10 port had dropped the large single sections that carry a bearing subscript (T18 240x45, ...); with them
+      // restored an MGP10 pick can be a smaller section that still spans. Never a shorter span than asked, never an LVL/product change.
+      if (a.outcome !== "engineer" && product === "MGP10" && JSON.stringify(a) !== JSON.stringify(b)) { assert.equal(b.outcome, "ok"); assert.equal(b.grade, "MGP10"); assert.ok(b.maxSpanMm >= spanMm); assert.ok(b.depthMm * b.plies <= a.depthMm * a.plies, "restored rows are shallower"); restored++; }
+      else if (a.outcome !== "engineer") { assert.deepEqual(b, a); same++; }
       else if (JSON.stringify(a) !== JSON.stringify(b)) { changed.push([a, b]); }
     }
   assert.ok(same > 800, `${same} identical`);
@@ -97,7 +101,7 @@ t("floor width rounds UP to the table's axis (1800/3600/4800), never down: a wid
   assert.match(w(3600).basis, /floor width 3600/);
   assert.match(w(4000).basis, /floor width 4800/);
   assert.match(w(4800).basis, /floor width 4800/);
-  assert.deepEqual([w(1800).section, w(1800).plies, w(3600).section, w(3600).plies, w(4800).section, w(4800).plies], ["240x45", 2, "240x45", 2, "290x45", 2]);
+  assert.deepEqual([w(1800).section, w(1800).plies, w(3600).section, w(3600).plies, w(4800).section, w(4800).plies], ["290x45", 1, "240x45", 2, "290x45", 2]);
 });
 t("floor width over the table's last column → engineer (type the size), never the nearest", () => {
   const r = selectLintel({ ...base, floorWidthMm: 4801 });
@@ -171,6 +175,33 @@ t("server: loadsAbove / floorWidthMm are kept or refused, the typed text parses,
   assert.deepEqual(a.lintel, { depthMm: 240, breadthMm: 45, plies: 2, grade: "LVL13", perEngineer: true });
   assert.deepEqual(cleanMeasurementInputs("opening", { ...open, lintel: { depthMm: 290, breadthMm: 45, plies: 1 } }).lintel, { depthMm: 290, breadthMm: 45, plies: 1 });
   assert.throws(() => cleanMeasurementInputs("opening", { ...open, lintel: { text: "junk" } }), /Type the size/);
+});
+
+// ── review fixes: MGP10 data, bearing, carriesRoof ───────────────────────────────────────────────────────────────
+t("MGP10 lintel tables: every span is a multiple of 100 (a fused 9005 once read as a span), every row has a bearing cell per column", () => {
+  const D = MGP10DATA;
+  for (const id of ["T17", "T18", "T47", "T48"]) for (const r of D.tables[id].rows) {
+    assert.equal(r.extraBearingMm.length, r.maxSpanMm.length, `${id} ${r.size}`);
+    for (const v of r.maxSpanMm) assert.equal(v % 100, 0, `${id} ${r.size} ${v}`);
+  }
+});
+t("Floor + roof, tile, roof 7500, floor 4800: a long opening is not 'sized' as a 170x35", () => {
+  const q = { product: "MGP10", roofMass: "tile", rlwMm: 7500, windClass: "N2", loadsAbove: "floorRoof", floorWidthMm: 4800, maxThicknessMm: 90 };
+  for (const spanMm of [2500, 4000, 6000, 9000]) { const r = selectLintel({ ...q, spanMm }); assert.ok(r.outcome !== "ok" || r.maxSpanMm <= 4000, `${spanMm}: ${r.section} ${r.maxSpanMm}`); }
+});
+t("an MGP10 lower-storey cell with a subscript passes its extra bearing on", () => {
+  // T47 240x35 at roof 4500 / floor 3600 spans 1600 with +5
+  const r = selectLintel({ product: "MGP10", roofMass: "sheet", rlwMm: 4500, windClass: "N2", loadsAbove: "floorRoof", floorWidthMm: 3600, spanMm: 1550, maxThicknessMm: 45, maxDepthMm: 240 });
+  assert.ok(r.outcome === "ok" && r.grade === "MGP10", JSON.stringify(r));
+  const direct = selectLintel({ ...base, rlwMm: 4500, spanMm: 1500, maxThicknessMm: 35 });
+  assert.equal(typeof direct.extraBearingMm, "number");
+});
+t("Above these walls = Floor + roof or Engineer: 'carries roof' = No does not drop the lintel; a non-loadbearing wall still does", () => {
+  for (const la of ["floorRoof", "engineer"]) {
+    const c = run(WIN(), { carriesRoof: false, loadsAbove: la, floorWidthMm: 3600 });
+    assert.notEqual(rule(c).lintel.status, "not_needed", la);
+  }
+  assert.equal(rule(run(WIN(), { carriesRoof: false })).lintel.status, "not_needed", "roof item unchanged");
 });
 
 console.log(`takeoff-tc-loads-above: ${pass} passed, ${fail} failed`);

@@ -28,6 +28,7 @@ import { selectStock, stockLengthsFrom } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { expandOpening } from "./openingRules.js";
+import { loadsAboveOf } from "../standards/index.js";
 import { blockCentresFor, blockCountFor, findJunctions, JUNCTION_BLOCK } from "./junctions.js";
 import { openingSelectors } from "./openingSelectors.js";
 import { supportGrid } from "./supports.js";
@@ -514,7 +515,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const onWall = (msg) => ([...names].some((nm) => msg.startsWith(`${nm}:`) || msg.startsWith(`${nm} `)) ? `${tag} ${msg}` : `${tag}: ${msg}`);
     // HUB 031 (Sam, 17 Nov 2026): the framing around each opening is worked out for you (kings, jacks, cripples above and
     // below at this wall's centres, trimmers, the lintel). An opening with a framing detail of its own keeps it: manual wins.
-    const wallCarries = w.wall.loadBearing ?? (typeof rules.carriesRoof === "boolean" ? rules.carriesRoof : null);
+    // a floor or the engineer above (Loads above) means the wall carries load, whatever "carries roof" says; a wall marked non-loadbearing on its own still wins
+    const wallCarries = w.wall.loadBearing ?? (loadsAboveOf(rules) !== "roof" ? true : typeof rules.carriesRoof === "boolean" ? rules.carriesRoof : null);
     const ruled = new Map();
     const ruleNotes = [];
     if (openings.length && !(autoFraming && plateThick > 0)) autoOff = true;

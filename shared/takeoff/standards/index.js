@@ -60,7 +60,7 @@ function windGate(fam, windClass) {
   return null;
 }
 function storeyGate(storey) {
-  if (storey && storey !== "single_upper") return engineer("lower storey is not built", "with a floor above, jamb studs aren't table-sized: use the engineer's or the supplier's count");
+  if (storey && storey !== "single_upper") return engineer("lower storey is not built", "With a floor above, jamb studs aren't table-sized: use the engineer's or the supplier's count");
   return null;
 }
 
@@ -168,7 +168,7 @@ function selectRoofLintel(q, product) {
     table = q.roofMass === "sheet" ? MGP10.tables.T17 : MGP10.tables.T18;
     page = table.citation.page;
     const col = table.columns.findIndex((c) => c.rlw === rlw && c.spacing === sp);
-    rows = table.rows.map((r) => ({ ...r, span: r.maxSpanMm[col], extra: 0 }));
+    rows = table.rows.map((r) => ({ ...r, span: r.maxSpanMm[col], extra: r.extraBearingMm?.[col] || 0 }));
   } else {
     table = SMARTLVL13.tables["L13-LINTEL"];
     page = `${table.citation.pdfPages.join(" and ")} (guide pp. ${table.citation.guidePages.join(" and ")})`;
@@ -202,7 +202,7 @@ function selectLowerLintel(q) {
     const flw = up([...new Set(t.columns.map((c) => c.flw))].sort((a, b) => a - b), q.floorWidthMm);
     if (rlw != null && flw != null) {
       const col = t.columns.findIndex((c) => c.rlw === rlw && c.flw === flw);
-      const r = pickRow(t.rows.map((x) => ({ ...x, span: x.maxSpanMm[col], extra: 0 })), q);
+      const r = pickRow(t.rows.map((x) => ({ ...x, span: x.maxSpanMm[col], extra: x.extraBearingMm?.[col] || 0 })), q);
       if (r) return okResult("MGP10", t, `${cite("MGP10", t.id, t.citation.page)}, ${q.roofMass} roof, roof width ${rlw}, floor width ${flw} (${tag})`, r, { twoStorey: true });
     }
     why = MGP10_NO_SPAN_NOTE;
