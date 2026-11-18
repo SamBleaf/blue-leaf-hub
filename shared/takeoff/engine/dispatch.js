@@ -630,8 +630,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
     if (w.wall.bracing?.length) {
       const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), L);
       const ref = [{ measurementId: m.id, wallId: m.id, role: "bracing" }];
-      if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm,
-        identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
+      if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm, ripText: b.ply.ripText ? `${tag}: ${b.ply.ripText}` : null,
+        identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}${b.ply.ripText ? ` (${b.ply.ripText})` : ""}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
       if (b.cross) {
         demands.push({ id: demandId(mat.id, "brace-cross-hoop", m.id), materialId: mat.id, role: "hoop iron", kind: "count", unit: "roll", quantity: b.cross.metres / rollM, hoopMetres: b.cross.metres, hoopPart: "cross",
           identity: hoopIdentity, label: `${tag} cross braces: ${b.cross.count} × 2 diagonals = ${b.cross.metres} m of hoop iron`, itemDescription: hoopProduct.name, sourceRefs: ref, provenance: "calculated" });
@@ -1154,6 +1154,11 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       const part = (k) => Number(ds.filter((d) => d.hoopPart === k).reduce((a, d) => a + (d.hoopMetres || 0), 0).toFixed(2));
       const straps = part("straps"), cross = part("cross"), total = Number((straps + cross).toFixed(2));
       l.item = { ...l.item, hoopMetres: total, note: `${total} m of hoop iron${cross ? ` (${straps} m wall straps + ${cross} m cross braces)` : " (wall straps, 2 straps of 0.7 m per 1,200 mm of wall)"} → ${l.quantity} ${l.quantity === 1 ? "roll" : "rolls"} of ${l.hoop.rollM} m` };
+    }
+    if (l.bracing) {
+      // Sam, 18 Nov 2026: a sheet ripped down to a short wall (or the last sheet of a wall) is still ordered as a full sheet; the cut list says so
+      const rips = l.demandIds.map((id) => demById.get(id)?.ripText).filter(Boolean);
+      if (rips.length) l.item = { ...l.item, note: `Ordered as full sheets; ${rips.join("; ")}` };
     }
     if (l.unit === "piece" && n.family === "timber" && l.finishedLengthMm == null && !l.bracing) l.problems.push("A timber line has no stock length.");
     if (l.follower === "battens" || l.follower === "hflashing") {

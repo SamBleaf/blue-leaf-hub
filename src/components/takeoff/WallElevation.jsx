@@ -182,7 +182,7 @@ export default function WallElevation({
     }
     if (bracingHit && !placing) {
       for (const m of bracing) {
-        const x0 = frame.X(m.xMm), x1 = frame.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+        const x0 = frame.X(m.xMm), x1 = frame.X(m.xMm + (m.type === "ply" ? (m.widthMm > 0 && m.widthMm < 1200 ? m.widthMm : 1200) : m.spanMm));
         if (p.x >= Math.min(x0, x1) - 4 && p.x <= Math.max(x0, x1) + 4 && p.y >= frame.Y(frame.bb.y1) - 4 && p.y <= frame.Y(frame.bb.y0) + 4) return { kind: "bracing", id: m.id };
       }
     }
@@ -400,7 +400,7 @@ export default function WallElevation({
           })}
           {/* Sam, 18 Nov 2026: bracing marks: a ply sheet is a green panel the wall's height, a cross brace is two hoop iron diagonals */}
           {bracing.map((m) => {
-            const x0 = F.X(m.xMm), x1 = F.X(m.xMm + (m.type === "ply" ? 1200 : m.spanMm));
+            const x0 = F.X(m.xMm), x1 = F.X(m.xMm + (m.type === "ply" ? (m.widthMm > 0 && m.widthMm < 1200 ? m.widthMm : 1200) : m.spanMm));
             const yTop = F.Y(F.bb.y1), yBot = F.Y(F.bb.y0);
             const sel = m.id === selectedBracingId;
             return (

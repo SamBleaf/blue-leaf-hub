@@ -46,7 +46,7 @@ import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } f
 import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { overrideKeyWallIds } from "../../../shared/takeoff/engine/junctions.js";
-import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
 import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
@@ -1960,6 +1960,13 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
     setBraceSel(r.mark.id);
     setBraceNote(`${bracingMarkText(r.mark, braceHeight)}. Undo takes it off.`);
   }
+  function braceWhole(on) {
+    const r = setPlyWholeWall(inputs, lengthMm, on);
+    if (!r.ok) { setBraceNote(r.error); return; }
+    act.updateWall(wall, { bracing: r.inputs.bracing });
+    setBraceAdd(null); setBraceSel(null);
+    setBraceNote(on ? `Ply whole wall: ${r.sheets} sheet${r.sheets === 1 ? "" : "s"}${r.rippedMm ? `, last ripped to ${r.rippedMm.toLocaleString("en-AU")} mm` : ""}. Undo takes it off.` : "Whole-wall ply taken off. Undo puts it back.");
+  }
   function braceRemove(id) {
     const next = removeBracingMark(inputs, id);
     act.updateWall(wall, { bracing: next.bracing });
@@ -2263,6 +2270,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
                 <h3 className="flex-1 text-sm font-semibold text-ink">Bracing <span className="font-normal text-muted">({braceMarks.length})</span></h3>
                 {canEdit && !braceAdd && <>
                   <Btn kind="primary" onClick={() => { setBraceAdd("ply"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="ply">Add ply sheet</Btn>
+                  <Btn kind={plyWholeWallOn(inputs) ? "secondary" : "primary"} onClick={() => braceWhole(!plyWholeWallOn(inputs))} data-brace-whole-toggle="" aria-pressed={plyWholeWallOn(inputs)}>Ply whole wall: {plyWholeWallOn(inputs) ? "On" : "Off"}</Btn>
                   <Btn kind="primary" onClick={() => { setBraceAdd("cross"); setBraceNote(null); setPlacing(false); showDrawing(); }} data-brace-add="cross">Add cross brace</Btn></>}
               </div>
               {braceAdd && (

@@ -72,7 +72,7 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
-import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
+import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
 import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
@@ -213,6 +213,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [wetMat, setWetMat] = useState(null);              // HUB 031: the Walls item whose "Wet-area walls at 450" mode is on (Select only)
   const wetLast = useRef(null);
   const [braceMat, setBraceMat] = useState(null);          // Sam, 18 Nov 2026: the Walls item whose "Add bracing" mode is on (Select only)
+  const [braceWhole, setBraceWhole] = useState(false);       // Sam, 18 Nov 2026: "Ply whole wall" toggle: a tap covers that wall end to end (tap again to take it off)
   const [braceType, setBraceType] = useState("ply");       // "ply" (1,200 mm sheet) | "cross" (hoop iron cross brace)
   const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
   const [braceNote, setBraceNote] = useState(null);
@@ -1054,10 +1055,35 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const m = measNow(hit.wall.id);
     if (!m) return;
     const name = m.inputs?.name || "Wall";
+    if (braceType === "ply" && braceWhole) {
+      const on = !plyWholeWallOn(m.inputs);
+      const w = setPlyWholeWall(m.inputs, hit.station.lengthMm, on);
+      if (!w.ok) { setMsg({ tone: "warn", text: `${name}: ${w.error}` }); return; }
+      record({ redo: partial({ measurements: [{ ...m, inputs: w.inputs }] }), undo: partial({ measurements: [m] }) });
+      setBraceNote(on ? `${name}: ply whole wall, ${w.sheets} sheet${w.sheets === 1 ? "" : "s"}${w.rippedMm ? `, last ripped to ${fmtMm(w.rippedMm)} mm` : ""}` : `${name}: whole-wall ply taken off`);
+      return;
+    }
     const r = addBracingMark(m.inputs, { type: braceType, atMm: hit.station.stationMm, lengthMm: hit.station.lengthMm, spanMm: braceSpan });
     if (!r.ok) { setMsg({ tone: "warn", text: `${name}: ${r.error}` }); return; }
     record({ redo: partial({ measurements: [{ ...m, inputs: r.inputs }] }), undo: partial({ measurements: [m] }) });
     setBraceNote(`${name}: ${bracingMarkText(r.mark, bracingHeightMm(r.inputs))}`);
+  }
+  /** Ply whole wall on or off for one wall (Select) or for every wall of this item (Add bracing). One edit, one Undo. */
+  function setWholeWalls(list, on) {
+    const redo = [], undo = [];
+    let sheets = 0;
+    for (const w of list) {
+      const m = measNow(w.id);
+      if (!m) continue;
+      const len = pathLengthMm(m.points, calsById.get(m.calibrationId));
+      if (on === plyWholeWallOn(m.inputs)) continue;
+      const r = setPlyWholeWall(m.inputs, len, on);
+      if (!r.ok) { setMsg({ tone: "warn", text: `${m.inputs?.name || "Wall"}: ${r.error}` }); continue; }
+      sheets += r.sheets; redo.push({ ...m, inputs: r.inputs }); undo.push(m);
+    }
+    if (!redo.length) return;
+    record({ redo: partial({ measurements: redo }), undo: partial({ measurements: undo }) });
+    setBraceNote(on ? `Ply whole wall on ${redo.length} wall${redo.length === 1 ? "" : "s"} (${sheets} sheet${sheets === 1 ? "" : "s"})` : `Whole-wall ply taken off ${redo.length} wall${redo.length === 1 ? "" : "s"}`);
   }
   /** Select → a wall → Remove one bracing mark. One Undo puts it back. */
   function removeBrace(m, id) {
@@ -1964,8 +1990,16 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                   <button key={k} type="button" role="radio" aria-checked={braceType === k} onClick={() => setBraceType(k)} data-brace-type={k}
                     className={`min-h-[44px] flex-1 rounded-lg border px-3 text-sm font-medium focus-ring ${braceType === k ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>))}
               </div>
+              {braceType === "ply" && (
+                <div className="space-y-1" data-brace-whole="">
+                  <button type="button" role="switch" aria-checked={braceWhole} onClick={() => setBraceWhole((v) => !v)} data-brace-whole-toggle=""
+                    className={`min-h-[44px] w-full rounded-lg border px-3 text-sm font-medium focus-ring ${braceWhole ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Ply whole wall: {braceWhole ? "On" : "Off"}</button>
+                  {braceWhole && <div className="flex gap-2">
+                    <Btn onClick={() => setWholeWalls(materialWalls(), true)} data-brace-whole-all="">All walls</Btn>
+                    <Btn onClick={() => setWholeWalls(materialWalls(), false)} data-brace-whole-none="">Take off all</Btn></div>}
+                </div>)}
               {braceType === "cross" && <div className="w-48" data-brace-span=""><NumberField label="Cross brace span" unit="mm" value={braceSpan} min={BRACING_RULE.crossSpanMinMm} max={20000} onCommit={(n) => setBraceSpan(n ?? BRACING_RULE.crossSpanDefaultMm)} /></div>}
-              <p className="text-muted">{braceType === "ply" ? "Tap along a wall where each 1,200 mm sheet goes. Its length follows the wall height." : `Tap a wall where each cross brace goes (${braceSpan} mm span, two hoop iron diagonals, 2 tensioners).`} Tap again for the next one.</p>
+              <p className="text-muted">{braceType === "ply" ? (braceWhole ? "Tap a wall to cover it end to end with ply (the last sheet is ripped to fit). Tap it again to take it off." : "Tap along a wall where each 1,200 mm sheet goes. A wall shorter than 1,200 takes one sheet ripped to fit. Its length follows the wall height.") : `Tap a wall where each cross brace goes (${braceSpan} mm span, two hoop iron diagonals, 2 tensioners).`} Tap again for the next one.</p>
               <p data-brace-count="">{braceTotals.ply + braceTotals.cross ? `${braceTotals.ply ? `${braceTotals.ply} ply sheet${braceTotals.ply === 1 ? "" : "s"}` : ""}${braceTotals.ply && braceTotals.cross ? ", " : ""}${braceTotals.cross ? `${braceTotals.cross} cross brace${braceTotals.cross === 1 ? "" : "s"}` : ""} on ${braceTotals.walls} wall${braceTotals.walls === 1 ? "" : "s"}.` : "No bracing yet."}</p>
               {braceNote && <p className="text-[12px] text-muted" data-brace-last="">{braceNote}. Undo takes it off.</p>}
               <Btn kind="primary" onClick={() => { setBraceMat(null); setBraceNote(null); }}>Done</Btn>
@@ -2096,6 +2130,18 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                     {[["on", "On", true], ["off", "Off", false]].map(([k, text, v]) => {
                       const on = sel.inputs?.noHoopIron !== true;
                       return <button key={k} type="button" aria-pressed={on === v} onClick={() => setWallHoopIron(sel, v)}
+                        className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {isWallsItem(selMat) && canEdit && sel.points?.length === 2 && sel.inputs?.kind !== "polygon" && (
+                <div className="space-y-1" data-wall-ply-whole="">
+                  <p className="text-[11px] text-muted">Ply whole wall</p>
+                  <div className="flex gap-2">
+                    {[["on", "On", true], ["off", "Off", false]].map(([k, text, v]) => {
+                      const on = plyWholeWallOn(sel.inputs);
+                      return <button key={k} type="button" aria-pressed={on === v} onClick={() => setWholeWalls([sel], v)} data-ply-whole={k}
                         className={`min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on === v ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>{text}</button>;
                     })}
                   </div>
