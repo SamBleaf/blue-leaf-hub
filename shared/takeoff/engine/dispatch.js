@@ -1091,7 +1091,10 @@ function purchaseLines(mat, n, demands, matKey, sink) {
       if (!isShortPlate(d)) continue;
       const k = identityKey(d.identity);
       if (!stickOf.has(k)) stickOf.set(k, shortPlateStickMm(d.stockPolicy));
-      if (stickOf.get(k) != null) shortSet.add(d.id);
+      const stick = stickOf.get(k);
+      // a piece that cannot fit the stick with its kerf/end trim (product max under 6,000) stays on the normal grid path
+      const kerf = d.stockPolicy.kerfMm > 0 ? d.stockPolicy.kerfMm : SHORT_PLATE_KERF_MM;
+      if (stick != null && d.lengthMm + kerf + (d.stockPolicy.endTrimMm > 0 ? d.stockPolicy.endTrimMm : 0) <= stick + EPS_MM) shortSet.add(d.id);
     }
     const pooledDemands = linear.filter((d) => shortSet.has(d.id)).map((d) => pooledPlate(d, stickOf.get(identityKey(d.identity))));
     for (const d of pooledDemands) demById.set(d.id, d);
@@ -1265,6 +1268,12 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     const leftMm = Math.max(0, Math.round(sticks * stickMm - usedMm - ds.length * kerfMm));
     const spare = sparePct ? Math.ceil(sticks * sparePct / 100 - 1e-9) : 0;
     const longest = ds[0]?.stockPolicy?.lengthMm === stickMm && stickMm < SHORT_PLATE_STICK_MM;
+    // the line's roles name every plate role pooled into it (top and bottom), the sticks shared out by length
+    if (l.roles && usedMm > 0) {
+      const byRole = {};
+      for (const d of ds) byRole[d.role || "other"] = (byRole[d.role || "other"] || 0) + d.lengthMm;
+      l.roles = Object.fromEntries(Object.entries(byRole).map(([r, mm]) => [r, Math.round(sticks * mm / usedMm * 100) / 100]));
+    }
     l.shortPlatePool = { pieces: ds.length, sticks, stickMm, offcutMm: leftMm, kerfMm, ...(spare ? { spare, sparePct } : {}) };
     l.item = { ...l.item, note: [`${ds.length} short plate${ds.length === 1 ? "" : "s"} (under ${fmt(SHORT_PLATE_BELOW_MM)} mm) pooled across the walls and cut from ${sticks} × ${fmt(stickMm)} mm stick${sticks === 1 ? "" : "s"}, ${kerfMm} mm saw cut each, ${fmt(leftMm)} mm of offcut left`,
       longest ? `${fmt(stickMm)} mm is this product's longest available length (under ${fmt(SHORT_PLATE_STICK_MM)} mm)` : null,
@@ -1479,6 +1488,7 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       status: { quantity: quantityStatus, installation: installs.includes("source-pending") ? "source-pending" : installs[0] || "unspecified", procurement },
       problems: [...blocking, ...advisory], explain: methodResults.flatMap((r) => r.explain || []),
       layouts: methodResults.map((r) => r.layout).filter(Boolean), demands, allocation: pl.allocation, appendix: pl.appendix,
+      ...(pl.lines.find((l) => l.shortPlatePool) ? { shortPlatePool: pl.lines.find((l) => l.shortPlatePool).shortPlatePool } : {}),
     };
     out.lines.push(...pl.lines);
     if (pooled.length && n) pool.push({ mat, n, matKey, demands: pooled, key: followerKey || depKey, blocking, advisory, measCodes, contribOf, resById, ownLines: pl.lines });

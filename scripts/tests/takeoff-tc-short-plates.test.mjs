@@ -229,7 +229,7 @@ await t("site appendix PDF: a stick-by-stick list (which cuts come from each sti
 await t("Walls line: names the short plates and their sticks ('12 short plates from 4 × 6.0 m sticks'); nothing when there are none", () => {
   const { c } = run(WORKED);
   const totals = wallFramingTotals(c.materialResults.walls);
-  assert.deepEqual(totals.shortPlates, { pieces: 12, sticks: 4, stickMm: 6000 });
+  assert.deepEqual(totals.shortPlates, { pieces: 12, sticks: 4, stickMm: 6000, spare: 0 });
   assert.match(wallFramingText(totals, "Walls"), /top plate 9\.85 m · 12 short plates from 4 × 6\.0 m sticks · /);
   assert.ok(!("shortPlates" in wallFramingTotals(run([["w", 5000]]).c.materialResults.walls)));
   assert.doesNotMatch(wallFramingText(wallFramingTotals(run([["w", 5000]]).c.materialResults.walls), "Walls"), /short plate/);
@@ -239,6 +239,23 @@ await t("Walls line: names the short plates and their sticks ('12 short plates f
 await t("the double top plate's second layer is pooled too (4 plates per wall)", () => {
   const { c } = run([["w", 2000]], { rules: { doubleTopPlate: true } });
   assert.deepEqual([pooledLine(c).shortPlatePool.pieces, pooledLine(c).quantity], [3, 2], "3 × 2,000 + 15 = 6,015 does not fit one stick");
+});
+
+await t("a short plate that cannot fit a product's longest stock with its kerf stays on its own line (no blocking error)", () => {
+  for (const [w, max] of [[2999, 3000], [2998, 3000], [2700, 2700]]) {
+    const { c } = run([["w", w]], { spec: READY({ stock: { maxMm: max, unavailableMm: [] } }) });
+    assert.equal(pooledLine(c), undefined, `${w}/${max} is not pooled`);
+    assert.deepEqual(ownLines(c), [[2, max]], `${w}/${max} keeps its own stock line`);
+    assert.equal((c.materialResults.walls.problems || []).filter((p) => p.blocking).length, 0, `${w}/${max} has no blocking problem`);
+  }
+  const { c } = run([["w", 2995]], { spec: READY({ stock: { maxMm: 3000, unavailableMm: [] } }) });
+  assert.ok(pooledLine(c), "2995 in 3000 stock still pools");
+});
+
+await t("the pooled line names every plate role it holds, and the Walls line shows the spare sticks", () => {
+  const { c } = run([["w", 2900]], { rules: { shortPlateSparePct: 50 } });
+  assert.deepEqual(Object.keys(pooledLine(c).roles).sort(), ["bottom-plate", "top-plate"]);
+  assert.match(wallFramingText(wallFramingTotals(c.materialResults.walls), "Walls"), /from 1 × 6\.0 m stick \+ 1 spare/);
 });
 
 console.log(`takeoff-tc-short-plates: ${pass} passed, ${fail} failed`);
