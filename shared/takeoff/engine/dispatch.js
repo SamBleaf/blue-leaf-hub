@@ -21,7 +21,7 @@ import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js"
 import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
-import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
+import { STOCK_MAX_UNSET_NOTE, framingDetailMissing, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
@@ -44,11 +44,14 @@ const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pa
 export const JOB_GENERATED_LIMIT = 20000;
 const fmt = (mm) => formatMm(mm, 1);
 /**
- * An opening's own framing detail "wins" over the automatic framing only once something has been ENTERED in it: its members
- * (even an explicit empty list) or an answered below-sill / above-head region. A bare stub (just the source chip, or a
- * reference typed with nothing else) counts nothing, so it must not switch the automatic kings, jacks and lintel off.
+ * An opening's own framing detail "wins" over the automatic framing only when it is COMPLETE by the engine's own check
+ * (timber.js framingDetailMissing: source, reference, regions answered, members listed, each member with a length and
+ * product). Any unfinished detail, whatever its shape (even members: [] with no reference), is ignored for counting: the
+ * automatic rules frame the opening and a note says the override isn't used. Sam, 18 Nov 2026 (W1 with a half-ticked detail).
  */
-const isEnteredDetail = (d) => !!d && typeof d === "object" && (Array.isArray(d.members) || typeof d.belowSill?.required === "boolean" || typeof d.aboveHead?.required === "boolean");
+const detailComplete = (d, levels) => !!d && typeof d === "object" && framingDetailMissing(d, levels).length === 0;
+/** Has anything been put in a stored detail (a bare {} says nothing, so needs no "unfinished" note)? */
+const detailTouched = (d) => !!d && typeof d === "object" && Object.values(d).some((v) => v !== null && v !== undefined && v !== "" && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length));
 
 /** Measurement kinds each generic method READS. Anything else assigned to the material would be silently ignored —
  *  so it is refused by the server and flagged by the engine (never dropped). */
@@ -454,6 +457,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
   const seen = new Set();
   const once = (p) => { const k = `${p.blocking !== false}|${p.message}`; if (seen.has(k)) return false; seen.add(k); return true; };
+  let autoOff = false; // some wall has openings but the automatic framing can't run for this item
   const notCounted = []; // openings with no framing detail, so no lintel, jacks or trimmers: { name, tag, measurementId, openingId }
   const noMax = new Set(); // the parts with no longest length (studs on a new Walls item: Sam stated none)
   // walls in a fixed order (by their names), so the notes and every line read the same whatever order they were traced
@@ -508,13 +512,15 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const wallCarries = w.wall.loadBearing ?? (typeof rules.carriesRoof === "boolean" ? rules.carriesRoof : null);
     const ruled = new Map();
     const ruleNotes = [];
+    if (openings.length && !(autoFraming && plateThick > 0)) autoOff = true;
     const framed = autoFraming && plateThick > 0 ? openings.map((o) => {
-      if (o.detail && isEnteredDetail(o.detail)) return o;
+      if (o.detail && detailComplete(o.detail, { sillMm: o.sillMm, headMm: Math.min(o.headMm, H), studLengthMm: H })) return o;
+      if (detailTouched(o.detail)) ruleNotes.push({ code: "framing_override_unfinished", blocking: false, message: `${o.label} has an unfinished framing override that isn't used. Finish it or clear it.`, openingId: o.id });
       const src = w.openings.find((x) => x.id === o.id) || {};
       const e = expandOpening({ ctx: { ...ruleCtx, studLengthMm: H, loadBearing: wallCarries, ...openingSelectors({ rules, parts, wall: { heightMm: H, loadBearing: wallCarries }, opening: src }) },
         opening: { id: o.id, label: o.label, type: src.type, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: src.sillMm, headMm: src.sillMm + src.heightMm,
           fullHeight: !!src.fullHeight, cavity: src.cavityLeafMm ? { leafMm: src.cavityLeafMm, pocket: src.cavityPocket || "right" } : null, lintel: src.lintel || null } });
-      ruled.set(o.id, e.rule);
+      ruled.set(o.id, { ...e.rule, cripples: { below: !!e.detail.belowSill?.required, above: !!e.detail.aboveHead?.required } });
       ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
       return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };
     }) : openings;
@@ -690,6 +696,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // two calibrations of one page that really disagree: junctions and corners on that page are not worked out, said in a note
   for (const k of jPlan.skipped) sink.problems.push({ code: "junction_calibration_conflict", message: `Page ${Number(k.pageIndex) + 1}: the walls on it are calibrated to different scales, so their junctions and corners weren't worked out. Check the calibration.`, blocking: false, refs: k.wallIds.map((id) => ({ measurementId: id })) });
   for (const c of jPlan.corners) if (c.multi) sink.problems.push({ code: "wall_corner_unclear", message: `${c.wallIds.map((id) => jWallName(id)).join(", ")} all end at one point: no corner stud is added there. Check it on the plan.`, blocking: false, refs: c.wallIds.map((id) => ({ measurementId: id })) });
+  if (autoOff) {
+    sink.problems.push({ code: "framing_auto_unavailable", blocking: false, framingGap: true,
+      message: autoFraming ? "Lintels, jacks and trimmers aren't worked out automatically: the plates section has no width. Set the Plates section (e.g. 90 × 45) in Setup and they are counted for you."
+        : "Opening framing is switched off for this item, so lintels, jacks and trimmers are only counted from a framing detail you finish on each opening. Turn automatic opening framing back on in Setup to have them worked out." });
+  }
   if (notCounted.length) {
     // "D1, W1"; a label on two walls is named with its wall ("W1 on Wall 1, W1 on Wall 2")
     const twice = new Set(notCounted.map((o) => o.name).filter((nm, i, all) => all.indexOf(nm) !== i));

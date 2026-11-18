@@ -664,11 +664,14 @@ function wallOpenings(raw, wallLengthMm, studLengthMm, datumMm, clip = null) {
   return out;
 }
 
-function openingFraming(ctx, o, removed, kept, w) {
-  const d = o.detail;
+/**
+ * What a stored framing detail still lacks to be COMPLETE (an empty list = complete): the engine's own check, shared with
+ * the opening-rules gate in dispatch.js (an unfinished detail is ignored there and the automatic framing is used).
+ * `levels` = { sillMm, headMm, studLengthMm } of the opening in the stud frame.
+ */
+export function framingDetailMissing(d, levels) {
   const missing = [];
-  const out = { demands: [], explain: [], missing };
-  const regions = [["belowSill", "below-sill", o.sillMm], ["aboveHead", "above-head", w.studLengthMm - o.headMm]];
+  const regions = [["belowSill", "below-sill", levels.sillMm], ["aboveHead", "above-head", levels.studLengthMm - levels.headMm]];
   if (!d || typeof d !== "object") missing.push("its framing detail");
   else {
     if (!DETAIL_SOURCES.includes(d.source)) missing.push("the detail source (reviewed detail or explicit quantities)");
@@ -679,7 +682,25 @@ function openingFraming(ctx, o, removed, kept, w) {
       else if (d[key].required && !isFiniteNumber(d[key].deductionMm)) missing.push(`the ${name} deduction`);
     }
     if (!Array.isArray(d.members)) missing.push("its kings, jacks, trimmers, lintel and sill (or an explicit empty list)");
+    else if (!missing.length) {
+      // a member with no length, or no product, is still a draft (explicitMember returns the same two gaps)
+      for (const m of d.members) {
+        if (!m || typeof m !== "object") continue;
+        const id = text(m.id);
+        if (m.lengthMm === undefined && m.lengthFrom === undefined) missing.push(`${id} length`);
+        else if (m.sameAsStud !== true && !(m.identity && typeof m.identity === "object")) missing.push(`${id} product (section, grade, treatment)`);
+      }
+    }
   }
+  return missing;
+}
+
+function openingFraming(ctx, o, removed, kept, w) {
+  const d = o.detail;
+  const out = { demands: [], explain: [], missing: [] };
+  const missing = out.missing;
+  missing.push(...framingDetailMissing(d, { sillMm: o.sillMm, headMm: o.headMm, studLengthMm: w.studLengthMm }));
+  const regions = [["belowSill", "below-sill", o.sillMm], ["aboveHead", "above-head", w.studLengthMm - o.headMm]];
   const members = [];
   if (!missing.length) {
     const lengths = { stud: w.studLengthMm, openingWidth: o.xRightMm - o.xLeftMm, headLevel: o.headMm, sillLevel: o.sillMm };

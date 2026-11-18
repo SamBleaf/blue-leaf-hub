@@ -47,7 +47,7 @@ import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { overrideKeyWallIds } from "../../../shared/takeoff/engine/junctions.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
-import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -985,6 +985,21 @@ const ENGINE_MEMBER = /\bm(\d+) (length|product)/g;
  * member row stays here as a draft and is never counted. The engine's own verdict is shown — quantities only,
  * never a design check.
  */
+/** "Framed automatically": what the opening rules produced, in plain bullets (kings, jacks, cripples, trimmers, lintel). */
+function ruleBullets(r) {
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const side = (a) => (a.left === a.right ? `${a.left} each side` : `${a.left} left, ${a.right} right`);
+  const out = [`Kings: ${side(r.kings)}`];
+  if (r.jacks.left || r.jacks.right) out.push(`Jacks: ${side(r.jacks)}`);
+  if (r.cripples?.below || r.cripples?.above) out.push(`Cripples: ${[r.cripples.below && "below the sill", r.cripples.above && "above the head"].filter(Boolean).join(" and ")}, at this wall's centres`);
+  if (r.trimmers.head || r.trimmers.sill) out.push(`Trimmers: ${[r.trimmers.head && `${r.trimmers.head} at the head`, r.trimmers.sill && `${r.trimmers.sill} at the sill`].filter(Boolean).join(", ")}`);
+  const l = r.lintel;
+  if (l.status === "sized" || l.status === "typed") out.push(`Lintel: ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  else if (l.status === "unsized" || l.status === "engineer") out.push(`Lintel: not sized yet (${l.reason})`);
+  else if (l.status === "not_needed") out.push("Lintel: not needed");
+  return out;
+}
+
 function FramingDetail({ opening, stud, canEdit, onSave }) {
   const uid = useId();
   const stored = opening.rec.inputs?.detail || null;
@@ -1024,9 +1039,26 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   const walls = (stud?.result?.methodKey || stud?.material?.methodKey) === "wall_framing";
   const name = opening.label || fr?.label || "this opening";
   const onlyDetail = (fr?.missing || []).length === 1 && fr.missing[0] === "its framing detail";
+  const touched = !!stored && typeof stored === "object" && Object.values(stored).some((v) => v !== null && v !== undefined && v !== "" && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length));
+  const auto = !!fr?.rule; // the rules framed this opening (no complete detail of its own)
+  const unfinished = auto && touched; // a stored detail that isn't complete: ignored for counting
+  const [open, setOpen] = useState(touched);
+  const clearDetail = () => { setS(framingFromStored(null)); onSave(null); };
   const status = !stud ? null : !fr ? <p className="text-xs text-muted" data-framing-state="none">The studs aren&apos;t calculated on this wall yet — finish the wall first.</p>
-    : fr.rule && !(Array.isArray(stored?.members) || typeof stored?.belowSill?.required === "boolean" || typeof stored?.aboveHead?.required === "boolean")
-      ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="auto">Framing worked out automatically at this wall&apos;s centres. Fill in the detail below only to replace it.</p>
+    : auto ? (
+      <div className="space-y-2" data-framing-state={unfinished ? "unfinished" : "auto"}>
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framed-automatically="">
+          <p className="font-semibold">Framed automatically</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">{ruleBullets(fr.rule).map((t) => <li key={t}>{t}</li>)}</ul>
+        </div>
+        {unfinished && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-unfinished="">
+            <p>{name} has an unfinished framing override that isn&apos;t used — finish it or clear it.</p>
+            {canEdit && <div className="mt-1 flex gap-2"><Btn onClick={() => setOpen(true)}>Finish</Btn><Btn kind="ghost" onClick={clearDetail}>Clear</Btn></div>}
+          </div>
+        )}
+      </div>
+    )
     : fr.complete ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="complete">Framing entered — counted as quantities only, not checked as a design.</p>
       : walls && onlyDetail ? <p className="rounded-lg bg-page px-3 py-2 text-xs text-ink" data-framing-state="not-counted">Lintels, jacks and trimmers at {name} aren&apos;t counted.</p>
         : walls ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Lintels, jacks and trimmers at {name} aren&apos;t counted until the detail is complete. It still needs {(fr.missing || []).map(engineText).join("; ")}.</p>
@@ -1053,12 +1085,10 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
       </div>
     );
   };
-  return (
-    <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
-      <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
-      <p className="text-[11px] text-muted">{fr?.rule && !stored?.source ? "Worked out from this wall's own rules. Choose a source below only to replace it with a reviewed detail or your own quantities." : "Kings, jacks, trimmers, lintel and sill are never guessed — they come only from this detail."}</p>
-      {status}
-      <Chips label={fr?.rule && !stored?.source ? "Replace with" : "Framing comes from"} value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
+  const editor = (
+    <>
+      <p className="text-[11px] text-muted">Kings, jacks, trimmers, lintel and sill are never guessed — an override comes only from a reviewed detail or your own quantities. Until it is complete the automatic framing is used.</p>
+      <Chips label={auto ? "Replace with" : "Framing comes from"} value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
       {s.source && (
         <>
           <CommitText label={s.source === "reviewed-detail" ? "Detail reference (needed)" : "Reference (optional)"} value={s.ref} maxLength={120} onCommit={(v) => change((x) => ({ ...x, ref: v }))} />
@@ -1112,9 +1142,21 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
               )}
             </div>
           </fieldset>
-          {stored && <Btn kind="ghost" onClick={() => { setS(framingFromStored(null)); onSave(null); }}>Clear the framing detail</Btn>}
+          {stored && <Btn kind="ghost" onClick={clearDetail}>Clear the framing detail</Btn>}
         </>
       )}
+    </>
+  );
+  return (
+    <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
+      <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
+      {status}
+      {auto || touched ? (
+        <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="space-y-2" data-framing-override="">
+          <summary className="min-h-[44px] cursor-pointer py-3 text-xs font-medium text-primary">Override framing</summary>
+          <div className="space-y-2">{editor}</div>
+        </details>
+      ) : editor}
     </section>
   );
 }
@@ -2388,7 +2430,6 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
-              {ruleLayout && <p className="text-xs text-ink" data-opening-rule="">Framing worked out: {openingRuleText(ruleLayout)} A framing detail typed below replaces it.</p>}
               {ruleLayout && canEdit && <LintelLoad key={`lintel-${selOpening.id}-${draftReset}`} opening={selOpening} rule={ruleLayout.rule} onSet={(next) => act.setOpeningInputs(selOpening.rec, next)} />}
               {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}

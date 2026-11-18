@@ -141,10 +141,12 @@ t("a detail with something entered still wins (manual beats automatic): members 
   assert.equal(l.openings.find((x) => x.id === "o").rule, undefined);
 });
 
-t("an incomplete detail with a region answered still wins and is still reported, never guessed", () => {
+t("an incomplete detail with a region answered no longer wins: the automatic framing is used and the note says so (takeoff-calc@9)", () => {
   const base = cavityConvert(door, "left", LEN).inputs;
-  const { res } = run({ ...base, detail: { source: "reviewed-detail", belowSill: { required: false } } });
-  assert.ok(res.problems.some((p) => p.code === "opening_framing_not_counted" || /aren't counted/.test(p.message)));
+  const { res, l } = run({ ...base, detail: { source: "reviewed-detail", belowSill: { required: false } } });
+  assert.ok(l.openings.find((x) => x.id === "o").rule);
+  assert.ok(res.problems.some((p) => p.code === "framing_override_unfinished"));
+  assert.ok(!res.problems.some((p) => p.code === "opening_framing_not_counted"));
 });
 
 t("a door width outside 300–1,500 is refused on toggle-on (the server would reject it)", () => {

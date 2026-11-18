@@ -39,7 +39,7 @@ const nogs = (c, wallId) => WR(c).demands.filter((d) => d.identity.component ===
 // ══ Step 1: per-wall stud centres ═══════════════════════════════════════════════════════════════════════════════
 t("constants: wet-area centres are 450 (Sam, 17 Nov 2026) and the calculation is stamped @5", () => {
   assert.equal(WET_WALL_CENTRES_MM, 450);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@8$/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/);
   assert.ok(NOTE_CODES.includes("wall_centres_ignored"));
 });
 
