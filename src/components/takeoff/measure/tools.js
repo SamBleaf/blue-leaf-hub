@@ -736,6 +736,7 @@ export function cavityDefaultSide(inputs, wallLenMm, others = []) {
 export function cavityConvert(inputs, side, wallLenMm, others = []) {
   const w = Number(inputs?.widthMm);
   if (!(w > 0)) return { error: "Enter the door width first." };
+  if (w < 300 || w > 1500) return { error: "Door width must be between 300 and 1,500 mm. Change the width first." };
   const pocket = side === "left" || side === "right" ? side : cavityDefaultSide(inputs, wallLenMm, others);
   const next = cavityInputs(inputs, w, inputs.xMm, pocket);
   return { inputs: next, warning: cavityWarning(next, wallLenMm, others) };

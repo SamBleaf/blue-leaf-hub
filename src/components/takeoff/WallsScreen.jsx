@@ -1056,9 +1056,9 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   return (
     <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
       <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
-      <p className="text-[11px] text-muted">Kings, jacks, trimmers, lintel and sill are never guessed — they come only from this detail.</p>
+      <p className="text-[11px] text-muted">{fr?.rule && !stored?.source ? "Worked out from this wall's own rules. Choose a source below only to replace it with a reviewed detail or your own quantities." : "Kings, jacks, trimmers, lintel and sill are never guessed — they come only from this detail."}</p>
       {status}
-      <Chips label="Framing comes from" value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
+      <Chips label={fr?.rule && !stored?.source ? "Replace with" : "Framing comes from"} value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
       {s.source && (
         <>
           <CommitText label={s.source === "reviewed-detail" ? "Detail reference (needed)" : "Reference (optional)"} value={s.ref} maxLength={120} onCommit={(v) => change((x) => ({ ...x, ref: v }))} />
@@ -1928,7 +1928,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       act.updateOpening(o.rec, { sillMm: v, heightMm: h });
       return;
     }
-    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v, ...(field === "type" && v !== "door" ? { cavityLeafMm: undefined, cavityPocket: undefined } : {}) });
+    // leaving "door" while a slider: back to the door's own width at the door's position (same as Cavity slider off)
+    if (field === "type" && v !== "door" && cur.cavityLeafMm > 0) {
+      act.setOpeningInputs(o.rec, { ...cavityOff(cur), type: v });
+      return;
+    }
+    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v });
   }
   /** The opening sheet's Full height / Cavity slider chips. */
   function onOpeningFlag(o, flag, arg) {

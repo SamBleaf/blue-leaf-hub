@@ -147,5 +147,11 @@ t("an incomplete detail with a region answered still wins and is still reported,
   assert.ok(res.problems.some((p) => p.code === "opening_framing_not_counted" || /aren't counted/.test(p.message)));
 });
 
+t("a door width outside 300–1,500 is refused on toggle-on (the server would reject it)", () => {
+  assert.ok(cavityConvert({ ...door, widthMm: 1800 }, "right", LEN).error);
+  assert.ok(cavityConvert({ ...door, widthMm: 250 }, "right", LEN).error);
+  assert.ok(cavityConvert({ ...door, widthMm: 1500 }, "right", LEN).inputs);
+});
+
 console.log(`takeoff-tc-cavity-door: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
