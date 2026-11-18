@@ -140,7 +140,7 @@ try { const dir = execSync("mktemp -d").toString().trim(); execSync(`git archive
 t("openings without the field: results byte-identical to origin/main (and a typed or chip-sized lintel too)", () => {
   if (!oldEngine) return;
   let n = 0;
-  for (const rules of [ROOF, { ...ROOF, carriesRoof: false }, {}]) for (const ms of [SAM(), SAM({ loadRlwMm: 1500 }), SAM({ lintel: { depthMm: 90, breadthMm: 45, plies: 1 } })]) {
+  for (const rules of [ROOF, { ...ROOF, carriesRoof: false }, {}]) for (const ms of [SAM(), SAM({ loadRlwMm: 1500 }), SAM({ lintel: { depthMm: 90, breadthMm: 45, plies: 1, grade: "LVL13" } })]) {  // typed with its own grade: a gradeless typed lintel now takes the item's lintel product (takeoff-tc-framing-visible)
     const mk = (ws) => JSON.stringify(ws.computeWorkspace(snap([walls(READY(), { ...WALL_FRAMING_RULES, ...rules })], ms, [onW("w")])));
     const a = mk(oldEngine), b = mk({ computeWorkspace });
     // the only permitted difference is the new "put it in the roof or floor frame" wording and the rule's position

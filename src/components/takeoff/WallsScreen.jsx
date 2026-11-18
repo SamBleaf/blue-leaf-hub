@@ -72,7 +72,7 @@ const TONE = { ok: "bg-emerald-50 text-emerald-800 border-emerald-200", warn: "b
 const ROLE_LABEL = {
   sheet: "Sheets", panel: "Panels", "aac-panel": "AAC panels", "course-board": "Course boards", "vertical-board": "Vertical boards", "board-lm": "Random-length boards",
   support: "Supports", stud: "Studs", king: "King studs", jack: "Jack studs", trimmer: "Trimmers", lintel: "Lintels", "sill trimmer": "Sill trimmers",
-  "head trimmer": "Head trimmers", cripple: "Cripple studs", sill: "Sills", "below-sill": "Below-sill pieces", "above-head": "Above-head pieces", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
+  "head trimmer": "Head trimmers", cripple: "Cripple studs", sill: "Sills", "below-sill": "Cripples below sill", "above-head": "Cripples above head", "head block": "Head blocking", "bottom-plate": "Bottom plate", "top-plate": "Top plate", "top-2-plate": "Second top plate", noggin: "Noggins",
   "horizontal-joint": "Horizontal joint strips", "vertical-joint": "Vertical joint strips", rail: "Rails", "control-joint": "Control joints",
   batten: "Battens", "h-flashing": "H-flashing", "foam-tape": "Foam tape",
   coating: "Coating (net finish area)", basecoat: "Basecoat (net finish area)", "finish-coat": "Finish coat (net finish area)", "fixing-support-to-frame": "Support fixings",
@@ -264,6 +264,45 @@ function demandsForWall(result, wallId, tag, { ownerOnly = false } = {}) {
   return (result?.demands || []).filter((d) => (ownerOnly && (d.unit === "sheet" || d.kind === "sheet") ? onWall(d.sourceRefs?.[0]) : (d.sourceRefs || []).some(onWall)));
 }
 
+/**
+ * One opening's automatic framing as elevation items, from the engine layout (opening rule + removed stations): jacks to the
+ * head, cripples below the sill and above the head, the stacked sill trimmers, the head trimmer(s) and, under the top plate,
+ * the lintel. Heights run from the stud base (top of the bottom plate), as the engine measures them. A lintel put up in the
+ * roof or floor frame is drawn separately (dashed, above the top plate). Nothing for an opening with no rule.
+ */
+export function openingFramingItems(l, o, prefix, bbox) {
+  const rl = o.rule;
+  if (!rl || !(l.heightMm > 0)) return [];
+  const sw = l.studWidthMm > 0 ? l.studWidthMm : 45;
+  const t = l.plateThickMm > 0 ? l.plateThickMm : sw; // a trimmer is as thick as the bottom plate is
+  const base = bbox.y0 + (l.plateThickMm || 0);
+  const top = bbox.y0 + l.heightMm;
+  const name = o.label || "Opening";
+  const items = [];
+  const sill = base + rl.sillFromStudBaseMm, head = base + rl.headFromStudBaseMm;
+  const line = (id, state, x, y0, y1, title, rows) => { if (y1 > y0 + 0.5) items.push({ id: `${prefix}${id}-${o.id}`, kind: "line", state, a: { x, y: y0 }, b: { x, y: y1 }, clip: true, info: { title, rows } }); };
+  // jacks: against the opening's edges, to the head
+  for (let k = 0; k < (rl.jacks?.left || 0); k++) line(`jackL${k}`, "jack", o.xLeftMm + sw / 2 + k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
+  for (let k = 0; k < (rl.jacks?.right || 0); k++) line(`jackR${k}`, "jack", o.xRightMm - sw / 2 - k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
+  const stack = rl.trimmers?.sill || 0, headTrim = rl.trimmers?.head || 0;
+  const lintel = rl.lintel?.status === "sized" || rl.lintel?.status === "typed" ? rl.lintel : null;
+  const lintelUnder = !!lintel && rl.position === "underTopPlate" && Number(lintel.depthMm) > 0;
+  const lintelTop = lintelUnder ? head + headTrim * t + Number(lintel.depthMm) : head + headTrim * t;
+  const rect = (id, state, x0, x1, y0, y1, title, rows) => { if (y1 > y0 + 0.5 && x1 > x0) items.push({ id: `${prefix}${id}-${o.id}`, kind: "rect", state, rect: { x0, x1, y0, y1 }, info: { title, rows } }); };
+  rect("sillTrim", "trimmer", o.xLeftMm, o.xRightMm, sill - stack * t, sill, `${name} sill trimmers`, [["Stacked", String(stack)], ["Length", `${fmtMm(o.xRightMm - o.xLeftMm)} mm`]]);
+  const jl = (rl.jacks?.left || 0) * sw, jr = (rl.jacks?.right || 0) * sw;
+  if (headTrim) rect("headTrim", "trimmer", o.xLeftMm - jl, o.xRightMm + jr, head, head + headTrim * t, `${name} head trimmer`, [["Pieces", String(headTrim)]]);
+  if (lintelUnder) rect("lintel", "lintel", o.xLeftMm - jl, o.xRightMm + jr, head + headTrim * t, lintelTop, `${name} lintel`, [["Size", `${rl.lintel.plies > 1 ? `${rl.lintel.plies}/` : ""}${String(rl.lintel.section).replace("x", " × ")}${rl.lintel.grade ? ` ${rl.lintel.grade}` : ""}`], ["Sits", "under the top plate"]]);
+  // cripples: at the grid positions the opening removed, below the sill trimmers and above the lintel / head trimmer
+  const at = (l.ticks || []).filter((x) => x.openingId === o.id && x.state === "removed").map((x) => x.positionMm);
+  const aboveTop = Math.min(top, base + (l.studLengthMm || l.heightMm));
+  for (const x of at) {
+    if (rl.cripples?.below) line(`crB${x}`, "cripple", x, base, sill - stack * t, `${name} cripple below the sill @ ${fmtMm(x)} mm`, [["Length", `${fmtMm(sill - stack * t - base)} mm`]]);
+    if (rl.cripples?.above) line(`crA${x}`, "cripple", x, lintelTop, aboveTop, `${name} cripple above the head @ ${fmtMm(x)} mm`, [["Length", `${fmtMm(aboveTop - lintelTop)} mm`]]);
+  }
+  return items;
+}
+
 /** A wall's bounding box in local mm (null until its size is complete). */
 function wallBox(view, wall) {
   const g = wallGeometry(wall, view.calibrations, []);
@@ -344,11 +383,21 @@ function allocationMap(result) {
   return map;
 }
 
+/** The positions on one wall where a stud stands beside an opening (its king), from the layout's ticks. */
+function kingStations(result, wallId) {
+  const lay = (result?.layouts || []).find((l) => l?.kind === "studWall" && (l?.wallMeasurementId === wallId || l?.wallId === wallId));
+  return new Set((lay?.ticks || []).filter((t) => (t.besideOpeningIds || []).length && t.state !== "removed" && t.state !== "junction" && t.state !== "corner").map((t) => t.positionMm));
+}
+
 /** Per-wall quantities for one material: layout stock grouped by what is bought (before spares). */
-function wallQuantities(result, wallId, tag) {
+export function wallQuantities(result, wallId, tag) {
   const alloc = allocationMap(result);
   const groups = new Map();
-  for (const d of demandsForWall(result, wallId, tag, { ownerOnly: true })) {
+  // Sam, 18 Nov 2026: the studs standing beside an opening are its kings; the engine counts them as grid studs, so the list
+  // names them apart (display only: the demand, its role and the order are untouched)
+  const kingAt = kingStations(result, wallId);
+  for (const d0 of demandsForWall(result, wallId, tag, { ownerOnly: true })) {
+    const d = d0.role === "stud" && kingAt.has(d0.sourceRefs?.[0]?.station) ? { ...d0, role: "king" } : d0;
     let key, text;
     const id = d.identity || {};
     if (d.follower === "tape") {
@@ -598,10 +647,10 @@ function supportElements(entries, bbox, polygon) {
         const beside = (t.besideOpeningIds || []).map((id) => e.openingLabel(id));
         const span = spanAtX(polygon, t.positionMm) || { lo: bbox.y0, hi: bbox.y1 };
         items.push({
-          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : t.state === "junction" ? "junction" : t.state === "corner" ? "corner" : "full",
+          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : t.state === "junction" ? "junction" : t.state === "corner" ? "corner" : beside.length ? "king" : "full",
           a: { x: t.positionMm, y: span.lo }, b: { x: t.positionMm, y: span.hi },
           info: {
-            title: t.state === "junction" ? `Junction stud @ ${fmtMm(t.positionMm)} mm${t.junctionLabel ? ` (${t.junctionLabel})` : ""}` : t.state === "corner" ? `Corner stud @ ${fmtMm(t.positionMm)} mm` : `Stud @ ${fmtMm(t.positionMm)} mm${beside.length ? ` (beside ${beside.join(", ")})` : ""}`,
+            title: t.state === "junction" ? `Junction stud @ ${fmtMm(t.positionMm)} mm${t.junctionLabel ? ` (${t.junctionLabel})` : ""}` : t.state === "corner" ? `Corner stud @ ${fmtMm(t.positionMm)} mm` : beside.length ? `King stud @ ${fmtMm(t.positionMm)} mm (beside ${beside.join(", ")})` : `Stud @ ${fmtMm(t.positionMm)} mm`,
             rows: t.state === "removed" ? [["Status", `Removed — inside ${opening || "an opening"}`]]
               : [["Cut length", `${fmtMm(d?.lengthMm ?? l.studLengthMm)} mm`], ["Stock", a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `${fmtMm(a.stockLengthMm)} mm length` : "—"], ...(l.plies > 1 ? [["Plies", String(l.plies)]] : [])],
             note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
@@ -625,6 +674,9 @@ function supportElements(entries, bbox, polygon) {
           rect: { x0: o.xLeftMm, x1: o.xRightMm, y0: top, y1: top + (d > 0 ? d : 150) },
           info: { title: `${o.label || "Opening"} lintel in the ${where}`, rows: [["Sits", `above the top plate, in the ${where}`], ["Size", d > 0 ? String(rl.lintel.section).replace("x", " × ") : "to size"]], note: rl.position === "roofFrame" ? "Check the roof frame layout with the truss supplier." : "Size from the engineer (floor load)." } });
       }
+      // Sam, 18 Nov 2026: the opening's own framing drawn from the engine layout: jacks, cripples, trimmers and the lintel
+      // under the top plate (the kings are the studs beside it, drawn above in their own colour)
+      for (const o of l.openings || []) items.push(...openingFramingItems(l, o, prefix, bbox));
       // owner rule A: the junction blocks (laminated pairs, 300 mm tall, at 900 centres) between the two junction studs
       for (const j of l.junctions || []) {
         if (!j.blocks?.counted && !j.blocks?.shown) continue;
@@ -738,7 +790,7 @@ function accessoryElements(polygon, openings, claddingEntries) {
 const LEGEND = {
   cladding: [["occupied", "In use", "bg-blue-100 border-[#006c9b]"], ["cut", "Cut strip", "bg-amber-100 border-amber-700"], ["narrow", "Narrow — review", "bg-red-200 border-red-700"],
     ["blocked", "No stock fits", "bg-red-300 border-red-800"], ["empty", "Empty — none used", "bg-white border-slate-400 border-dashed"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
-  supports: [["support", "Support", "bg-teal-700 border-teal-700"], ["existing", "Existing (not bought)", "bg-slate-400 border-slate-500 border-dashed"], ["full", "Stud", "bg-amber-800 border-amber-800"], ["junction", "Junction stud", "bg-cyan-700 border-cyan-700"], ["corner", "Corner stud", "bg-cyan-700 border-cyan-700"], ["block", "Junction block", "bg-cyan-200 border-cyan-700"], ["removed", "Removed stud", "bg-slate-300 border-slate-400 border-dashed"]],
+  supports: [["support", "Support", "bg-teal-700 border-teal-700"], ["existing", "Existing (not bought)", "bg-slate-400 border-slate-500 border-dashed"], ["full", "Stud", "bg-amber-800 border-amber-800"], ["king", "King stud", "bg-rose-700 border-rose-700"], ["jack", "Jack stud", "bg-blue-600 border-blue-600"], ["cripple", "Cripple", "bg-lime-600 border-lime-600"], ["trimmer", "Trimmer", "bg-orange-300 border-orange-700"], ["lintel", "Lintel", "bg-slate-300 border-slate-700"], ["lintelAloft", "Lintel in roof/floor frame", "bg-violet-100 border-violet-700 border-dashed"], ["junction", "Junction stud", "bg-cyan-700 border-cyan-700"], ["corner", "Corner stud", "bg-cyan-700 border-cyan-700"], ["block", "Junction block", "bg-cyan-200 border-cyan-700"], ["removed", "Removed stud", "bg-slate-300 border-slate-400 border-dashed"]],
   accessories: [["edge", "Base / opening edge", "bg-orange-600 border-orange-600"], ["end", "Wall end", "bg-sky-700 border-sky-700"], ["joint", "Joint", "bg-violet-600 border-violet-600"]],
 };
 
@@ -940,6 +992,7 @@ export function LintelLoad({ opening, rule, onSet }) {
           {position === "floorFrame" && <p className="text-[11px] text-muted">Above the top plate, carrying floor load. The roof tables don&apos;t apply: type the size from the engineer.</p>}
         </div>
       )}
+      {l.status === "typed" && !l.grade && <p className="text-xs text-amber-800" data-lintel-grade-missing="">Pick the lintel grade: Lintels from, in this item&apos;s Setup.</p>}
       {l.basis && <p className="text-[11px] text-muted" data-lintel-basis="">{l.basis}</p>}
       {open && (
         <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-load="">
@@ -952,7 +1005,7 @@ export function LintelLoad({ opening, rule, onSet }) {
             <NumberField label="Pieces" value={dim.plies} min={1} max={4} optional onCommit={(n) => setDim((d) => ({ ...d, plies: n || 1 }))} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade ? { grade: l.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
+            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(typed?.grade ? { grade: typed.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
             {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; save(next); }}>Use the table</Btn>}
           </div>
           <p className="text-[11px] text-muted">A size you type is used as it is: it isn&apos;t checked against a span table.</p>

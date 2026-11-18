@@ -455,7 +455,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const plateThick = Number(parts.plates.section?.widthMm) || 0;
   const ruleCtx = { studLengthMm: 0, bottomPlateMm: plateThick, trimmerMm: plateThick, studWidthMm: studW,
     plateIdentity: wallPartIdentity(parts.plates, "plates"), plateStock: timberStock(parts.plates), lintelTreatment: String(parts.plates.treatment || "").trim() || null,
-    lintelStock: { maxMm: null, unavailableMm: [] } };
+    lintelStock: { maxMm: null, unavailableMm: [] },
+    // a lintel size typed by hand with no grade of its own takes the grade of the item's own lintel product (the one the span tables use)
+    lintelGrade: rules.lintelProduct === "MGP10" ? "MGP10" : "LVL13" };
   const results = [];
   // a note is said once for the item however many walls or parts give it (e.g. a clipped opening named twice)
   const seen = new Set();

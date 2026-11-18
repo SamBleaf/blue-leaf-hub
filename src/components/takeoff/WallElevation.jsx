@@ -41,12 +41,17 @@ const RECT_STYLE = {
   area: { fill: "#e0f2fe", stroke: "#0369a1" },
   block: { fill: "#a5f3fc", stroke: "#0e7490" },
   plate2: { fill: "#fde68a", stroke: "#92400e" },   // Sam, 18 Nov 2026: a second top plate
+  trimmer: { fill: "#fed7aa", stroke: "#c2410c" },
+  lintel: { fill: "#cbd5e1", stroke: "#334155" },
   lintelAloft: { fill: "#ede9fe", stroke: "#6d28d9" }, // Sam, 18 Nov 2026: a lintel put up in the roof or floor frame, above the top plate (dashed)
 };
 const LINE_STYLE = {
   support: { stroke: "#0f766e", width: 3 },
   existing: { stroke: "#64748b", width: 2, dash: "6 4" },
   full: { stroke: "#92400e", width: 3 },
+  king: { stroke: "#be123c", width: 3 },
+  jack: { stroke: "#2563eb", width: 3 },
+  cripple: { stroke: "#65a30d", width: 3 },
   junction: { stroke: "#0e7490", width: 3 },
   corner: { stroke: "#0e7490", width: 3 },
   removed: { stroke: "#94a3b8", width: 2, dash: "4 4" },

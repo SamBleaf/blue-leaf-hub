@@ -98,7 +98,7 @@ export function expandOpening({ opening: o, ctx }) {
     let pick = null;
     if (typed) {
       pick = { source: "typed", section: `${typed.depthMm}x${typed.breadthMm}`, depthMm: typed.depthMm, breadthMm: typed.breadthMm, plies: typed.plies || 1,
-        grade: String(typed.grade || "").toUpperCase() || null, basis: "typed by the office" };
+        grade: String(typed.grade || "").toUpperCase() || ctx.lintelGrade || null, basis: "typed by the office" };
     } else if (aloft && position === "floorFrame") {
       // the floor-load lintel tables (SmartLVL 13 guide, lintels supporting floor loads) are not mapped: never invented
       lintel = { status: "engineer", reason: "size from the engineer (floor load)" };
