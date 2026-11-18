@@ -25,7 +25,7 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
+import { CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -690,27 +690,80 @@ export function fullHeightFollowers(openings, nextWallInputs) {
   }
   return out;
 }
+// ── Cavity slider on a door already drawn (Sam, 18 Nov 2026) ────────────────────────────────────────────────────
+// The door is what is drawn or typed; the leaf stays exactly where it is. Turning Cavity slider on keeps the door width and
+// grows the opening to 2 × door + 20 towards the pocket side; "left" is the wall start. cavityLeafMm + cavityPocket are the
+// stored truth (the door's own width and the side), so the door's position is always read back the same way:
+//   pocket right: door = [x, x + leaf]            pocket left: door = [x + leaf + 20, x + W]
+const EXTRA = CAVITY_SLIDER_EXTRA_MM;
+/** Where the door leaf stands in a stored slider: { leaf, pocket, doorX } (doorX = its left edge). null when not a slider. */
+export function cavityDoor(inputs) {
+  const leaf = Number(inputs?.cavityLeafMm);
+  if (!(leaf > 0)) return null;
+  const pocket = inputs.cavityPocket === "left" ? "left" : "right";
+  return { leaf, pocket, doorX: pocket === "right" ? inputs.xMm : inputs.xMm + leaf + EXTRA };
+}
+/** The opening [x0, x1] a door of `leaf` at `doorX` has for `pocket`. */
+function cavitySpan(leaf, doorX, pocket) {
+  return { x0: pocket === "right" ? doorX : doorX - (leaf + EXTRA), W: cavityOpeningWidth(leaf) };
+}
+/** The slider's stored inputs for a door at doorX. */
+function cavityInputs(inputs, leaf, doorX, pocket) {
+  const { x0, W } = cavitySpan(leaf, doorX, pocket);
+  return { ...inputs, xMm: x0, widthMm: W, cavityLeafMm: leaf, cavityPocket: pocket };
+}
+/** A plain-words warning when the slider's opening runs past a wall end or into another opening (never a refusal). */
+export function cavityWarning(inputs, wallLenMm, others = []) {
+  if (!(Number(inputs?.cavityLeafMm) > 0)) return null;
+  const x0 = inputs.xMm, x1 = inputs.xMm + inputs.widthMm, W = inputs.widthMm;
+  const fmt = (n) => Number(n).toLocaleString("en-AU");
+  if (x0 < -1e-6) return `The pocket runs ${fmt(Math.round(-x0))} past the start of the wall. Try the other side, or move the door.`;
+  if (wallLenMm > 0 && x1 > wallLenMm + 1e-6) return `The pocket runs ${fmt(Math.round(x1 - wallLenMm))} past the end of the wall. Try the other side, or move the door.`;
+  const hit = others.find((o) => x0 < o.x1 - 1e-6 && x1 > o.x0 + 1e-6);
+  if (hit) return `A ${fmt(W)} opening runs into ${hit.label || "another opening"}. Try the other side, or move the door.`;
+  return null;
+}
+/** The side a new pocket goes: where it fits inside the wall and clear of other openings; both fit (or neither) → right. */
+export function cavityDefaultSide(inputs, wallLenMm, others = []) {
+  const w = Number(inputs?.widthMm);
+  const fits = (side) => cavityWarning(cavityInputs({ ...inputs }, w, inputs.xMm, side), wallLenMm, others) == null;
+  return fits("right") || !fits("left") ? "right" : "left";
+}
 /**
- * Elevation sheet → Cavity slider on a door already drawn (HUB 031). Returns the new inputs, or { error }.
- *  - a door wider than CAVITY_LEAF_WIDE_MM is read as the whole slider opening (its width stays, the door is (w − 20) ÷ 2);
- *  - otherwise `side` ("left" | "right", the wall's start is left) is where the door slides: the width becomes
- *    2 × w + 20, and for left the offset moves so the shut edge stays put.
- * `others` = the wall's other openings [{ x0, x1, label }]; running off the wall or into one is refused.
+ * Cavity slider ON for a drawn door: the door width is the opening it had; the door stays put; the opening grows to
+ * 2 × door + 20 towards `side` (default: cavityDefaultSide). Returns { inputs, warning }, or { error } with no door width.
  */
 export function cavityConvert(inputs, side, wallLenMm, others = []) {
-  const w = Number(inputs?.widthMm), x = Number(inputs?.xMm);
+  const w = Number(inputs?.widthMm);
   if (!(w > 0)) return { error: "Enter the door width first." };
-  if (w > CAVITY_LEAF_WIDE_MM) {
-    const leaf = cavityLeafFromOpening(w);
-    return { inputs: { ...inputs, cavityLeafMm: leaf, cavityPocket: side === "left" || side === "right" ? side : (inputs.cavityPocket || "right") }, wide: true };
-  }
-  if (side !== "left" && side !== "right") return { error: "Choose the side the door slides into." };
-  const W = cavityOpeningWidth(w);
-  const x0 = side === "right" ? x : x - (w + CAVITY_SLIDER_EXTRA_MM);
-  if (x0 < 0 || x0 + W > wallLenMm + 1e-6) return { error: `A ${W.toLocaleString("en-AU")} opening runs past the end of this wall. Move it first.` };
-  const hit = others.find((o) => x0 < o.x1 - 1e-6 && x0 + W > o.x0 + 1e-6);
-  if (hit) return { error: `A ${W.toLocaleString("en-AU")} opening runs into ${hit.label || "another opening"}.` };
-  return { inputs: { ...inputs, xMm: x0, widthMm: W, cavityLeafMm: w, cavityPocket: side }, wide: false };
+  const pocket = side === "left" || side === "right" ? side : cavityDefaultSide(inputs, wallLenMm, others);
+  const next = cavityInputs(inputs, w, inputs.xMm, pocket);
+  return { inputs: next, warning: cavityWarning(next, wallLenMm, others) };
+}
+/** Move the pocket to the other side: the door stays put. */
+export function cavitySetSide(inputs, side, wallLenMm, others = []) {
+  const d = cavityDoor(inputs);
+  if (!d || (side !== "left" && side !== "right")) return { error: "This isn't a cavity slider." };
+  const next = cavityInputs(inputs, d.leaf, d.doorX, side);
+  return { inputs: next, warning: cavityWarning(next, wallLenMm, others) };
+}
+/** Change the door width: the jamb edge (away from the pocket) stays fixed; the pocket grows or shrinks. */
+export function cavitySetLeaf(inputs, leaf, wallLenMm, others = []) {
+  const d = cavityDoor(inputs);
+  if (!d || !(Number(leaf) > 0)) return { error: "Enter the door width first." };
+  const L = Number(leaf);
+  // right: the left (jamb) edge x stays; left: the right edge x + W stays, so the door's right edge is fixed
+  const doorX = d.pocket === "right" ? d.doorX : (inputs.xMm + inputs.widthMm) - L;
+  const next = cavityInputs(inputs, L, doorX, d.pocket);
+  return { inputs: next, warning: cavityWarning(next, wallLenMm, others) };
+}
+/** Cavity slider OFF: the opening returns to the door's own width at the door's position. */
+export function cavityOff(inputs) {
+  const d = cavityDoor(inputs);
+  if (!d) return inputs;
+  const next = { ...inputs, xMm: d.doorX, widthMm: d.leaf };
+  delete next.cavityLeafMm; delete next.cavityPocket;
+  return next;
 }
 
 /**

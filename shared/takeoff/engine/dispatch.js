@@ -43,6 +43,12 @@ const UNIT_INTEGER = new Set(["piece", "sheet", "bar", "box", "bag", "roll", "pa
  */
 export const JOB_GENERATED_LIMIT = 20000;
 const fmt = (mm) => formatMm(mm, 1);
+/**
+ * An opening's own framing detail "wins" over the automatic framing only once something has been ENTERED in it: its members
+ * (even an explicit empty list) or an answered below-sill / above-head region. A bare stub (just the source chip, or a
+ * reference typed with nothing else) counts nothing, so it must not switch the automatic kings, jacks and lintel off.
+ */
+const isEnteredDetail = (d) => !!d && typeof d === "object" && (Array.isArray(d.members) || typeof d.belowSill?.required === "boolean" || typeof d.aboveHead?.required === "boolean");
 
 /** Measurement kinds each generic method READS. Anything else assigned to the material would be silently ignored —
  *  so it is refused by the server and flagged by the engine (never dropped). */
@@ -503,7 +509,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const ruled = new Map();
     const ruleNotes = [];
     const framed = autoFraming && plateThick > 0 ? openings.map((o) => {
-      if (o.detail) return o;
+      if (o.detail && isEnteredDetail(o.detail)) return o;
       const src = w.openings.find((x) => x.id === o.id) || {};
       const e = expandOpening({ ctx: { ...ruleCtx, studLengthMm: H, loadBearing: wallCarries, ...openingSelectors({ rules, parts, wall: { heightMm: H, loadBearing: wallCarries }, opening: src }) },
         opening: { id: o.id, label: o.label, type: src.type, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm, sillMm: src.sillMm, headMm: src.sillMm + src.heightMm,

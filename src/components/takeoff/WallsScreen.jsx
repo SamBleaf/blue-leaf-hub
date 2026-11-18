@@ -38,7 +38,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
-import { cavityOpeningWidth, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { ROOF_LOAD_WIDTHS_MM } from "../../../shared/takeoff/standards/index.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
@@ -47,7 +47,7 @@ import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { overrideKeyWallIds } from "../../../shared/takeoff/engine/junctions.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
-import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -860,32 +860,32 @@ export function OpeningForm({ value, onField, canEdit, focusToken }) {
 }
 
 /**
- * Full height and Cavity slider on an opening already drawn (HUB 031, Sam 17 Nov 2026). A door up to 1,200 wide asks which
- * side it slides into (left is the wall start); a wider one is read as the whole opening. One tap each, one Undo.
+ * Full height and Cavity slider on an opening already drawn (HUB 031; reworked Sam, 18 Nov 2026). Cavity slider keeps the
+ * door where it is and doubles the opening towards the pocket side; Pocket left / Pocket right sit right under the toggle
+ * and move only the pocket. One tap each, one Undo. `warning` = the pocket runs past the wall or into another opening.
  */
-export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
-  const [asking, setAsking] = useState(false);
+export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag, warning }) {
   const chip = (on, extra = "") => `min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"} ${extra}`;
   const slider = opening.cavityLeafMm > 0;
   const canSlider = opening.type === "door" && timberWalls;
+  const pocket = opening.cavityPocket === "left" ? "left" : "right";
   return (
     <div className="mt-2 space-y-2" data-opening-flags="">
       <div className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={opening.fullHeight} disabled={!wallHeightOk} onClick={() => onFlag("fullHeight")} data-opening-fullheight="" className={chip(opening.fullHeight, !wallHeightOk ? "opacity-50" : "")}>Full height</button>
-        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity=""
-          onClick={() => { if (slider) { onFlag("cavity"); setAsking(false); } else if (opening.widthMm > 1200) onFlag("cavity") ; else setAsking((a) => !a); }} className={chip(slider)}>Cavity slider</button>}
+        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity="" onClick={() => onFlag("cavity")} className={chip(slider)}>Cavity slider</button>}
       </div>
       {!wallHeightOk && <p className="text-[11px] text-muted">Full height only works on a wall of one height.</p>}
-      {canSlider && asking && !slider && (
+      {canSlider && slider && (
         <div className="space-y-1" data-opening-pocket="">
-          <p className="text-sm text-ink">Which side does the door slide into?</p>
-          <div className="flex gap-2">
-            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "left"); }}>◀ Left</button>
-            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "right"); }}>Right ▶</button>
+          <div className="flex gap-2" role="group" aria-label="Pocket side">
+            <button type="button" aria-pressed={pocket === "left"} data-pocket="left" className={chip(pocket === "left")} onClick={() => onFlag("cavity", "left")}>◀ Pocket left</button>
+            <button type="button" aria-pressed={pocket === "right"} data-pocket="right" className={chip(pocket === "right")} onClick={() => onFlag("cavity", "right")}>Pocket right ▶</button>
           </div>
+          <p className="text-[11px] text-muted">The door stays where it is. No studs or noggins in the pocket. Left is towards the wall start.</p>
         </div>
       )}
-      {slider && <p className="text-[11px] text-muted">No studs or noggins in the pocket. The pocket slides {opening.cavityPocket === "left" ? "left (towards the wall start)" : "right"}.</p>}
+      {slider && warning && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-opening-pocket-warning="">{warning}</p>}
     </div>
   );
 }
@@ -1025,6 +1025,8 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   const name = opening.label || fr?.label || "this opening";
   const onlyDetail = (fr?.missing || []).length === 1 && fr.missing[0] === "its framing detail";
   const status = !stud ? null : !fr ? <p className="text-xs text-muted" data-framing-state="none">The studs aren&apos;t calculated on this wall yet — finish the wall first.</p>
+    : fr.rule && !(Array.isArray(stored?.members) || typeof stored?.belowSill?.required === "boolean" || typeof stored?.aboveHead?.required === "boolean")
+      ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="auto">Framing worked out automatically at this wall&apos;s centres. Fill in the detail below only to replace it.</p>
     : fr.complete ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="complete">Framing entered — counted as quantities only, not checked as a design.</p>
       : walls && onlyDetail ? <p className="rounded-lg bg-page px-3 py-2 text-xs text-ink" data-framing-state="not-counted">Lintels, jacks and trimmers at {name} aren&apos;t counted.</p>
         : walls ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Lintels, jacks and trimmers at {name} aren&apos;t counted until the detail is complete. It still needs {(fr.missing || []).map(engineText).join("; ")}.</p>
@@ -1909,15 +1911,14 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   function onOpeningField(o, field, v) {
     const cur = o.rec.inputs || {};
     if (cur[field] === v || (field === "label" && (cur.label || "") === v)) return;
-    // HUB 031: a cavity slider's Door width rewrites the whole opening (2 × door + 20), keeping its left edge; refused if it won't fit
+    // a cavity slider's Door width: the jamb edge (away from the pocket) stays; the pocket grows or shrinks. A pocket that no
+    // longer fits is said, never refused
     if (field === "cavityLeafMm") {
-      const W = cavityOpeningWidth(v);
       const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
-      if (!(lengthMm > 0) || cur.xMm + W > lengthMm + 1e-6) { setOpNote(`A ${fmtMm(W)} opening runs past the end of this wall. Move it first.`); return; }
-      const hit = others.find((x) => cur.xMm < x.x1 - 1e-6 && cur.xMm + W > x.x0 + 1e-6);
-      if (hit) { setOpNote(`A ${fmtMm(W)} opening runs into ${hit.label || "another opening"}.`); return; }
-      setOpNote(null);
-      act.updateOpening(o.rec, { cavityLeafMm: v, widthMm: W });
+      const r = cavitySetLeaf(cur, v, lengthMm, others);
+      if (r.error) { setOpNote(r.error); return; }
+      setOpNote(r.warning || null);
+      act.setOpeningInputs(o.rec, r.inputs);
       return;
     }
     // a full-height opening keeps its stored height at wall height − sill in the same edit
@@ -1941,12 +1942,24 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       return;
     }
     if (flag === "cavity") {
-      if (cur.cavityLeafMm > 0) { delete cur.cavityLeafMm; delete cur.cavityPocket; act.setOpeningInputs(o.rec, cur); setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(cur.widthMm)} opening. Undo to go back.`); return; }
       const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      if (cur.cavityLeafMm > 0) {
+        if (arg === "left" || arg === "right") {
+          if (arg === (cur.cavityPocket === "left" ? "left" : "right")) return;
+          const r = cavitySetSide(cur, arg, lengthMm, others);
+          act.setOpeningInputs(o.rec, r.inputs);
+          setOpNote(r.warning || null);
+          return;
+        }
+        const plain = cavityOff(cur);
+        act.setOpeningInputs(o.rec, plain);
+        setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(plain.widthMm)} opening. Undo to go back.`);
+        return;
+      }
       const r = cavityConvert(cur, arg, lengthMm, others);
       if (r.error) { setOpNote(r.error); return; }
       act.setOpeningInputs(o.rec, r.inputs);
-      if (r.wide) setOpNote(`${o.label || "This door"} is ${fmtMm(cur.widthMm)} wide, so it's taken as the whole opening: a ${fmtMm(r.inputs.cavityLeafMm)} door and its pocket. Change Door width if that's wrong.`);
+      setOpNote(r.warning || null);
     }
   }
   const wallsMat = !!material && isWallsItem(material);
@@ -2358,7 +2371,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               fullHeight: selOpening.fullHeight, cavityLeafMm: selOpening.cavityLeafMm, cavityPocket: selOpening.cavityPocket }}
             onField={(f, v) => (sel.kind === "newOpening" ? onDraftField(f, v) : onOpeningField(selOpening, f, v))} />
           {sel.kind === "opening" && canEdit && (
-            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)} />
+            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)}
+              warning={cavityWarning(selOpening, lengthMm, openings.filter((x) => x.id !== selOpening.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label })))} />
           )}
           {opNote && sel.kind === "opening" && <p className="mt-1 text-[11px] text-amber-800" data-opening-notice="">{opNote}</p>}
           {sel.kind === "newOpening" ? (
