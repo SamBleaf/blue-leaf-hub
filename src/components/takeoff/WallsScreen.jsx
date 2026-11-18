@@ -38,7 +38,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm } from "../../../shared/takeoff/index.js";
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
-import { cavityOpeningWidth, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
+import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { ROOF_LOAD_WIDTHS_MM } from "../../../shared/takeoff/standards/index.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
@@ -47,7 +47,7 @@ import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { overrideKeyWallIds } from "../../../shared/takeoff/engine/junctions.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
-import { cavityConvert, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRuleText, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -860,32 +860,32 @@ export function OpeningForm({ value, onField, canEdit, focusToken }) {
 }
 
 /**
- * Full height and Cavity slider on an opening already drawn (HUB 031, Sam 17 Nov 2026). A door up to 1,200 wide asks which
- * side it slides into (left is the wall start); a wider one is read as the whole opening. One tap each, one Undo.
+ * Full height and Cavity slider on an opening already drawn (HUB 031; reworked Sam, 18 Nov 2026). Cavity slider keeps the
+ * door where it is and doubles the opening towards the pocket side; Pocket left / Pocket right sit right under the toggle
+ * and move only the pocket. One tap each, one Undo. `warning` = the pocket runs past the wall or into another opening.
  */
-export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag }) {
-  const [asking, setAsking] = useState(false);
+export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag, warning }) {
   const chip = (on, extra = "") => `min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"} ${extra}`;
   const slider = opening.cavityLeafMm > 0;
   const canSlider = opening.type === "door" && timberWalls;
+  const pocket = opening.cavityPocket === "left" ? "left" : "right";
   return (
     <div className="mt-2 space-y-2" data-opening-flags="">
       <div className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={opening.fullHeight} disabled={!wallHeightOk} onClick={() => onFlag("fullHeight")} data-opening-fullheight="" className={chip(opening.fullHeight, !wallHeightOk ? "opacity-50" : "")}>Full height</button>
-        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity=""
-          onClick={() => { if (slider) { onFlag("cavity"); setAsking(false); } else if (opening.widthMm > 1200) onFlag("cavity") ; else setAsking((a) => !a); }} className={chip(slider)}>Cavity slider</button>}
+        {canSlider && <button type="button" aria-pressed={slider} data-opening-cavity="" onClick={() => onFlag("cavity")} className={chip(slider)}>Cavity slider</button>}
       </div>
       {!wallHeightOk && <p className="text-[11px] text-muted">Full height only works on a wall of one height.</p>}
-      {canSlider && asking && !slider && (
+      {canSlider && slider && (
         <div className="space-y-1" data-opening-pocket="">
-          <p className="text-sm text-ink">Which side does the door slide into?</p>
-          <div className="flex gap-2">
-            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "left"); }}>◀ Left</button>
-            <button type="button" className={chip(false)} onClick={() => { setAsking(false); onFlag("cavity", "right"); }}>Right ▶</button>
+          <div className="flex gap-2" role="group" aria-label="Pocket side">
+            <button type="button" aria-pressed={pocket === "left"} data-pocket="left" className={chip(pocket === "left")} onClick={() => onFlag("cavity", "left")}>◀ Pocket left</button>
+            <button type="button" aria-pressed={pocket === "right"} data-pocket="right" className={chip(pocket === "right")} onClick={() => onFlag("cavity", "right")}>Pocket right ▶</button>
           </div>
+          <p className="text-[11px] text-muted">The door stays where it is. No studs or noggins in the pocket. Left is towards the wall start.</p>
         </div>
       )}
-      {slider && <p className="text-[11px] text-muted">No studs or noggins in the pocket. The pocket slides {opening.cavityPocket === "left" ? "left (towards the wall start)" : "right"}.</p>}
+      {slider && warning && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-opening-pocket-warning="">{warning}</p>}
     </div>
   );
 }
@@ -985,6 +985,21 @@ const ENGINE_MEMBER = /\bm(\d+) (length|product)/g;
  * member row stays here as a draft and is never counted. The engine's own verdict is shown — quantities only,
  * never a design check.
  */
+/** "Framed automatically": what the opening rules produced, in plain bullets (kings, jacks, cripples, trimmers, lintel). */
+function ruleBullets(r) {
+  const n = (v) => Math.round(v).toLocaleString("en-AU");
+  const side = (a) => (a.left === a.right ? `${a.left} each side` : `${a.left} left, ${a.right} right`);
+  const out = [`Kings: ${side(r.kings)}`];
+  if (r.jacks.left || r.jacks.right) out.push(`Jacks: ${side(r.jacks)}`);
+  if (r.cripples?.below || r.cripples?.above) out.push(`Cripples: ${[r.cripples.below && "below the sill", r.cripples.above && "above the head"].filter(Boolean).join(" and ")}, at this wall's centres`);
+  if (r.trimmers.head || r.trimmers.sill) out.push(`Trimmers: ${[r.trimmers.head && `${r.trimmers.head} at the head`, r.trimmers.sill && `${r.trimmers.sill} at the sill`].filter(Boolean).join(", ")}`);
+  const l = r.lintel;
+  if (l.status === "sized" || l.status === "typed") out.push(`Lintel: ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  else if (l.status === "unsized" || l.status === "engineer") out.push(`Lintel: not sized yet (${l.reason})`);
+  else if (l.status === "not_needed") out.push("Lintel: not needed");
+  return out;
+}
+
 function FramingDetail({ opening, stud, canEdit, onSave }) {
   const uid = useId();
   const stored = opening.rec.inputs?.detail || null;
@@ -1024,7 +1039,26 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
   const walls = (stud?.result?.methodKey || stud?.material?.methodKey) === "wall_framing";
   const name = opening.label || fr?.label || "this opening";
   const onlyDetail = (fr?.missing || []).length === 1 && fr.missing[0] === "its framing detail";
+  const touched = !!stored && typeof stored === "object" && Object.values(stored).some((v) => v !== null && v !== undefined && v !== "" && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length));
+  const auto = !!fr?.rule; // the rules framed this opening (no complete detail of its own)
+  const unfinished = auto && touched; // a stored detail that isn't complete: ignored for counting
+  const [open, setOpen] = useState(touched);
+  const clearDetail = () => { setS(framingFromStored(null)); onSave(null); };
   const status = !stud ? null : !fr ? <p className="text-xs text-muted" data-framing-state="none">The studs aren&apos;t calculated on this wall yet — finish the wall first.</p>
+    : auto ? (
+      <div className="space-y-2" data-framing-state={unfinished ? "unfinished" : "auto"}>
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framed-automatically="">
+          <p className="font-semibold">Framed automatically</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">{ruleBullets(fr.rule).map((t) => <li key={t}>{t}</li>)}</ul>
+        </div>
+        {unfinished && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-unfinished="">
+            <p>{name} has an unfinished framing override that isn&apos;t used — finish it or clear it.</p>
+            {canEdit && <div className="mt-1 flex gap-2"><Btn onClick={() => setOpen(true)}>Finish</Btn><Btn kind="ghost" onClick={clearDetail}>Clear</Btn></div>}
+          </div>
+        )}
+      </div>
+    )
     : fr.complete ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-framing-state="complete">Framing entered — counted as quantities only, not checked as a design.</p>
       : walls && onlyDetail ? <p className="rounded-lg bg-page px-3 py-2 text-xs text-ink" data-framing-state="not-counted">Lintels, jacks and trimmers at {name} aren&apos;t counted.</p>
         : walls ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-framing-state="incomplete">Lintels, jacks and trimmers at {name} aren&apos;t counted until the detail is complete. It still needs {(fr.missing || []).map(engineText).join("; ")}.</p>
@@ -1051,12 +1085,10 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
       </div>
     );
   };
-  return (
-    <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
-      <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
-      <p className="text-[11px] text-muted">Kings, jacks, trimmers, lintel and sill are never guessed — they come only from this detail.</p>
-      {status}
-      <Chips label="Framing comes from" value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
+  const editor = (
+    <>
+      <p className="text-[11px] text-muted">Kings, jacks, trimmers, lintel and sill are never guessed — an override comes only from a reviewed detail or your own quantities. Until it is complete the automatic framing is used.</p>
+      <Chips label={auto ? "Replace with" : "Framing comes from"} value={s.source} options={DETAIL_SOURCES} onChange={(v) => change((x) => ({ ...x, source: v }))} />
       {s.source && (
         <>
           <CommitText label={s.source === "reviewed-detail" ? "Detail reference (needed)" : "Reference (optional)"} value={s.ref} maxLength={120} onCommit={(v) => change((x) => ({ ...x, ref: v }))} />
@@ -1110,9 +1142,21 @@ function FramingDetail({ opening, stud, canEdit, onSave }) {
               )}
             </div>
           </fieldset>
-          {stored && <Btn kind="ghost" onClick={() => { setS(framingFromStored(null)); onSave(null); }}>Clear the framing detail</Btn>}
+          {stored && <Btn kind="ghost" onClick={clearDetail}>Clear the framing detail</Btn>}
         </>
       )}
+    </>
+  );
+  return (
+    <section aria-label="Framing detail" className="space-y-2 rounded-lg border border-hairline p-2" data-framing-detail="">
+      <h4 className="text-xs font-semibold text-ink">Framing detail{stud ? ` — ${stud.material.name}` : ""}</h4>
+      {status}
+      {auto || touched ? (
+        <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="space-y-2" data-framing-override="">
+          <summary className="min-h-[44px] cursor-pointer py-3 text-xs font-medium text-primary">Override framing</summary>
+          <div className="space-y-2">{editor}</div>
+        </details>
+      ) : editor}
     </section>
   );
 }
@@ -1909,15 +1953,14 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   function onOpeningField(o, field, v) {
     const cur = o.rec.inputs || {};
     if (cur[field] === v || (field === "label" && (cur.label || "") === v)) return;
-    // HUB 031: a cavity slider's Door width rewrites the whole opening (2 × door + 20), keeping its left edge; refused if it won't fit
+    // a cavity slider's Door width: the jamb edge (away from the pocket) stays; the pocket grows or shrinks. A pocket that no
+    // longer fits is said, never refused
     if (field === "cavityLeafMm") {
-      const W = cavityOpeningWidth(v);
       const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
-      if (!(lengthMm > 0) || cur.xMm + W > lengthMm + 1e-6) { setOpNote(`A ${fmtMm(W)} opening runs past the end of this wall. Move it first.`); return; }
-      const hit = others.find((x) => cur.xMm < x.x1 - 1e-6 && cur.xMm + W > x.x0 + 1e-6);
-      if (hit) { setOpNote(`A ${fmtMm(W)} opening runs into ${hit.label || "another opening"}.`); return; }
-      setOpNote(null);
-      act.updateOpening(o.rec, { cavityLeafMm: v, widthMm: W });
+      const r = cavitySetLeaf(cur, v, lengthMm, others);
+      if (r.error) { setOpNote(r.error); return; }
+      setOpNote(r.warning || null);
+      act.setOpeningInputs(o.rec, r.inputs);
       return;
     }
     // a full-height opening keeps its stored height at wall height − sill in the same edit
@@ -1927,7 +1970,12 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       act.updateOpening(o.rec, { sillMm: v, heightMm: h });
       return;
     }
-    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v, ...(field === "type" && v !== "door" ? { cavityLeafMm: undefined, cavityPocket: undefined } : {}) });
+    // leaving "door" while a slider: back to the door's own width at the door's position (same as Cavity slider off)
+    if (field === "type" && v !== "door" && cur.cavityLeafMm > 0) {
+      act.setOpeningInputs(o.rec, { ...cavityOff(cur), type: v });
+      return;
+    }
+    act.updateOpening(o.rec, { [field]: field === "label" ? v || null : v });
   }
   /** The opening sheet's Full height / Cavity slider chips. */
   function onOpeningFlag(o, flag, arg) {
@@ -1941,12 +1989,24 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
       return;
     }
     if (flag === "cavity") {
-      if (cur.cavityLeafMm > 0) { delete cur.cavityLeafMm; delete cur.cavityPocket; act.setOpeningInputs(o.rec, cur); setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(cur.widthMm)} opening. Undo to go back.`); return; }
       const others = openings.filter((x) => x.id !== o.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label }));
+      if (cur.cavityLeafMm > 0) {
+        if (arg === "left" || arg === "right") {
+          if (arg === (cur.cavityPocket === "left" ? "left" : "right")) return;
+          const r = cavitySetSide(cur, arg, lengthMm, others);
+          act.setOpeningInputs(o.rec, r.inputs);
+          setOpNote(r.warning || null);
+          return;
+        }
+        const plain = cavityOff(cur);
+        act.setOpeningInputs(o.rec, plain);
+        setOpNote(`${o.label || "This door"} is now a plain ${fmtMm(plain.widthMm)} opening. Undo to go back.`);
+        return;
+      }
       const r = cavityConvert(cur, arg, lengthMm, others);
       if (r.error) { setOpNote(r.error); return; }
       act.setOpeningInputs(o.rec, r.inputs);
-      if (r.wide) setOpNote(`${o.label || "This door"} is ${fmtMm(cur.widthMm)} wide, so it's taken as the whole opening: a ${fmtMm(r.inputs.cavityLeafMm)} door and its pocket. Change Door width if that's wrong.`);
+      setOpNote(r.warning || null);
     }
   }
   const wallsMat = !!material && isWallsItem(material);
@@ -2366,7 +2426,8 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               fullHeight: selOpening.fullHeight, cavityLeafMm: selOpening.cavityLeafMm, cavityPocket: selOpening.cavityPocket }}
             onField={(f, v) => (sel.kind === "newOpening" ? onDraftField(f, v) : onOpeningField(selOpening, f, v))} />
           {sel.kind === "opening" && canEdit && (
-            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)} />
+            <OpeningFlags opening={selOpening} timberWalls={!!studEntry} wallHeightOk={fullHeightMm(inputs, selOpening.sillMm) != null || selOpening.fullHeight} onFlag={(f, a) => onOpeningFlag(selOpening, f, a)}
+              warning={cavityWarning(selOpening, lengthMm, openings.filter((x) => x.id !== selOpening.id).map((x) => ({ x0: x.xMm, x1: x.xMm + x.widthMm, label: x.label })))} />
           )}
           {opNote && sel.kind === "opening" && <p className="mt-1 text-[11px] text-amber-800" data-opening-notice="">{opNote}</p>}
           {sel.kind === "newOpening" ? (
@@ -2377,7 +2438,6 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               <p className="text-[11px] text-muted">Head / sill / jamb flashings: no reviewed flashing template is linked here yet — the lengths above are the opening&apos;s edges only.</p>
               {openingProblem(selOpening.id) && <p className="text-xs font-semibold text-red-700">{openingProblem(selOpening.id)}</p>}
               {canEdit && <p className="text-[11px] text-muted">Drag the highlighted opening on the drawing to move it (snaps to 10 mm) — the typed numbers are what count.</p>}
-              {ruleLayout && <p className="text-xs text-ink" data-opening-rule="">Framing worked out: {openingRuleText(ruleLayout)} A framing detail typed below replaces it.</p>}
               {ruleLayout && canEdit && <LintelLoad key={`lintel-${selOpening.id}-${draftReset}`} opening={selOpening} rule={ruleLayout.rule} onSet={(next) => act.setOpeningInputs(selOpening.rec, next)} />}
               {studEntry && <FramingDetail key={`framing-${selOpening.id}-${draftReset}`} opening={selOpening} stud={studEntry} canEdit={canEdit} onSave={(d) => act.updateOpening(selOpening.rec, { detail: d })} />}
               {canEdit && <Btn kind="danger" onClick={() => { act.removeOpening(selOpening.rec); setSel(null); }}>Remove opening</Btn>}

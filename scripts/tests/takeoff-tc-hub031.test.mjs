@@ -3,7 +3,7 @@
 // WET_WALLS_AND_CAVITY_DOORS_PLAN.md; Sam's answers (docs/takeoff/OWNER_ANSWERS_17NOV.md) override them.
 //   node scripts/tests/takeoff-tc-hub031.test.mjs
 import assert from "node:assert/strict";
-import { CALCULATION_VERSION, CAVITY_LEAF_WIDE_MM, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityLeafFromOpening, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
+import { CALCULATION_VERSION, CAVITY_SLIDER_EXTRA_MM, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { cleanMaterialContent, cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
 import { OPENING_JAMBS_MIN, TRIMMER_STACK_RULE, expandOpening, trimmerStackCount } from "../../shared/takeoff/engine/openingRules.js";
 import { buildCalibration } from "../../shared/takeoff/index.js";
@@ -39,7 +39,7 @@ const nogs = (c, wallId) => WR(c).demands.filter((d) => d.identity.component ===
 // ══ Step 1: per-wall stud centres ═══════════════════════════════════════════════════════════════════════════════
 t("constants: wet-area centres are 450 (Sam, 17 Nov 2026) and the calculation is stamped @5", () => {
   assert.equal(WET_WALL_CENTRES_MM, 450);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@8$/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/);
   assert.ok(NOTE_CODES.includes("wall_centres_ignored"));
 });
 
@@ -123,12 +123,10 @@ t("server whitelist: studCentresMm 450 is kept, 50 and 5,000 are refused plainly
 });
 
 // ══ Step 2: cavity slider (opening = 2 × door + 20) ═════════════════════════════════════════════════════════════
-t("a cavity slider's opening is 2 × the door + 20: 920 → 1,860, 820 → 1,660; the door is read back to the nearest 10", () => {
+t("a cavity slider's opening is 2 × the door + 20: 920 → 1,860, 820 → 1,660", () => {
   assert.equal(CAVITY_SLIDER_EXTRA_MM, 20);
   assert.equal(cavityOpeningWidth(920), 1860);
   assert.equal(cavityOpeningWidth(820), 1660);
-  assert.equal(cavityLeafFromOpening(1860), 920);
-  assert.equal(CAVITY_LEAF_WIDE_MM, 1200);
 });
 
 t("framing: a 1,860 slider at 600 in a 3,600 wall has no stud inside the pocket, 2 full studs at each edge (pocket end included)", () => {
@@ -157,17 +155,12 @@ t("placing a slider: a finger's slip (100 mm or less) past the wall end slides b
   assert.equal(fixedWidthOpening({ wallLenMm: 5000, firstMm: 1000, secondMm: 1000, widthMm: 1860 }).reason, "no_direction");
 });
 
-t("an existing door → cavity slider: right keeps the offset, left moves it back by door + 20, over 1,200 wide is read as the whole opening, no room is refused", () => {
+t("an existing door → cavity slider keeps the door where it is (full rework in takeoff-tc-cavity-door)", () => {
   const door = { xMm: 2000, sillMm: 0, widthMm: 920, heightMm: 2040, type: "door", label: "D1" };
   assert.deepEqual(cavityConvert(door, "right", 5000).inputs, { ...door, widthMm: 1860, cavityLeafMm: 920, cavityPocket: "right" });
   assert.deepEqual(cavityConvert(door, "left", 5000).inputs, { ...door, xMm: 1060, widthMm: 1860, cavityLeafMm: 920, cavityPocket: "left" });
-  assert.match(cavityConvert({ ...door, xMm: 200 }, "left", 5000).error, /runs past the end of this wall/);
-  assert.match(cavityConvert(door, "right", 5000, [{ x0: 3000, x1: 3500, label: "W1" }]).error, /runs into W1/);
-  const wide = cavityConvert({ ...door, widthMm: 1860 }, null, 5000);
-  assert.equal(wide.inputs.cavityLeafMm, 920);
-  assert.equal(wide.inputs.widthMm, 1860);
-  assert.equal(wide.wide, true);
-  assert.match(cavityConvert(door, null, 5000).error, /Choose the side/);
+  assert.match(cavityConvert({ ...door, xMm: 200 }, "left", 5000).warning, /past the start of the wall/);
+  assert.match(cavityConvert(door, "right", 5000, [{ x0: 3000, x1: 3500, label: "W1" }]).warning, /runs into W1/);
 });
 
 t("the last slider's door width is remembered for the next one", () => {

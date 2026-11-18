@@ -61,7 +61,8 @@ try {
   ok("flags: a window offers Full height only", !flags({ ...door, type: "window" }).includes("Cavity slider") && flags({ ...door, type: "window" }).includes("Full height"));
   ok("flags: no Cavity slider off a timber walls item", !flags(door, false, true).includes("Cavity slider"));
   ok("flags: a wall of no single height disables Full height and says so", /disabled=""[^>]*>Full height/.test(flags(door, true, false)) || /disabled/.test(flags(door, true, false)) && /Full height only works on a wall of one height/.test(flags(door, true, false)));
-  ok("flags: a slider says nothing stands in the pocket and which way it slides", /No studs or noggins in the pocket\. The pocket slides right/.test(flags({ ...slider }, true, true)));
+  ok("flags: a slider says nothing stands in the pocket, and Pocket left / Pocket right sit under the toggle with the current side pressed", /No studs or noggins in the pocket/.test(flags({ ...slider }, true, true)) && /aria-pressed="true"[^>]*data-pocket="right"|data-pocket="right"[^>]*aria-pressed="true"/.test(flags({ ...slider }, true, true)) && /Pocket left/.test(flags(slider)) && /Pocket right/.test(flags(slider)));
+  ok("flags: a plain door shows no pocket chips", !flags(door).includes("Pocket left"));
   ok("flags: Cavity slider reads pressed on a slider", pressed(flags(slider), "Cavity slider"));
 
   // the lintel row

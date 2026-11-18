@@ -206,10 +206,6 @@ export const WET_WALL_CENTRES_MM = 450;
 export const CAVITY_SLIDER_EXTRA_MM = 20;
 /** The framing opening of a cavity slider whose door leaf is `leafMm` wide. */
 export const cavityOpeningWidth = (leafMm) => 2 * leafMm + CAVITY_SLIDER_EXTRA_MM;
-/** A door already drawn this wide (or wider) is read as the WHOLE slider opening when Cavity slider is turned on [Default, needs Sam]. */
-export const CAVITY_LEAF_WIDE_MM = 1200;
-/** The door leaf of a slider opening of `widthMm`, to the nearest 10. */
-export const cavityLeafFromOpening = (widthMm) => Math.round((widthMm - CAVITY_SLIDER_EXTRA_MM) / 2 / 10) * 10;
 
 const LVL_RE = /\blvl/i;
 /** Is this saved timber product an LVL (grade or species names LVL, e.g. "LVL13" or species "LVL")? */
