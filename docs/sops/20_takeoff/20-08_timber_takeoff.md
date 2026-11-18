@@ -1,5 +1,5 @@
 ---
-sop_version: 1.9
+sop_version: 2.1
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
@@ -15,6 +15,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 **Priority:** High
 
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
+
+> **Wall junctions (18 November 2026):** built on branch `takeoff/wall-junctions`, local, NOT pushed or deployed. No migration. Where a traced wall ends on another wall's run, the continuous wall gets two extra studs (one against each face of the butting wall) and junction blocks between them; a corner gets a second stud on the wall that starts there (owner rules of 18 November). Section 5E and TC-27 describe it. Plan: `docs/takeoff/WALL_JUNCTIONS_PLAN.md`.
 
 > **Walls (HUB 028, 25 October 2026):** built on branch `takeoff-r03` and NOT deployed yet. It waits for the Director's "deploy" and an iPhone check. It needs no migration. Sections 5D, 7, 8, 11, 12 and TC-15 to TC-18 describe it.
 
@@ -203,6 +205,22 @@ Use these only for an exception. Normal wall framing is **Add walls** (Section 5
 4. "Note: The longest available stock isn't set for this product — confirm it before ordering." is advisory — set **Longest available length** in the setup card once the supplier confirms it.
 
 ---
+
+## 5E. Wall junctions and corners (extra studs and blocks where one wall meets another)
+
+You do nothing to get these. The takeoff already knows where each wall starts and finishes on the plan, so it works out where one wall ends against another. Sam's owner rules of 18 November 2026 apply.
+
+1. **T-junction.** The end of one wall (the butting wall) lies on another wall's run (the continuous wall), not at that wall's own ends, and the two are not nearly parallel (under 20 degrees apart). The end may be up to one wall thickness (90 for a 90 x 45 stud) off the continuous wall's centreline, so tracing to the face of the wall on the plan still counts. Both walls must be on the same plan page and the same Walls item. Walls on one page drawn under different calibrations are compared in real millimetres; if those calibrations really disagree (a different scale) the takeoff skips that page and says so in a note.
+2. **What the continuous wall gets.** Two junction studs with a 90 mm space between them (the butting wall's thickness), cut at the continuous wall's own Wall height. They are extra to the studs already counted. A junction stud within one stud width of a stud already counted is not added twice, and one inside a window or door, or past the wall's end, is not counted. Each case is named on the wall page.
+3. **Junction blocks.** Plus 300 mm long 90 x 45 blocks, laminated in pairs, at 900 centres up the wall, fixed in the 90 mm space between the junction studs. Per junction: **2 x the wall height divided by 900, rounded up**: 6 blocks on a 2.4 or 2.7 m wall, 8 on a 3.0 m wall. They are ordered as one length per junction (6 x 0.3 = 1.8 m; 8 x 0.3 = 2.4 m) cut from stock lengths, the same way the supplier take-off lists them. A junction with no counted stud has no blocks.
+4. **Where you see it.** The Walls line reads "21 studs at 2,700 + 2 junction studs + 6 junction blocks". The elevation draws the junction studs in teal ("Junction stud") and the blocks between them at their heights ("Junction block"). The supplier take-off and PDF print the junction studs and blocks under **JUNCT. BLK** (for example `1/1.8` for the blocks), apart from STUDS.
+5. **Corner (an L).** Two walls whose ends meet at an angle of 20 degrees or more. Walls are traced as one continuous line, so the takeoff goes by direction: the wall that **starts** at the corner gets 2 studs (its normal start stud and a second stud for the internal-corner plasterboard fixing, 112.5 mm from its start on a 90 x 45 wall); the wall that **ends** there has its normal end stud only. 3 studs a corner in all. If two walls both start there, or both end there (drawn separately), the **longer** wall gets the 2 studs. The second stud is a full stud: it is counted in the Walls line and prints under **STUDS**; the elevation draws it teal ("Corner stud").
+6. **Swap a corner.** On the wall page, under the Walls line, each corner is listed ("Corner with Wall 2: this wall takes the second corner stud (that wall starts at the corner)") with **Swap**, which hands the second stud to the other wall. Tap it again to undo.
+7. **Joins that are not corners.** A wall traced in two collinear legs (under 20 degrees) is not a corner: no extra stud and it is not reported. If a wall meets the join of the two legs, the two legs count as one continuous wall: exactly 2 junction studs, the two leg-end studs at the join are dropped, and the blocks are counted once.
+8. **Remove one.** Each junction is listed on the continuous wall's page ("Wall 2 butts in at 3,000: stud at 2,932.5; stud at 3,067.5. 6 blocks (3 pairs of 300 mm) go between the studs.") with **Remove**. It then reads "removed by hand" with **Count** to put it back; the junction studs and the blocks go together. Each junction has its own switch, so one wall end between two walls turns off only the one you pick. The switch for the whole item is the Walls setting `junctionStuds` (off = none).
+9. **Notes.** If a butting wall is blocked (for example it has no height yet) the continuous wall still gets its junction studs, and a note says which wall isn't counted. Two walls that cross each other (X) are flagged in a note and not counted. Three or more wall ends at one point get a note and no corner stud.
+10. **Moving a wall moves its junction.** Nothing is stored except your switches: every junction and corner is worked out again each time.
+11. **Walls with no plan points** (typed lengths) have no position, so they never form junctions or corners.
 
 ## 6. What happens next
 
@@ -645,6 +663,17 @@ Next review date: 2027-04-14
 2. Hoop iron per cross brace is two diagonals: each = square root of (span squared + wall height squared), so a 2,700 span on a 2,700 wall is 2 x 3.818 = 7.64 m; on 2,400 it is 7.23 m. Tensioners: 2 per cross (one per diagonal), "TENSIONER SET HEX HEAD (PCE)". Sam's rule of thumb (2.7 x 1.6 x 2 = 8.64 m) is higher than the geometry, so the geometry is what is ordered (no allowance for laps or fixing ends); AS 1684.2 Section 8 is the reference for strap (tension) bracing, but the bracing design (how many, where, what angle) stays with the bracing plan. A cross brace flatter than 30 or steeper than 60 degrees is flagged. The cross braces' hoop iron and the walls' own straps are added together and ordered as one rolls line.
 3. The same on the wall's elevation: in the wall page **Bracing** card tap **Add ply sheet** or **Add cross brace**, then tap the elevation (stays on until **Done**). Marks show on the elevation (green panel = ply, purple X = cross brace). **Remove** is on each row (and in Select, tap a wall, **Bracing on this wall**); every add and remove is one Undo.
 4. Temporary bracing and screws are **not** calculated: use **+ Add bracing** on the order and pick **TEMP BR** (PINE 90x35 MGP10 P/M, `10/4.8`) or **SB SCREW** (COACHSCREW 10X75 GALV (PK 10), `1 EA`). Node: scripts/tests/takeoff-tc-hub034.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-27 — Wall junctions and corners**
+1. Walls item. Trace Wall 1 from (2000, 3000) to (8000, 3000), Wall 2 from (5000, 3000) to (5000, 7000) (so Wall 2 ends on the middle of Wall 1). Set Wall height 2,700 on both.
+2. Expected: Wall 1's page lists "Wall 2 butts in at 3,000 ..." with two studs, 2,932.5 and 3,067.5, and "6 blocks (3 pairs of 300 mm)". The Walls line reads "... studs at 2,700 + 2 junction studs + 6 junction blocks". Wall 2 has none. The elevation shows two teal studs and three teal blocks between them. Change Wall 1's height to 3,000: 8 blocks.
+3. Tap **Remove** on the junction: the junction studs and blocks drop and the row reads "removed by hand". Tap **Count**: they return. Undo does the same.
+4. Drag Wall 2's end away from Wall 1 (or delete Wall 2): the junction goes.
+5. Order: the supplier take-off shows JUNCT. BLK with the 2 junction studs and the blocks as one 1.8 m cut (`1/1.8`).
+6. Corner: trace Wall 3 from (2000, 3000) to (2000, 7000), then Wall 4 from (2000, 7000) to (6000, 7000) (clicked through as one line, so Wall 3 ENDS where Wall 4 starts). Expected: Wall 4 has a "Corner stud" 112.5 from its start (teal), Wall 3 only its normal end stud, and the Walls line counts the extra stud under STUDS. Wall 3 also starts where Wall 1 starts (both start there): the longer wall, Wall 1, gets the second stud. Tap **Swap** on a corner: the other wall gets it; tap again: back.
+7. Two collinear legs of one straight wall meeting end to end: no corner stud and no corner listed. A wall meeting the join: exactly 2 junction studs, no studs at the join.
+Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

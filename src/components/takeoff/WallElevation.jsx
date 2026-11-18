@@ -39,11 +39,14 @@ const RECT_STYLE = {
   narrow: { fill: "#fecaca", stroke: "#b91c1c" },
   blocked: { fill: "#fca5a5", stroke: "#991b1b" },
   area: { fill: "#e0f2fe", stroke: "#0369a1" },
+  block: { fill: "#a5f3fc", stroke: "#0e7490" },
 };
 const LINE_STYLE = {
   support: { stroke: "#0f766e", width: 3 },
   existing: { stroke: "#64748b", width: 2, dash: "6 4" },
   full: { stroke: "#92400e", width: 3 },
+  junction: { stroke: "#0e7490", width: 3 },
+  corner: { stroke: "#0e7490", width: 3 },
   removed: { stroke: "#94a3b8", width: 2, dash: "4 4" },
   joint: { stroke: "#7c3aed", width: 2.5 },
   edge: { stroke: "#ea580c", width: 3 },

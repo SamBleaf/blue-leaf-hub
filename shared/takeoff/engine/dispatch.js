@@ -21,13 +21,14 @@ import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js"
 import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm } from "./families.js";
-import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
+import { STOCK_MAX_UNSET_NOTE, computeManualTimber, computeJunctionBlocks, computeNoggins, computePlates, computeRepeatedMembers, computeStudWall, computeTrim, repeatedPositions, timberIdentity,
   wallNogginRows } from "./timber.js";
 import { allocateLinear } from "./allocator.js";
 import { selectStock } from "./stock.js";
 import { buildWall, wallAreas } from "./wall.js";
 import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcrossWalls, sheetLayout } from "./cladding.js";
 import { expandOpening } from "./openingRules.js";
+import { blockCentresFor, blockCountFor, findJunctions, JUNCTION_BLOCK } from "./junctions.js";
 import { openingSelectors } from "./openingSelectors.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
@@ -358,6 +359,36 @@ function runTimber(mat, n, items, ctx, sink) {
 
 // ── HUB 028 Walls: one traced run → studs, plates and noggins together ─────────
 
+/**
+ * Junctions and corners of a Walls item's traced walls. Each wall's two points go to real mm with its OWN calibration, and walls
+ * are grouped by (document, page) so two calibrations of one page are compared in real mm. If the calibrations on a page really
+ * disagree (a different scale or rotation), that page is skipped and reported in `skipped`, never compared silently. Pure.
+ */
+export function wallJunctionPlan(wallMeasurements, ctx, opts) {
+  const groups = new Map();
+  for (const m of wallMeasurements) {
+    if (m.inputs?.kind === "polygon" || !Array.isArray(m.points) || m.points.length !== 2 || !m.calibrationId) continue;
+    const cal = ctx.calibrationsById?.get(m.calibrationId);
+    if (!cal) continue;
+    const key = `${m.documentId}|${m.pageIndex}`;
+    const o = { x: 0, y: 0 };
+    if (!groups.has(key)) groups.set(key, { documentId: m.documentId, pageIndex: m.pageIndex, cals: new Map(), walls: [] });
+    const g = groups.get(key);
+    g.cals.set(m.calibrationId, cal);
+    g.walls.push({ id: m.id, a: pointToMm(cal, o, m.points[0]), b: pointToMm(cal, o, m.points[1]) });
+  }
+  const out = { junctions: [], corners: [], crossings: [], skipped: [] };
+  const differs = (p, q) => Math.abs(p - q) > 0.01 * Math.max(Math.abs(p), Math.abs(q), 1e-9);
+  for (const g of groups.values()) {
+    const cals = [...g.cals.values()];
+    const conflict = cals.some((c) => differs(c.sx, cals[0].sx) || differs(c.sy, cals[0].sy) || Math.abs((c.basisRotation || 0) - (cals[0].basisRotation || 0)) > 1e-6);
+    if (conflict) { if (g.walls.length > 1) out.skipped.push({ documentId: g.documentId, pageIndex: g.pageIndex, wallIds: g.walls.map((w) => w.id) }); continue; }
+    const r = findJunctions(g.walls, opts);
+    out.junctions.push(...r.junctions); out.corners.push(...r.corners); out.crossings.push(...r.crossings);
+  }
+  return out;
+}
+
 /** A Walls part's procurement identity, tagged with its part so each part buys on its own lines and cut list. */
 const wallPartIdentity = (p, part) => timberIdentity({ section: sectionText(p), grade: p.grade, treatment: p.treatment, species: p.species, supplier: p.supplierName, component: part });
 /**
@@ -427,6 +458,17 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // wall is "not counted" (never 0.00 m of plates). familyProblems already blocks with the part's need, once ("Studs:
   // enter the timber section", "Plates: the longest length must be at least 1,200 mm.")
   const stockOk = ["studs", "plates", "noggins"].every((k) => wallPartLongestOk(parts[k]));
+  // Wall junctions: found from where the traced walls start and finish (same page, same scale), worked out afresh each time
+  const jPlan = studW && stockOk && rules.junctionStuds !== false ? wallJunctionPlan(walls.map((x) => x.m), ctx, { thicknessMm: Number(parts.studs.section?.depthMm) || 90, studWidthMm: studW, toleranceMm: Number(rules.junctionToleranceMm) > 0 ? Number(rules.junctionToleranceMm) : undefined,
+    cornersSwapped: Array.isArray(rules.cornersSwapped) ? rules.cornersSwapped : [] }) : { junctions: [], corners: [], crossings: [], skipped: [] };
+  // one switch per junction (its id: butting wall + end + continuous wall); a key for a wall that no longer exists matches nothing
+  const jOffKeys = new Set(Array.isArray(rules.junctionsOff) ? rules.junctionsOff : []);
+  // a key saved by the first junction build named just the butting end ("b:0"): still honoured, but only where that end makes ONE junction
+  const idsAtNode = new Map();
+  for (const j of jPlan.junctions) idsAtNode.set(j.nodeId, new Set([...(idsAtNode.get(j.nodeId) || []), j.id]));
+  const isOff = (j) => jOffKeys.has(j.id) || (jOffKeys.has(j.nodeId) && idsAtNode.get(j.nodeId).size === 1);
+  const doneWalls = new Set(); // walls that were worked out (a blocked wall still gives its neighbours their junction studs, and is named in a note)
+  const jWallName = (id) => { const x = walls.find((q) => q.m.id === id); return x ? tagOf(x) : "a wall"; };
   for (const { m } of studW && stockOk ? walls : []) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
@@ -470,8 +512,16 @@ function runWallFraming(mat, n, items, ctx, sink) {
       ruleNotes.push(...e.notes.map((n) => ({ ...n, openingId: o.id })));
       return { ...o, sillMm: e.levels.sillMm, headMm: e.levels.headMm, detail: e.detail, sides: e.sides, jackMm: e.jackMm };
     }) : openings;
+    // the junctions where this wall is the continuous one: two studs each (unless removed by hand), cut at THIS wall's height
+    const myJ = jPlan.junctions.filter((j) => j.continuousId === m.id);
+    const jStuds = myJ.filter((j) => !isOff(j)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: x, spaceMm: [j.studsAtMm[0], j.studsAtMm[1]], label: `butts ${jWallName(j.buttingId)}` })));
+    // a T on the join of two collinear legs replaces the two leg-end studs there (the junction studs stand either side of the butting wall)
+    const dropAt = (end) => myJ.some((j) => !isOff(j) && j.dropEnd === end);
+    // owner rule B: the corner's second stud, from the wall's own first point (or its last, when the wall ENDS at the corner)
+    const myCornerStuds = jPlan.corners.filter((c) => c.studWallId === m.id).map((c) => ({ id: c.id, positionMm: c.studEnd === 0 ? c.offsetMm : L - c.offsetMm, label: "corner" }));
     const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
-      openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true });
+      openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true, junctionStuds: jStuds, cornerStuds: myCornerStuds,
+      ...(dropAt(0) ? { includeStart: false } : {}), ...(dropAt(1) ? { includeEnd: false } : {}) });
     const refused = studs.problems.filter((p) => p.code === "invalid_input");
     if (refused.length) {
       // e.g. overlapping openings: this wall gets no quantities, the other walls keep theirs, and the block holds every
@@ -479,13 +529,40 @@ function runWallFraming(mat, n, items, ctx, sink) {
       for (const p of refused) block("invalid_input", onWall(p.message));
       continue;
     }
-    const counted = studs.layout.ticks.filter((t) => t.state !== "removed");
+    const counted = studs.layout.ticks.filter((t) => t.state !== "removed" && t.state !== "junction");
+    const jTicks = studs.layout.ticks.filter((t) => t.state === "junction");
+    const jRep = new Map((studs.layout.junctionStuds || []).map((r) => [r.junctionId, r]));
+    // what the wall page lists: every junction on this wall, counted or not (off = removed by hand)
+    const junctionLayout = myJ.map((j) => {
+      const sts = j.studsAtMm.map((x, i) => ({ positionMm: x, state: isOff(j) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) }));
+      // owner rule A: blocks in the space between the two junction studs, at 900 centres up THIS wall's height, while the junction is counted
+      const here = j.ownsBlocks !== false && !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged");
+      const blocks = { count: blockCountFor(H), pairs: blockCountFor(H) / 2, lengthMm: JUNCTION_BLOCK.lengthMm, centresMm: blockCentresFor(H), xLeftMm: Math.round((j.stationMm - j.halfSpanMm) * 10) / 10, xRightMm: Math.round((j.stationMm + j.halfSpanMm) * 10) / 10, counted: here,
+        // drawn on every leg of a two-leg wall while the junction is on (counted on one only)
+        shown: !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged" || x.state === "pastEnd") };
+      return { id: j.id, nodeId: j.nodeId, buttingId: j.buttingId, buttingLabel: jWallName(j.buttingId), stationMm: j.stationMm, angleDeg: j.angleDeg, split: j.split,
+        off: isOff(j), studs: sts, blocks };
+    });
+    const blockJ = junctionLayout.filter((j) => j.blocks.counted);
+    const blocksOut = blockJ.length ? computeJunctionBlocks({ ...part("plates"), wallId: m.id, measurementId: m.id, junctions: blockJ.map((j) => ({ id: j.id, count: j.blocks.count, label: `@ ${fmt(j.stationMm)} (butts ${j.buttingLabel})` })) }) : null;
+    const myCorners = jPlan.corners.filter((c) => c.wallIds.includes(m.id) && !c.multi).length;
+    // corners on this wall, said on the wall page: which wall takes the second stud, and the per-corner swap
+    const cornerLayout = jPlan.corners.filter((c) => c.wallIds.includes(m.id)).map((c) => {
+      const other = c.wallIds.find((id) => id !== m.id);
+      const rep = (studs.layout.cornerStuds || []).find((r) => r.cornerId === c.id);
+      return { id: c.id, otherId: other, otherLabel: c.wallIds.length > 2 ? "other walls" : jWallName(other), multi: !!c.multi, hasStud: c.studWallId === m.id, studWallId: c.studWallId, why: c.why, swapped: c.swapped,
+        end: c.studWallId === m.id ? c.studEnd : null, offsetMm: c.offsetMm, ...(rep ? { positionMm: rep.positionMm, state: rep.state, ...(rep.mergedWithMm != null ? { mergedWithMm: rep.mergedWithMm } : {}) } : {}) };
+    });
+    const myCrossings = jPlan.crossings.filter((c) => c.wallIds.includes(m.id));
     const centres = counted.map((t) => t.positionMm);
     const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
       layers: [{ tag: "bottom" }, { tag: "top" }, ...(rules.doubleTopPlate === true ? [{ tag: "top-2" }] : [])],
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
-    const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: centres.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
-      openings: studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), skipClosedBays: true });
+    // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
+    const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
+    const blockSpaces = jTicks.length ? junctionLayout.filter((j) => !j.off && j.studs.some((x) => x.state === "added")).map((j) => ({ id: `junction-space:${j.id}`, xLeftMm: Math.max(j.blocks.xLeftMm, 0), xRightMm: Math.min(j.blocks.xRightMm, L) })).filter((o) => o.xRightMm > o.xLeftMm + 1) : [];
+    const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: nogStations.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
+      openings: [...studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), ...blockSpaces], skipClosedBays: true });
     // a wall whose plates or noggins can't be worked out (a plate with no stud to join over, or a part's setting
     // refused) adds nothing to the totals either: it is named "not counted", with its reason, which holds the item
     const tooLong = plates.problems.filter((p) => p.code === "plate_too_long");
@@ -526,11 +603,17 @@ function runWallFraming(mat, n, items, ctx, sink) {
       const q = { code: "framing_detail_members", message: `${tag} ${nm}: its framing detail adds its own members. Check the studs beside ${nm} aren't counted twice.`, blocking: false };
       if (once(q)) problems.push(q);
     }
-    const demands = three.flatMap((r) => r.demands);
+    for (const c of myCrossings) {
+      if (c.wallIds[0] !== m.id) continue;
+      const q = { code: "wall_crossing", message: `${tag} crosses ${jWallName(c.wallIds[1])}: two walls crossing each other. No junction studs are counted for a crossing. Check it on the plan.`, blocking: false, refs: [{ measurementId: m.id }] };
+      if (once(q)) problems.push(q);
+    }
+    if (blocksOut) for (const p of blocksOut.problems.filter((q) => q.code === "invalid_input")) block("invalid_input", onWall(`Plates: ${p.message}`));
+    const demands = [...three, ...(blocksOut ? [blocksOut] : [])].flatMap((r) => r.demands);
     for (const d of demands) {
       if (d.identity?.component) d.itemDescription = wallPartText(d.identity, parts[d.identity.component]);
       // the cut lists name each piece's wall ("Wall 2 stud @ 1,177.5 (beside W1)", "Wall 1 second top plate 0–6,000")
-      d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Bottom plate|Top plate|Second top plate|Noggin)\b/, (x) => x.toLowerCase())}`;
+      d.label = `${tag} ${String(d.label || "").replace(/^Top-2 plate/, "Second top plate").replace(/^(Stud|Corner stud|Bottom plate|Top plate|Second top plate|Noggin|Junction blocks)\b/, (x) => x.toLowerCase())}`;
     }
     // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off. Counted in
     // ROLLS (a fraction of a roll per wall; the item adds the walls up and rounds once), the cross braces' hoop iron joins the same line.
@@ -557,6 +640,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       }
       for (const text of b.notes) problems.push({ code: "bracing_note", message: `${tag}: ${text}`, blocking: false, refs: [{ measurementId: m.id }] });
     }
+    doneWalls.add(m.id);
     const layers = plates.layout?.layers || [];
     const layerMm = (t) => (layers.find((l) => l.tag === t)?.piecesMm || []).reduce((a, b) => a + b, 0);
     results.push({
@@ -567,7 +651,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
         openingsNotCounted: here,
-        totals: { studs: counted.length, studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
+        junctions: junctionLayout, corners: cornerLayout, junctionCorners: myCorners, junctionTicks: jTicks.length,
+        totals: { studs: counted.length, ...(jTicks.length ? { junctionStuds: jTicks.length } : {}), ...(blockJ.length ? { junctionBlocks: blockJ.reduce((a, j) => a + j.blocks.count, 0) } : {}),
+          ...(counted.some((t) => t.state === "corner") ? { cornerStuds: counted.filter((t) => t.state === "corner").length } : {}), studLengthMm: H, bottomPlateMm: layerMm("bottom"), topPlateMm: layerMm("top"),
           secondTopPlateMm: layers.some((l) => l.tag === "top-2") ? layerMm("top-2") : null,
           longPlateMm: layers.reduce((a, l) => a + (l.longPiecesMm || []).reduce((s, x) => s + x, 0), 0),
           noggins: noggins.demands.reduce((a, d) => a + d.quantity, 0), nogginRows: noggins.layout?.rows ?? null,
@@ -583,6 +669,21 @@ function runWallFraming(mat, n, items, ctx, sink) {
       explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],
     });
   }
+  // a wall that could not be worked out (blocked: see its own problem) still gives its neighbours their junction studs and corner
+  // studs: the continuous wall says which butting wall is not counted, so the studs are never taken for granted
+  const wallRef = (id) => walls.find((q) => q.m.id === id);
+  const missed = new Set();
+  const say = (contId, otherId, what) => {
+    const k = `${contId}|${otherId}`;
+    if (missed.has(k) || !doneWalls.has(contId) || doneWalls.has(otherId) || !wallRef(otherId)) return;
+    missed.add(k);
+    sink.problems.push({ code: "junction_wall_not_counted", message: `${jWallName(contId)}: ${jWallName(otherId)} ${what} isn't counted (it needs attention, see its problem), so the studs here are worked out from where it is drawn.`, blocking: false, refs: [{ measurementId: contId }] });
+  };
+  for (const j of jPlan.junctions) say(j.continuousId, j.buttingId, "butts into it but");
+  for (const c of jPlan.corners) if (c.studWallId) say(c.studWallId, c.wallIds.find((id) => id !== c.studWallId), "meets it at a corner but");
+  // two calibrations of one page that really disagree: junctions and corners on that page are not worked out, said in a note
+  for (const k of jPlan.skipped) sink.problems.push({ code: "junction_calibration_conflict", message: `Page ${Number(k.pageIndex) + 1}: the walls on it are calibrated to different scales, so their junctions and corners weren't worked out. Check the calibration.`, blocking: false, refs: k.wallIds.map((id) => ({ measurementId: id })) });
+  for (const c of jPlan.corners) if (c.multi) sink.problems.push({ code: "wall_corner_unclear", message: `${c.wallIds.map((id) => jWallName(id)).join(", ")} all end at one point: no corner stud is added there. Check it on the plan.`, blocking: false, refs: c.wallIds.map((id) => ({ measurementId: id })) });
   if (notCounted.length) {
     // "D1, W1"; a label on two walls is named with its wall ("W1 on Wall 1, W1 on Wall 2")
     const twice = new Set(notCounted.map((o) => o.name).filter((nm, i, all) => all.indexOf(nm) !== i));

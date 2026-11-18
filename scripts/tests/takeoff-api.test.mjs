@@ -1782,7 +1782,8 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   const cons = [w1, w2].map((mid) => ({ id: id(), measurementId: mid, jobMaterialId: walls, role: "wall" }));
   // the preview: what the app works out on the device before the save reaches the server
   const preview = compute({ ...scaled, materials: [...scaled.materials, mat], measurements: [...scaled.measurements, ...meas], contributions: [...scaled.contributions, ...cons] });
-  const LINE = "Walls: 21 studs (13 at 2,700, 8 at 3,000) · bottom plate 10.00 m · top plate 2 × 10.00 m · 17 noggins (1–2 rows)";
+  // Wall 2 STARTS at the corner with Wall 1, so it takes the corner's second stud (owner rule B, 18 Nov 2026): 22 studs, and its 2 more noggins
+  const LINE = "Walls: 22 studs (13 at 2,700, 9 at 3,000) · bottom plate 10.00 m · top plate 2 × 10.00 m · 19 noggins (1–2 rows)";
   assert.equal(wallFramingText(wallFramingTotals(preview.materialResults[walls]), "Walls"), LINE);
   const r = await SP(`/workspaces/${w}/commit`, { expectedRevision: await rev(), changes: {
     materials: { upsert: [mat] }, measurements: { upsert: meas }, contributions: { upsert: cons } } });
@@ -1812,7 +1813,7 @@ await t("HUB 028 step 6: a Walls item, its 2-wall Line run and D1 + W1 come back
   assert.deepEqual(mine(compute(again.snapshot)), mine(again.computed));
   assert.deepEqual(back.map((m) => [m.inputs.heightSource, Math.abs(m.inputs.widthMm - [6000, 4000][m.inputs.seq - 1]) < 0.01]), [["plan+entered", true], ["plan+entered", true]], "the traced lengths, 6,000 and 4,000");
   assert.equal(wallFramingText(wallFramingTotals(again.computed.materialResults[walls]), "Walls"), LINE);
-  assert.deepEqual(mine(again.computed).filter((l) => l.component === "studs").map((l) => [l.quantity, l.finishedLengthMm]), [[8, 3000], [13, 2700]]);
+  assert.deepEqual(mine(again.computed).filter((l) => l.component === "studs").map((l) => [l.quantity, l.finishedLengthMm]), [[9, 3000], [13, 2700]]);
   assert.deepEqual(mine(again.computed).filter((l) => l.component === "plates").map((l) => [l.quantity, l.finishedLengthMm]), [[3, 6000], [3, 4200]]);
   // a Walls item reads traced walls only: a Run, an entered length or a count is refused with the server's message, nothing saved
   const before = await rev();

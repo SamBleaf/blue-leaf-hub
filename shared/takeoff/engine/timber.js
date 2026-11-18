@@ -743,8 +743,8 @@ function sideStudOption(raw) {
   };
 }
 
-const STUD_RANK = { end: 0, side: 1, centre: 2 };
-const STUD_NAME = { end: "end stud", side: "side stud", centre: "stud" };
+const STUD_RANK = { end: 0, side: 1, centre: 2, corner: 3 };
+const STUD_NAME = { end: "end stud", side: "side stud", centre: "stud", corner: "corner stud" };
 
 /**
  * HUB 028 side studs and merge. [Sam, 24 Oct 2026] A full stud each side of every opening, added to the kept T1
@@ -763,7 +763,7 @@ const STUD_NAME = { end: "end stud", side: "side stud", centre: "stud" };
  *    there would otherwise sit inside the other opening), and get no further studs on that side.
  * Returns the counted stations along the wall.
  */
-function framedStations(ctx, stations, run, openings, side, wallId) {
+function framedStations(ctx, stations, run, openings, side, wallId, cornerStuds = []) {
   const { w, perSide } = side;
   const L = run.runMm;
   const last = stations.length - 1;
@@ -812,6 +812,13 @@ function framedStations(ctx, stations, run, openings, side, wallId) {
       if (k <= perR && !right.shared && inWall(rx) && !(next && rx + w / 2 > ne.l + EPS_MM)) cands.push({ x: rx, kind: "side", order: k, beside: [o.id] });
     }
   });
+  // owner rule B (Sam, 18 Nov 2026): the second stud at a corner is a full stud like the others, merged into any stud within one
+  // stud width and not placed inside an opening or past the wall's end
+  for (const cs of cornerStuds) {
+    if (cs.x < w / 2 - EPS_MM || cs.x > L - w / 2 + EPS_MM) continue;
+    if (openings.some((o) => cs.x > o.xLeftMm + EPS_MM && cs.x < o.xRightMm - EPS_MM)) continue;
+    cands.push({ x: cs.x, kind: "corner", order: 0, beside: [] });
+  }
   const accepted = [];
   for (const c of [...cands].sort((a, b) => STUD_RANK[a.kind] - STUD_RANK[b.kind] || a.order - b.order || a.x - b.x)) {
     let near = null;
@@ -884,7 +891,31 @@ export function computeStudWall(input) {
     const stations = run.positions.map((x) => ({
       x, stationId: demandId(wallId, posKey(x)), opening: openings.find((o) => x > o.xLeftMm + EPS_MM && x < o.xRightMm - EPS_MM) ?? null,
     }));
-    const kept = side === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, side, wallId);
+    const cornerIn = Array.isArray(input.cornerStuds) ? input.cornerStuds.map((c) => ({ id: c.id, label: c.label || null, x: num(c.positionMm, "Corner stud position", { min: -Infinity }) })) : [];
+    const keptAll = side === null ? stations.filter((s) => !s.opening) : framedStations(ctx, stations, run, openings, side, wallId, cornerIn);
+    // a junction pair REPLACES a regular stud standing in the space between its two studs (the blocks are fixed there): that
+    // stud comes out, so it is never counted inside the 90 mm block space (only while a junction stud of the pair is counted)
+    const spaces = side === null || !Array.isArray(input.junctionStuds) ? [] : input.junctionStuds
+      .filter((j) => Array.isArray(j.spaceMm) && j.spaceMm.length === 2 && Number.isFinite(j.positionMm)
+        && !(j.positionMm < side.w / 2 - EPS_MM || j.positionMm > run.runMm - side.w / 2 + EPS_MM)
+        && !openings.some((o) => j.positionMm > o.xLeftMm + EPS_MM && j.positionMm < o.xRightMm - EPS_MM)).map((j) => j.spaceMm);
+    const kept = spaces.length ? keptAll.filter((s) => {
+      const inSpace = (s.kind === "centre" || s.kind === "end") && spaces.some(([lo, hi]) => s.x > lo + EPS_MM && s.x < hi - EPS_MM);
+      if (inSpace) ctx.explain.push(`The stud at ${fmt(s.x)} is in the space between a junction's two studs, which the junction pair replaces`);
+      return !inSpace;
+    }) : keptAll;
+    // what became of each corner stud: counted, merged into a stud already there, inside an opening, or past the wall's end
+    const cornerReport = side === null ? [] : cornerIn.map((c) => {
+      const sw = side.w;
+      let state = "added", mergedWithMm = null;
+      if (c.x < sw / 2 - EPS_MM || c.x > run.runMm - sw / 2 + EPS_MM) state = "pastEnd";
+      else if (openings.some((o) => c.x > o.xLeftMm + EPS_MM && c.x < o.xRightMm - EPS_MM)) state = "inOpening";
+      else if (!kept.some((k) => k.kind === "corner" && Math.abs(k.x - c.x) <= EPS_MM)) {
+        const near = kept.filter((k) => Math.abs(k.x - c.x) < sw - EPS_MM).sort((a, b) => Math.abs(a.x - c.x) - Math.abs(b.x - c.x))[0];
+        state = "merged"; mergedWithMm = near ? near.x : null;
+      }
+      return { cornerId: c.id, positionMm: c.x, state, ...(mergedWithMm !== null ? { mergedWithMm } : {}) };
+    });
     const w = { wallId, ref, plies, allowanceMm, studLengthMm: height.studLengthMm, reconciled: new Map() };
     const framing = [];
     const openingLayout = [];
@@ -911,12 +942,39 @@ export function computeStudWall(input) {
         if (k === 1 && w.reconciled.has(s.stationId)) continue;
         demands.push(piece(ctx, {
           id: demandId(ctx.materialId, "stud", s.stationId, `p${k}`), role: "stud", lengthMm: height.studLengthMm + allowanceMm,
-          label: `Stud @ ${fmt(s.x)}${s.beside?.length ? ` (beside ${s.beside.map((id) => nameOf.get(id) ?? id).join(", ")})` : ""}${plies > 1 ? ` ply ${k}` : ""}`,
+          label: `${s.kind === "corner" ? "Corner stud" : "Stud"} @ ${fmt(s.x)}${s.beside?.length ? ` (beside ${s.beside.map((id) => nameOf.get(id) ?? id).join(", ")})` : ""}${plies > 1 ? ` ply ${k}` : ""}`,
           sourceRefs: [{ ...ref, station: s.x, role: "stud" }],
         }));
       }
     }
     demands.push(...framing);
+    // Wall junctions (docs/takeoff/WALL_JUNCTIONS_PLAN.md): extra studs either side of a wall butting into this one. Each is
+    // merged into a counted stud within one stud width, and skipped inside an opening or past the wall's ends.
+    const junctionTicks = [];
+    const junctionReport = [];
+    if (side !== null && Array.isArray(input.junctionStuds) && input.junctionStuds.length) {
+      const taken = kept.map((s) => s.x);
+      const sw = side.w;
+      for (const j of [...input.junctionStuds].sort((a, b) => a.positionMm - b.positionMm)) {
+        const x = num(j.positionMm, "Junction stud position", { min: -Infinity });
+        let state = "added", mergedWithMm = null;
+        if (x < sw / 2 - EPS_MM || x > run.runMm - sw / 2 + EPS_MM) state = "pastEnd";
+        else if (openings.some((o) => x > o.xLeftMm + EPS_MM && x < o.xRightMm - EPS_MM)) state = "inOpening";
+        else {
+          const near = taken.find((t) => Math.abs(t - x) < sw - EPS_MM);
+          if (near !== undefined) { state = "merged"; mergedWithMm = near; }
+        }
+        junctionReport.push({ junctionId: j.id, positionMm: x, state, ...(mergedWithMm !== null ? { mergedWithMm } : {}) });
+        if (state !== "added") continue;
+        taken.push(x);
+        const stationId = demandId(wallId, posKey(x));
+        junctionTicks.push({ stationId, positionMm: x, state: "junction", openingId: null, reconciledWith: null, junctionId: j.id, junctionLabel: j.label || null });
+        demands.push(piece(ctx, {
+          id: demandId(ctx.materialId, "junction-stud", stationId), role: "junction stud", lengthMm: height.studLengthMm + allowanceMm,
+          label: `Junction stud @ ${fmt(x)}${j.label ? ` (${j.label})` : ""}`, sourceRefs: [{ ...ref, station: x, role: "junction stud", junctionId: j.id }],
+        }));
+      }
+    }
     let additionsComplete = true;
     const extras = list(input.extras, "Wall additions");
     const extraIds = new Set();
@@ -933,7 +991,7 @@ export function computeStudWall(input) {
     ctx.explain.push(`${kept.length} ${side === null ? "common " : ""}stud station(s) × ${plies}${allowanceMm ? ` at ${fmt(height.studLengthMm)} + ${fmt(allowanceMm)} allowance` : ""}`
       + `${side === null ? "" : `, ${sideCount} of them beside openings (${side.perSide > 1 ? `${side.perSide} each side, the first with its face on the opening edge` : "face on the opening edge"})`}`
       + `${w.reconciled.size ? `; ${w.reconciled.size} serve as kings (detail permits)` : ""}`,
-    `Corners, T-junctions, brace panels, point loads and hold-downs are explicit additions only (${extras.length} entered)`);
+    `Corners, brace panels, point loads and hold-downs are explicit additions only (${extras.length} entered); T-junction studs come from the walls' positions${junctionTicks.length ? ` (${junctionTicks.length} added)` : ""}`);
     const scope = openingsComplete ? (openings.length ? "studs with explicit opening framing" : "base studs") : OPENING_FRAMING_INCOMPLETE;
     if (!openingsComplete) ctx.explain.push(cap(OPENING_FRAMING_INCOMPLETE));
     const ticks = side === null
@@ -944,15 +1002,17 @@ export function computeStudWall(input) {
       // HUB 028: the counted studs (end and centre "full", "side") and the stations removed inside openings, along
       // the wall; a stud merged into its neighbour is not a tick of its own (its position is in mergedMm)
       : [...kept.map((s) => ({
-        stationId: s.stationId, positionMm: s.x, state: s.kind === "side" ? "side" : "full", openingId: null,
+        stationId: s.stationId, positionMm: s.x, state: s.kind === "side" ? "side" : s.kind === "corner" ? "corner" : "full", openingId: null,
         reconciledWith: w.reconciled.get(s.stationId) ?? null, besideOpeningIds: s.beside, mergedMm: s.merged,
-      })), ...stations.filter((s) => s.opening).map((s) => ({
+      })), ...junctionTicks, ...stations.filter((s) => s.opening).map((s) => ({
         stationId: s.stationId, positionMm: s.x, state: "removed", openingId: s.opening.id, reconciledWith: null,
       }))].sort((a, b) => a.positionMm - b.positionMm);
     return result(ctx, demands, {
       kind: "studWall", wallId, wallLengthMm: run.runMm, studLengthMm: height.studLengthMm, plies, scope,
       ...(side === null ? {} : { studWidthMm: side.w, ...(side.perSide > 1 ? { sideStudsEachSide: side.perSide } : {}) }),
       ticks,
+      ...(junctionReport.length ? { junctionStuds: junctionReport } : {}),
+      ...(cornerReport.length ? { cornerStuds: cornerReport } : {}),
       openings: openingLayout,
       // HUB 028 clipOpeningLevels: openings wholly above the studs, which frame nothing here (only when there are some)
       ...(aboveStuds.length ? { openingsAboveStuds: aboveStuds.map((o) => ({ id: o.id, ...(o.label ? { label: o.label } : {}), xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })) } : {}),
@@ -1234,6 +1294,33 @@ export function computeNoggins(input) {
       + `${closed ? `, ${closed} closed (touching studs, no noggin)` : ""}`
       + (rows ? ` × ${rows} row(s) (${input.rowsSource === "entered" ? "entered" : ruled ? `owner rule: ${text(input.rowsRuleRef)}` : `reviewed detail ${text(input.rowsDetailRef)}`})` : " — rows not set"));
     return result(ctx, demands, { kind: "noggins", wallId, rows, ...(ruled ? { rowsSource: "owner-rule", rowsRuleRef: text(input.rowsRuleRef) } : {}), bays }, rows > 0);
+  });
+}
+
+/**
+ * Junction blocks (owner rule A, Sam 18 Nov 2026; docs/takeoff/WALL_JUNCTIONS_PLAN.md): short blocks laminated in pairs, fixed
+ * in the space between the two junction studs. Each junction buys its blocks as ONE length (count x block length: 6 x 300 = 1,800 mm),
+ * rolled into a stock length on the product's grid like the supplier's take-off; the crew cuts them from it.
+ * @param {{ materialId:string, wallId:string, identity:object, stock?:object, sizing?:object, label?:string, blockMm?:number,
+ *   junctions:Array<{ id:string, count:number, label?:string }> }} input
+ */
+export function computeJunctionBlocks(input) {
+  return guarded(() => {
+    const ctx = setup(input, "block");
+    const wallId = text(input.wallId) || fail("Trace the wall first.", "wallId");
+    const blockMm = num(input.blockMm, "Block length", { def: 300, above: true });
+    const demands = [];
+    const blocks = [];
+    for (const j of list(input.junctions, "Junctions")) {
+      const count = num(j.count, "Block count", { min: 1, integer: true });
+      demands.push(piece(ctx, {
+        id: demandId(ctx.materialId, "junction-block", wallId, j.id), role: "junction block", quantity: 1, lengthMm: count * blockMm,
+        label: `Junction blocks${j.label ? ` ${j.label}` : ""}: ${count} x ${fmt(blockMm)} mm`, sourceRefs: [{ wallId, role: "junction block", junctionId: j.id }],
+      }));
+      blocks.push({ junctionId: j.id, count, blockMm, lengthMm: count * blockMm });
+    }
+    ctx.explain.push(`${blocks.length} junction(s) with blocks: ${blocks.map((b) => `${b.count} x ${fmt(b.blockMm)} mm in one ${fmt(b.lengthMm)} mm length`).join("; ")}`);
+    return result(ctx, demands, { kind: "junctionBlocks", wallId, blocks }, true);
   });
 }
 
