@@ -952,7 +952,7 @@ export function LintelLoad({ opening, rule, onSet }) {
             <NumberField label="Pieces" value={dim.plies} min={1} max={4} optional onCommit={(n) => setDim((d) => ({ ...d, plies: n || 1 }))} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade || position === "floorFrame" ? { grade: l.grade || "LVL13" } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
+            <Btn onClick={() => save({ ...inputs, lintel: { depthMm: dim.depthMm, breadthMm: dim.breadthMm, plies: dim.plies || 1, ...(l.grade ? { grade: l.grade } : {}) } })} disabled={!(dim.depthMm > 0 && dim.breadthMm > 0)}>Use this size</Btn>
             {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; save(next); }}>Use the table</Btn>}
           </div>
           <p className="text-[11px] text-muted">A size you type is used as it is: it isn&apos;t checked against a span table.</p>

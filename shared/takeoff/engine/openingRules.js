@@ -169,7 +169,7 @@ export function expandOpening({ opening: o, ctx }) {
   const aloftFree = aboveRegion - aboveDed;
   const aloftBlock = aloft && aloftFree > EPS && aloftFree < MIN_CRIPPLE_MM;
   if (aloftBlock) {
-    members.push({ id: "head-blocking", role: "blocking", quantity: 1, lengthFrom: "openingWidth", addMm: jackMm.left + jackMm.right, ...plate });
+    members.push({ id: "head-blocking", role: "head block", quantity: 1, lengthFrom: "openingWidth", addMm: jackMm.left + jackMm.right, ...plate });
     notes.push({ code: "lintel_aloft_blocking", blocking: false, message: `${name}: only ${fmt(aloftFree)} mm above the head trimmer, too short for cripples. Solid blocking is counted instead.` });
   }
   const detail = {

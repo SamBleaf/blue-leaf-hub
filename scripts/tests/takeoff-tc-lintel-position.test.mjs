@@ -6,6 +6,7 @@ import { execSync } from "node:child_process";
 import { WALL_FRAMING_RULES, computeWorkspace, wallFramingDefaults } from "../../shared/takeoff/index.js";
 import { cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
 import { NOTE_CODES } from "../../shared/takeoff/fixes.js";
+import { memberGroup } from "../../shared/takeoff/supplierOrder.js";
 import { LINTEL_POSITIONS } from "../../shared/takeoff/engine/openingRules.js";
 
 let pass = 0, fail = 0;
@@ -107,8 +108,10 @@ t("free space at or under one trimmer: just the head trimmer, no cripples; under
   // head 2,685 from the floor: 2,700 - 2,640 = 60 free: more than a trimmer (45), 15 mm left, under 50 → blocking
   const tight = run([wm("w", 3955, 2700, "Wall 1"), om("o", "w", "W1", "window", 450, 3430, 685, 2000, { lintelPosition: "roofFrame" })]);
   assert.deepEqual(dem(tight, /above-head/), []);
-  assert.ok(dem(tight, /blocking/i).length >= 1, JSON.stringify(WR(tight).demands.map((d) => d.label)));
+  assert.ok(dem(tight, /head block/i).length >= 1, JSON.stringify(WR(tight).demands.map((d) => d.label)));
   assert.ok(codes(tight).includes("lintel_aloft_blocking"));
+  // the block must not print with the kings and jacks (review defect: "blocking" matched /king/)
+  assert.equal(memberGroup("head block").key, "junction");
   // head at the top of the studs: nothing above
   const flush = run([wm("w", 3955, 2700, "Wall 1"), om("o", "w", "W1", "window", 450, 3430, 700, 2000, { lintelPosition: "roofFrame" })]);
   assert.deepEqual(dem(flush, /above-head/), []);
