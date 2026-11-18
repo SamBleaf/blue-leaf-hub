@@ -87,6 +87,9 @@ t("elevation: kings, jacks, cripples, trimmers and the lintel are drawn from the
   assert.equal(Math.round(by("lintel")[0].rect.y0), 2600, "sits on the head at 2,600");
   assert.deepEqual(by("jack").map((i) => i.a.y), [45, 45].map((x) => x), "jacks stand on the bottom plate");
   assert.equal(Math.round(by("jack")[0].b.y), 2600, "and run to the head");
+  const o = l.openings[0], jx = by("jack").map((i) => i.a.x).sort((a, b) => a - b);
+  assert.equal(jx[0], o.xLeftMm - 22.5, "left jack stands just outside the clear opening");
+  assert.equal(jx[1], o.xRightMm + 22.5, "right jack stands just outside the clear opening");
 });
 
 t("elevation: roof-frame lintel gets a head trimmer and cripples above it, no solid lintel under the top plate", () => {

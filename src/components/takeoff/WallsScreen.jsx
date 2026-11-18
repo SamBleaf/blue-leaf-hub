@@ -270,6 +270,7 @@ function demandsForWall(result, wallId, tag, { ownerOnly = false } = {}) {
  * the lintel. Heights run from the stud base (top of the bottom plate), as the engine measures them. A lintel put up in the
  * roof or floor frame is drawn separately (dashed, above the top plate). Nothing for an opening with no rule.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper, exported for the tests
 export function openingFramingItems(l, o, prefix, bbox) {
   const rl = o.rule;
   if (!rl || !(l.heightMm > 0)) return [];
@@ -282,8 +283,8 @@ export function openingFramingItems(l, o, prefix, bbox) {
   const sill = base + rl.sillFromStudBaseMm, head = base + rl.headFromStudBaseMm;
   const line = (id, state, x, y0, y1, title, rows) => { if (y1 > y0 + 0.5) items.push({ id: `${prefix}${id}-${o.id}`, kind: "line", state, a: { x, y: y0 }, b: { x, y: y1 }, clip: true, info: { title, rows } }); };
   // jacks: against the opening's edges, to the head
-  for (let k = 0; k < (rl.jacks?.left || 0); k++) line(`jackL${k}`, "jack", o.xLeftMm + sw / 2 + k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
-  for (let k = 0; k < (rl.jacks?.right || 0); k++) line(`jackR${k}`, "jack", o.xRightMm - sw / 2 - k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
+  for (let k = 0; k < (rl.jacks?.left || 0); k++) line(`jackL${k}`, "jack", o.xLeftMm - sw / 2 - k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
+  for (let k = 0; k < (rl.jacks?.right || 0); k++) line(`jackR${k}`, "jack", o.xRightMm + sw / 2 + k * sw, base, head, `${name} jack stud`, [["Length", `${fmtMm(rl.jackLengthMm)} mm`]]);
   const stack = rl.trimmers?.sill || 0, headTrim = rl.trimmers?.head || 0;
   const lintel = rl.lintel?.status === "sized" || rl.lintel?.status === "typed" ? rl.lintel : null;
   const lintelUnder = !!lintel && rl.position === "underTopPlate" && Number(lintel.depthMm) > 0;
@@ -390,6 +391,7 @@ function kingStations(result, wallId) {
 }
 
 /** Per-wall quantities for one material: layout stock grouped by what is bought (before spares). */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper, exported for the tests
 export function wallQuantities(result, wallId, tag) {
   const alloc = allocationMap(result);
   const groups = new Map();
