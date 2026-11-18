@@ -1076,7 +1076,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   function setItemDoubleTop(mat, on) {
     const st = doubleTopState(view.measurements, view.contributions, mat);
     setRule(mat, { doubleTopPlate: on });
-    if (st.own > 0) setDtAsk({ matId: mat.id, on, walls: st.own });
+    // keep the op we just recorded: "Yes" folds the clearing into it so the whole answer is ONE Undo
+    if (st.own > 0) setDtAsk({ matId: mat.id, on, walls: st.own, op: histRef.current.past[histRef.current.past.length - 1], mat });
     else setDtAsk(null);
   }
   /** Yes: every wall's own setting is cleared (so all follow the item). No: leave them; only walls without their own follow. */
@@ -1085,7 +1086,17 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     setDtAsk(null);
     if (!yes || !ask) return;
     const ch = clearDoubleTopOverrides(view.measurements, view.contributions, material);
-    if (ch.length) record({ redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) });
+    if (!ch.length) return;
+    const clear = { redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) };
+    const h = histRef.current;
+    if (ask.op && h.past[h.past.length - 1] === ask.op) {
+      // still the last edit: replace it with item change + clearing, one Undo
+      ws.edit(clear.redo);
+      const merged = { redo: partial({ materials: [materialRecord({ ...ask.mat, rules: { ...(ask.mat.rules || {}), doubleTopPlate: ask.on } })], measurements: ch.map((c) => c.next) }),
+        undo: partial({ materials: [materialRecord(ask.mat)], measurements: ch.map((c) => c.before) }) };
+      histRef.current = { past: [...h.past.slice(0, -1), merged], future: [] };
+      sync();
+    } else record(clear);
   }
   /** A tap in Add bracing mode: a 1,200 mm ply sheet or a hoop iron cross brace is clicked out on that wall. One tap, one Undo. */
   function braceTap(p) {
