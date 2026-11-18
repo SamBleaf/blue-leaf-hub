@@ -30,6 +30,7 @@ import { aacPanelLayout, areaToLinear, courseLayout, panelGrid, shareSheetsAcros
 import { expandOpening } from "./openingRules.js";
 import { blockCentresFor, blockCountFor, findJunctions, JUNCTION_BLOCK } from "./junctions.js";
 import { openingSelectors } from "./openingSelectors.js";
+import { computeFloorFraming } from "./floor/framing.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
 import { FOLLOWERS_VERSION, FOLLOWER_KINDS, FOLLOWER_TEXT, FOAM_TAPE, followerNote, followerRule, wallFollowers } from "./followers.js";
@@ -52,6 +53,8 @@ export function methodReads(mat) {
     // HUB 028 Walls: traced walls only (a run, count or entered length can't be put on Walls; extra members go on a
     // separate Timber item)
     if (mat.methodKey === "wall_framing") return ["wall"];
+    // Floor frame (Sam, 18 Nov 2026): the outline, openings and wet areas are traced AREAS (inputs.role floor / void / wet)
+    if (mat.methodKey === "floor_framing") return ["area"];
     if (mat.methodKey === "repeated_members") return ["distribution", "run", "polyline", "member", "manual", "count"];
     if (mat.methodKey === "wall_frame") return ["wall", "manual", "count"];
     const purpose = mat.spec?.purpose;
@@ -261,6 +264,7 @@ function connectedRuns(ms, ctx, sink, lengthOf) {
 
 function runTimber(mat, n, items, ctx, sink) {
   if (mat.methodKey === "wall_framing") return runWallFraming(mat, n, items, ctx, sink);
+  if (mat.methodKey === "floor_framing") return runFloorFraming(mat, n, items, ctx, sink);
   const rules = mat.rules || {};
   const identity = timberId(n);
   // a schedule/engineer source counts only WITH its reference; otherwise the size is a manual selection
@@ -713,6 +717,38 @@ function runWallFraming(mat, n, items, ctx, sink) {
   sink.usesLongPlates = used("longPlates");
   if (!walls.length && !sink.problems.length) sink.problems.push({ code: "nothing_measured", message: "Trace the walls for this Walls item.", blocking: false });
   return results;
+}
+
+/**
+ * Floor frame (floor_framing@1, Sam 18 Nov 2026): the traced floor outline, stair voids / openings (areas with inputs.role "floor" | "void")
+ * become trusses, strongbacks, beams and trimmers through engine/floor/framing.js. One floor outline per item.
+ */
+function runFloorFraming(mat, n, items, ctx, sink) {
+  const areas = items.filter((x) => x.m.kind === "area");
+  const roleOf = (x) => x.m.inputs?.role;
+  const byId = (a, b) => (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0);
+  const floors = areas.filter((x) => roleOf(x) === "floor").sort(byId);
+  const others = areas.filter((x) => roleOf(x) !== "floor" && roleOf(x) !== "void");
+  for (const x of others) { sink.measProblems.set(x.m.id, [...(sink.measProblems.get(x.m.id) || []), "measurement_unused"]); sink.problems.push({ code: "measurement_unused", message: "That area isn't a floor outline or an opening, so the Floor frame can't use it. Remove it.", blocking: true }); }
+  if (!floors.length) { if (!sink.problems.length) sink.problems.push({ code: "floor_outline_missing", message: "Draw the floor outline for this Floor frame item.", blocking: false }); return []; }
+  if (floors.length > 1) sink.problems.push({ code: "floor_outline_many", message: "A Floor frame item takes one floor outline. Remove the extra outlines, or add another Floor frame item for another floor.", blocking: true });
+  const floor = floors[0].m;
+  const t = tracedLength(floor, ctx);
+  sink.measProblems.set(floor.id, t.problems);
+  if (!t.cal) { sink.problems.push({ code: "floor_scale_missing", message: "Scale this plan page before the floor frame can be worked out.", blocking: true }); return []; }
+  const origin = floor.points[0];
+  const toMm = (m) => m.points.map((p) => pointToMm(t.cal, origin, p));
+  const voids = [];
+  for (const x of areas.filter((a) => roleOf(a) === "void")) {
+    const vt = tracedLength(x.m, ctx);
+    sink.measProblems.set(x.m.id, vt.problems);
+    if (!vt.cal || vt.cal.id !== t.cal.id) { sink.problems.push({ code: "floor_void_scale", message: `${x.m.inputs?.name || "An opening"} is on a different scaled page from the floor outline. Draw it on the same page.`, blocking: true }); continue; }
+    voids.push({ id: x.m.id, name: x.m.inputs?.name || "Opening", stair: x.m.inputs?.stair !== false, points: toMm(x.m) });
+  }
+  voids.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }) || (a.id < b.id ? -1 : 1));
+  const r = computeFloorFraming({ materialId: mat.id, n, rules: mat.rules || {}, outline: toMm(floor), voids, refs: [{ measurementId: floor.id, role: "floor" }] });
+  if (r.layout) r.layout = { ...r.layout, floorMeasurementId: floor.id, origin: { x: origin.x, y: origin.y }, calibrationId: t.cal.id };
+  return [r];
 }
 
 /** Aluminium: window preset cuts per opening + measured/entered runs, as cut demands for the bar allocator. */

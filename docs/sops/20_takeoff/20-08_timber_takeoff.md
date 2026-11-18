@@ -1,7 +1,7 @@
 ---
-sop_version: 2.1
+sop_version: 2.2
 last_reviewed: 2026-11-18
-app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
+app_version: takeoff-r03 + HUB 031 + Floor frame phase 1 (branch takeoff/floor-framing, built 18 Nov 2026, local, not deployed)
 screenshot_status: placeholders_only
 owner: Admin / Director
 test_status: untested  <!-- untested | passed | failed | partial -->
@@ -15,6 +15,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 **Priority:** High
 
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
+
+> **Floor frame, phase 1 (18 November 2026):** built on branch `takeoff/floor-framing`, local, NOT pushed or deployed. No migration (a traced floor outline is an `area` measurement the database already allows). Calculation version `takeoff-calc@9`. Trusses, strongbacks, ring beams and stair trimmers only: no floor sheets (Structaflor, Hebel, Scyon), no layout drawing or PDF appendix, no AS1684 joist floors yet (plan phases 2 to 6: `docs/takeoff/FLOOR_FRAMING_PLAN.md`). Section 5G and TC-28.
 
 > **Wall junctions (18 November 2026):** built on branch `takeoff/wall-junctions`, local, NOT pushed or deployed. No migration. Where a traced wall ends on another wall's run, the continuous wall gets two extra studs (one against each face of the butting wall) and junction blocks between them; a corner gets a second stud on the wall that starts there (owner rules of 18 November). Section 5E and TC-27 describe it. Plan: `docs/takeoff/WALL_JUNCTIONS_PLAN.md`.
 
@@ -221,6 +223,21 @@ You do nothing to get these. The takeoff already knows where each wall starts an
 9. **Notes.** If a butting wall is blocked (for example it has no height yet) the continuous wall still gets its junction studs, and a note says which wall isn't counted. Two walls that cross each other (X) are flagged in a note and not counted. Three or more wall ends at one point get a note and no corner stud.
 10. **Moving a wall moves its junction.** Nothing is stored except your switches: every junction and corner is worked out again each time.
 11. **Walls with no plan points** (typed lengths) have no position, so they never form junctions or corners.
+
+## 5G. Floor frame (trusses, strongbacks, ring beams and stair trimmers)
+
+For a floor built on floor trusses. The truss supplier designs the real layout and spans, so these counts are for ordering and checking against their layout. Sam's owner answers of 18 November 2026 apply. Nothing here checks anything structural.
+
+1. **Add it.** On the Timber and cladding overview tap **Add floor frame** (next to Add walls). It opens straight onto the plan with **Rectangle** chosen. The plan page must be scaled first (the sheet says so, with Scale page). The item has no Setup card: everything is on the sheet at the bottom of the plan. Tools are **Rectangle**, **Outline** and **Pan**.
+2. **Outline.** Rectangle: tap one corner, then the opposite corner. Outline: tap each corner, then Finish (or double-tap the last corner, or tap the first). One floor outline per item (another floor or level is another Floor frame item). **Redraw** takes the outline off (Undo brings it back) and clears the beams marked on its edges.
+3. **Openings.** **+ Stair void** or **+ Opening**, then draw it the same way (inside the outline). A stair void gets 4 LVL trimmers; a plain opening gets none (and a note says the trusses it cuts end unsupported). **Remove** takes one off.
+4. **Trusses.** The chips **Span the short way** (default) and **Span the long way**, and **450 centres** (default), **600 centres** or **Other** (200 to 1,200). The sheet reads "15 trusses · 15 × 4,200". The first truss is on the first edge, then one every centres, and there is **always a truss on the far edge** (count = width divided by centres, rounded up, plus 1; a short last bay is fine and gives no warning; the flooring is cut off flush at the overhang). An outline edge that runs along the trusses (for example the step of an L-shaped floor) also gets its own truss. Each truss is clipped to the outline and the openings. A truss an opening cuts becomes two shorter trusses that end at the opening's trimmers (flagged for the supplier). Lengths are rounded up to the next 10 mm.
+5. **Beams.** The truss ends are the outline edges the trusses end on, numbered on the plan and listed on the sheet (**Edge 1 · 6.00 m**). Tap **No beam** to make it a **Beam**, then pick its size: **400 × 63 LVL**, **445 × 63 LVL** or **Other** (type a size like 360x63). **There is no default size** (the engineer sets it, you spec it per beam). The size you used last in this job is the next beam's starting size. **Select all ends** beams every truss-end edge at once. A beam with no size makes the order **Incomplete**: the sheet says "Edge 1 has a beam with no size", and no size is ever guessed.
+6. **Strongbacks.** An end with no beam gets a **120 × 35** strongback along the whole edge (confirm with the truss supplier). Mid-span rows come from the span of the longest truss: up to 3.5 m none, over 3.5 up to 6.5 m one row at midspan, over 6.5 m three rows (quarter points). **More** under Strongbacks sets the rows for this job (Auto, 0, 1, 2 or 3) and the size (90 × 35, 120 × 35, 140 × 35). A run longer than the longest stock is cut into stock lengths joined over a truss (no lap is added in phase 1).
+7. **Stair trimmers.** One chip row per stair void: **445 × 63 LVL** (default) or **400 × 63 LVL**. Two header trimmers across the trusses (as long as the distance between the truss lines either side of the void) and two side trimmers (the void's length plus 45 mm bearing each end).
+8. **The order.** The sheet shows the order the way the supplier reads it: **FLOOR TRUSSES** (one row per length, EA), **STRONGBACKS** (LM, longest first), **BEAMS** (LM by size) and **TRIMMERS** (LM by size). LVL is bought in 1,200 mm then 300 mm steps; strongbacks on the MGP10 grid. A floor beam is never under LINTELS and a floor trimmer is never under HD & SILL TR. **Done** goes back to the overview, where the lines go on an order like any other.
+9. **Plan overlay.** Trusses (thin grey), beams (heavy dark), end strongbacks (dashed orange), mid-span strongbacks (orange), trimmers (blue), openings (dashed red) and a number on every truss-end edge. This is a simple overlay; the full layout drawing and PDF page come in phase 4.
+10. **Limits and not yet.** Floor sheets, wet areas, Hebel, Scyon, the plan drawing in the PDF and conventional joists are later phases. Beams and trimmers do not share LVL offcuts with each other (each has its own cut list). The truss count is a check number: compare it to the supplier's layout on a real job before relying on it.
 
 ## 6. What happens next
 
@@ -674,6 +691,16 @@ Next review date: 2027-04-14
 6. Corner: trace Wall 3 from (2000, 3000) to (2000, 7000), then Wall 4 from (2000, 7000) to (6000, 7000) (clicked through as one line, so Wall 3 ENDS where Wall 4 starts). Expected: Wall 4 has a "Corner stud" 112.5 from its start (teal), Wall 3 only its normal end stud, and the Walls line counts the extra stud under STUDS. Wall 3 also starts where Wall 1 starts (both start there): the longer wall, Wall 1, gets the second stud. Tap **Swap** on a corner: the other wall gets it; tap again: back.
 7. Two collinear legs of one straight wall meeting end to end: no corner stud and no corner listed. A wall meeting the join: exactly 2 junction studs, no studs at the join.
 Node: scripts/tests/takeoff-tc-junctions.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-28 — Floor frame, phase 1 (trusses, strongbacks, beams, trimmers)**
+1. Overview, **Add floor frame**. Scale the page. With **Rectangle**, draw a 6.0 x 4.2 m room. Expected: the sheet reads 25.20 m², 6.00 × 4.20 m, "15 trusses · 15 × 4,200" at 450 centres, strongbacks 18.00 lm (12.00 at the truss ends, 6.00 mid-span, 1 row). The order shows FLOOR TRUSSES `FLOOR TRUSS 4200 mm 15 EA` and STRONGBACKS `PINE 120x35 MGP10 P/M`.
+2. Tap **600 centres**: 11 trusses. Tap **Span the long way**: 11 trusses of 6,000 at 450. Back to the short way.
+3. Beams: tap **No beam** on Edge 1. Expected: it reads Beam with no size chip on, "Choose this beam's size", the order reads **Incomplete** with "Edge 1 has a beam with no size", and no BEAMS group. Tap **445 × 63 LVL**: BEAMS `6 m`, the end strongback on that edge goes (strongbacks 12.00 lm). Tap **Beam** on Edge 2: it starts on 445 × 63 (last size used). **Other**, type 360x63, Set: its chip reads 360 × 63 LVL. **Select all ends** and **Clear all ends**.
+4. **+ Stair void**, draw a 1.0 x 2.4 m rectangle inside. Expected: trusses 17 (13 x 4,200 and 4 x 900 cut by the void), a Trimmers step with 445 × 63 on, TRIMMERS in the order, and a note that 4 trusses end at the trimmers. Tap **400 × 63 LVL**: the order reads 400X63. Draw a void outside the outline: "is outside the floor outline" and the order is Incomplete.
+5. **Redraw** the outline: beams clear; Undo brings the outline and beams back. Strongbacks **More**: rows Auto (1), 0 to 3, size 90 / 120 / 140 x 35.
+6. Draw an L-shaped outline with **Outline**: the trusses are clipped to the shape, and the step edge has its own truss.
+7. Node: scripts/tests/takeoff-tc-floor.test.mjs (engine, order headings, server whitelist), scripts/tests/takeoff-tc-floor-render.test.mjs (the sheet and the overlay).
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

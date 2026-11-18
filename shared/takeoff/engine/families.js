@@ -267,6 +267,31 @@ export function wallFramingDefaults(presets = []) {
   return normaliseFamilySpec({ family: "timber", purpose: WALLS_PURPOSE, components });
 }
 
+// ── Floor frame (Sam, 18 Nov 2026): one timber item, three parts ─────────────────────────────────────────────────
+/** The Floor frame purpose (method floor_framing@1). Like Walls it is never a Purpose chip. */
+export const FLOOR_PURPOSE = "floor";
+/** Parts of a Floor frame item: the 120 x 35 strongbacks, the ring/perimeter beams (LVL, size set per beam) and the stair trimmers (LVL, size set per void). */
+export const FLOOR_PARTS = Object.freeze(["strongback", "beam", "trimmer"]);
+export const FLOOR_PART_LABELS = Object.freeze({ strongback: "Strongbacks", beam: "Beams", trimmer: "Trimmers" });
+/** Defaults [need Sam's confirmation where marked in the plan]: strongback 120 x 35 MGP10 H2 (editable per job), LVL Smart 10 H2 for beams and trimmers.
+ *  Beam and trimmer sections are NOT part defaults: each beam / stair void carries its own size (the engineer sets them). */
+export const FLOOR_PART_DEFAULTS = Object.freeze({
+  strongback: Object.freeze({ depthMm: 120, widthMm: 35, grade: "MGP10", treatment: "H2", maxMm: 6000 }),
+  beam: Object.freeze({ depthMm: null, widthMm: null, grade: "LVL Smart 10", treatment: "H2", maxMm: 11000 }),
+  trimmer: Object.freeze({ depthMm: null, widthMm: null, grade: "LVL Smart 10", treatment: "H2", maxMm: 11000 }),
+});
+/** Rules a new Floor frame item starts with (all editable per item). Centres 450; trusses span the short way. */
+export const FLOOR_FRAMING_RULES = Object.freeze({ centresMm: 450, span: "short" });
+/** A new Floor frame item's spec (normalised, so it is exactly what the server keeps). */
+export function floorFramingDefaults() {
+  const components = {};
+  for (const part of FLOOR_PARTS) {
+    const d = FLOOR_PART_DEFAULTS[part];
+    components[part] = { ...emptyPart(), section: { depthMm: d.depthMm, widthMm: d.widthMm }, grade: d.grade, treatment: d.treatment, stock: { maxMm: d.maxMm, unavailableMm: [] } };
+  }
+  return normaliseFamilySpec({ family: "timber", purpose: FLOOR_PURPOSE, components });
+}
+
 /**
  * The longest pine plate a Walls item buys (HUB 028 round 3): the longest timber-grid length (1,200, then 300 mm steps)
  * within the plates' longest length, less the lengths marked not stocked. This is the length computePlates splits
@@ -316,6 +341,7 @@ export function methodFor(spec) {
   switch (spec?.family) {
     case "timber":
       if (spec.purpose === WALLS_PURPOSE) return { key: "wall_framing", version: 1 };
+      if (spec.purpose === FLOOR_PURPOSE) return { key: "floor_framing", version: 1 };
       if (["rafters", "joists", "battens"].includes(spec.purpose)) return { key: "repeated_members", version: 2 };
       if (spec.purpose === "studs") return { key: "wall_frame", version: 1 };
       return { key: "linear_stock", version: 1 };                 // plates, noggins, trim, other members
@@ -378,6 +404,13 @@ export function normaliseFamilySpec(spec) {
         section: { depthMm: null, widthMm: null }, grade: null, treatment: null, species: null, plies: 1,
         stock: { ...TIMBER_GRID, maxMm: null, unavailableMm: [] }, sizing, endAllowanceMm: 0,
         components: Object.fromEntries(WALL_PARTS.map((k) => [k, normaliseWallPart(parts[k], WALL_PART_LABELS[k], k)])) };
+    }
+    if (s.purpose === FLOOR_PURPOSE) {
+      const parts = s.components && typeof s.components === "object" ? s.components : {};
+      return { ...base, spareRate: 0, purpose: FLOOR_PURPOSE,
+        section: { depthMm: null, widthMm: null }, grade: null, treatment: null, species: null, plies: 1,
+        stock: { ...TIMBER_GRID, maxMm: null, unavailableMm: [] }, sizing, endAllowanceMm: 0,
+        components: Object.fromEntries(FLOOR_PARTS.map((k) => [k, normaliseWallPart(parts[k], FLOOR_PART_LABELS[k], k)])) };
     }
     const maxMm = num(s.stock?.maxMm, "Longest available length");
     return { ...base,
@@ -443,6 +476,9 @@ export function familyIdentity(spec) {
     // every part's identity (a part's product change marks the item's draft lines for review; one key per material)
     return { family: "timber", purpose: WALLS_PURPOSE, components: Object.fromEntries(WALL_PARTS.map((k) => [k, timberPartIdentity(n.components[k])])) };
   }
+  if (n.family === "timber" && n.purpose === FLOOR_PURPOSE) {
+    return { family: "timber", purpose: FLOOR_PURPOSE, components: Object.fromEntries(FLOOR_PARTS.map((k) => [k, timberPartIdentity(n.components[k])])) };
+  }
   if (n.family === "timber") return { family: "timber", section: n.section, grade: n.grade?.toLowerCase() || null, treatment: n.treatment?.toLowerCase() || null, species: n.species?.toLowerCase() || null, productCode: n.productCode };
   if (n.family === "aluminium") return { family: "aluminium", profile: n.profile, alloyTemper: n.alloyTemper, finish: n.finish?.toLowerCase() || null, colour: n.colour?.toLowerCase() || null, productCode: n.productCode };
   const p = n.product;
@@ -493,6 +529,16 @@ export function familyProblems(spec, { usesLongPlates = false } = {}) {
       // a longest length under the grid's 1,200 can't buy any length: named once here, and no wall is worked out
       needPart(wallPartLongestOk(p), "stock.maxMm", `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);
     }
+  } else if (n.family === "timber" && n.purpose === FLOOR_PURPOSE) {
+    for (const k of FLOOR_PARTS) {
+      const p = n.components[k], label = FLOOR_PART_LABELS[k];
+      const needPart = (cond, field, message) => { if (!cond) out.push({ code: "material_incomplete", message: `${label}: ${message}`, part: k, field }); };
+      // beams and trimmers take their size per beam / per stair void, so only the strongback has a section here
+      if (k === "strongback") needPart(p.section.depthMm && p.section.widthMm, "section", "enter the timber section (e.g. 120 × 35).");
+      needPart(p.grade || p.species, "grade", "enter the grade or species.");
+      needPart(p.treatment, "treatment", "enter the treatment (or \"untreated\").");
+      needPart(wallPartLongestOk(p), "stock.maxMm", `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);
+    }
   } else if (n.family === "timber") {
     need(n.section.depthMm && n.section.widthMm, "section", "Enter the timber section (e.g. 90 × 45).");
     need(n.grade || n.species, "grade", "Enter the grade or species.");
@@ -532,6 +578,11 @@ export function describeFamilySpec(spec) {
       return [i === 0 ? label : label.toLowerCase(), sec, p.grade, p.species, p.treatment].filter(Boolean).join(" ");
     };
     return { line: WALL_PARTS.map(part).join(" · "), installation: "Size: manual selection (not structurally checked)" };
+  }
+  if (n.family === "timber" && n.purpose === FLOOR_PURPOSE) {
+    const sb = n.components.strongback;
+    const sec = sb.section.depthMm && sb.section.widthMm ? `${mm(sb.section.depthMm)} × ${mm(sb.section.widthMm)}` : "section?";
+    return { line: `Floor frame · strongbacks ${[sec, sb.grade, sb.treatment].filter(Boolean).join(" ")} · beams and trimmers sized per beam (by engineer)`, installation: "Size: manual selection (not structurally checked); truss layout by supplier" };
   }
   if (n.family === "timber") {
     const sec = n.section.depthMm && n.section.widthMm ? `${mm(n.section.depthMm)} × ${mm(n.section.widthMm)}` : "section?";

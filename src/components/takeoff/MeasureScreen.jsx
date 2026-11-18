@@ -73,11 +73,14 @@ import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark } from "../../../shared/takeoff/bracing.js";
-import { COLORS, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
+import { COLORS, isFloorItem, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride } from "./measure/tools.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
+import FloorPanel from "./measure/FloorPanel.jsx";
+import { FloorLayer } from "./measure/FloorLayer.jsx";
+import { buildSupplierGroups } from "../../../shared/takeoff/supplierOrder.js";
 import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js";
 
 
@@ -109,6 +112,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const view = ws.view;
   const material = view.materials.find((m) => m.id === materialId) || null;
   const flashing = isFlashingMaterial(material);
+  const floorItem = isFloorItem(material);   // Floor frame (Sam, 18 Nov 2026): the floor outline and its openings are traced areas
   const tools = useMemo(() => toolsFor(material), [material]);
   const wsId = view.workspace?.id || null;
   const canEdit = !!ws.capabilities?.edit;
@@ -212,6 +216,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // first end tapped. Handlers read sizes + first end through refs: a tap straight after typing commits the field first.
   const [wetMat, setWetMat] = useState(null);              // HUB 031: the Walls item whose "Wet-area walls at 450" mode is on (Select only)
   const wetLast = useRef(null);
+  const [floorDraw, setFloorDraw] = useState(null);        // Floor frame: set while a stair void / opening is being drawn ({ stair }); null = drawing the floor outline
   const [braceMat, setBraceMat] = useState(null);          // Sam, 18 Nov 2026: the Walls item whose "Add bracing" mode is on (Select only)
   const [braceType, setBraceType] = useState("ply");       // "ply" (1,200 mm sheet) | "cross" (hoop iron cross brace)
   const [braceSpan, setBraceSpan] = useState(BRACING_RULE.crossSpanDefaultMm);
@@ -473,8 +478,53 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   // ── Rectangle and Area on an elevation (HUB 023) ────────────────────────────────────────────────────────────
   /** A corner on the nearest 10 mm (so a wall tapped at 3,000.3 is 3,000), unless that would leave the scaled region. */
   const cornerAt = (p, c = cal) => { const q = snapToMmGrid(c, p); return c && pointsWithinCalibration(c, [q]) ? q : p; };
+  /** Floor frame: the first outline drawn is the floor; after that each one is a stair void / opening (chosen first). One Undo each. */
+  function saveFloorShape(points, d) {
+    if (floorMeasure && !floorDraw) { warn("To draw an opening, press + Stair void or + Opening first. Redraw replaces the floor outline."); return false; }
+    const prob = outlineProblem(points, cal);
+    if (prob) { warn(prob === "wall_self_intersecting" ? "The outline crosses itself. Tap the corners in order round the shape (Undo takes the last one off)." : "That outline has no area. Tap the corners round the shape."); return false; }
+    const role = floorMeasure ? "void" : "floor";
+    const stair = floorMeasure ? floorDraw.stair : null;
+    const used = new Set(floorVoids.map((v) => v.name));
+    const base = role === "floor" ? null : stair ? "Stair void" : "Opening";
+    let name = "Floor";
+    if (base) { for (let i = 1; ; i++) { name = `${base} ${i}`; if (!used.has(name)) break; } }
+    const mid = orderedId(), cid = newId();
+    const meas = { id: mid, kind: "area", documentId: planDoc.id, pageIndex, calibrationId: cal.id, points, inputs: { role, kind: d?.tool === "rect" ? "rect" : "polygon", name, ...(role === "void" ? { stair } : {}) } };
+    record({ redo: partial({ measurements: [meas], contributions: [{ id: cid, measurementId: mid, jobMaterialId: material.id, role: "primary" }] }),
+      undo: partial({ archive: { measurements: [mid], contributions: [cid] } }), draftBefore: d, draftAfter: null });
+    setFloorDraw(null); setLastDone(null); setMsg(null);
+    return true;
+  }
+  /** Floor frame: change this item's settings (one Undo). A null value takes the setting off. */
+  function setFloorRules(patch) {
+    if (!canEdit || !material) return;
+    const rules = { ...(material.rules || {}), ...patch };
+    for (const k of Object.keys(rules)) if (rules[k] === null) delete rules[k];
+    record({ redo: partial({ materials: [{ ...material, rules }] }), undo: partial({ materials: [material] }) });
+  }
+  function setStrongbackSize(size) {
+    const [depthMm, widthMm] = size.split("x").map(Number);
+    const comps = material.spec.components;
+    record({ redo: partial({ materials: [{ ...material, spec: { ...material.spec, components: { ...comps, strongback: { ...comps.strongback, section: { depthMm, widthMm } } } } }] }), undo: partial({ materials: [material] }) });
+  }
+  function removeFloorShape(m) {
+    const cs = (contribsOf.get(m.id) || []).filter((c) => c.jobMaterialId === material.id);
+    record({ redo: partial({ archive: { measurements: [m.id], contributions: cs.map((c) => c.id) } }), undo: partial({ measurements: [m], contributions: cs }) });
+    setMsg({ tone: "ok", text: `${m.inputs?.name || "The opening"} removed. Undo puts it back.` });
+  }
+  /** Redraw the floor outline: the old one comes off (with its beams, which belong to its edges); Undo brings all of it back. */
+  function redrawFloor() {
+    if (!floorMeasure) return;
+    const cs = (contribsOf.get(floorMeasure.id) || []).filter((c) => c.jobMaterialId === material.id);
+    const rules = { ...(material.rules || {}) }; delete rules.beams;
+    record({ redo: partial({ materials: [{ ...material, rules }], archive: { measurements: [floorMeasure.id], contributions: cs.map((c) => c.id) } }),
+      undo: partial({ materials: [material], measurements: [floorMeasure], contributions: cs }) });
+    setFloorDraw(null); setModeSel("rect");
+  }
   /** Save ONE outline wall on the material in use (one Undo; the drawing comes back with it). */
   function saveOutline(points, d) {
+    if (floorItem) return saveFloorShape(points, d);
     const prob = outlineProblem(points, cal);
     if (prob) {
       warn(prob === "wall_self_intersecting" ? "The outline crosses itself. Tap the corners in order round the wall (Undo takes the last one off)."
@@ -1236,6 +1286,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const runCount = pageMeasurements.filter((m) => (m.kind === "run" || m.kind === "polyline") && (contribsOf.get(m.id) || []).length).length;
   const noun = memberNoun(material);
   const results = material && familyOf(material) ? ws.computed?.materialResults?.[material.id] || null : null;
+  // Floor frame: this item's traced shapes (the floor outline, its stair voids / openings), the engine's layout and the order as the supplier reads it
+  const floorShapes = floorItem ? view.measurements.filter((x) => x.kind === "area" && !x.archived && (contribsOf.get(x.id) || []).some((c) => c.jobMaterialId === material.id)) : [];
+  const floorMeasure = floorShapes.filter((x) => x.inputs?.role === "floor").sort((a, b) => (a.id < b.id ? -1 : 1))[0] || null;
+  const floorVoids = floorShapes.filter((x) => x.inputs?.role === "void").map((x) => ({ m: x, name: x.inputs?.name || "Opening", stair: x.inputs?.stair !== false }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+  const floorLayout = floorItem ? (results?.layouts || []).find((l) => l?.method === "floor_framing@1") || null : null;
+  const floorOrder = floorItem ? buildSupplierGroups([{ lines: (ws.computed?.scheduleLines || []).filter((l) => l.roles && (l.jobMaterialIds || []).includes(material.id))
+    .map((l) => ({ unit: l.unit, quantity: l.quantity, stockLengthMm: l.item?.stockLengthMm ?? null, roles: l.roles, product: l.product || null, description: l.item?.description, problem: (l.problems || []).length > 0 })) }]) : [];
   // HUB 028 Walls: the parts' needs are counted on the Line panel ("Details: n to fix ›") and listed on the Walls card
   const wallsItem = isWallsItem(material);
   // Wet-area walls mode (HUB 031): Select with nothing picked, on a Walls item, until Done / another tool / another item
@@ -1347,6 +1405,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const isSel = m.id === selected || hlSet.has(m.id); // highlighted from the schedule: same halo as a selection
     const c = computedBy.get(m.id);
     const cs = contribsOf.get(m.id) || [];
+    if (m.kind === "area" && m.inputs?.role) {
+      // Floor frame: the floor outline, or a stair void / opening (dashed)
+      const wc = calsById.get(m.calibrationId);
+      const a = outlineAreaM2(pts, wc);
+      const isVoid = m.inputs.role === "void";
+      return <PolylineShape key={m.id} measurementId={m.id} kind="area" points={pts} toScreen={toScr} color={isVoid ? COLORS.floorVoid : COLORS.floor} selected={isSel} closed dashed={isVoid} areaM2={a}
+        label={`${m.inputs.name || (isVoid ? "Opening" : "Floor")}${a != null ? ` · ${fmtM2(a)} m²` : ""}`} />;
+    }
     if (m.kind === "run" && pts.length === 2) {
       const s = pts.map(toScr);
       const problem = c?.problems?.length;
@@ -1578,6 +1644,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 if (el && hlSet.has(m.id)) return <g key={m.id} data-highlighted="">{el}</g>;
                 return el && other ? <g key={m.id} opacity={0.45} data-other-layer="">{el}</g> : el;
               })}
+              {floorItem && floorLayout && <FloorLayer layout={floorLayout} cal={calsById.get(floorLayout.calibrationId) || cal} toScreen={toScr} />}
               {renderDraft(toScr)}
               {openStart && (() => { const s = toScr(openStart.at); const color = openStart.kind === "door" ? COLORS.door : COLORS.window; return (
                 <circle data-opening-start={openStart.wallId} cx={s.x} cy={s.y} r={7} fill="#fff" stroke={color} strokeWidth={3} />
@@ -1607,7 +1674,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         />
       </div>
       {/* phone portrait: the plan keeps most of the screen; the sheet scrolls (desktop/landscape: side panel) */}
-      <Sheet title={mode === "select" ? (sel ? "Selected" : "Select") : openKind ? `${openKind === "door" ? "Door" : "Window"} · ${material?.name || ""}` : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
+      <Sheet title={floorItem ? "Floor frame" : mode === "select" ? (sel ? "Selected" : "Select") : openKind ? `${openKind === "door" ? "Door" : "Window"} · ${material?.name || ""}` : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
         <div onFocusCapture={keepFieldInView} className="space-y-2">
           {msg && <Banner tone={msg.tone}>{msg.text}</Banner>}
           {hl.ids.length > 0 && (
@@ -1617,6 +1684,13 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 {hlElsewhere.length > 0 && ` ${hlElsewhere.length} ${hlHere.length ? "more " : ""}${hlElsewhere.length === 1 ? "isn't" : "aren't"} on this page: ${describeElsewhere(hlElsewhere, view.documents)}.`}
               </Banner>
             </div>
+          )}
+
+          {floorItem && (
+            <FloorPanel material={material} layout={floorLayout} results={results} floor={floorMeasure} voids={floorVoids} canEdit={canEdit} canDraw={canMeasure && !!cal}
+              mode={mode} floorDraw={floorDraw} drawing={draft?.tool === mode && draft.points.length > 0} needScale={!cal && !stale && canMeasure} onScale={onScale ? scalePage : null}
+              onDraw={(stair) => { setFloorDraw({ stair }); if (mode === "pan") setModeSel("rect"); setMsg(null); }} onCancelDraw={() => { setFloorDraw(null); discardDraft(); }}
+              onRule={setFloorRules} onStrongbackSize={setStrongbackSize} onRemoveShape={removeFloorShape} onRedrawFloor={redrawFloor} orderGroups={floorOrder} onDone={close} />
           )}
 
           {mode === "run" && flashing && (
@@ -1827,7 +1901,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             );
           })()}
 
-          {SHAPE_TOOLS.has(mode) && !openKind && (() => {
+          {SHAPE_TOOLS.has(mode) && !openKind && !floorItem && (() => {
             // HUB 023: Rectangle / Area straight onto a scaled elevation — one outline wall on this material
             const rect = mode === "rect";
             const drawing = draft?.tool === mode && draft.points.length > 0;

@@ -606,7 +606,7 @@ t("decision 6 (Sam, 25 Oct): a new Walls item starts with Sam's products, needs 
 // ── the guard: every blocking code the engine raises maps to a target ────────
 
 const SRC = new URL("../../shared/takeoff/", import.meta.url);
-const SOURCES = [...readdirSync(new URL("engine/", SRC)).filter((f) => f.endsWith(".js")).map((f) => `engine/${f}`), "schedule.js", "flashing.js", "catalogue.js", "profile.js", "calibration.js"];
+const SOURCES = [...readdirSync(new URL("engine/", SRC)).filter((f) => f.endsWith(".js")).map((f) => `engine/${f}`), "engine/floor/geometry.js", "engine/floor/framing.js", "schedule.js", "flashing.js", "catalogue.js", "profile.js", "calibration.js"];
 const CODE = "([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)";
 const RAISE = [
   new RegExp(`\\bcode:\\s*"${CODE}"`, "g"),

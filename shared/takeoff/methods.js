@@ -198,6 +198,8 @@ const GENERIC = [
   generic("wall_frame", 1, "Timber — stud wall frame", ["timber"], ["wall", "opening", "distribution", "manual"], ["linearDemands"]),
   // HUB 028 Walls: one item, traced walls only (openings sit on the walls); studs, plates and noggins worked out together
   generic("wall_framing", 1, "Timber — walls (studs, plates and noggins together)", ["timber"], ["wall"], ["linearDemands", "allocation"]),
+  // Floor frame (Sam, 18 Nov 2026): one item, traced floor outline + openings (areas); trusses, strongbacks, beams and trimmers worked out together
+  generic("floor_framing", 1, "Timber — floor frame (trusses, strongbacks, beams and trimmers together)", ["timber"], ["primary"], ["linearDemands", "allocation"]),
   generic("linear_stock", 1, "Linear stock — plates, noggins, trim, aluminium profiles", ["timber", "aluminium"], ["primary", "path", "opening", "wall", "manual", "count", "offcut"], ["linearDemands", "allocation"]),
   generic("sheet_layout", 2, "Cladding — sheet layout (Axon, Rendex)", ["cladding", "foam"], ["wall", "opening", "surface"], ["sheetDemands", "layout"]),
   generic("course_layout", 1, "Cladding — horizontal/vertical courses (Linea, Stria, timber boards)", ["cladding", "timber-cladding"], ["wall", "opening", "surface"], ["linearDemands", "layout"]),

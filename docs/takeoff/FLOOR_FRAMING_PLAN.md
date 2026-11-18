@@ -1,8 +1,36 @@
 # HUB: Floor Framing module (implementation plan, no code)
 
-**Status:** PLAN ONLY, 18 Nov 2026. Branch `takeoff/floor-framing` (from main `f1f33dc`), local, not pushed. Nothing is built until Sam answers section 12.
+**Status:** Sam answered 18 Nov 2026 (section 0 below, authoritative). **Phase 1 BUILT** on branch `takeoff/floor-framing` (merged with main `88b7233`), local, not pushed; calculation version `takeoff-calc@9`. Phases 2 to 6 not started.
 **Owner rule:** simple onsite. Fewest taps, advanced detail hidden, sensible defaults, derive don't ask, accurate counts, one phase at a time.
 **Builds on:** the Hub takeoff Walls function (not the Bestimator repo; its rules are reused as knowledge, not code).
+
+---
+
+## 0. Owner answers, 18 Nov 2026 (authoritative: they override the recommendations below where different)
+
+| # | Question | Sam's answer | Effect |
+|---|---|---|---|
+| 1 | Strongback spacing (Q1) | Accept the supplier rule as the default, per-job override | Built (P1): none up to 3.5 m, one row at midspan over 3.5 to 6.5 m, three rows over 6.5 m; per-job rows 0 to 3 |
+| 2 | Ring beam size (Q2) | **No default size.** Engineer-determined: Sam specs it per beam during the takeoff. Later (not now): read the engineering | **Supersedes** the "one job-wide default" recommendation. Per beam: chips 400x63 LVL / 445x63 LVL / Other (type a size); the last size used in the job is the next beam's preselected chip; a beam with no size makes the order Incomplete with a clear line, never guessed. Built (P1) |
+| 3 | Waste (Q3) | 5% applied after offcut reuse, editable per job; Hebel may go lower | P2+ (sheets). Not built yet |
+| 4 | Hebel stagger (Q4) | Build as spec'd (600 to 900), flag UNCONFIRMED, get the Hebel Design & Installation Guide **before phase 3** | P3. Not built yet |
+| 5 | Scyon on a 35 mm chord (Q5) | Warn, do not block; ask the truss supplier | P3 |
+| 6 | Strongback size (Q6) | 120 x 35 default, editable per job | Built (P1): the Strongbacks part section; chips 90 / 120 / 140 x 35 under More |
+| 7 | Last truss bay (Q7) | **Always a truss at the far edge**; flooring is cut off flush at the overhang. Short last bay is fine | **Supersedes** the "short-bay warning / split the difference" recommendation: count = ceil(width / centres) + 1, no warning, no split option. Built (P1) |
+| 8 | Hebel floor height (Q8) | A one-line note that it raises the floor 75 mm | P3 |
+| 9 | Thickness from centres (Q9) | Automatic | P2+ |
+
+**Superseded text below:** section 4 step 4 ("Beam size default per section 12"), section 6.3 ("If the last bay is under 200 mm, warn"), section 7.7's "last bay 150 mm (warn)" column, section 12 Q2 and Q7 recommendations, and the risk row about the last bay. Left in place for the record.
+
+**Phase 1 decisions made while building (not in the plan; check them):**
+- A truss is also placed on every outline edge that runs along the trusses (for example the step of an L-shaped floor), so the arm of an L-shape has an edge truss. Same reading as "always a truss at the far edge".
+- Truss direction is the two chips only (no two-tap direction yet; the engine accepts `rules.trussAngleDeg` for later).
+- The floor frame item has a settings sheet on the plan instead of a Setup card; beam and trimmer sections are per beam and per stair void (stored as `rules.beams` and `rules.trimmerSizes`, `rules.lastBeamSize`), the strongback section is the item's Strongbacks part.
+- Beam and trimmer LVL default to grade "LVL Smart 10", treatment H2, longest 11,000 (the Walls long-plate figures), the strongback to MGP10 H2, longest 6,000 [Defaults, confirm with Sam]. Beams and trimmers are separate cut lists and do not share LVL offcuts.
+- Strongback runs longer than the longest stock are cut into stock-length pieces joined over a truss with no lap added (the supplier's two-spacing lap is P5).
+- Truss pieces under 300 mm beside an opening are not counted as trusses (noted).
+- A plain opening ("+ Opening") gets no trimmers; the stair void gets 4.
+- All floor areas use the existing `area` measurement kind (`inputs.role` floor / void), role "primary" on the contribution: no new contribution role and no migration. The server whitelist keeps `role`, `kind`, `name`, `stair` only.
 
 ---
 
