@@ -311,6 +311,13 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       }) : [] };
   }
   if (kind === "member") return { mode: ["projected", "true"].includes(i.mode) ? i.mode : "projected" };
+  if (kind === "area") {
+    // Floor frame (Sam, 18 Nov 2026): a traced floor outline, stair void / opening or wet area. Unknown keys are dropped; an area with no
+    // role stays as before (no inputs).
+    if (!["floor", "void", "wet"].includes(i.role)) return null;
+    return { role: i.role, kind: i.kind === "polygon" ? "polygon" : "rect", name: optStr(i.name, 60),
+      ...(i.role === "void" ? { stair: i.stair !== false } : {}) };
+  }
   return null;
 }
 

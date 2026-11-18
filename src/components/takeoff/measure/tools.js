@@ -7,6 +7,7 @@
 //                      the cut length is entered)
 //   timber Walls       Line · Select · Pan                             (HUB 028 wall_framing: one trace → studs, plates and
 //                      noggins together; no Rectangle or Area, an outline has no single wall length)
+//   timber Floor frame Rectangle · Outline · Pan                       (Sam, 18 Nov 2026 floor_framing: the floor outline and its openings are traced AREAS)
 //   timber studs       Wall · Select · Pan                             (wall_frame)
 //   timber plates      Wall · Run · Count · Select · Pan               (linear_stock)
 //   timber noggins     Wall · Count · Select · Pan
@@ -25,7 +26,7 @@
 //                      that still need setup in one wall-page line (wallPartsNeedText)
 // =============================================================================
 import { ceilToIncrement } from "../../../../shared/takeoff/units.js";
-import { CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm , wallHasDoubleTop } from "../../../../shared/takeoff/engine/families.js";
+import { FLOOR_PURPOSE, CAVITY_SLIDER_EXTRA_MM, WALLS_PURPOSE, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth, WALL_PARTS, WALL_PART_LABELS, longPlateStockLengths, wallPinePlateMaxMm , wallHasDoubleTop } from "../../../../shared/takeoff/engine/families.js";
 
 /** Layer colours on the plan (measurement layer, not supplier finish — 02 §1). */
 export const COLORS = Object.freeze({
@@ -34,6 +35,8 @@ export const COLORS = Object.freeze({
   window: "#0284c7", door: "#4f46e5",
   // HUB 031: a wet-area wall (its own stud centres), cyan-700 (5.4:1 on white); its label also says "ctrs", so colour is never the only cue
   wetWall: "#0e7490",
+  // Floor frame (Sam, 18 Nov 2026): outline, openings, trusses, beams, strongbacks, trimmers (colour is never the only cue: edges are numbered, labels say what each is)
+  floor: "#0f766e", floorVoid: "#b91c1c", floorTruss: "#64748b", floorTrussCut: "#475569", floorBeam: "#0f172a", floorStrongback: "#ea580c", floorTrimmer: "#2563eb",
 });
 
 const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "batten", "accessory"]);
@@ -41,6 +44,14 @@ const WALL_FAMILIES = new Set(["cladding", "aac", "foam", "timber-cladding", "ba
 /** TC-R04 family of a job material (null = flashing). */
 export const familyOf = (m) => (m?.spec?.family && m.spec.family !== "flashing" ? m.spec.family : null);
 export const isFlashingMaterial = (m) => !!m && !familyOf(m);
+/** Floor frame (Sam, 18 Nov 2026): one timber item framing a traced floor outline (trusses, strongbacks, beams, trimmers together). */
+export const isFloorItem = (m) => m?.methodKey === "floor_framing" || (m?.spec?.family === "timber" && m?.spec?.purpose === FLOOR_PURPOSE);
+/** Sam, 18 Nov 2026: redrawing the floor outline clears the beam marks (beams belong to the old edges; never silently re-mapped onto new ones). Returns a NEW material; the old one is what Undo restores. */
+export function withoutFloorBeams(material) {
+  const rules = { ...(material?.rules || {}) };
+  delete rules.beams;
+  return { ...material, rules };
+}
 /** HUB 028: a Walls item (one timber item framing its traced walls: studs, plates and noggins together). */
 export const isWallsItem = (m) => m?.methodKey === "wall_framing" || (m?.spec?.family === "timber" && m?.spec?.purpose === WALLS_PURPOSE);
 /** Materials measured as walls (+ openings) rather than plan lines — same rule as TakeoffApp. */
@@ -63,6 +74,8 @@ export function toolsFor(material) {
     if (material.methodKey === "repeated_members") return material.rules?.lengthSource === "entered" ? [T.distribution, T.select, T.pan] : [T.member, T.distribution, T.select, T.pan];
     // HUB 028 Walls: trace the run with Line (the Wall height in force at each tap); straight walls only
     if (isWallsItem(material)) return [T.line, T.select, T.pan];
+    // Floor frame: Rectangle (two corners) or Outline (each corner, then Finish) for the floor and its openings; no Select in Phase 1
+    if (isFloorItem(material)) return [T.rect, { k: "area", label: "Outline" }, T.pan];
     if (p === "studs" || material.methodKey === "wall_frame") return [T.wall, T.select, T.pan];
     if (p === "plates") return [T.wall, T.run, T.count, T.select, T.pan];
     if (p === "noggins") return [T.wall, T.count, T.select, T.pan];

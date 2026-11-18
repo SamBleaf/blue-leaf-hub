@@ -141,7 +141,7 @@ t("a detail with something entered still wins (manual beats automatic): members 
   assert.equal(l.openings.find((x) => x.id === "o").rule, undefined);
 });
 
-t("an incomplete detail with a region answered no longer wins: the automatic framing is used and the note says so (takeoff-calc@9)", () => {
+t("an incomplete detail with a region answered no longer wins: the automatic framing is used and the note says so (takeoff-calc@10)", () => {
   const base = cavityConvert(door, "left", LEN).inputs;
   const { res, l } = run({ ...base, detail: { source: "reviewed-detail", belowSill: { required: false } } });
   assert.ok(l.openings.find((x) => x.id === "o").rule);
