@@ -321,6 +321,11 @@ t("engine: a wet area drawn on a floor item is allowed and ignored with a non-bl
   assert.equal(wet.res.status.quantity, base.res.status.quantity);
   assert.deepEqual(wet.res.demands.map((d) => [d.role, d.lengthMm, d.quantity]), base.res.demands.map((d) => [d.role, d.lengthMm, d.quantity]));
 });
+t("engine: a wet area with no floor outline still prompts to draw the outline (plus the wet note)", () => {
+  const r = run([{ ...floorArea(), id: "w1", inputs: { role: "wet", name: "Bathroom" } }], {});
+  const codes = r.res.problems.map((x) => x.code);
+  assert.ok(codes.includes("floor_outline_missing")); assert.ok(codes.includes("floor_wet_ignored"));
+});
 t("decisions confirmed: beams/trimmers LVL Smart 10 H2 longest 11,000; strongbacks MGP10 H2 longest 6,000; cut stair void counts its pieces", () => {
   const d = floorFramingDefaults();
   const txt = JSON.stringify(d);
