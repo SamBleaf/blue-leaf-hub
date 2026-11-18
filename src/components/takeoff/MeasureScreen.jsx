@@ -339,6 +339,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (pendingStart()) { setOpenStart(null); setMsg(null); return; }
     const h = histRef.current;
     if (!h.past.length) return;
+    setBraceNote(null);
     const op = h.past[h.past.length - 1];
     if (op.undo) ws.edit(op.undo);
     if (op.draftBefore !== undefined) applyDraft(op.draftBefore);

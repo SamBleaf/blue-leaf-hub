@@ -68,14 +68,18 @@ t("whole wall: 3700 -> 4 sheets, last ripped to 100; order counts 4", () => {
   assert.equal(setPlyWholeWall({ kind: "rect" }, 3600, true, ids).rippedMm, null, "exact multiple: no rip");
 });
 
-t("toggling off removes only the whole-wall sheets; manual sheets and crosses stay; last removal deletes the key", () => {
+t("toggling ON replaces hand-placed ply sheets (no doubling); OFF removes only whole-wall sheets; crosses stay; last removal deletes the key", () => {
   const inp = { kind: "rect", widthMm: 3700, heightMm: 2400, bracing: [{ id: "man", type: "ply", xMm: 600 }, { id: "x", type: "cross", xMm: 0, spanMm: 2700 }] };
   const on = setPlyWholeWall(inp, 3700, true, ids);
-  assert.equal(on.inputs.bracing.length, 6);
+  assert.equal(on.inputs.bracing.length, 5, "4 whole-wall sheets + cross; the hand sheet is absorbed");
+  assert.ok(!on.inputs.bracing.some((x) => x.id === "man"));
   const on2 = setPlyWholeWall(on.inputs, 3700, true, ids);
-  assert.equal(on2.inputs.bracing.length, 6, "switching on twice does not stack sheets");
+  assert.equal(on2.inputs.bracing.length, 5, "switching on twice does not stack sheets");
   const off = setPlyWholeWall(on.inputs, 3700, false);
-  assert.deepEqual(off.inputs.bracing.map((x) => x.id), ["man", "x"]);
+  assert.deepEqual(off.inputs.bracing.map((x) => x.id), ["x"]);
+  assert.equal(setPlyWholeWall({ kind: "rect" }, 3601, true, ids).sheets, 3, "a 1 mm sliver is rounding, not a fourth sheet");
+  assert.equal(setPlyWholeWall({ kind: "rect" }, 3610, true, ids).sheets, 4);
+  assert.equal(cleanBracing([{ id: "a", type: "ply", xMm: 0, widthMm: "900" }]).ok, false, "widthMm must be a number");
   const plain = setPlyWholeWall({ kind: "rect", widthMm: 3700 }, 3700, true, ids);
   assert.ok(!("bracing" in setPlyWholeWall(plain.inputs, 3700, false).inputs));
   assert.equal(setPlyWholeWall({}, 0, true).ok, false);

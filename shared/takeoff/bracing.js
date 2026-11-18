@@ -115,22 +115,23 @@ export function addBracingMark(inputs, { type, atMm, lengthMm, spanMm = BRACING_
 export const plyWholeWallOn = (inputs) => bracingOf(inputs).some((m) => m.type === "ply" && m.whole);
 
 /**
- * "Ply whole wall": the wall is covered end to end with ceil(L / 1,200) sheets, the last one ripped to the remainder. ON replaces any
- * earlier whole-wall sheets; OFF removes only those (sheets placed one at a time stay). The key is deleted when no marks are left.
+ * "Ply whole wall": the wall is covered end to end with ceil(L / 1,200) sheets, the last one ripped to the remainder. ON replaces every
+ * ply sheet already on the wall (cross braces stay); OFF removes only those (sheets placed one at a time stay). The key is deleted when no marks are left.
  * @returns {{ ok:true, inputs:object, sheets:number, rippedMm:number|null } | { ok:false, error:string }}
  */
 export function setPlyWholeWall(inputs, lengthMm, on, newId = newMarkId) {
-  const keep = bracingOf(inputs).filter((m) => !(m.type === "ply" && m.whole));
+  // ON replaces every ply sheet on the wall (hand-placed ones would overlap the full run); OFF removes only the whole-wall sheets.
+  const keep = bracingOf(inputs).filter((m) => (on ? m.type !== "ply" : !(m.type === "ply" && m.whole)));
   const out = { ...(inputs || {}) };
   if (!on) { if (keep.length) out.bracing = keep; else delete out.bracing; return { ok: true, inputs: out, sheets: 0, rippedMm: null }; }
   const L = Math.round(Number(lengthMm));
   const W = BRACING_RULE.plyWidthMm;
   if (!(L > 0)) return { ok: false, error: "Set the wall's length first." };
-  const n = Math.ceil(L / W);
+  const n = Math.max(1, Math.ceil((L - 5) / W)); // a sliver under 5 mm is rounding, not another sheet
   if (keep.length + n > BRACING_RULE.maxMarksPerWall) return { ok: false, error: `A wall can have at most ${BRACING_RULE.maxMarksPerWall} bracing marks.` };
   const made = [];
   for (let i = 0; i < n; i++) {
-    const x = i * W, w = Math.min(W, L - x);
+    const x = i * W, w = Math.max(1, Math.min(W, L - x));
     made.push({ id: newId(), type: "ply", xMm: x, ...(w < W ? { widthMm: w } : {}), whole: true });
   }
   out.bracing = [...keep, ...made];
@@ -169,7 +170,7 @@ export function cleanBracing(list) {
     const xMm = Number(m.xMm);
     if (!(xMm >= 0 && xMm <= 200000)) return { ok: false, error: "A bracing mark is outside the wall." };
     if (m.type === "ply") {
-      const w = m.widthMm == null ? null : Number(m.widthMm);
+      const w = m.widthMm == null ? null : (typeof m.widthMm === "number" ? m.widthMm : NaN);
       if (w != null && !(w >= 1 && w <= BRACING_RULE.plyWidthMm)) return { ok: false, error: "A ply sheet's ripped width is invalid." };
       marks.push({ id, type: "ply", xMm: Math.round(xMm), ...(w != null && w < BRACING_RULE.plyWidthMm ? { widthMm: Math.round(w) } : {}), ...(m.whole === true ? { whole: true } : {}) });
     }
