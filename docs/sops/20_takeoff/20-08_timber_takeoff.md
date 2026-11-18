@@ -1,5 +1,5 @@
 ---
-sop_version: 2.1
+sop_version: 2.3
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
@@ -15,6 +15,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 **Priority:** High
 
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
+
+> **Short plates in 6.0 m sticks (Sam, 18 Nov 2026, takeoff-calc@9):** built on branch `takeoff/short-plates-6m`, local, NOT pushed or deployed. In a Walls item every top and bottom plate piece under 3,000 mm (after the join rule) is pooled across all the walls and cut from full 6,000 mm sticks (5 mm saw cut each, offcuts are the only waste). It orders as one plates line ("N/6" under T&B PLATES) with a stick-by-stick cut list. Plates of 3,000 mm and over are bought as before. A product whose longest length is under 6,000 uses that length. Walls card > More > Spare plate sticks (%, default 0) adds extra sticks. Saved orders offer the update. Plan: docs/takeoff/SHORT_PLATES_6M_PLAN.md.
 
 > **Wall junctions (18 November 2026):** built on branch `takeoff/wall-junctions`, local, NOT pushed or deployed. No migration. Where a traced wall ends on another wall's run, the continuous wall gets two extra studs (one against each face of the butting wall) and junction blocks between them; a corner gets a second stud on the wall that starts there (owner rules of 18 November). Section 5E and TC-27 describe it. Plan: `docs/takeoff/WALL_JUNCTIONS_PLAN.md`.
 
@@ -130,7 +132,9 @@ This is the normal way to take off wall framing (HUB 028). One **Walls** item gi
 5. Tap the start of the run, then each corner. Double-tap the last point, or tap it and press **Finish**. To go right round a building, double-tap the start. While you trace, the Walls line and the settings hide, so **Finish** stays in view. All the walls save together with one Undo. The card says, for example, "Run 1 · 2 walls · 2,700".
 6. **+ Door**: type **Height** (only the first door needs it), then tap both door edges on the wall. **+ Window**: type **Height** and **Sill height**, then tap both window edges. They are labelled D1, W1 and so on (SOP 20-09 Section C2). Tap **Trace more walls** when the openings are in.
 7. Read the **Walls line** under the settings, for example "Walls: 21 studs at 2,700 · bottom plate 10.00 m · top plate 10.00 m · 13 noggins (1 row)".
-   - With Double top plate on, the top plate reads "top plate 2 × 10.00 m".
+   - With Double top plate on every wall, the top plate reads "top plate 2 × 10.00 m". With it on for some walls only, it reads "top plate 10.00 m + second 4.00 m", and only those walls count the second plate.
+   - **Double top plate on one wall (Select).** You do not have to decide before you draw. Tap **Select**, tap a wall, then tap the **Double top plate** chip (blue = on). Tap it again to take it off. The wall shows a small **2T** on the plan, and its elevation draws the second plate along the top. To do many walls, tap **Double top plate walls** (with nothing selected), then tap each wall, or tap the chip to set every wall: if some are on and some off, one tap puts all on, the next puts all off. The wall page has the same switch. Each tap is one **Undo**.
+   - The **Double top plate** box on the Line panel is now the default for walls with no setting of their own. If some walls have their own setting when you change it, it asks **Apply to every wall?** **Yes, every wall** clears their own settings, so all follow the box. **No, keep theirs** changes only the walls without their own setting. An item saved with the box ticked still has every wall double.
    - Walls of different heights read "21 studs (13 at 2,700, 8 at 3,000)" and "(1–2 rows)".
    - A wall that can't be worked out adds nothing to the totals and is named: "… · Wall 1 not counted". The reason shows straight under the line, for example "Wall 1: enter the Wall height.".
 8. **Details ›** opens the **Walls** card. A new Walls item starts with Blue Leaf's framing (Sam, 25 Oct 2026), so there is nothing to fix:
@@ -678,6 +682,13 @@ Next review date: 2027-04-14
 6. Corner: trace Wall 3 from (2000, 3000) to (2000, 7000), then Wall 4 from (2000, 7000) to (6000, 7000) (clicked through as one line, so Wall 3 ENDS where Wall 4 starts). Expected: Wall 4 has a "Corner stud" 112.5 from its start (teal), Wall 3 only its normal end stud, and the Walls line counts the extra stud under STUDS. Wall 3 also starts where Wall 1 starts (both start there): the longer wall, Wall 1, gets the second stud. Tap **Swap** on a corner: the other wall gets it; tap again: back.
 7. Two collinear legs of one straight wall meeting end to end: no corner stud and no corner listed. A wall meeting the join: exactly 2 junction studs, no studs at the join.
 Node: scripts/tests/takeoff-tc-junctions.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-28 — Short plates cut from 6.0 m sticks (Sam, 18 Nov)**
+1. Walls item with walls of 2,950, 2,400, 1,800, 1,200, 900 and 600 mm (no door or window). Expected: one plates line "4 pieces ... 6,000 mm length (short plates, pooled)" and the Walls line "12 short plates from 4 x 6.0 m sticks". Offcut 4,240 mm in the line note.
+2. Site appendix > Short plates cut list: Stick 1 to Stick 4, each listing its cuts, saw cuts and offcut.
+3. A 3,000 mm wall: its two plates stay their own 3,000 lengths (not pooled). A 2,999 mm wall: pooled.
+4. Walls card > More > Spare plate sticks 25: line becomes 5 pieces, note "+ 1 spare stick (25%)". Node: scripts/tests/takeoff-tc-short-plates.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

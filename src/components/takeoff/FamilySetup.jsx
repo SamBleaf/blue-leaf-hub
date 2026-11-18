@@ -1394,6 +1394,15 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
       {line && <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink" data-walls-card-line="">{line}</p>}
       {/* HUB 031 (Sam, 17 Nov 2026): the framing around each window and door is worked out for you; the office tells it about the roof
           once, here, so the lintels and jambs come from the span tables. Nothing here is guessed: a blank stays "needs roof information". */}
+      {/* Sam, 18 Nov 2026: plates under 3 m are pooled into full 6 m sticks; spare sticks are 0 unless the office asks for some */}
+      <details className="rounded-lg border border-hairline px-2 py-1" data-walls-more="">
+        <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">More{Number(r.shortPlateSparePct) > 0 ? ` · ${Number(r.shortPlateSparePct)}% spare plate sticks` : ""}</summary>
+        <div className="space-y-2 pb-2">
+          <NumberField label="Spare plate sticks" unit="%" value={Number(r.shortPlateSparePct) > 0 ? Number(r.shortPlateSparePct) : 0} min={0} max={100}
+            onCommit={(n) => { const v = n > 0 ? n : undefined; if (v !== (Number(r.shortPlateSparePct) > 0 ? Number(r.shortPlateSparePct) : undefined)) d.patch({ rules: { shortPlateSparePct: v } }); }} />
+          <p className="text-[11px] text-muted">Top and bottom plates under 3 m are cut from full 6 m sticks, pooled across the walls, so the offcuts are the only waste. Add a % here for extra sticks.</p>
+        </div>
+      </details>
       <details className="rounded-lg border border-hairline px-2 py-1" data-walls-roof="">
         <summary className="min-h-[44px] cursor-pointer py-3 text-sm text-ink">Roof and openings{r.carriesRoof === true ? " · walls carry the roof" : r.carriesRoof === false ? " · walls don't carry the roof" : ""}</summary>
         <div className="space-y-3 pb-2">

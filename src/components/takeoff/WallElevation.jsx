@@ -40,6 +40,7 @@ const RECT_STYLE = {
   blocked: { fill: "#fca5a5", stroke: "#991b1b" },
   area: { fill: "#e0f2fe", stroke: "#0369a1" },
   block: { fill: "#a5f3fc", stroke: "#0e7490" },
+  plate2: { fill: "#fde68a", stroke: "#92400e" },   // Sam, 18 Nov 2026: a second top plate
 };
 const LINE_STYLE = {
   support: { stroke: "#0f766e", width: 3 },

@@ -47,7 +47,7 @@ import { fmtMm } from "./format.js";
 import WallElevation from "./WallElevation.jsx";
 import { overrideKeyWallIds } from "../../../shared/takeoff/engine/junctions.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
-import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems,
+import { cavityConvert, cavityOff, cavitySetLeaf, cavitySetSide, cavityWarning, fullHeightFollowers, fullHeightMm, isWallsItem, nextOpeningLabel, openingRecord, reviewWalls, runIdOf, runLabel, toolsFor, wallCladdingText, wallCladdingTotals, junctionText, cornerText, wallFramingNotes, wallFramingText, wallFramingTotals, wallListItems, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop,
   wallPartsNeedText, wallRuns } from "./measure/tools.js";
 
 const MAX_MM = 100000;
@@ -607,6 +607,12 @@ function supportElements(entries, bbox, polygon) {
             note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
           },
         });
+      }
+      // Sam, 18 Nov 2026: a wall with a second top plate draws it along the top of the studs (this wall only)
+      if (l.doubleTop && l.plateThickMm > 0 && l.heightMm > 0) {
+        const x1 = Math.min(bbox.x1, l.wallLengthMm ?? bbox.x1);
+        items.push({ id: `${prefix}top2`, kind: "rect", state: "plate2", rect: { x0: Math.max(bbox.x0, 0), x1, y0: bbox.y0 + l.heightMm - l.plateThickMm, y1: bbox.y0 + l.heightMm },
+          info: { title: "Second top plate", rows: [["Length", `${fmtMm(x1 - Math.max(bbox.x0, 0))} mm`]], note: l.doubleTopFrom === "wall" ? "This wall's own setting." : "From the item's Double top plate." } });
       }
       // owner rule A: the junction blocks (laminated pairs, 300 mm tall, at 900 centres) between the two junction studs
       for (const j of l.junctions || []) {
@@ -1482,6 +1488,11 @@ export default function WallsScreen({ ws, materialId, wallId, wallTab = null, on
       const fol = "heightMm" in patch ? fullHeightFollowers(latestView.current.measurements.filter((m) => m.kind === "opening" && m.parentId === w.id && !m.archived), nextInputs) : [];
       record({ redo: partial({ measurements: [{ ...before, inputs: nextInputs }, ...fol.map((f) => mRec(f.next))] }), undo: partial({ measurements: [before, ...fol.map((f) => mRec(f.before))] }) });
     },
+    /** Replace a wall's inputs whole (a key can be taken away, e.g. Double top plate back to the item's): one edit, one Undo. */
+    setWallInputs(w, inputs) {
+      const before = mRec(view.measurements.find((m) => m.id === w.id) || w);
+      record({ redo: partial({ measurements: [{ ...before, inputs }] }), undo: partial({ measurements: [before] }) });
+    },
     removeWall(w) {
       const ops = openingsOf(w.id);
       const ids = new Set([w.id, ...ops.map((o) => o.id)]);
@@ -1908,7 +1919,7 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
   // and the lintels note for this wall's openings
   const framingLines = framingEntries.map((e) => {
     const text = wallFramingText(wallFramingTotals(e.result, wall.id));
-    return { id: e.material.id, name: e.material.name, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet"),
+    return { id: e.material.id, name: e.material.name, material: e.material, text: text || (blockingFor(e.material.id) ? "needs attention, see below" : "nothing worked out yet"),
       notes: wallFramingNotes(e.result, wall.id, e.material.spec),
       junctions: ((e.result?.layouts || []).find((q) => q?.method === "wall_framing@1" && q.wallMeasurementId === wall.id)?.junctions) || [],
       corners: ((e.result?.layouts || []).find((q) => q?.method === "wall_framing@1" && q.wallMeasurementId === wall.id)?.corners) || [] };
@@ -2117,6 +2128,17 @@ function WallEditor({ ws, view, wall, material, results, canEdit, act, onTrace, 
               {framingLines.map((l) => (
                 <div key={l.id} data-wall-line={l.id} data-wall-framing="">
                   <p><b className="text-ink">{l.name}:</b> <span className="text-ink" data-wall-line-text="">{l.text}</span></p>
+                  {/* Sam, 18 Nov 2026: this wall's second top plate, on or off (the same switch as Select on the plan) */}
+                  {isWallsItem(l.material) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-2" data-wall-doubletop="">
+                      {canEdit ? (
+                        <button type="button" aria-pressed={wallDoubleTopOn(wall, l.material)} data-wall-doubletop-chip=""
+                          onClick={() => act.setWallInputs(wall, toggleWallDoubleTop(wall, l.material))}
+                          className={`min-h-[44px] rounded-lg border px-3 text-sm font-medium focus-ring ${wallDoubleTopOn(wall, l.material) ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`}>Double top plate</button>
+                      ) : <span className="text-xs text-ink" data-wall-doubletop-state="">Top plate: {wallDoubleTopOn(wall, l.material) ? "double" : "single"}</span>}
+                      <span className="text-[11px] text-muted">{wallOwnDoubleTop(wall) === null ? `This wall follows the item (${l.material.rules?.doubleTopPlate === true ? "double" : "single"}).` : "This wall's own setting."}</span>
+                    </div>
+                  )}
                   {l.notes.length > 0 && <ul className="mt-0.5 space-y-0.5 text-xs text-muted" data-wall-line-notes="">{l.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
                   {l.junctions.length > 0 && (
                     <ul className="mt-1 space-y-1" data-wall-junctions="">
