@@ -948,6 +948,36 @@ export default {
    ],
    "rows": [
     {
+     "size": "90x35",
+     "plies": 1,
+     "depthMm": 90,
+     "breadthMm": 35,
+     "maxSpanMm": [
+      1400,
+      1000,
+      1000,
+      700,
+      800,
+      600,
+      700,
+      null,
+      600,
+      null
+     ],
+     "extraBearingMm": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
      "size": "2/90x35",
      "plies": 2,
      "depthMm": 90,
@@ -1578,6 +1608,36 @@ export default {
      ]
     },
     {
+     "size": "240x45",
+     "plies": 1,
+     "depthMm": 240,
+     "breadthMm": 45,
+     "maxSpanMm": [
+      3500,
+      3400,
+      2900,
+      2900,
+      2500,
+      2400,
+      2200,
+      2100,
+      1900,
+      1700
+     ],
+     "extraBearingMm": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      5
+     ]
+    },
+    {
      "size": "2/240x45",
      "plies": 2,
      "depthMm": 240,
@@ -1695,36 +1755,6 @@ export default {
       0,
       0,
       0
-     ]
-    },
-    {
-     "size": "240x45",
-     "plies": 1,
-     "depthMm": 240,
-     "breadthMm": 45,
-     "maxSpanMm": [
-      3500,
-      3400,
-      2900,
-      2900,
-      2500,
-      2400,
-      2200,
-      2100,
-      1900,
-      1700
-     ],
-     "extraBearingMm": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      5
      ]
     }
    ],
