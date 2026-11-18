@@ -1,5 +1,5 @@
 ---
-sop_version: 2.1
+sop_version: 2.2
 last_reviewed: 2026-11-18
 app_version: takeoff-r03 + HUB 031 (branch takeoff/wet-walls-cavity-doors, built 18 Nov 2026, not deployed)
 screenshot_status: placeholders_only
@@ -15,6 +15,8 @@ test_status: untested  <!-- untested | passed | failed | partial -->
 **Priority:** High
 
 > **Feature status (2026-10-14):** Takeoffs ship **switched off** behind the server flag `TAKEOFF_ENABLED` (SOP 20-01). A read-only check on 2026-10-14 found migration 206's tables present in production (`docs/takeoff/evidence/live-206-verification-2026-10-14.txt`). Timber takeoff is part of the **TC-R04 build on branch `takeoff-r03`** and also needs **migration 207 (`supabase/migrations/207_takeoff_generic_methods.sql`), which is NOT applied in production** — it must not be applied until the Director approves the TC-R04 release. Nothing in this SOP has been tested against the live app; Section 14 runs in UI Review Mode (mocked data).
+
+> **Short plates in 6.0 m sticks (Sam, 18 Nov 2026, takeoff-calc@9):** built on branch `takeoff/short-plates-6m`, local, NOT pushed or deployed. In a Walls item every top and bottom plate piece under 3,000 mm (after the join rule) is pooled across all the walls and cut from full 6,000 mm sticks (5 mm saw cut each, offcuts are the only waste). It orders as one plates line ("N/6" under T&B PLATES) with a stick-by-stick cut list. Plates of 3,000 mm and over are bought as before. A product whose longest length is under 6,000 uses that length. Walls card > More > Spare plate sticks (%, default 0) adds extra sticks. Saved orders offer the update. Plan: docs/takeoff/SHORT_PLATES_6M_PLAN.md.
 
 > **Wall junctions (18 November 2026):** built on branch `takeoff/wall-junctions`, local, NOT pushed or deployed. No migration. Where a traced wall ends on another wall's run, the continuous wall gets two extra studs (one against each face of the butting wall) and junction blocks between them; a corner gets a second stud on the wall that starts there (owner rules of 18 November). Section 5E and TC-27 describe it. Plan: `docs/takeoff/WALL_JUNCTIONS_PLAN.md`.
 
@@ -674,6 +676,13 @@ Next review date: 2027-04-14
 6. Corner: trace Wall 3 from (2000, 3000) to (2000, 7000), then Wall 4 from (2000, 7000) to (6000, 7000) (clicked through as one line, so Wall 3 ENDS where Wall 4 starts). Expected: Wall 4 has a "Corner stud" 112.5 from its start (teal), Wall 3 only its normal end stud, and the Walls line counts the extra stud under STUDS. Wall 3 also starts where Wall 1 starts (both start there): the longer wall, Wall 1, gets the second stud. Tap **Swap** on a corner: the other wall gets it; tap again: back.
 7. Two collinear legs of one straight wall meeting end to end: no corner stud and no corner listed. A wall meeting the join: exactly 2 junction studs, no studs at the join.
 Node: scripts/tests/takeoff-tc-junctions.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-28 — Short plates cut from 6.0 m sticks (Sam, 18 Nov)**
+1. Walls item with walls of 2,950, 2,400, 1,800, 1,200, 900 and 600 mm (no door or window). Expected: one plates line "4 pieces ... 6,000 mm length (short plates, pooled)" and the Walls line "12 short plates from 4 x 6.0 m sticks". Offcut 4,240 mm in the line note.
+2. Site appendix > Short plates cut list: Stick 1 to Stick 4, each listing its cuts, saw cuts and offcut.
+3. A 3,000 mm wall: its two plates stay their own 3,000 lengths (not pooled). A 2,999 mm wall: pooled.
+4. Walls card > More > Spare plate sticks 25: line becomes 5 pieces, note "+ 1 spare stick (25%)". Node: scripts/tests/takeoff-tc-short-plates.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist

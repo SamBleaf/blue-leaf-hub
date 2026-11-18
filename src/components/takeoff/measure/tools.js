@@ -444,6 +444,12 @@ export function wallFramingTotals(result, wallId = null) {
   if (rules.openings) t.openingRules = rules;
   t.studsByHeight = [...byH].sort((a, b) => a[0] - b[0]);
   t.rows.sort((a, b) => a - b);
+  // Sam, 18 Nov 2026: the short plates (under 3 m) pooled into full sticks, from the item's allocation (whole item only)
+  if (wallId == null) {
+    const pools = (result?.allocation?.groups || []).filter((g) => g.identity?.shortPlates);
+    const pieces = pools.reduce((a, g) => a + g.totals.allocatedCuts, 0);
+    if (pieces) t.shortPlates = { pieces, sticks: pools.reduce((a, g) => a + g.barCount, 0), stickMm: pools[0].bars[0]?.stockLengthMm ?? null };
+  }
   return t;
 }
 
@@ -488,7 +494,8 @@ export function wallFramingText(t, label = null, notCounted = []) {
   // HUB 031: the lintels the opening rules sized, and the ones still to size ("· 2 lintels, 1 to size")
   const r = t.openingRules;
   const heads = r && (r.lintels || r.lintelsToSize) ? [[r.lintels ? `${n(r.lintels)} lintel${r.lintels === 1 ? "" : "s"}` : null, r.lintelsToSize ? `${n(r.lintelsToSize)} to size` : null, r.noFit ? `${n(r.noFit)} won't fit` : null].filter(Boolean).join(", ")] : [];
-  const body = [studs + jn, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
+  const sp = t.shortPlates ? [`${n(t.shortPlates.pieces)} short plate${t.shortPlates.pieces === 1 ? "" : "s"} from ${n(t.shortPlates.sticks)} × ${(t.shortPlates.stickMm / 1000).toFixed(1)} m stick${t.shortPlates.sticks === 1 ? "" : "s"}`] : [];
+  const body = [studs + jn, `bottom plate ${m(t.bottomPlateMm)}`, `top plate ${top}`, ...sp, `${n(t.noggins)} noggin${t.noggins === 1 ? "" : "s"}${rowText}`, ...heads, ...own, ...(out ? [out] : [])].join(" · ");
   return label ? `${label}: ${body}` : body;
 }
 

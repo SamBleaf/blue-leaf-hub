@@ -213,6 +213,11 @@ function drawAppendix(doc, snap, opts) {
     title(`${tb.materialName} — ${tb.title || "timber cut list"}`);   // older snapshots carry no title (timber)
     // every member is named (wrapping) — a site reader must be able to tell which ones are which
     for (const r of tb.rows || []) line(`${r.qty} × cut ${fmt(r.cutMm)} mm from ${r.stockMm ? `${fmt(r.stockMm)} mm stock` : "NO AVAILABLE STOCK"}${r.labels?.length ? ` — ${r.labels.join(", ")}` : ""}`);
+    // pooled short plates (Sam, 18 Nov 2026): each stick, the cuts that come out of it and the offcut left
+    for (const st of tb.sticks || []) {
+      line(`Stick ${st.n} (${fmt(st.stockMm)} mm): ${st.cuts.map((c) => fmt(c.lengthMm)).join(" | ")} — offcut ${fmt(st.offcutMm)} mm, saw cuts ${fmt(st.kerfLossMm || 0)} mm`, { bold: true });
+      for (const c of st.cuts) if (c.label) line(`${fmt(c.lengthMm)}: ${c.label}`, { muted: true, indent: 10 });
+    }
     y += 6;
   }
   for (const sh of a.layouts || []) {

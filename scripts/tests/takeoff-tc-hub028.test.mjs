@@ -470,7 +470,7 @@ t("grid: one owner timber grid, 1,200 then 300 mm steps (Sam, 25 Oct 2026), in f
   assert.equal(TIMBER_GRID_SOURCE, "OWNER-2026-10-25");
   assert.deepEqual([TIMBER_ORDERING_POLICY.minLengthMm, TIMBER_ORDERING_POLICY.incrementMm, TIMBER_ORDERING_POLICY.scope], [1200, 300, "all-suppliers-timber"]);
   assert.deepEqual(TIMBER_ORDERING_POLICY.sourceRefs, ["OWNER-2026-10-14", "OWNER-2026-10-25"]);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@8$/, "a behaviour change is stamped into exports");
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/, "a behaviour change is stamped into exports");
   const p = timberStockPolicy({});
   assert.deepEqual([p.kind, p.minMm, p.incrementMm], ["grid", 1200, 300]);
   for (const [need, buy] of [[2700, 2700], [4000, 4200], [1000, 1200], [6000, 6000], [1200.1, 1500], [4180, 4200], [5196.2, 5400], [2701, 3000]]) {
@@ -963,7 +963,7 @@ t("bottom plate (round 2): bought the full wall length like the top plate; doors
   assert.ok(WR(c).explain.includes("Bottom plate: one continuous 6,000 mm piece (no joints selected from the framing detail)"));
   const full = wf([wm("w", 820, 2700, "Wall 1"), om("a", "w", "D1", "door", 0, 820, 2040, 0)]);
   assert.deepEqual(wl(full, "Wall 1").plates.layers.map((l) => l.piecesMm), [[820], [820]]);
-  assert.deepEqual([partRows(full, "plates"), st(wl(full, "Wall 1")), pieceSum(full, "noggins")], [[[2, 1200]], [0, 820], 0], "its 2 end studs, no noggin in the doorway");
+  assert.deepEqual([partRows(full, "plates"), st(wl(full, "Wall 1")), pieceSum(full, "noggins")], [[[1, 6000]], [0, 820], 0], "its 2 end studs, no noggin in the doorway");
   assert.ok(!msgs(full).some(([, blocking]) => blocking), JSON.stringify(msgs(full)));
 });
 
@@ -1035,9 +1035,9 @@ t("round 3: a 6,000 wall stays pine (no LVL line or need); a 12,000 wall at 600 
   const twelve = wf([wm("w", 12000, 2700, "Wall 1")], { spec: LVL_READY() });
   assert.deepEqual(wl(twelve, "Wall 1").plates.layers.map((l) => [l.tag, l.piecesMm, l.longPiecesMm, l.joinsOverStudsMm]),
     [["bottom", [10800, 1200], [10800], [10800]], ["top", [10800, 1200], [10800], [10800]]]);
-  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[2, 1200]]]);
+  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[1, 6000]]]);
   assert.ok(WR(twelve).explain.includes("Top plate: 12,000 mm joined over the stud at 10,800 mm (longest length 11,000 mm) → 10,800 + 1,200 mm (10,800 mm as a long plate, over the 6,000 mm plates)"));
-  assert.deepEqual(cutList(twelve, "Plates cut list").rows.map((x) => [x.qty, x.cutMm, x.stockMm, x.labels]), [[2, 1200, 1200, ["Wall 1 bottom plate 10,800–12,000", "Wall 1 top plate 10,800–12,000"]]]);
+  assert.deepEqual(cutList(twelve, "Short plates cut list (pooled into full sticks)").rows.map((x) => [x.qty, x.cutMm, x.stockMm, x.labels]), [[2, 1200, 6000, ["Wall 1 bottom plate 10,800–12,000", "Wall 1 top plate 10,800–12,000"]]]);
   // one job, both kinds: the 6,000 wall's plates are pine, the 9,000 wall's LVL, each on its own lines (studs, plates, LVL, noggins)
   const both = wf([wm("a", 6000, 2700, "Wall 1"), wm("b", 9000, 2700, "Wall 2")]);
   assert.deepEqual([partRows(both, "plates"), partRows(both, "longPlates")], [[[2, 6000]], [[2, 9000]]]);
@@ -1238,7 +1238,7 @@ t("round 3: an LVL longest length marked not stocked (11,000, off the 300 mm gri
   assert.deepEqual(longPlateStockLengths(n.components.longPlates).slice(-2), [10200, 10500]);
   // a 10,900 wall: no 11,000 or 10,800 LVL, so each plate joins over the stud at 10,200 (10,200 LVL + 700 pine)
   const c = wf([wm("w", 10900, 2700, "Wall 1")], { spec });
-  assert.deepEqual([partRows(c, "longPlates"), partRows(c, "plates")], [[[2, 10200]], [[2, 1200]]]);
+  assert.deepEqual([partRows(c, "longPlates"), partRows(c, "plates")], [[[2, 10200]], [[1, 6000]]]);
   assert.deepEqual(wl(c, "Wall 1").plates.layers.map((l) => [l.piecesMm, l.joinsOverStudsMm]), [[[10200, 700], [10200]], [[10200, 700], [10200]]]);
   // a pine plate's not-stocked length off the grid still comes out, as before
   assert.deepEqual(normaliseFamilySpec(withPart(LVL_READY(), "plates", { stock: { maxMm: 6000, unavailableMm: [6100, 5700] } })).components.plates.stock.unavailableMm, [5700]);
@@ -1546,7 +1546,7 @@ t("SOP 20-08: every 'never joined' / 'never clamped' stock line (outside the Tim
   // what those lines say: a 9,000 Walls plate is one LVL length, and only a plate over 11,000 is joined over a stud
   assert.deepEqual(partRows(wf([wm("w", 9000, 2700, "Wall 1")], { spec: LVL_READY() }), "longPlates"), [[2, 9000]]);
   const twelve = wf([wm("w", 12000, 2700, "Wall 1")], { spec: LVL_READY() });
-  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[2, 1200]]]);
+  assert.deepEqual([partRows(twelve, "longPlates"), partRows(twelve, "plates")], [[[2, 10800]], [[1, 6000]]]);
 });
 
 // ══ Final review fixes (25 October 2026) ══════════════════════════════════════════════════════════════════════════
