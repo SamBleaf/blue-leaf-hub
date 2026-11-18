@@ -39,7 +39,7 @@ const nogs = (c, wallId) => WR(c).demands.filter((d) => d.identity.component ===
 // ══ Step 1: per-wall stud centres ═══════════════════════════════════════════════════════════════════════════════
 t("constants: wet-area centres are 450 (Sam, 17 Nov 2026) and the calculation is stamped @5", () => {
   assert.equal(WET_WALL_CENTRES_MM, 450);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@10$/);
   assert.ok(NOTE_CODES.includes("wall_centres_ignored"));
 });
 
@@ -417,7 +417,10 @@ t("fail closed: anything missing is 'needs roof information', anything outside a
   assert.match(selectLintel({ ...ok, windClass: undefined }).reasons[0], /wind class/);
   assert.equal(selectLintel({ ...ok, windClass: "N5" }).outcome, "engineer");
   assert.equal(selectLintel({ ...ok, windClass: "C2" }).outcome, "engineer");
-  assert.equal(selectLintel({ ...ok, product: "MGP10", windClass: "N3" }).outcome, "engineer", "the pine tables are N1 and N2 only");
+  // 18 Nov 2026 (Loads above): the pine tables are still N1/N2 only, but an MGP10 item now falls back to the LVL13 table (with a note) instead of stopping at "engineer"
+  const pineN3 = selectLintel({ ...ok, product: "MGP10", windClass: "N3" });
+  assert.deepEqual([pineN3.outcome, pineN3.grade, pineN3.note], ["ok", "LVL13", "MGP10 doesn't span — LVL13"], "pine is N1 and N2 only: falls back to LVL13");
+  assert.equal(selectLintel({ ...ok, product: "MGP10", windClass: "N5" }).outcome, "engineer", "N5 is in neither table");
   assert.equal(selectLintel({ ...ok, storey: "lower" }).outcome, "engineer");
   assert.equal(selectLintel({ ...ok, rlwMm: 7501 }).outcome, "engineer");
   assert.equal(selectLintel({ ...ok, spacingMm: 1201 }).outcome, "engineer");
@@ -488,7 +491,9 @@ t("a typed lintel on the opening beats the table; 'Pine MGP10' reads the AS 1684
   assert.equal(wl(pine, "Wall 1").openings[0].rule.lintel.grade, "MGP10");
   assert.match(wl(pine, "Wall 1").openings[0].rule.lintel.basis, /AS 1684\.2 N1\/N2 Supplement 4 \(2006\), T17, page 22/);
   const n3 = withRoof([wm("w", 4000, 2700, "Wall 1"), om("o", "w", "W1", "window", 1000, 1200, 1200, 900)], { lintelProduct: "MGP10", windClass: "N3" });
-  assert.equal(wl(n3, "Wall 1").openings[0].rule.lintel.status, "engineer");
+  assert.equal(wl(n3, "Wall 1").openings[0].rule.lintel.status, "sized");
+  assert.equal(wl(n3, "Wall 1").openings[0].rule.lintel.grade, "LVL13");
+  assert.equal(wl(n3, "Wall 1").openings[0].rule.lintel.note, "MGP10 doesn't span — LVL13");
 });
 
 t("tap the lintel to add load information: a bigger roof width on one opening gives a deeper lintel for that opening only", () => {

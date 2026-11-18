@@ -98,7 +98,9 @@ export function expandOpening({ opening: o, ctx }) {
     let pick = null;
     if (typed) {
       pick = { source: "typed", section: `${typed.depthMm}x${typed.breadthMm}`, depthMm: typed.depthMm, breadthMm: typed.breadthMm, plies: typed.plies || 1,
-        grade: String(typed.grade || "").toUpperCase() || ctx.lintelGrade || null, basis: "typed by the office" };
+        grade: String(typed.grade || "").toUpperCase() || ctx.lintelGrade || null,
+        ...(ctx.loadsAbove === "engineer" || typed.perEngineer === true ? { perEngineer: true } : {}),
+        basis: ctx.loadsAbove === "engineer" || typed.perEngineer === true ? "per engineer, not checked against a table" : "typed by the office" };
     } else if (aloft && position === "floorFrame") {
       // the floor-load lintel tables (SmartLVL 13 guide, lintels supporting floor loads) are not mapped: never invented
       lintel = { status: "engineer", reason: "size from the engineer (floor load)" };
@@ -106,7 +108,7 @@ export function expandOpening({ opening: o, ctx }) {
       lintel = { status: "unsized", reason: "this wall doesn't carry the roof, so there is no span table to use: type the head size" };
     } else {
       const r = ctx.lintels({ spanMm: W, maxDepthMm: aloft ? null : H - headSB, opening: o });
-      if (r.outcome === "ok") pick = { source: "table", section: r.section, depthMm: r.depthMm, breadthMm: r.breadthMm, plies: r.plies || 1, grade: r.grade, basis: r.basis, extraBearingMm: r.extraBearingMm || 0 };
+      if (r.outcome === "ok") pick = { source: "table", section: r.section, depthMm: r.depthMm, breadthMm: r.breadthMm, plies: r.plies || 1, grade: r.grade, basis: r.basis, extraBearingMm: r.extraBearingMm || 0, ...(r.note ? { note: r.note } : {}) };
       else lintel = { status: r.outcome === "engineer" ? "engineer" : "unsized", reason: r.reasons?.[0] || r.basis || "needs roof information" };
     }
     if (pick) {
@@ -182,7 +184,7 @@ export function expandOpening({ opening: o, ctx }) {
     source: "rule", ref: OPENING_RULE_REF, loadBearing, widthMm: W, cavity: cavity ? { leafMm: cavity.leafMm, pocket } : null, fullHeight: !!o.fullHeight,
     jambsPerSide: jambs, jambTable: table.outcome === "not_needed" ? null : { outcome: table.outcome, basis: table.basis || null, jambsPerSide: table.jambsPerSide ?? null },
     kings: { left: ends.left.kings, right: ends.right.kings }, jacks: { left: ends.left.jacks, right: ends.right.jacks }, jackLengthMm: headSB,
-    lintel, position: aloft ? position : "underTopPlate", trimmers: { head: headTrim, sill: sillTrim, stack }, headLevelMm: o.fullHeight ? H + bp : o.headMm, headFromStudBaseMm: headSB, sillFromStudBaseMm: sillSB,
+    ...(ctx.loadsAbove && ctx.loadsAbove !== "roof" ? { loadsAbove: ctx.loadsAbove } : {}), lintel, position: aloft ? position : "underTopPlate", trimmers: { head: headTrim, sill: sillTrim, stack }, headLevelMm: o.fullHeight ? H + bp : o.headMm, headFromStudBaseMm: headSB, sillFromStudBaseMm: sillSB,
   };
   return { detail, sides, jackMm, levels, rule, notes, headLenMm: headLen };
 }

@@ -668,7 +668,7 @@ export function openingRuleText(o) {
   const kj = (side) => `${r.kings[side]} king${r.kings[side] === 1 ? "" : "s"}${r.jacks[side] ? ` + ${r.jacks[side]} jack${r.jacks[side] === 1 ? "" : "s"}` : ""}`;
   parts.push(r.kings.left === r.kings.right && r.jacks.left === r.jacks.right ? `${kj("left")} each side` : `left ${kj("left")}, right ${kj("right")}`);
   const l = r.lintel;
-  if (l.status === "sized" || l.status === "typed") parts.push(`lintel ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  if (l.status === "sized" || l.status === "typed") parts.push(`lintel ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? (l.perEngineer ? " (per engineer)" : " (typed)") : ""}${l.note ? ` — ${l.note}` : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
   else if (l.status === "unsized" || l.status === "engineer") parts.push(`lintel not sized (${l.reason})`);
   if (r.trimmers.head) parts.push(`head trimmer × ${r.trimmers.head}`);
   if (r.trimmers.sill) parts.push(`sill trimmer × ${r.trimmers.sill}`);

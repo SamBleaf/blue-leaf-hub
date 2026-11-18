@@ -41,7 +41,7 @@ try {
   ok("card: spacing chips 600 and 1200", c.includes(">600<") && c.includes(">1200<"));
   ok("card: the chosen answers are pressed", pressed(c, "Yes") && pressed(c, "Sheet") && pressed(c, "3000") && pressed(c, "N2"));
   ok("card: lintels default to SmartLVL 13", pressed(c, "SmartLVL 13 \\(LVL\\)"));
-  ok("card: says lower storey and N5/C need an engineer", /lower storey, N5 and C wind classes need an engineer/.test(c));
+  ok("card: says N4/N5/C need an engineer", /N4, N5 and C wind classes need an engineer/.test(c));
   const blank = card();
   ok("card: nothing answered reads 'Not set' and 'Not sure', never a default", pressed(blank, "Not set") && /Roof and openings<\/summary>/.test(blank));
   const off = card({ openingFraming: false });

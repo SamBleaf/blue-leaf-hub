@@ -39,7 +39,7 @@ import { BLUE_LEAF_SHEET_JOINT, describeFamilySpec, pointToMm, polylineLengthMm 
 import { buildWall, wallAreas } from "../../../shared/takeoff/engine/wall.js";
 import { FOLLOWER_TEXT, followerRule } from "../../../shared/takeoff/engine/followers.js";
 import { normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
-import { ROOF_LOAD_WIDTHS_MM } from "../../../shared/takeoff/standards/index.js";
+import { ENGINEER_GRADES, ROOF_LOAD_WIDTHS_MM, parseLintelText } from "../../../shared/takeoff/standards/index.js";
 import { newId, orderedId } from "../../lib/takeoffApi.js";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet, TextField } from "./ui.jsx";
@@ -966,13 +966,34 @@ export function OpeningFlags({ opening, timberWalls, wallHeightOk, onFlag, warni
  * width this opening carries (chips from the tables' own columns), or a lintel size typed by hand that the tables never
  * overwrite. A lintel that doesn't fit, or can't be sized, says why in plain words.
  */
+function NumberFieldlessText({ value, onChange, onEnter }) {
+  return (
+    <label className="block text-xs font-medium text-muted">Size per engineer (depth x thickness)
+      <input type="text" inputMode="text" autoComplete="off" autoCapitalize="off" value={value} placeholder="290x45 or 2/240x45" data-lintel-size-input=""
+        onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } }}
+        className="mt-1 min-h-[44px] w-full rounded-lg border border-hairline bg-white px-3 text-base text-ink focus-ring" />
+    </label>
+  );
+}
+
 export function LintelLoad({ opening, rule, onSet }) {
   const [open, setOpen] = useState(false);
   const inputs = opening.rec.inputs || {};
   const l = rule.lintel;
   const typed = inputs.lintel || null;
   const [dim, setDim] = useState({ depthMm: typed?.depthMm ?? null, breadthMm: typed?.breadthMm ?? 45, plies: typed?.plies ?? 1 });
-  const text = l.status === "sized" || l.status === "typed" ? `${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}`
+  // Sam, 18 Nov 2026: under an Engineer item every lintel is typed: tap the lintel, type "290x45" (or "2/240x45"), pick the grade
+  const engineerCase = rule.loadsAbove === "engineer";
+  const [sizeText, setSizeText] = useState(typed ? `${typed.plies > 1 ? `${typed.plies}/` : ""}${typed.depthMm}x${typed.breadthMm}` : "");
+  const [grade, setGrade] = useState(ENGINEER_GRADES.includes(typed?.grade) ? typed.grade : ENGINEER_GRADES[0]);
+  const [sizeErr, setSizeErr] = useState(null);
+  const useEngineerSize = () => {
+    const p = parseLintelText(sizeText);
+    if (!p.ok) { setSizeErr(p.error); return; }
+    setSizeErr(null);
+    onSet({ ...inputs, lintel: { depthMm: p.depthMm, breadthMm: p.breadthMm, plies: p.plies, grade, perEngineer: true } });
+  };
+  const text = engineerCase && l.status !== "typed" && l.status !== "not_needed" ? "per engineer: type the size" : l.status === "sized" || l.status === "typed" ? `${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? (l.perEngineer ? " (per engineer)" : " (typed)") : ""}${l.note ? ` — ${l.note}` : ""}`
     : l.status === "not_needed" ? "none (this wall doesn't carry the roof; the head is framed with trimmers)" : `not sized (${l.reason})`;
   const save = (next) => onSet(next);
   // Sam, 18 Nov 2026: where the lintel sits. Shown when it won't fit, and whenever a non-default position is stored (to change it back).
@@ -995,8 +1016,21 @@ export function LintelLoad({ opening, rule, onSet }) {
         </div>
       )}
       {l.status === "typed" && !l.grade && <p className="text-xs text-amber-800" data-lintel-grade-missing="">Pick the lintel grade: Lintels from, in this item&apos;s Setup.</p>}
+      {l.note && <p className="text-xs font-semibold text-amber-800" data-lintel-note="">{l.note}</p>}
       {l.basis && <p className="text-[11px] text-muted" data-lintel-basis="">{l.basis}</p>}
-      {open && (
+      {open && engineerCase && (
+        <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-engineer="">
+          <NumberFieldlessText value={sizeText} onChange={(v) => { setSizeText(v); setSizeErr(null); }} onEnter={useEngineerSize} />
+          <Chips label="Grade" value={grade} options={ENGINEER_GRADES.map((g) => [g, g])} onChange={setGrade} />
+          {sizeErr && <p className="text-xs font-semibold text-red-700" data-lintel-size-error="">{sizeErr}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Btn onClick={useEngineerSize} disabled={!sizeText.trim()} data-lintel-use="">Use this size</Btn>
+            {typed && <Btn kind="ghost" onClick={() => { const next = { ...inputs }; delete next.lintel; setSizeText(""); save(next); }}>Clear</Btn>}
+          </div>
+          <p className="text-[11px] text-muted">Per engineer: used as typed, not checked against a table.</p>
+        </div>
+      )}
+      {open && !engineerCase && (
         <div className="space-y-2 rounded-lg bg-page p-2" data-lintel-load="">
           <Chips label="Roof width this opening carries (mm)" value={inputs.loadRlwMm ?? "item"} options={[["item", "Same as the item"], ...ROOF_LOAD_WIDTHS_MM.map((v) => [v, String(v)])]}
             onChange={(v) => { const next = { ...inputs }; if (v === "item") delete next.loadRlwMm; else next.loadRlwMm = v; save(next); }} />
@@ -1078,7 +1112,7 @@ function ruleBullets(r) {
   if (r.cripples?.below || r.cripples?.above) out.push(`Cripples: ${[r.cripples.below && "below the sill", r.cripples.above && "above the head"].filter(Boolean).join(" and ")}, at this wall's centres`);
   if (r.trimmers.head || r.trimmers.sill) out.push(`Trimmers: ${[r.trimmers.head && `${r.trimmers.head} at the head`, r.trimmers.sill && `${r.trimmers.sill} at the sill`].filter(Boolean).join(", ")}`);
   const l = r.lintel;
-  if (l.status === "sized" || l.status === "typed") out.push(`Lintel: ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? " (typed)" : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
+  if (l.status === "sized" || l.status === "typed") out.push(`Lintel: ${l.plies > 1 ? `${l.plies}/` : ""}${String(l.section).replace("x", " × ")}${l.grade ? ` ${l.grade}` : ""}${l.status === "typed" ? (l.perEngineer ? " (per engineer)" : " (typed)") : ""}${l.note ? ` — ${l.note}` : ""}${l.noFit ? ` — won't fit (${n(l.noFit.freeMm)} free)` : ""}`);
   else if (l.status === "unsized" || l.status === "engineer") out.push(`Lintel: not sized yet (${l.reason})`);
   else if (l.status === "not_needed") out.push("Lintel: not needed");
   return out;

@@ -9,6 +9,7 @@
 // All functions take a Supabase service client `sb` and an access context `ctx`:
 //   ctx = { owner, caps, actor, ws? }   (built by takeoffRoutes after authorisation)
 // =============================================================================
+import { LOADS_ABOVE, parseLintelText } from "../../../shared/takeoff/standards/index.js";
 import crypto from "crypto";
 import {
   CALCULATION_VERSION, PROFILE_SCHEMA_VERSION, LIMITS, PROBLEM_TEXT, TakeoffValidationError,
@@ -222,10 +223,16 @@ const MM = (v, label, { min = 0, max = 100000, allowNull = true } = {}) => {
 /** A lintel typed on an opening (HUB 031): section, laminations and grade, bounded; the span tables never overwrite it. */
 function cleanLintel(l) {
   must(l && typeof l === "object" && !Array.isArray(l), "The lintel is invalid.");
+  // Sam, 18 Nov 2026: a size typed as text ("290x45", "2/240x45") is parsed here with the client's own parser; junk is refused
+  if (l.text != null && l.depthMm == null) {
+    const p = parseLintelText(l.text);
+    must(p.ok, p.error);
+    l = { ...l, depthMm: p.depthMm, breadthMm: p.breadthMm, plies: p.plies };
+  }
   const plies = Number(l.plies ?? 1);
   must(Number.isInteger(plies) && plies >= 1 && plies <= 4, "A lintel can be 1 to 4 pieces.");
   return { depthMm: MM(l.depthMm, "Lintel depth", { min: 40, max: 600, allowNull: false }), breadthMm: MM(l.breadthMm, "Lintel thickness", { min: 18, max: 200, allowNull: false }),
-    plies, ...(optStr(l.grade, 30) ? { grade: optStr(l.grade, 30) } : {}) };
+    plies, ...(optStr(l.grade, 30) ? { grade: optStr(l.grade, 30) } : {}), ...(l.perEngineer === true ? { perEngineer: true } : {}) };
 }
 function cleanInputs(kind, inp, tracedLengthMm) {
   const i = inp || {};
@@ -351,6 +358,9 @@ export function cleanMaterialContent(m) {
     const gname = str(m.name);
     must(gname, "Give the material a name.");
     const rules = m.rules && typeof m.rules === "object" ? cleanGenericRules(m.rules) : {};
+    // Sam, 18 Nov 2026: what is above the Walls item (roof | floorRoof | engineer) and the floor width it carries; refused, never guessed
+    if (rules.loadsAbove !== undefined) must(LOADS_ABOVE.includes(rules.loadsAbove), "What is above these walls must be Roof, Floor + roof or Engineer.");
+    if (rules.floorWidthMm !== undefined) must(typeof rules.floorWidthMm === "number" && rules.floorWidthMm >= 100 && rules.floorWidthMm <= 20000, "Floor width must be between 100 and 20,000 mm.");
     return { name: gname, methodKey, methodVersion, rules, profile: null, spec };
   }
   const rules = normaliseFlashingRules(m.rules || {});

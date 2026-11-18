@@ -61,6 +61,7 @@
 // at the same spot — only the first open (or Fit) fits the page. Two fingers always navigate. Points must stay inside the scaled region. Measuring is blocked on a replaced plan
 // (existing measurements stay visible for review). Every valid edit applies at once; Undo/Redo cover all of them.
 // =============================================================================
+import { LoadsAboveRows } from "./FamilySetup.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pointsWithinCalibration, latestPageCalibrations as pageCalibrations, CALIBRATION_STATUS, PROBLEM_TEXT, WALL_FRAMING_RULES, WET_WALL_CENTRES_MM, cavityOpeningWidth } from "../../../shared/takeoff/index.js";
 import { addSplit, appendVertex, computeFlashingPath, finishPath, moveSplit, moveSplitToCorner, resolvePathTap, splitAtLimit } from "../../../shared/takeoff/engine/flashingPath.js";
@@ -1885,6 +1886,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                         onChange={(e) => setItemDoubleTop(material, e.target.checked)} />
                       Double top plate
                     </label>
+                    <LoadsAboveRows rules={material.rules || {}} onPatch={(rules) => setRule(material, rules)} />
                     {dtAsk && dtAsk.matId === material.id && (
                       <div className="w-full space-y-1 rounded-lg bg-page px-3 py-2 text-sm" role="group" aria-label="Apply to every wall?" data-double-top-ask="">
                         <p className="text-ink">Apply to every wall? {dtAsk.walls} wall{dtAsk.walls === 1 ? " has" : "s have"} a setting of {dtAsk.walls === 1 ? "its" : "their"} own.</p>

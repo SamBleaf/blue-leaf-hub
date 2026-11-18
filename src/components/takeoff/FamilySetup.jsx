@@ -34,7 +34,7 @@ import { OWNER_BATTEN, SUPPORT_BATTEN_DEFAULTS, TIMBER_COVER_OPTIONS_MM, TIMBER_
   familyProblems, matchTimberChoice, methodFor, normaliseFamilySpec, isMgp10Grade, onTimberGrid, timberPresetLabel, timberStockRuleText, timberPresetMatches, timberPresetsFor, timberProductFill, timberProductMatches,
   isOwnerBatten, wallPartFill, wallPartProducts } from "../../../shared/takeoff/index.js";
 import { wallFramingText, wallFramingTotals, wallLongPlateOverText } from "./measure/tools.js";
-import { LINTEL_PRODUCTS, ROOF_LOAD_WIDTHS_MM, ROOF_SPACINGS_MM } from "../../../shared/takeoff/standards/index.js";
+import { FLOOR_WIDTHS_MM, FLOOR_WIDTH_DEFAULT_MM, LINTEL_PRODUCTS, LOADS_ABOVE, LOADS_ABOVE_LABELS, ROOF_LOAD_WIDTHS_MM, ROOF_SPACINGS_MM, loadsAboveOf } from "../../../shared/takeoff/standards/index.js";
 import { FixContext } from "./fixContext.js";
 import { assembliesFor, productGroups, rendexTemplate, specFromGroup } from "../../../shared/takeoff/products/index.js";
 import { CATALOGUE_SEED } from "../../../shared/takeoff/products/seed.js";
@@ -1359,6 +1359,28 @@ function WallPart({ d, part, presets }) {
  * No Purpose chips, no company-product picker and no Save as company product, so a Walls item stays a Walls item; no
  * offsets, plies or spares.
  */
+/**
+ * "Above these walls" (Sam, 18 Nov 2026): one chip row, Roof (the default) · Floor + roof · Engineer, and only for Floor + roof one more
+ * row, the floor width above (3,600 preselected). Used on the Walls card and the plan's Line panel; `onPatch` applies rules in one edit.
+ */
+export function LoadsAboveRows({ rules, onPatch }) {
+  const la = loadsAboveOf(rules);
+  const flw = rules?.floorWidthMm ?? FLOOR_WIDTH_DEFAULT_MM;
+  return (
+    <div className="w-full space-y-2" data-loads-above="">
+      <Chips label="Above these walls" name="loadsAbove" value={la} options={LOADS_ABOVE.map((v) => [v, LOADS_ABOVE_LABELS[v]])}
+        onChange={(v) => { if (v !== la) onPatch(v === "floorRoof" ? { loadsAbove: v, floorWidthMm: rules?.floorWidthMm ?? FLOOR_WIDTH_DEFAULT_MM } : { loadsAbove: v }); }} />
+      {la === "floorRoof" && (
+        <div data-loads-floor-width="">
+          <Chips label="Floor width above (mm)" name="floorWidthMm" value={FLOOR_WIDTHS_MM.includes(flw) ? flw : null} options={FLOOR_WIDTHS_MM.map((v) => [v, String(v)])} onChange={(v) => onPatch({ floorWidthMm: v })} />
+          <p className="text-[11px] text-muted">Half the joist span above, each side, plus any overhang. Rounds up to the table. Sized from the 2-storey tables.</p>
+        </div>
+      )}
+      {la === "engineer" && <p className="text-[11px] text-muted" data-loads-engineer="">Every lintel is typed per the engineer: tap the lintel, type the size.</p>}
+    </div>
+  );
+}
+
 export function WallsSetup({ value, onChange, result, presets = null, notCounted = [] }) {
   const d = useAutoApply(value, onChange);
   const kb = useKeepFieldVisible();
@@ -1391,6 +1413,7 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
           Double top plate
         </label>
       </div>
+      <LoadsAboveRows rules={r} onPatch={(rules) => d.patch({ rules })} />
       {line && <p className="rounded-lg bg-page px-3 py-2 text-sm text-ink" data-walls-card-line="">{line}</p>}
       {/* HUB 031 (Sam, 17 Nov 2026): the framing around each window and door is worked out for you; the office tells it about the roof
           once, here, so the lintels and jambs come from the span tables. Nothing here is guessed: a blank stays "needs roof information". */}
@@ -1424,7 +1447,7 @@ export function WallsSetup({ value, onChange, result, presets = null, notCounted
             onChange={(v) => d.patch({ rules: { windClass: v === "unset" ? undefined : v } })} />
           <Chips label="Lintels from" name="lintelProduct" value={r.lintelProduct || LINTEL_PRODUCTS[0][0]} options={LINTEL_PRODUCTS.map(([v, t]) => [v, t])}
             onChange={(v) => d.patch({ rules: { lintelProduct: v } })} />
-          <p className="text-[11px] text-muted">Single or upper storey only; a lower storey, N5 and C wind classes need an engineer or the supplier. Where a table can&apos;t size it, the opening says so and you type the size.</p>
+          <p className="text-[11px] text-muted">Roof, or Floor + roof, at N1 to N3; N4, N5 and C wind classes need an engineer or the supplier. Where a table can&apos;t size it, the opening says so and you type the size.</p>
         </div>
       </details>
       {blocked.length > 0 && <ul className="space-y-0.5 text-xs text-amber-800" data-walls-card-problems="">{blocked.map((m) => <li key={m}>{m}</li>)}</ul>}

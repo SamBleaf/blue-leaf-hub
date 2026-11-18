@@ -46,9 +46,9 @@ const sticksOf = (c, id = "walls") => (c.materialResults[id].appendix.timber.fin
 const WORKED = [["a", 2950], ["b", 2400], ["c", 1800], ["d", 1200], ["e", 900], ["f", 600]];
 const PIECES = WORKED.flatMap(([, mm]) => [mm, mm]).sort((a, b) => b - a);
 
-await t("constants: under 3,000 mm, 6,000 mm sticks, 5 mm saw cut; the calculation is stamped takeoff-calc@9", () => {
+await t("constants: under 3,000 mm, 6,000 mm sticks, 5 mm saw cut; the calculation is stamped takeoff-calc@10", () => {
   assert.deepEqual([SHORT_PLATE_BELOW_MM, SHORT_PLATE_STICK_MM, SHORT_PLATE_KERF_MM], [3000, 6000, 5]);
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@10$/);
 });
 
 await t("worked example: 12 short plates (2,950 ×2, 2,400 ×2, 1,800 ×2, 1,200 ×2, 900 ×2, 600 ×2) come out of 4 full 6,000 sticks, nothing else bought", () => {

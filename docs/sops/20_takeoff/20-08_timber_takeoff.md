@@ -166,6 +166,10 @@ When a window or door is on a Walls wall, the app works out its framing. You tap
 
 1. Open the Walls card (**Details ›**) and open **Roof and openings**. The office fills it in once: **Do these walls carry the roof?**, **Roof covering** (sheet or tile), **Roof width these walls carry**, **Rafter or truss spacing**, **Wind class**, and **Lintels from** (SmartLVL 13 or pine MGP10). A blank stays blank: the opening says "needs roof information". Nothing is guessed.
 2. One wall can differ: **Select** the wall and tap **Yes** or **No** under **Carries the roof**.
+2a. **Above these walls (Sam, 18 Nov 2026).** One chip row on the Walls card (and beside Stud centres on the plan's Line panel): **Roof** (the default, today's sizing) · **Floor + roof** · **Engineer**. Set it once per Walls item: a 3-storey house uses three items.
+   - **Roof**: nothing new. If **Lintels from** is Pine MGP10 and no pine size spans (or the wind class is N3, outside the pine tables) the lintel now falls back to the SmartLVL 13 table by itself, and the card says "MGP10 doesn't span — LVL13".
+   - **Floor + roof** (the 2nd storey of a 3-storey house: the 2-storey tables are accepted there): a second row **Floor width above** appears (1,800 / 3,600 / 4,800, 3,600 preselected). Lintels come from the AS 1684 MGP10 lower-storey tables (T47 sheet, T48 tile) at N1 and N2; if no pine size spans, or the wind class is N3, from the SmartLVL 13 lower-storey table (guide p. 23 sheet, p. 24 tile), with the note on the card. Roof and floor width each round UP to the table, never down; a floor width above the table, or wind N4 and up, says "type the size". The source line ends "(2-storey tables)". The **Lintels from** chip is not used here (pine first, then LVL 13). Jamb studs stay at the minimum of 2 each side with a note. Girder trusses, struts or beams landing on a lintel are not covered: size those with the engineer.
+   - **Engineer** (the bottom storey): no lintel is ever sized. Tap the **Lintel** row, type the size (**290x45**, or **2/240x45** for two pieces), pick **MGP10** (default) or **LVL13**, tap **Use this size**. It reads "per engineer" and the quantity stays incomplete until every lintel is typed.
 3. Each opening then has a king and jacks each side, cripples above and below at that wall's centres, trimmers, and a lintel where the wall carries the roof. Tap the opening on its wall page: **Framing worked out: …** says what it counted.
 4. Tap the **Lintel** row to add load information (the roof width that opening carries) or to type a size. A size you type is used as it is. **Use the table** puts it back.
 5. A lintel that can't fit under the head says so: "a 240 deep lintel won't fit. Only 145 mm is free above the head."
@@ -270,7 +274,7 @@ You do nothing to get these. The takeoff already knows where each wall starts an
 | Expecting the bottom plate to stop at each doorway | The plan shows the doorway | The bottom plate is ordered full length. Cut the doorway out of the bottom plate after standing the frame |
 | Putting Studs, Plates or Noggins on walls that already have Walls | Older jobs used three items | Don't. Both are counted, and Walls shows a note if you do |
 | Lintel "not sized" on every window | The roof isn't described yet | Open **Roof and openings** on the Walls card. Fill in covering, roof width, spacing and wind class. Or tap the lintel and type a size |
-| Expecting a lintel the span tables can't size | The span is past the table, the wind class is N5 or C, or it's a lower storey | The opening says "needs an engineer or the supplier". Tap the lintel and type the size you were given |
+| Expecting a lintel the span tables can't size | The span is past the table, the wind class is N4 (with a floor above), N5 or C, or the walls are set to Engineer | The opening says "needs an engineer or the supplier". Tap the lintel and type the size you were given |
 | Expecting the sill height to be from the bottom plate | Heights on the elevation are from the floor | The app takes the bottom plate off (45) when it works out cripples and jacks. Type heights from the floor |
 
 ---
@@ -695,6 +699,14 @@ Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 2. Site appendix > Short plates cut list: Stick 1 to Stick 4, each listing its cuts, saw cuts and offcut.
 3. A 3,000 mm wall: its two plates stay their own 3,000 lengths (not pooled). A 2,999 mm wall: pooled.
 4. Walls card > More > Spare plate sticks 25: line becomes 5 pieces, note "+ 1 spare stick (25%)". Node: scripts/tests/takeoff-tc-short-plates.test.mjs.
+- [ ] Pass  [ ] Fail
+
+**TC-29 — Above these walls: Roof, Floor + roof, Engineer (Sam, 18 Nov 2026)**
+1. Walls card: **Above these walls** shows **Roof** selected on an existing item. Roof N2, sheet, roof width 3,000, spacing 600, Lintels from Pine MGP10, a 3,000 wide window: lintel reads the pine table, no note.
+2. Tap **Floor + roof**: **Floor width above** appears with 3,600 selected. The window's lintel source line ends "(2-storey tables)". Tap 4,800: the lintel may get deeper, never shallower. Wind class N4: the lintel says to type the size.
+3. A wide opening no pine size spans: the card says "MGP10 doesn't span — LVL13" and shows an LVL 13 size.
+4. Tap **Engineer**: every lintel on the item shows "per engineer: type the size" and the Walls line stays incomplete. Tap the lintel, type 290x45, tap **Use this size**: it reads "290 × 45 MGP10 (per engineer)". Type "abc": the box says how to type it. Type 2/240x45 with LVL13: two pieces.
+5. Node: scripts/tests/takeoff-tc-loads-above.test.mjs.
 - [ ] Pass  [ ] Fail
 
 ### Post-test checklist
