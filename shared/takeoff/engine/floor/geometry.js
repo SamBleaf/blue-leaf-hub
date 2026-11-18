@@ -233,9 +233,22 @@ export function layoutFloor(input) {
       v0: Math.min(...ring.map((p) => p.v)), v1: Math.max(...ring.map((p) => p.v)), areaMm2: ringAreaMm2(pts) });
   });
   const boxHit = (a, b) => a.u0 < b.u1 - TOL && b.u0 < a.u1 - TOL && a.v0 < b.v1 - TOL && b.v0 < a.v1 - TOL;
+  const isBox = (s) => s.ring.length === 4 && Math.abs(s.areaMm2 - (s.u1 - s.u0) * (s.v1 - s.v0)) < 1;
+  // real overlap: bounding boxes first, then (for non-rectangles) crossing edges or a point nudged inside one shape lying inside the other
+  const shapesHit = (a, b) => {
+    if (!boxHit(a, b)) return false;
+    if (isBox(a) && isBox(b)) return true;
+    const A = a.ring.map((q) => ({ x: q.u, y: q.v })), B = b.ring.map((q) => ({ x: q.u, y: q.v }));
+    for (let i = 0; i < A.length; i++) for (let j = 0; j < B.length; j++)
+      if (segmentsCross(A[i], A[(i + 1) % A.length], B[j], B[(j + 1) % B.length])) return true;
+    const cen = (r) => ({ u: r.reduce((t, p) => t + p.u, 0) / r.length, v: r.reduce((t, p) => t + p.v, 0) / r.length });
+    const inner = (r) => { const c = cen(r); return r.map((p) => ({ u: p.u + (c.u - p.u) * 0.01, v: p.v + (c.v - p.v) * 0.01 })); };
+    const inRing = (ring, p) => pointInRing(ring.map((q) => ({ x: q.u, y: q.v })), { x: p.u, y: p.v });
+    return inner(a.ring).some((p) => inRing(b.ring, p)) || inner(b.ring).some((p) => inRing(a.ring, p));
+  };
   for (let i = 0; i < wets.length; i++) {
-    for (let j = i + 1; j < wets.length; j++) if (boxHit(wets[i], wets[j])) fail("floor_wet_overlap", `${wets[i].name} and ${wets[j].name} overlap. Move one of them.`);
-    for (const v of voids) if (boxHit(wets[i], v)) fail("floor_wet_overlap", `${wets[i].name} overlaps ${v.name}. Move one of them.`);
+    for (let j = i + 1; j < wets.length; j++) if (shapesHit(wets[i], wets[j])) fail("floor_wet_overlap", `${wets[i].name} and ${wets[j].name} overlap. Move one of them.`);
+    for (const v of voids) if (shapesHit(wets[i], v)) fail("floor_wet_overlap", `${wets[i].name} overlaps ${v.name}. Move one of them.`);
   }
 
   // ── truss lines ──

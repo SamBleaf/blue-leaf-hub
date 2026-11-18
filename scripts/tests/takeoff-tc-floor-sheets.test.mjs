@@ -132,6 +132,19 @@ t("a wet area outside the outline is a blocking problem; so is one over a void o
   blocked({ wets: [wet(rect(2000, 1000, 1000, 1000))], voids: [vd(rect(1500, 1500, 1500, 1200))] }, "floor_wet_overlap");
   blocked({ wets: [wet(rect(2000, 1000, 1000, 1000)), wet(rect(2000, 1000, 1500, 1200), "Wet area 2", "w2")] }, "floor_wet_overlap");
 });
+t("polygon wet areas only block on real overlap, not bounding boxes (review D1)", () => {
+  const tri = [{ x: 500, y: 500 }, { x: 2500, y: 500 }, { x: 500, y: 2500 }];
+  const has = (shapes) => layoutFloor({ outline: rect(6000, 4200), rules: { centresMm: 450 }, ...shapes }).problems.some((p) => p.code === "floor_wet_overlap");
+  assert.equal(has({ wets: [wet(tri)], voids: [vd(rect(900, 900, 1700, 1700))] }), false, "disjoint triangle and void");
+  assert.equal(has({ wets: [wet(tri)], voids: [vd(rect(900, 900, 900, 900))] }), true, "void inside the triangle");
+  assert.equal(has({ wets: [wet(tri), wet(rect(900, 900, 1700, 1700), "Wet area 2", "w2")] }), false, "disjoint wets");
+});
+t("a sheet end beside a wet edge that is off a truss line gets a non-blocking note (review D2)", () => {
+  const { sh } = sheets(rect(6000, 4200), {}, { wets: [wet(rect(2400, 1800))] });
+  const n = sh.problems.find((p) => p.code === "floor_sheet_opening_edge");
+  assert.ok(n && !n.blocking, "note present and non-blocking");
+  assert.ok(!sheets(rect(6000, 4200)).sh.problems.some((p) => p.code === "floor_sheet_opening_edge"), "no note without openings");
+});
 t("a void that fills the whole row strip splits the row into two segments, each laid from its own start", () => {
   // a 1.2 m wide void through the full height of rows 2 to 3 (v 800 to 2400): rows 2 and 3 have two segments
   const { sh } = sheets(rect(6000, 4200), {}, { voids: [vd(rect(1200, 1600, 2400, 800))] });

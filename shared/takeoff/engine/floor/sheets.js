@@ -107,12 +107,15 @@ export function layoutSheets(input) {
   }
 
   // fill: joints on truss lines, alternate starts, adjacent rows at least STAGGER_MIN_MM apart
-  let prev = [], minStagger = Infinity, offTruss = 0, closeJoints = 0;
+  let prev = [], minStagger = Infinity, offTruss = 0, closeJoints = 0, openingEnds = 0;
   const pieces = [];
   for (const row of rows) {
     const parityB = row.k % 2 === 1;
     const joints = [];
+    const outlineEnds = scan(O, (row.v0 + row.v1) / 2).flat();
     for (const [a, b] of row.segments) {
+      // a sheet end beside a void or wet edge that is not on a truss line needs blocking there
+      for (const e of [a, b]) if (!outlineEnds.some((o) => Math.abs(o - e) < 2) && !us.some((x) => Math.abs(x - e) < 2)) openingEnds++;
       let pos = a, first = true;
       const own = [];
       const passes = (x) => prev.every((p) => Math.abs(p - x) >= STAGGER_MIN_MM - 1e-6);
@@ -144,6 +147,8 @@ export function layoutSheets(input) {
   }
   if (closeJoints) note("floor_sheet_stagger", `${closeJoints} sheet joint${closeJoints === 1 ? " is" : "s are"} under ${STAGGER_MIN_MM} mm from the joint in the next row: this outline leaves no better truss line. Check the layout on site.`);
   if (offTruss) note("floor_sheet_joint_off_truss", `${offTruss} sheet joint${offTruss === 1 ? " has" : "s have"} no truss line to land on at this centres. Check the layout on site.`);
+
+  if (openingEnds) note("floor_sheet_opening_edge", `${openingEnds} sheet end${openingEnds === 1 ? "" : "s"} beside a stair void or wet area ${openingEnds === 1 ? "isn't" : "aren't"} on a truss line. Add blocking under ${openingEnds === 1 ? "it" : "them"} on site.`);
 
   // counting
   const ripped = (p) => p.widthMm < W - ROW_TOLERANCE_MM;
