@@ -269,6 +269,16 @@ t("tools: a Floor frame is drawn with Rectangle or Outline (and Pan), is not a W
   assert.deepEqual(toolsFor(m).map((x) => x.label), ["Rectangle", "Outline", "Pan"]);
   assert.ok(!isFloorItem({ methodKey: "wall_framing", spec: { family: "timber", purpose: "walls" } }));
 });
+t("review fixes: short void-cut pieces get no mid-span row; bad row override is flagged; a void crossing an L notch is rejected", () => {
+  const base = { outline: rect(6000, 4200), voids: [{ id: "v", name: "Stair", stair: true, points: rect(1000, 2700, 2000, 750) }], rules: { centresMm: 450 } };
+  const lay = layoutFloor(base);
+  assert.ok(lay.totals.midStrongbackLm < 5, `mid lm ${lay.totals.midStrongbackLm}`);
+  const bad = layoutFloor({ outline: rect(6000, 4200), rules: { strongbackRows: 5 } });
+  assert.ok(bad.problems.some((p) => p.code === "floor_strongback_rows_invalid"));
+  const L = [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 2000 }, { x: 3000, y: 2000 }, { x: 3000, y: 4200 }, { x: 0, y: 4200 }];
+  const cross = layoutFloor({ outline: L, voids: [{ id: "v", name: "Hole", stair: true, points: [{ x: 2000, y: 1000 }, { x: 4000, y: 1000 }, { x: 4000, y: 3000 }, { x: 2000, y: 3000 }] }], rules: {} });
+  assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
+});
 t("version: the calculation is stamped takeoff-calc@9 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@9$/); });
 
 console.log(`takeoff-tc-floor: ${pass} passed, ${fail} failed`);

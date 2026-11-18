@@ -195,7 +195,9 @@ export function layoutFloor(input) {
     const pts = v.points || [];
     if (pts.length >= 3 && ringSelfIntersects(pts)) { fail("floor_void_invalid", `${name}: the outline crosses itself. Redraw it.`); return; }
     if (pts.length < 3 || ringAreaMm2(pts) < 1e3) { fail("floor_void_invalid", `${name}: that opening has no area. Redraw it.`); return; }
-    if (!pts.every((p) => pointInRing(outline, p))) { fail("floor_void_outside", `${name} is outside the floor outline. Move it inside, or redraw the outline.`); return; }
+    const wholly = pts.every((p, k) => pointInRing(outline, p) && pointInRing(outline, { x: (p.x + pts[(k + 1) % pts.length].x) / 2, y: (p.y + pts[(k + 1) % pts.length].y) / 2 }))
+      && !pts.some((p, k) => outline.some((o, m) => segmentsCross(p, pts[(k + 1) % pts.length], o, outline[(m + 1) % outline.length])));
+    if (!wholly) { fail("floor_void_outside", `${name} is outside the floor outline. Move it inside, or redraw the outline.`); return; }
     const ring = pts.map(loc);
     voids.push({ id: v.id, name, stair: v.stair !== false, ring, points: pts, u0: Math.min(...ring.map((p) => p.u)), u1: Math.max(...ring.map((p) => p.u)),
       v0: Math.min(...ring.map((p) => p.v)), v1: Math.max(...ring.map((p) => p.v)), areaMm2: ringAreaMm2(pts) });
@@ -279,14 +281,16 @@ export function layoutFloor(input) {
   const longest = trusses.reduce((m, t) => Math.max(m, t.lengthMm), 0);
   const ruleRows = rules.strongbackRows == null || rules.strongbackRows === "" ? null : Math.round(Number(rules.strongbackRows));
   const autoRows = longest <= STRONGBACK_SPAN_RULE.noneMaxMm ? 0 : longest <= STRONGBACK_SPAN_RULE.oneMaxMm ? 1 : 3;
+  if (rules.strongbackRows != null && rules.strongbackRows !== "" && !(Number.isInteger(ruleRows) && ruleRows >= 0 && ruleRows <= 3 && Number(rules.strongbackRows) === ruleRows)) note("floor_strongback_rows_invalid", "Strongback rows must be 0 to 3, so the span rule was used instead.");
   const rows = Number.isInteger(ruleRows) && ruleRows >= 0 && ruleRows <= 3 ? ruleRows : autoRows;
   const rowFractions = rows === 0 ? [] : rows === 1 ? [0.5] : rows === 2 ? [1 / 3, 2 / 3] : [0.25, 0.5, 0.75];
+  const ruleOverride = Number.isInteger(ruleRows) && ruleRows >= 0 && ruleRows <= 3;
   const midRows = [];
   for (const f of rowFractions) {
     let open = [];
     const runs = [];
     for (const ln of lines) {
-      const pts = ln.pieces.map((pc) => ({ line: ln.k, u: ln.u, v: pc.v0 + f * (pc.v1 - pc.v0) }));
+      const pts = ln.pieces.filter((pc) => ruleOverride || pc.v1 - pc.v0 > STRONGBACK_SPAN_RULE.noneMaxMm).map((pc) => ({ line: ln.k, u: ln.u, v: pc.v0 + f * (pc.v1 - pc.v0) }));
       const next = [];
       const used = new Set();
       for (const pt of pts) {
