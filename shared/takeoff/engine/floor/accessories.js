@@ -19,7 +19,8 @@ export const ADHESIVE_LM_PER_CARTRIDGE = ((ADHESIVE_CARTRIDGE_G / ADHESIVE_DENSI
 export const SEALANT_SAUSAGE_ML = 480;
 export const SEALANT_BEAD_MM2 = 20;             // assumed — confirm
 export const SEALANT_LM_PER_SAUSAGE = (SEALANT_SAUSAGE_ML * 1000) / SEALANT_BEAD_MM2 / 1000;
-/** Scyon nails: stainless steel first-fix, 50 mm default, 75 mm under More (Sam). Box size is not known, so the line is a count. */
+/** Scyon nails: stainless steel first-fix, 50 mm default, 75 mm under More (Sam). Sam, 19 Nov 2026: boxes of 3000. */
+export const NAIL_BOX = 3000;
 export const NAIL_DEFAULT_MM = 50;
 export const NAIL_OPTION_MM = 75;
 export const BACKING_ROD_MM = 10;
@@ -28,7 +29,7 @@ export const ACC_NAMES = Object.freeze({
   screws: "HEBEL BUGLE SCREWS 14-10x100 (box of 500)",
   hebelAdhesive: "HEBEL ADHESIVE 20 kg bag",
   maxBond: "MAX BOND CONSTRUCTION ADHESIVE 900 g cartridge",
-  nails: (mm) => `STAINLESS STEEL FIRST-FIX NAILS ${mm} mm`,
+  nails: (mm) => `STAINLESS STEEL FIRST-FIX NAILS ${mm} mm (box of 3000)`,
   sealant: "SOUDAL SMX50 STICK & SEAL 480 mL sausage",
   paint: "ANTI-CORROSIVE PAINT (Hebel)",
   rod: `BACKING ROD ${BACKING_ROD_MM} mm`,
@@ -63,7 +64,7 @@ export function floorAccessories({ main, wets = [], rules = {}, centresMm }) {
     const nails = wets.reduce((t, w) => t + w.basis.fixings, 0);
     const wb = wets.reduce((t, w) => t + w.basis.beadLm, 0);
     const seal = wets.reduce((t, w) => t + w.basis.tongueLm + w.basis.buttLm, 0);
-    push("nails", ACC_NAMES.nails(nailMm), "EA", nails, `${nails} nails: 4 per truss line across each 600 sheet (200 max apart, 25 from the edges). Box size to confirm`);
+    push("nails", ACC_NAMES.nails(nailMm), "EA", Math.ceil(nails / NAIL_BOX - 1e-9), `${nails} nails: 4 per truss line across each 600 sheet (200 max apart, 25 from the edges), boxes of ${NAIL_BOX}`);
     beadLm += wb; beadParts.push(`Scyon ${m(wb)} lm under the sheets`);
     push("sealant", ACC_NAMES.sealant, "EA", Math.ceil(seal / SEALANT_LM_PER_SAUSAGE - 1e-9), `${m(seal)} lm of tongue and butt joints (Scyon wet areas) at ${m(SEALANT_LM_PER_SAUSAGE)} lm per sausage (assumed ${Math.round(SEALANT_BEAD_MM2)} mm² bead, confirm)`);
     rodLm += wets.reduce((t, w) => t + w.basis.controlJointLm, 0);

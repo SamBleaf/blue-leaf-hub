@@ -89,8 +89,8 @@ t("Scyon accessories: nails (4 per truss line per sheet, 50 mm default), adhesiv
   const r = go(rect(6000, 4200), {}, [wet(rect(2400, 1800))]);
   assert.equal(scyonFixingsPerLine(600), 4);
   // each row: truss lines 0..2250 (6) plus blocking at the 2400 end (1) = 7 lines x 4 = 28; 3 rows = 84
-  assert.equal(acc(r, "nails").quantity, 84); assert.match(acc(r, "nails").product, /STAINLESS STEEL FIRST-FIX NAILS 50 mm/); assert.match(acc(r, "nails").note, /Box size to confirm/);
-  assert.equal(go(rect(6000, 4200), { nailMm: 75 }, [wet(rect(2400, 1800))]).layout.accessories.find((a) => a.key === "nails").product, "STAINLESS STEEL FIRST-FIX NAILS 75 mm");
+  assert.equal(acc(r, "nails").quantity, 1); assert.match(acc(r, "nails").product, /STAINLESS STEEL FIRST-FIX NAILS 50 mm \(box of 3000\)/); assert.match(acc(r, "nails").note, /^84 nails: .*boxes of 3000/);
+  assert.equal(go(rect(6000, 4200), { nailMm: 75 }, [wet(rect(2400, 1800))]).layout.accessories.find((a) => a.key === "nails").product, "STAINLESS STEEL FIRST-FIX NAILS 75 mm (box of 3000)");
   const w = r.layout.wetSheets[0];
   near(w.basis.beadLm, 12.6); near(w.basis.tongueLm, 4.8); near(w.basis.buttLm, 0);
   assert.equal(acc(r, "sealant").quantity, 1); assert.match(acc(r, "sealant").product, /SMX50/); assert.match(acc(r, "sealant").note, /assumed .* confirm/);
