@@ -12,7 +12,7 @@ const hypot = Math.hypot;
 /** Fills of the three sheet products (light, distinct) and the line colours. */
 export const FLOOR_DRAWING_COLORS = Object.freeze({
   structaflor: "#f1e2bf", hebel: "#d8e3f0", scyon: "#cdeee8",
-  truss: "#64748b", trussCut: "#b45309", strongback: "#c2410c", trimmer: "#7c3aed", beam: "#0f4c75", controlJoint: "#dc2626", edge: "#1a1a2e", void: "#6b7280", wet: "#0d9488", ink: "#1a1a2e",
+  truss: "#94a3b8", trussCut: "#b45309", strongback: "#c2410c", trimmer: "#7c3aed", beam: "#0f4c75", controlJoint: "#dc2626", edge: "#1a1a2e", void: "#6b7280", wet: "#0d9488", ink: "#1a1a2e",
 });
 const C = FLOOR_DRAWING_COLORS;
 
@@ -71,7 +71,7 @@ export function floorDrawing(layout, opts = {}) {
   const sheetFill = (pieces, sz, fill, kind) => {
     for (const p of pieces) {
       const cut = isCut(p, sz);
-      poly(p.corners, { fill, stroke: "#8a8f98", sw: fs * 0.09, data: cut ? `${kind}-cut` : `${kind}-sheet` });
+      poly(p.corners, { fill, stroke: "#1a1a2e", sw: fs * 0.16, data: cut ? `${kind}-cut` : `${kind}-sheet` });
       if (kind === "wet") counts.wetPieces++; else counts.sheetPieces++;
       if (cut && kind !== "wet") counts.cutPieces++;
       if (cut) {
@@ -114,7 +114,7 @@ export function floorDrawing(layout, opts = {}) {
   }
 
   // 5  trusses, strongbacks, trimmers, beams
-  for (const t of layout.trusses || []) line(t.a, t.b, { stroke: t.interrupted ? C.trussCut : C.truss, sw: fs * 0.1, data: "truss" });
+  for (const t of layout.trusses || []) line(t.a, t.b, { stroke: t.interrupted ? C.trussCut : C.truss, sw: fs * 0.07, dash: [fs * 0.35, fs * 0.25], data: "truss" });
   counts.trussLines = (layout.lines || []).length;
   for (const s of layout.endStrongbacks || []) line(s.a, s.b, { stroke: C.strongback, sw: fs * 0.25, dash: [fs * 0.9, fs * 0.5], data: "end-strongback" });
   for (const row of layout.midRows || []) for (const run of row.runs) for (let i = 1; i < run.points.length; i++) line(run.points[i - 1], run.points[i], { stroke: C.strongback, sw: fs * 0.25, dash: [fs * 0.9, fs * 0.5], data: "mid-strongback" });
@@ -168,7 +168,7 @@ export function floorDrawing(layout, opts = {}) {
   if ((layout.voids || []).some((v) => v.stair)) add("stair", "Stair void (hatched)", { kind: "hatch", color: C.void });
   if ((layout.voids || []).some((v) => !v.stair)) add("opening", "Opening", { kind: "box", color: C.void });
   if (counts.cutPieces) add("cut", "Cut piece (red corner mark, size shown)", { kind: "line", color: C.controlJoint });
-  add("truss", "Floor truss line", { kind: "line", color: C.truss });
+  add("truss", "Floor truss line", { kind: "line", color: C.truss, dash: true });
   if ((layout.trusses || []).some((t) => t.interrupted)) add("trussCut", "Truss cut short by an opening", { kind: "line", color: C.trussCut });
   if ((layout.beams || []).length) add("beam", "Beam (letter and size)", { kind: "line", color: C.beam, w: 4 });
   if ((layout.endStrongbacks || []).length || (layout.midRows || []).some((r) => r.runs.length)) add("strongback", "Strongback, end (SB) and mid-span", { kind: "line", color: C.strongback, dash: true });
