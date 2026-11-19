@@ -16,8 +16,9 @@ import { demandId } from "../contract.js";
 import { timberIdentity, timberStockPolicy } from "../timber.js";
 import { FLOOR_PART_LABELS } from "../families.js";
 import { formatMm } from "../../units.js";
-import { layoutFloor, sizeParts } from "./geometry.js";
-import { layoutSheets } from "./sheets.js";
+import { floorFrame, layoutFloor, sizeParts } from "./geometry.js";
+import { DEFAULT_WASTE_PCT, layoutSheets } from "./sheets.js";
+import { floorAccessories } from "./accessories.js";
 
 const fmt = (mm) => formatMm(mm, 1);
 const sectionOf = (p) => (p.section?.depthMm && p.section?.widthMm ? `${p.section.depthMm}x${p.section.widthMm}` : null);
@@ -81,17 +82,48 @@ export function computeFloorFraming(input) {
   // trimmers: per stair void
   for (const t of lay.trimmers) demands.push(linear("trimmer", "floor trimmer", `${t.voidId}-${t.kind}-${t.at}`, t.lengthMm, 1, t.size, "floorTrimmer", `${t.voidName} ${t.kind} trimmer (${t.size})`, false));
 
-  // Phase 2 (Sam, 18 Nov 2026): Structaflor over the main floor (outline less openings and wet areas); wet areas are m² only until the Scyon phase
-  const sh = layoutSheets({ outline: input.outline, voids: lay.voids, wets: lay.wets, rules, lines: lay.lines, minU: lay.frame.minU, centresMm: lay.totals.centresMm });
+  // Phase 2 (Sam, 18 Nov 2026): the main floor (outline less openings and wet areas) is Structaflor, or Hebel PowerFloor (Phase 3, Sam 19 Nov 2026)
+  const hebel = rules.floorMaterial === "hebel";
+  const sh = layoutSheets({ outline: input.outline, voids: lay.voids, wets: lay.wets, rules, lines: lay.lines, minU: lay.frame.minU, centresMm: lay.totals.centresMm, product: hebel ? "hebel" : "structaflor" });
+  const sheetDemand = (s, count, label) => ({ id: demandId(materialId, "floor-sheet", s.sheet.name), materialId, role: "floor sheet", kind: "count", unit: "piece", quantity: count, lengthMm: s.sheet.lengthMm,
+    identity: { family: "floorSheet", id: s.sheet.name.toLowerCase().replace(/\s+/g, "-"), name: s.sheet.name }, label, itemDescription: s.sheet.name, sourceRefs, provenance: "calculated" });
+  const seen = new Set();
+  const addNotes = (list) => { for (const p of list) if (!seen.has(p.message)) { seen.add(p.message); problems.push(p); } };
+  const overlayCJ = [];
   if (sh) {
     lay.sheets = sh;
-    problems.push(...sh.problems);
-    if (sh.orderedSheets > 0) demands.push({ id: demandId(materialId, "floor-sheet", sh.sheet.name), materialId, role: "floor sheet", kind: "count", unit: "piece", quantity: sh.orderedSheets, lengthMm: sh.sheet.lengthMm,
-      identity: { family: "floorSheet", id: sh.sheet.name.toLowerCase().replace(/\s+/g, "-"), name: sh.sheet.name }, label: `${sh.orderedSheets} × ${sh.sheet.name} (${sh.packedSheets} packed + ${sh.wastePct}% waste, ${sh.laidM2} m² laid)`,
-      itemDescription: sh.sheet.name, sourceRefs, provenance: "calculated" });
+    addNotes(sh.problems);
+    if (sh.orderedSheets > 0) demands.push(sheetDemand(sh, sh.orderedSheets, `${sh.orderedSheets} × ${sh.sheet.name} (${sh.packedSheets} packed + ${sh.wastePct}% waste, ${sh.laidM2} m² laid)`));
     explain.push(`Flooring: ${sh.sheet.name}, ${sh.rows} rows across the trusses, ${sh.packedSheets} sheets ${sh.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}, +${sh.wastePct}% waste = ${sh.summary}`);
+    overlayCJ.push(...(sh.controlJoints || []));
+    if (hebel) addNotes([{ code: "floor_hebel_height", message: "Hebel raises the floor 75 mm.", blocking: false }]);
   }
-  if (lay.totals.wetM2 > 0) problems.push({ code: "floor_wet_pending", message: `Wet area flooring (Scyon, phase 3): ${lay.totals.wetM2.toFixed(2)} m² — not counted yet`, blocking: false });
+  // Phase 3: Scyon Secura in each wet area (the guide's layout in the floor's own truss frame), waste applied once over all wet areas after offcut reuse
+  const F = floorFrame(input.outline, rules);
+  const wetSheets = [];
+  for (const w of lay.wets) {
+    const ws = layoutSheets({ outline: w.points, voids: [], wets: [], rules: { ...rules, wastePct: 0 }, lines: lay.lines, minU: lay.frame.minU, centresMm: lay.totals.centresMm, product: "scyon", frame: F });
+    if (ws) { wetSheets.push({ id: w.id, name: w.name, ...ws }); addNotes(ws.problems.map((p) => ({ ...p, message: wetSheets.length > 1 || lay.wets.length > 1 ? `${w.name}: ${p.message}` : p.message }))); overlayCJ.push(...(ws.controlJoints || [])); }
+  }
+  let wastePct = rules.wastePct == null || rules.wastePct === "" ? DEFAULT_WASTE_PCT : Number(rules.wastePct);
+  if (!(wastePct >= 0 && wastePct <= 50)) wastePct = DEFAULT_WASTE_PCT;
+  if (wetSheets.length) {
+    const packed = wetSheets.reduce((t, x) => t + x.packedSheets, 0);
+    const ordered = Math.ceil(packed * (1 + wastePct / 100) - 1e-9);
+    const s0 = wetSheets[0];
+    lay.wetSheets = wetSheets;
+    lay.scyon = { sheet: s0.sheet, packedSheets: packed, wastePct, orderedSheets: ordered, laidM2: Math.round(wetSheets.reduce((t, x) => t + x.laidM2, 0) * 100) / 100, reuseOffcuts: s0.reuseOffcuts, summary: `${ordered} sheets (${wetSheets.reduce((t, x) => t + x.laidM2, 0).toFixed(2)} m² laid, waste ${wastePct}%)` };
+    if (ordered > 0) demands.push(sheetDemand(s0, ordered, `${ordered} × ${s0.sheet.name} (${packed} packed + ${wastePct}% waste, wet areas)`));
+    explain.push(`Wet areas: ${s0.sheet.name}, ${packed} sheets ${s0.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}, +${wastePct}% waste = ${lay.scyon.summary}`);
+    if (Number(lay.totals.centresMm) !== 450) addNotes([{ code: "floor_wet_centres", message: "Wet areas need trusses at 450 — check the truss layout", blocking: false }]);
+  }
+  const chord = Number(rules.chordWidthMm);
+  if ((sh || wetSheets.length) && chord > 0 && chord < 45) addNotes([{ code: "floor_support_width", message: `A support only ${chord} mm wide is under the 45 mm the Hebel and Scyon guides need. Check with the truss supplier.`, blocking: false }]);
+  lay.controlJoints = overlayCJ;
+  // accessories (Sam, 19 Nov 2026): supplier-style FLOORING ACCESSORIES lines, each with its own short basis note
+  lay.accessories = floorAccessories({ main: sh, wets: wetSheets, rules, centresMm: lay.totals.centresMm });
+  for (const a of lay.accessories) demands.push({ id: demandId(materialId, "floor-accessory", a.key), materialId, role: "floor accessory", kind: "count", unit: a.unit === "lm" ? "lm" : "box", quantity: a.quantity,
+    identity: { family: "floorAccessory", id: a.key, name: a.product }, label: `${a.quantity} × ${a.product}`, itemDescription: a.product, accUnit: a.unit === "lm" ? "lm" : "ea", note: a.note, sourceRefs, provenance: "calculated" });
   explain.push(`Floor frame: ${fmt(lay.frame.widthMm)} wide across the trusses, trusses span ${fmt(lay.frame.spanMm)} at ${lay.totals.centresMm} centres = ${lay.totals.trussCount} trusses (a truss on the far edge always)`);
   explain.push(`Strongbacks: ${lay.totals.endStrongbackLm} lm at truss ends with no beam, ${lay.totals.midStrongbackLm} lm mid-span (${lay.totals.strongbackRows} row${lay.totals.strongbackRows === 1 ? "" : "s"}${rules.strongbackRows == null ? ", from the span" : ", set for this job"})`);
   if (lay.beams.length) explain.push(`Beams: ${lay.beams.map((b) => `edge ${b.label} ${b.size} ${(b.lengthMm / 1000).toFixed(2)} m`).join(", ")}`);

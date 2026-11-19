@@ -26,7 +26,9 @@ export function FloorLayer({ layout, cal, toScreen }) {
       </defs>
       {/* Phase 2: sheet rows and joints as a light overlay (the full drawing and PDF are phase 4) */}
       {(layout.sheets?.pieces || []).map((p, i) => <polygon key={`s${i}`} data-floor-sheet="" points={p.corners.map((c) => { const q = P(c); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={COLORS.floorSheet} strokeWidth={0.75} strokeOpacity={0.8} />)}
+      {(layout.wetSheets || []).flatMap((ws) => ws.pieces).map((p, i) => <polygon key={`ws${i}`} data-floor-sheet="" points={p.corners.map((c) => { const q = P(c); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={COLORS.floorWet} strokeWidth={0.75} strokeOpacity={0.9} />)}
       {(layout.wets || []).map((w) => <polygon key={w.id} data-floor-wet-hatch={w.id} points={w.points.map((c) => { const q = P(c); return `${q.x},${q.y}`; }).join(" ")} fill="url(#floor-wet-hatch)" stroke={COLORS.floorWet} strokeWidth={1.5} />)}
+      {(layout.controlJoints || []).map((c, i) => <g key={`cj${i}`} data-floor-control-joint="">{seg(c.a, c.b, { stroke: COLORS.floorVoid, strokeWidth: 3, strokeDasharray: "2 4" })}</g>)}
       {layout.trusses.map((t, i) => <g key={`t${i}`} data-floor-truss="">{seg(t.a, t.b, { stroke: t.interrupted ? COLORS.floorTrussCut : COLORS.floorTruss, strokeWidth: 1.25, strokeOpacity: 0.9 })}</g>)}
       {layout.endStrongbacks.map((s) => <g key={s.edgeId} data-floor-end-strongback={s.edgeId}>{seg(s.a, s.b, { stroke: COLORS.floorStrongback, strokeWidth: 3, strokeDasharray: "8 5" })}</g>)}
       {layout.midRows.flatMap((row, ri) => row.runs.map((run, k) => {

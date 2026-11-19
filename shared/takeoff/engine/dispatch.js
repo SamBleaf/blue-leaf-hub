@@ -1263,7 +1263,7 @@ function purchaseLines(mat, n, demands, matKey, sink) {
     const u = d.unit || "piece";
     add(`${u}|${d.lengthMm ?? ""}|${identityKey(d.identity)}`, u, d.quantity, u === "piece" || u === "bar" ? d.lengthMm ?? null : null,
       // counted items keep their own entered label (e.g. "Cladding screws 8g × 40 (entered, quote Q-123)")
-      { description: d.itemDescription || (d.identity?.item ? itemText(d, n, recipeLabels) : d.label) || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null }, [d.id], d.identity, d.role);
+      { description: d.itemDescription || (d.identity?.item ? itemText(d, n, recipeLabels) : d.label) || itemText(d, n, recipeLabels), stockLengthMm: d.lengthMm ?? null, ...(d.accUnit ? { acc: d.accUnit, note: d.note } : {}) }, [d.id], d.identity, d.role);
   }
   const all = [...lines.values()];
   for (const l of all) {

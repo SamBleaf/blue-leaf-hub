@@ -28,7 +28,7 @@ const GROUPS = Object.freeze([
   ["trimmers", "HD & SILL TR"], ["lintels", "LINTELS"], ["noggins", "NOGGINS"], ["bracing", "BRACING"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"],
   // Floor frame (Sam, 18 Nov 2026): the floor roles are named "floor truss", "floor strongback", "floor beam", "floor trimmer" so they match here first
   // and a floor beam never lands in LINTELS nor a floor trimmer in HD & SILL TR
-  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "TRIMMERS"], ["floorsheet", "FLOORING"],
+  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "TRIMMERS"], ["floorsheet", "FLOORING"], ["flooracc", "FLOORING ACCESSORIES"],
 ]);
 const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", trim: "TRIM", other: "OTHER TIMBER" };
 
@@ -42,7 +42,7 @@ const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", t
 export function memberGroup(role) {
   const r = String(role || "other").toLowerCase().trim();
   const pick = (key) => ({ key, heading: GROUPS.find(([k]) => k === key)[1], rank: GROUPS.findIndex(([k]) => k === key) });
-  if (/^floor /.test(r)) return pick(/truss/.test(r) ? "floortruss" : /sheet/.test(r) ? "floorsheet" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
+  if (/^floor /.test(r)) return pick(/accessor/.test(r) ? "flooracc" : /truss/.test(r) ? "floortruss" : /sheet/.test(r) ? "floorsheet" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
   if (r === "tempbr") return pick("tempbr");
   if (r === "sbscrew") return pick("sbscrew");
   if (/hoop|brac|strap|tension/.test(r)) return pick("bracing");
@@ -157,6 +157,16 @@ export function buildSupplierGroups(items, manualLines = []) {
         row.quantity += n; row.problem = row.problem || !!l.problem;
         continue;
       }
+      // floor accessories (Sam, 19 Nov 2026): screws, adhesive, sealant, nails, backing rod: one row per product, its own unit (EA or LM) and a short basis note
+      if (g.key === "flooracc") {
+        const name = String(l.description || "FLOOR ACCESSORY");
+        const grp = groups.get(g.key) || { key: g.key, heading: g.heading, rank: g.rank, rows: new Map() };
+        groups.set(g.key, grp);
+        const row = grp.rows.get(`acc|${name}`) || { product: name, unit: l.acc === "lm" ? "LM" : "EA", accessory: true, note: l.note || null, order: 0, quantity: 0, problem: false, lvl: false, stock: null, cutsByLength: new Map(), lmDirect: 0 };
+        grp.rows.set(`acc|${name}`, row);
+        row.quantity += n; row.problem = row.problem || !!l.problem;
+        continue;
+      }
       const stud = g.key === "studs" && /^(stud|end stud|side stud|centre stud)/i.test(role);
       const lm = l.unit === "lm";
       const precutMm = stud && l.unit === "piece" && PRECUT_STUD_MM.includes(Number(l.stockLengthMm)) ? Number(l.stockLengthMm) : null;
@@ -188,6 +198,7 @@ export function buildSupplierGroups(items, manualLines = []) {
         const mm = r.cuts.reduce((a, c) => a + c.count * c.lengthMm, 0);
         return { product: r.product, unit: "LM", cuts: r.cuts, cutText: formatCuts(r.cuts), totalLm: Number((mm / 1000).toFixed(2)), problem: false, manual: true, id: r.id };
       }
+      if (r.accessory) return r.unit === "LM" ? { product: r.product, unit: "LM", cuts: [], cutText: "", totalLm: Number(r.quantity.toFixed(2)), note: r.note, accessory: true, problem: r.problem } : { product: r.product, unit: "EA", quantity: r.quantity, lengthMm: null, note: r.note, accessory: true, problem: r.problem };
       // the supplier's own layout for bracing: count, then the same as EA with two decimals ("5 ... 5.00 EA")
       if (r.unit === "EA") return { product: r.product, unit: "EA", quantity: r.quantity, lengthMm: r.stock, problem: r.problem, ...(r.supplierEa ? { cutText: String(r.quantity), totalText: `${r.quantity.toFixed(2)} EA` } : {}) };
       const cuts = [...r.cutsByLength.entries()].map(([lengthMm, count]) => ({ count, lengthMm })).sort((a, b) => b.lengthMm - a.lengthMm);

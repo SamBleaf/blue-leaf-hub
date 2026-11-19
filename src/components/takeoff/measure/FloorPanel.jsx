@@ -9,8 +9,8 @@
 //   4 Beams        one row per truss-end edge: Beam on/off, size chips 400x63 / 445x63 / Other (the last size used is the next beam's); no size = Incomplete
 //   5 Strongbacks  120 x 35 along truss ends with no beam + mid-span rows from the span rule: a summary line, rows and size under More
 //   6 Trimmers     one chip row per stair void (445x63 default / 400x63)
-//   7 Flooring     Structaflor over the main floor (outline less openings and wet areas): "N sheets (M m² laid, waste W%)"; sheet width, waste % and offcut reuse under More
-//   Wet areas      + Wet area beside the openings: m² only for now (the Scyon sheets are phase 3)
+//   7 Flooring     main floor (outline less openings and wet areas): chips Structaflor / Hebel, "N sheets (M m² laid, waste W%)"; Scyon Secura in each wet area; sheet width, Scyon 19/22 mm, nails 50/75 mm, waste % and offcut reuse under More
+//   Order          FLOORING ACCESSORIES (screws, adhesive, sealant, nails, backing rod) each with a one-line basis; control joints are drawn on the plan
 // =============================================================================
 import { useState } from "react";
 import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
@@ -21,6 +21,7 @@ const m = (mm) => (Number(mm) / 1000).toFixed(2);
 const SB_SIZES = ["90x35", "120x35", "140x35"];
 const CENTRES = [450, 600];
 const SHEET_WIDTHS = [800, 600];
+const sheetTitle = (n) => String(n).replace(/^STRUCTAFLOR/, "Structaflor").replace(/^HEBEL POWERFLOOR/, "Hebel PowerFloor").replace(/^SCYON SECURA/, "Scyon Secura");
 
 function Chip({ on, onClick, children, disabled, ...p }) {
   return (
@@ -71,13 +72,15 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
   const beams = rules.beams && typeof rules.beams === "object" ? rules.beams : {};
   const last = rules.lastBeamSize || null;
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false);
-  const notes = (results?.problems || []).filter((p) => p.blocking === false && !["floor_supplier_layout"].includes(p.code));
+  const notes = (results?.problems || []).filter((p) => p.blocking === false && !["floor_supplier_layout", "floor_hebel_height"].includes(p.code));
   const totals = layout?.totals || null;
   const ends = (layout?.edges || []).filter((e) => e.kind === "end");
   const stairs = (voids || []).filter((v) => v.stair);
   const [more, setMore] = useState(false);
   const [moreSheets, setMoreSheets] = useState(false);
   const sheets = layout?.sheets || null;
+  const scyon = layout?.scyon || null;
+  const hebel = rules.floorMaterial === "hebel";
   const [otherCentres, setOtherCentres] = useState(false);
   const centres = Number(rules.centresMm ?? 450);
   const span = rules.span === "long" ? "long" : "short";
@@ -244,23 +247,43 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
       {floor && totals && (
         <Line label="7 · Flooring" testId="flooring">
           <p className="text-ink" data-floor-areas="">Main floor <b>{fmtM2(totals.mainAreaM2)} m²</b>{totals.wetM2 > 0 && <> · wet areas <b>{fmtM2(totals.wetM2)} m²</b>{(layout.wets || []).length > 1 ? ` (${layout.wets.map((w) => `${w.name} ${fmtM2(w.areaM2)}`).join(", ")})` : ""}</>}{totals.openingsM2 > 0 && <> · openings {fmtM2(totals.openingsM2)} m²</>}</p>
-          {sheets ? (
-            <>
-              <p className="text-ink" data-floor-sheets-summary=""><b>{sheets.sheet.name.replace("STRUCTAFLOR", "Structaflor")}</b> · {sheets.summary}</p>
-              {canEdit && <Btn kind="ghost" onClick={() => setMoreSheets((x) => !x)} aria-expanded={moreSheets} data-floor-sheets-more="">{moreSheets ? "Less" : "More"}</Btn>}
-              {moreSheets && (
-                <div className="space-y-2" data-floor-sheets-more-panel="">
-                  <div role="group" aria-label="Sheet size" className="flex flex-wrap items-center gap-2" data-floor-sheet-width="">
-                    <span className="text-xs text-muted">Sheet</span>
-                    {SHEET_WIDTHS.map((w) => <Chip key={w} on={sheets.sheet.widthMm === w} onClick={() => onRule({ sheetWidthMm: w === 800 ? null : w })}>3600 × {w}</Chip>)}
-                  </div>
-                  <NumberField label="Waste %" value={sheets.wastePct} min={0} max={50} onCommit={(n) => onRule({ wastePct: n === 5 ? null : n })} />
-                  <Chip on={sheets.reuseOffcuts} onClick={() => onRule({ reuseOffcuts: sheets.reuseOffcuts ? false : null })} data-floor-reuse="">Reuse offcuts {sheets.reuseOffcuts ? "on" : "off"}</Chip>
-                  <p className="text-[11px] text-muted">{sheets.packedSheets} sheets {sheets.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}{sheets.reuseOffcuts ? `, ${sheets.packedNoReuseSheets} without` : ""}, plus waste, rounded up. Thickness {sheets.sheet.thicknessMm} mm from the truss centres.</p>
+          {canEdit && (
+            <div role="group" aria-label="Main floor material" className="flex flex-wrap items-center gap-2" data-floor-material-chips="">
+              <Chip on={!hebel} onClick={() => onRule({ floorMaterial: null })}>Structaflor</Chip>
+              <Chip on={hebel} onClick={() => onRule({ floorMaterial: "hebel" })}>Hebel</Chip>
+            </div>
+          )}
+          {hebel && <p className="text-[11px] text-muted" data-floor-hebel-height="">Hebel raises the floor 75 mm.</p>}
+          {sheets ? <p className="text-ink" data-floor-sheets-summary=""><b>{sheetTitle(sheets.sheet.name)}</b> · {sheets.summary}</p> : <p className="text-muted">No main floor left to sheet.</p>}
+          {scyon && <p className="text-ink" data-floor-scyon-summary=""><b>{sheetTitle(scyon.sheet.name)}</b> (wet areas) · {scyon.summary}</p>}
+          {(sheets || scyon) && canEdit && <Btn kind="ghost" onClick={() => setMoreSheets((x) => !x)} aria-expanded={moreSheets} data-floor-sheets-more="">{moreSheets ? "Less" : "More"}</Btn>}
+          {(sheets || scyon) && moreSheets && (
+            <div className="space-y-2" data-floor-sheets-more-panel="">
+              {sheets && !hebel && (
+                <div role="group" aria-label="Sheet size" className="flex flex-wrap items-center gap-2" data-floor-sheet-width="">
+                  <span className="text-xs text-muted">Sheet</span>
+                  {SHEET_WIDTHS.map((w) => <Chip key={w} on={sheets.sheet.widthMm === w} onClick={() => onRule({ sheetWidthMm: w === 800 ? null : w })}>3600 × {w}</Chip>)}
                 </div>
               )}
-            </>
-          ) : <p className="text-muted">No main floor left to sheet.</p>}
+              {scyon && (
+                <>
+                  <div role="group" aria-label="Wet area sheet" className="flex flex-wrap items-center gap-2" data-floor-scyon-size="">
+                    <span className="text-xs text-muted">Wet area sheet</span>
+                    <Chip on={rules.scyonThicknessMm !== 22} onClick={() => onRule({ scyonThicknessMm: null })}>2700 × 600 × 19</Chip>
+                    <Chip on={rules.scyonThicknessMm === 22} onClick={() => onRule({ scyonThicknessMm: 22 })}>2400 × 600 × 22</Chip>
+                  </div>
+                  <div role="group" aria-label="Wet area nails" className="flex flex-wrap items-center gap-2" data-floor-nails="">
+                    <span className="text-xs text-muted">Nails</span>
+                    <Chip on={rules.nailMm !== 75} onClick={() => onRule({ nailMm: null })}>50 mm</Chip>
+                    <Chip on={rules.nailMm === 75} onClick={() => onRule({ nailMm: 75 })}>75 mm</Chip>
+                  </div>
+                </>
+              )}
+              <NumberField label="Waste %" value={sheets?.wastePct ?? scyon?.wastePct ?? 5} min={0} max={50} onCommit={(n) => onRule({ wastePct: n === 5 ? null : n })} />
+              <Chip on={(sheets || scyon).reuseOffcuts} onClick={() => onRule({ reuseOffcuts: (sheets || scyon).reuseOffcuts ? false : null })} data-floor-reuse="">Reuse offcuts {(sheets || scyon).reuseOffcuts ? "on" : "off"}</Chip>
+              {sheets && <p className="text-[11px] text-muted">{sheets.packedSheets} sheets {sheets.reuseOffcuts ? "with offcuts reused" : "with no offcut reuse"}{sheets.reuseOffcuts ? `, ${sheets.packedNoReuseSheets} without` : ""}, plus waste, rounded up.{hebel ? "" : ` Thickness ${sheets.sheet.thicknessMm} mm from the truss centres.`}</p>}
+            </div>
+          )}
         </Line>
       )}
 
@@ -274,8 +297,13 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
             <ul className="divide-y divide-hairline" data-floor-order="">
               {orderGroups.map((g) => (
                 <li key={g.key} className="py-1" data-floor-order-group={g.heading}>
-                  <p className="text-[11px] font-bold tracking-wide text-ink">{g.heading} <span className="font-normal text-muted">{[g.totalLm ? `${g.totalLm.toFixed(2)} LM` : null, g.totalEa ? `${g.totalEa} EA` : null].filter(Boolean).join(" · ")}</span></p>
-                  {g.rows.map((r) => <p key={`${r.product}|${r.unit}`} className="text-xs text-muted">{g.heading === "FLOORING" ? `${r.product} — ${r.quantity} sheets` : <>{r.product} · {r.unit === "EA" ? `${r.quantity} EA` : `${r.cutText} = ${r.totalLm.toFixed(2)} LM`}</>}</p>)}
+                  <p className="text-[11px] font-bold tracking-wide text-ink">{g.heading} {g.heading !== "FLOORING ACCESSORIES" && <span className="font-normal text-muted">{[g.totalLm ? `${g.totalLm.toFixed(2)} LM` : null, g.totalEa ? `${g.totalEa} EA` : null].filter(Boolean).join(" · ")}</span>}</p>
+                  {g.rows.map((r) => (
+                    <div key={`${r.product}|${r.unit}`} className="text-xs text-muted">
+                      <p>{g.heading === "FLOORING" ? `${r.product} — ${r.quantity} sheets` : r.accessory ? `${r.product} — ${r.unit === "EA" ? r.quantity : `${r.totalLm} lm`}` : <>{r.product} · {r.unit === "EA" ? `${r.quantity} EA` : `${r.cutText} = ${r.totalLm.toFixed(2)} LM`}</>}</p>
+                      {r.accessory && r.note && <p className="text-[11px]" data-floor-acc-note="">{r.note}</p>}
+                    </div>
+                  ))}
                 </li>
               ))}
             </ul>

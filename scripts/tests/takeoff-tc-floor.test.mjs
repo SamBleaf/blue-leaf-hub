@@ -149,7 +149,7 @@ t("engine: the worked example order: trusses by length, strongbacks 18 lm, nothi
   assert.equal(r.res.methodKey, "floor_framing");
   assert.equal(r.res.status.quantity, "calculated", JSON.stringify(r.res.problems.filter((p) => p.blocking)));
   assert.equal(r.lay.totals.trussCount, 15);
-  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING"]);
+  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING", "FLOORING ACCESSORIES"]);
   const tr = group(r, "FLOOR TRUSSES");
   assert.equal(tr.rows.length, 1); assert.equal(tr.rows[0].unit, "EA"); assert.equal(tr.rows[0].quantity, 15); assert.match(tr.rows[0].product, /FLOOR TRUSS 4200 mm/);
   const sb = group(r, "STRONGBACKS");
@@ -197,7 +197,7 @@ t("engine: stair trimmers are LVL 445 x 63 by default, 400 x 63 by chip, under T
 });
 t("engine: floor roles file under their own headings, in the supplier's order, after the wall groups", () => {
   const r = run([floorArea(), voidArea("v1", rect(1000, 2400, 2500, 900), "Stair void 1")], { beams: { e0: "445x63" } });
-  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "BEAMS", "TRIMMERS", "FLOORING"]);
+  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "BEAMS", "TRIMMERS", "FLOORING", "FLOORING ACCESSORIES"]);
 });
 t("engine: a strongback longer than the longest stock is cut into stock-length pieces and says so", () => {
   const r = run([floorArea(rect(7000, 4200))], { centresMm: 600 });
@@ -279,7 +279,7 @@ t("review fixes: short void-cut pieces get no mid-span row; bad row override is 
   const cross = layoutFloor({ outline: L, voids: [{ id: "v", name: "Hole", stair: true, points: [{ x: 2000, y: 1000 }, { x: 4000, y: 1000 }, { x: 4000, y: 3000 }, { x: 2000, y: 3000 }] }], rules: {} });
   assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
 });
-t("version: the calculation is stamped takeoff-calc@12 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@12$/); });
+t("version: the calculation is stamped takeoff-calc@13 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
 
 // ── P1 owner decisions, 18 Nov 2026 (Sam approved all six recommendations) ──────────────────────────────────
 t("tolerance: a traced width within 5 mm over a centres multiple adds no truss; 6 mm over does", () => {
@@ -316,7 +316,7 @@ t("engine: P2: a wet area on a floor item is used (area taken off the main floor
   const wet = run([floorArea(), area("w1", rect(2400, 1800), { role: "wet", kind: "rect", name: "Bathroom" })], {});
   assert.ok(!wet.res.problems.some((x) => x.code === "floor_wet_ignored" || /sheets phase/.test(x.message)));
   assert.ok(!wet.res.problems.some((x) => x.code === "measurement_unused"));
-  assert.ok(wet.res.problems.some((x) => x.code === "floor_wet_pending" && x.blocking === false));
+  assert.ok(!wet.res.problems.some((x) => x.code === "floor_wet_pending"));   // P3: wet areas are now Scyon sheets, no "not counted yet" note
   assert.equal(wet.res.status.quantity, "calculated");
 });
 t("engine: a wet area with no floor outline still prompts to draw the outline", () => {

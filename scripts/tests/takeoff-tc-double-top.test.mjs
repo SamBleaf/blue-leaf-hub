@@ -86,7 +86,7 @@ t("legacy: an item saved with doubleTopPlate: true and no per-wall key keeps EVE
   assert.deepEqual(plain.c.scheduleLines.map((l) => [l.component, l.quantity, l.finishedLengthMm]), keyed.c.scheduleLines.map((l) => [l.component, l.quantity, l.finishedLengthMm]));
 });
 t("CALCULATION_VERSION is NOT bumped: no existing record gets a different count (the new key is absent on all of them)", () => {
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@12/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@13/);
   const before = run([wm("a", 5000), wm("b", 2400)], { doubleTopPlate: true });
   assert.equal(before.lay("a").totals.secondTopPlateMm, 5000);
   assert.equal(before.lay("b").totals.secondTopPlateMm, 2400);

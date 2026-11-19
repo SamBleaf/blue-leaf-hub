@@ -1382,7 +1382,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
   const floorLayout = floorItem ? (results?.layouts || []).find((l) => l?.method === "floor_framing@1") || null : null;
   const floorOrder = floorItem ? buildSupplierGroups([{ lines: (ws.computed?.scheduleLines || []).filter((l) => l.roles && (l.jobMaterialIds || []).includes(material.id))
-    .map((l) => ({ unit: l.unit, quantity: l.quantity, stockLengthMm: l.item?.stockLengthMm ?? null, roles: l.roles, product: l.product || null, description: l.item?.description, problem: (l.problems || []).length > 0 })) }]) : [];
+    .map((l) => ({ unit: l.unit, quantity: l.quantity, stockLengthMm: l.item?.stockLengthMm ?? null, roles: l.roles, product: l.product || null, description: l.item?.description, acc: l.item?.acc || null, note: l.item?.note || null, problem: (l.problems || []).length > 0 })) }]) : [];
   // HUB 028 Walls: the parts' needs are counted on the Line panel ("Details: n to fix ›") and listed on the Walls card
   const wallsItem = isWallsItem(material);
   // Wet-area walls mode (HUB 031): Select with nothing picked, on a Walls item, until Done / another tool / another item

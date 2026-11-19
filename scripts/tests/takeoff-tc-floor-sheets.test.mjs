@@ -191,7 +191,7 @@ t("engine: the order has FLOORING: STRUCTAFLOR 3600x800x19, 11 sheets, listed af
   const g = r.groups.find((x) => x.heading === "FLOORING");
   assert.ok(g, r.groups.map((x) => x.heading).join());
   assert.equal(g.rows.length, 1); assert.equal(g.rows[0].product, "STRUCTAFLOR 3600x800x19"); assert.equal(g.rows[0].unit, "EA"); assert.equal(g.rows[0].quantity, 11);
-  assert.deepEqual(r.groups.map((x) => x.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING"]);
+  assert.deepEqual(r.groups.map((x) => x.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING", "FLOORING ACCESSORIES"]);   // P3: Structaflor trusses, tongues and butts are glued with Max Bond
   assert.equal(r.lay.sheets.summary, "11 sheets (25.2 m² laid, waste 5%)");
 });
 t("engine: 600 centres orders the 22 mm sheet; 3600 x 600 and waste settings change the line", () => {
@@ -200,14 +200,12 @@ t("engine: 600 centres orders the 22 mm sheet; 3600 x 600 and waste settings cha
   const row = r.groups.find((x) => x.heading === "FLOORING").rows[0];
   assert.equal(row.product, "STRUCTAFLOR 3600x600x19"); assert.equal(row.quantity, r.lay.sheets.packedSheets);
 });
-t("engine: a wet area is deducted, shown as a note (never an order line), and no longer says 'used in the sheets phase'", () => {
+t("engine: a wet area is deducted from the main floor; P3 counts it as Scyon (the P2 'not counted yet' note is gone)", () => {
   const r = run([floorArea(), wetArea("w1", rect(2400, 1800))]);
   assert.equal(r.res.status.quantity, "calculated");
   near(r.lay.totals.mainAreaM2, 20.88); near(r.lay.totals.wetM2, 4.32);
-  const note = r.res.problems.find((p) => p.code === "floor_wet_pending");
-  assert.ok(note && note.blocking === false && /^Wet area flooring \(Scyon, phase 3\): 4\.32 m² — not counted yet$/.test(note.message), JSON.stringify(note));
-  assert.ok(!r.res.problems.some((p) => p.code === "floor_wet_ignored"));
-  assert.ok(!r.groups.some((g) => /SCYON|WET/i.test(g.heading) || g.rows.some((x) => /scyon/i.test(x.product))));
+  assert.ok(!r.res.problems.some((p) => p.code === "floor_wet_pending" || p.code === "floor_wet_ignored"));
+  assert.ok(r.groups.some((g) => g.rows.some((x) => /SCYON SECURA/.test(x.product))));
   assert.equal(r.lay.sheets.laidM2, 20.88);
 });
 t("engine: a wet area outside the outline makes the order Incomplete with a plain line", () => {
@@ -215,7 +213,7 @@ t("engine: a wet area outside the outline makes the order Incomplete with a plai
   assert.equal(r.res.status.quantity, "incomplete");
   assert.ok(r.res.problems.some((p) => p.code === "floor_wet_outside" && p.blocking && /outside the floor outline/.test(p.message)));
 });
-t("version: the calculation is stamped takeoff-calc@12 (a floor with an outline now gains a sheet count, so saved orders offer an update)", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@12$/); });
+t("version: the calculation is stamped takeoff-calc@13 (a floor with an outline now gains a sheet count, so saved orders offer an update)", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
 
 console.log(`takeoff-tc-floor-sheets: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

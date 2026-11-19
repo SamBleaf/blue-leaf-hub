@@ -469,7 +469,7 @@ function DraftOrder({ api, order, data, section, status, suppliers, ws, onChange
     if (!(ls.length && ls.every((l) => l.roles)) && !manual.length) return [];
     const useLines = ls.length > 0 && ls.every((l) => l.roles);
     return buildSupplierGroups(useLines ? tg.map((g) => ({ lines: g.lines.filter((l) => (qty[l.bucketKey] ?? 0) > 0).map((l) => ({ unit: l.unit, quantity: qty[l.bucketKey], stockLengthMm: l.item?.stockLengthMm ?? null,
-      roles: l.roles, product: l.product || null, hoop: l.hoop || null, bracing: l.bracing || null, description: l.item?.description, problem: l.problems.length > 0 })) })) : [], manual);
+      roles: l.roles, product: l.product || null, hoop: l.hoop || null, bracing: l.bracing || null, description: l.item?.description, acc: l.item?.acc || null, note: l.item?.note || null, problem: l.problems.length > 0 })) })) : [], manual);
   }, [genericGroups, qty, manualLines]);
   // what is on this order, per unit — flashing pieces/LM and every other unit kept apart
   const orderTotals = useMemo(() => {
