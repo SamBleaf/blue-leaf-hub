@@ -16,7 +16,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { coatedOffsetSegments, profileVertices, includedAngle, bendDirection, treatmentGlyphs, treatmentDrawing } from "../../../shared/takeoff/index.js";
 
-export const RENDERER_VERSION = "takeoff-pdf@5"; // @3: generic purchase lines + site appendix; @4: supplier address, Timber / Cladding parts; @5: timber printed as the supplier take-off (grouped by member role, count/length cut lists, LM and EA)
+export const RENDERER_VERSION = "takeoff-pdf@6"; // @6: a floor layout drawing page per Floor frame item in the site appendix; @3: generic purchase lines + site appendix; @4: supplier address, Timber / Cladding parts; @5: timber printed as the supplier take-off (grouped by member role, count/length cut lists, LM and EA)
 const BRAND = "#006c9b";
 const INK = "#1A1A2E";
 const MUTED = "#64748b";
@@ -169,6 +169,45 @@ export async function renderSiteAppendixPdf(snapshot, opts = {}) {
   });
 }
 
+/** Draw one floor layout drawing model (shared/takeoff/engine/floor/drawing.js) into a box; returns the y below it. */
+function drawFloorModel(doc, model, fonts, x0, y0, boxW, boxH) {
+  const k = Math.min(boxW / model.width, boxH / model.height);
+  const ox = x0 + (boxW - model.width * k) / 2;
+  const X = (v) => ox + v * k, Y = (v) => y0 + v * k;
+  doc.save();
+  doc.rect(ox, y0, model.width * k, model.height * k).lineWidth(0.4).strokeColor(HAIR).stroke();
+  for (const it of model.items) {
+    if (it.t === "poly") {
+      if (!it.pts.length) continue;
+      doc.save();
+      doc.moveTo(X(it.pts[0].x), Y(it.pts[0].y));
+      for (const p of it.pts.slice(1)) doc.lineTo(X(p.x), Y(p.y));
+      doc.closePath();
+      if (it.dash) doc.dash(it.dash[0] * k, { space: it.dash[1] * k });
+      const hasFill = it.fill && it.fill !== "none", hasStroke = it.stroke && it.stroke !== "none";
+      if (hasFill && hasStroke) doc.lineWidth(Math.max(0.2, it.sw * k)).fillAndStroke(it.fill, it.stroke);
+      else if (hasFill) doc.fill(it.fill);
+      else if (hasStroke) doc.lineWidth(Math.max(0.2, it.sw * k)).stroke(it.stroke);
+      else doc.undash().stroke("#ffffff").opacity(0);
+      doc.restore();
+    } else if (it.t === "line") {
+      doc.save().moveTo(X(it.a.x), Y(it.a.y)).lineTo(X(it.b.x), Y(it.b.y));
+      if (it.dash) doc.dash(it.dash[0] * k, { space: it.dash[1] * k });
+      if (it.opacity) doc.opacity(it.opacity);
+      doc.lineWidth(Math.max(0.2, it.sw * k)).stroke(it.stroke).restore();
+    } else {
+      const fsz = Math.max(3, it.size * k);
+      doc.font(it.bold ? fonts.bold : fonts.regular).fontSize(fsz);
+      const str = T(it.s), w = doc.widthOfString(str);
+      const left = it.anchor === "end" ? X(it.x) - w : it.anchor === "start" ? X(it.x) : X(it.x) - w / 2;
+      if (it.bg) doc.save().opacity(0.85).rect(left - 1, Y(it.y) - fsz * 0.85, w + 2, fsz * 1.1).fill("#ffffff").restore();
+      doc.fillColor(it.fill || INK).text(str, left, Y(it.y) - fsz * 0.8, { lineBreak: false });
+    }
+  }
+  doc.restore();
+  return y0 + model.height * k;
+}
+
 function drawAppendix(doc, snap, opts) {
   const fonts = pickFont(doc);
   const W = doc.page.width, M = 40, CW = W - M * 2;
@@ -234,6 +273,33 @@ function drawAppendix(doc, snap, opts) {
     line(`Tight ${fmt(fr.tightMm)} mm along the path · corners at ${fr.cornersMm.length ? fr.cornersMm.map(fmt).join(", ") : "none"} mm · splits at ${fr.splitsMm.length ? fr.splitsMm.map(fmt).join(", ") : "none"} mm. Corners are site cuts/folds, not supplier bends.`, { muted: true });
     fr.pieces.forEach((p, i) => line(`Piece ${i + 1}: ${fmt(p.fromMm)}–${fmt(p.toMm)} mm along the run → tight ${fmt(p.tightMm)} → order ${fmt(p.orderMm)} mm`, { indent: 10 }));
     y += 6;
+  }
+  // Floor P4: one page per Floor frame item, the scaled layout drawing with its legend and summary (the same model as the on-screen Layout view)
+  let onFreshPage = !any && !(snap.notIncluded || []).length;   // a floor-only appendix uses the first page, no blank page before it
+  for (const fl of a.floorLayouts || []) {
+    any = true;
+    if (!onFreshPage) { doc.addPage(); header(true); }
+    onFreshPage = false;
+    title(`${fl.title || "Floor frame"} — layout drawing`);
+    const legendH = 12 + Math.ceil((fl.legend || []).length / 2) * 11 + (fl.summary || []).length * 11 + 18;
+    const below = drawFloorModel(doc, fl, fonts, M, y, CW, Math.max(120, bottom() - y - legendH));
+    y = below + 6;
+    for (const sline of fl.summary || []) line(sline, { bold: sline === fl.summary[0] });
+    y += 2;
+    const colW = CW / 2;
+    const legendTop = y;
+    (fl.legend || []).forEach((lg, i) => {
+      const lx = M + 6 + (i % 2) * colW, ly = legendTop + Math.floor(i / 2) * 11;
+      doc.save();
+      if (lg.kind === "fill") doc.rect(lx, ly + 1, 14, 7).lineWidth(0.4).fillAndStroke(lg.color, "#8a8f98");
+      else if (lg.kind === "hatch") { doc.rect(lx, ly + 1, 14, 7).lineWidth(0.4).stroke(lg.color); for (let hx = 3; hx < 20; hx += 3) doc.moveTo(lx + Math.max(0, hx - 7), ly + 1 + Math.max(0, 7 - hx)).lineTo(lx + Math.min(14, hx), ly + 1 + Math.min(7, 14 - hx)).lineWidth(0.3).stroke(lg.color); }
+      else if (lg.kind === "box") doc.rect(lx, ly + 1, 14, 7).lineWidth(0.5).dash(2, { space: 1.5 }).stroke(lg.color);
+      else { if (lg.dash) doc.dash(3, { space: 2 }); doc.moveTo(lx, ly + 4.5).lineTo(lx + 14, ly + 4.5).lineWidth(lg.w ? lg.w * 0.6 : 1.2).stroke(lg.color); }
+      doc.restore();
+      doc.font(fonts.regular).fontSize(7.5).fillColor(INK).text(T(lg.label), lx + 20, ly + 1, { width: colW - 28, lineBreak: false, ellipsis: true, height: 9 });
+    });
+    y = legendTop + Math.ceil((fl.legend || []).length / 2) * 11 + 4;
+    line("The truss supplier designs the layout. Drawn from the plan for ordering and checking.", { muted: true });
   }
   if (!any) line("No cutting or setout detail for the materials on this order.", { muted: true });
   const range = doc.bufferedPageRange();

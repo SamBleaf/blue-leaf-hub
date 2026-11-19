@@ -1231,11 +1231,11 @@ export function buildExportSnapshot({ wsSnapshot, order, lines, supplier, compan
   const byUnitAll = {};
   for (const g of itemList) for (const [u, n] of Object.entries(g.totals.byUnit)) byUnitAll[u] = (byUnitAll[u] || 0) + n;
   // the site appendix travels in the same frozen snapshot (never part of the supplier order itself)
-  const appendix = { aluminium: [], timber: [], layouts: [], flashingRuns: [] };
+  const appendix = { aluminium: [], timber: [], layouts: [], flashingRuns: [], floorLayouts: [] };
   for (const g of itemList) {
     const ap = computed.materialResults?.[g.materialId]?.appendix;
     if (!ap) continue;
-    for (const k of ["aluminium", "timber", "layouts"]) for (const x of ap[k] || []) appendix[k].push({ ...x, materialName: g.materialName });
+    for (const k of ["aluminium", "timber", "layouts", "floorLayouts"]) for (const x of ap[k] || []) appendix[k].push({ ...x, materialName: g.materialName });
   }
   const usedDocIds = new Set();
   const usedCalIds = new Set();

@@ -32,6 +32,7 @@ import { loadsAboveOf } from "../standards/index.js";
 import { blockCentresFor, blockCountFor, findJunctions, JUNCTION_BLOCK } from "./junctions.js";
 import { openingSelectors } from "./openingSelectors.js";
 import { computeFloorFraming } from "./floor/framing.js";
+import { floorDrawing } from "./floor/drawing.js";
 import { supportGrid } from "./supports.js";
 import { accessoryRoutes } from "./accessories.js";
 import { FOLLOWERS_VERSION, FOLLOWER_KINDS, FOLLOWER_TEXT, FOAM_TAPE, followerNote, followerRule, wallFollowers } from "./followers.js";
@@ -1508,6 +1509,8 @@ export function computeGenericMaterials(materials, contributions, ctx) {
       }
     }
     for (const r of methodResults) {
+      // Floor P4: the scaled layout drawing travels in the site appendix (drawing model only; no number changes)
+      if (r.layout?.method === "floor_framing@1" && r.layout.totals) { const dr = floorDrawing(r.layout, { name: mat.name }); if (dr) (pl.appendix.floorLayouts ||= []).push(dr); }
       if (r.layout?.wallId && (r.layout.cells || r.layout.courses || r.layout.lines || r.layout.panels)) {
         const counts = new Map();
         for (const d of r.demands || []) {

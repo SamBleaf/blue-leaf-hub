@@ -104,7 +104,7 @@ await t("export snapshot: supplierGroups by member role, orderFormat stamped, it
   const { snapshot } = exportOf(c, w);
   assert.equal(snapshot.orderFormat, SUPPLIER_ORDER_FORMAT);
   assert.equal(snapshot.calculationVersion, CALCULATION_VERSION);
-  assert.match(RENDERER_VERSION, /^takeoff-pdf@5$/);
+  assert.match(RENDERER_VERSION, /^takeoff-pdf@6$/);
   assert.deepEqual(snapshot.supplierGroups.map((g) => g.heading), ["T&B PLATES", "STUDS", "JAMB STUDS", "HD & SILL TR", "NOGGINS"].filter((h) => snapshot.supplierGroups.some((g) => g.heading === h)));
   assert.ok(snapshot.supplierGroups.some((g) => g.heading === "T&B PLATES") && snapshot.supplierGroups.some((g) => g.heading === "NOGGINS"));
   assert.equal(snapshot.items[0].lines.length, c.scheduleLines.length, "one ledger line per bought length, exactly as before");
@@ -160,7 +160,7 @@ await t("formatting and grouping helpers", () => {
   assert.deepEqual(splitByRole(null, 4), [["other", 4]]);
 });
 
-await t("the PDF prints the take-off: group headings, product rows, count/length cuts, LM, and takeoff-pdf@5 in the footer; an old snapshot still renders", async () => {
+await t("the PDF prints the take-off: group headings, product rows, count/length cuts, LM, and takeoff-pdf@6 in the footer; an old snapshot still renders", async () => {
   const w = wallsWorkspace(), c = computeWorkspace(w);
   const { snapshot } = exportOf(c, w);
   const read = async (snap) => {
@@ -172,7 +172,7 @@ await t("the PDF prints the take-off: group headings, product rows, count/length
     return out;
   };
   const text = await read(snapshot);
-  for (const s of ["TIMBER", "T&B PLATES", "STUDS", "NOGGINS", "P/M", "LM", "takeoff-pdf@5"]) assert.ok(text.includes(s), s);
+  for (const s of ["TIMBER", "T&B PLATES", "STUDS", "NOGGINS", "P/M", "LM", "takeoff-pdf@6"]) assert.ok(text.includes(s), s);
   assert.ok(/\d+\/\d(\.\d)?/.test(text), "count/length cuts");
   assert.ok(!/mm length/.test(text.split("DRAFT")[0] || ""), "no per-stock-length rows any more");
   const { supplierGroups: _g, orderFormat: _f, ...old } = snapshot;

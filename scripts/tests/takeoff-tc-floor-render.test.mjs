@@ -17,6 +17,7 @@ writeFileSync(entry, `
 import { renderToStaticMarkup } from "react-dom/server";
 import FloorPanel from ${JSON.stringify(join(REPO, "src/components/takeoff/measure/FloorPanel.jsx"))};
 import { layoutFloor } from ${JSON.stringify(join(REPO, "shared/takeoff/engine/floor/geometry.js"))};
+import FloorLayoutView from ${JSON.stringify(join(REPO, "src/components/takeoff/measure/FloorLayoutView.jsx"))};
 import { FloorLayer } from ${JSON.stringify(join(REPO, "src/components/takeoff/measure/FloorLayer.jsx"))};
 import { buildCalibration, buildSupplierGroups, floorFramingDefaults, FLOOR_FRAMING_RULES } from ${JSON.stringify(join(REPO, "shared/takeoff/index.js"))};
 const rect = (w, h, x = 0, y = 0) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -24,6 +25,10 @@ export function layer(rules = {}) {
   const cal = { ...buildCalibration({ basisRotation: 0, horizontal: { p1: { x: 100, y: 60 }, p2: { x: 700, y: 60 }, knownMm: 12000 }, vertical: { p1: { x: 60, y: 100 }, p2: { x: 60, y: 500 }, knownMm: 8000 } }).calibration };
   const lay = { ...layoutFloor({ outline: rect(6000, 4200), rules: { ...FLOOR_FRAMING_RULES, ...rules } }), origin: { x: 100, y: 100 } };
   return renderToStaticMarkup(<svg><FloorLayer layout={lay} cal={cal} toScreen={(p) => p} /></svg>);
+}
+export function layoutView() {
+  const lay = layoutFloor({ outline: rect(6000, 4200), voids: [{ id: "v", name: "Stair", stair: true, points: rect(1000, 2400, 2500, 600) }], wets: [{ id: "w", name: "Bath", points: rect(2400, 1800, 3000, 2400) }], rules: { ...FLOOR_FRAMING_RULES } });
+  return renderToStaticMarkup(<FloorLayoutView layout={lay} name="Floor frame" onClose={() => {}} />);
 }
 export function panel({ rules = {}, withFloor = true, voids = [], problems = [], mode = "rect", floorDraw = null, orderGroups = [] } = {}) {
   const material = { id: "m", name: "Floor frame", methodKey: "floor_framing", spec: floorFramingDefaults(), rules: { ...FLOOR_FRAMING_RULES, ...rules } };
@@ -41,12 +46,16 @@ const ok = (name, cond, detail = "") => { if (cond) { pass++; if (process.env.TA
 const pressed = (html, label) => new RegExp(`aria-pressed="true"[^>]*>${label}<`).test(html);
 
 try {
-  const { panel, layer } = await import(pathToFileURL(out).href);
+  const { panel, layer, layoutView } = await import(pathToFileURL(out).href);
   const svg = layer({ beams: { e0: "445x63" } });
   ok("plan overlay: 15 truss lines, 1 beam, 1 dashed end strongback, 1 mid-span run, numbered end edges", (svg.match(/data-floor-truss=/g) || []).length === 15 && (svg.match(/data-floor-beam=/g) || []).length === 1
     && (svg.match(/data-floor-end-strongback=/g) || []).length === 1 && (svg.match(/data-floor-mid-strongback=/g) || []).length === 1 && (svg.match(/data-floor-edge-number=/g) || []).length === 2, svg.slice(0, 200));
   ok("plan overlay: the beam is heavy and the lines carry real coordinates", /stroke-width="6"/.test(svg) && !/NaN/.test(svg));
+  const lv = layoutView();
+  ok("Layout view: a full-screen drawing with a Close button, the summary and the legend as text", /data-floor-layout=""/.test(lv) && /data-floor-layout-close/.test(lv) && /data-floor-layout-drawing/.test(lv) && /data-floor-layout-summary/.test(lv) && (lv.match(/data-legend=/g) || []).length >= 6 && !/NaN/.test(lv));
+  ok("Layout view: every truss line is drawn", (lv.match(/data-fl="truss"/g) || []).length >= 15);
   const empty = panel({ withFloor: false });
+  ok("one Layout button on the floor panel once a floor is drawn, none before", /data-floor-layout-open/.test(panel({})) && !/data-floor-layout-open/.test(empty));
   ok("no outline yet: only the outline step, with the Rectangle hint and nothing else to answer", /Floor outline/.test(empty) && /Tap one corner of the floor/.test(empty) && !/data-floor-step="trusses"/.test(empty) && !/data-floor-step="beams"/.test(empty));
   ok("outline step offers Outline for other shapes", /Outline for any other shape/.test(empty));
   const html = panel({});

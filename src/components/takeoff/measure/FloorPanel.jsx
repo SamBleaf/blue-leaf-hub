@@ -13,6 +13,7 @@
 //   Order          FLOORING ACCESSORIES (screws, adhesive, sealant, nails, backing rod) each with a one-line basis; control joints are drawn on the plan
 // =============================================================================
 import { useState } from "react";
+import FloorLayoutView from "./FloorLayoutView.jsx";
 import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
 import { Banner, Btn, NumberField } from "../ui.jsx";
 import { fmtM2 } from "../format.js";
@@ -77,6 +78,7 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
   const ends = (layout?.edges || []).filter((e) => e.kind === "end");
   const stairs = (voids || []).filter((v) => v.stair);
   const [more, setMore] = useState(false);
+  const [showLayout, setShowLayout] = useState(false);
   const [moreSheets, setMoreSheets] = useState(false);
   const sheets = layout?.sheets || null;
   const scyon = layout?.scyon || null;
@@ -313,7 +315,8 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
         </Line>
       )}
       {!floor && blocking.length > 0 && !needScale && <Banner tone="warn">{blocking.map((p) => p.message).join(" ")}</Banner>}
-      <div className="flex flex-wrap gap-2">{onDone && <Btn kind="primary" onClick={onDone} data-floor-done="">Done</Btn>}</div>
+      {showLayout && layout?.totals && <FloorLayoutView layout={layout} name={material?.name} onClose={() => setShowLayout(false)} />}
+      <div className="flex flex-wrap gap-2">{layout?.totals && <Btn kind="secondary" onClick={() => setShowLayout(true)} data-floor-layout-open="">Layout</Btn>}{onDone && <Btn kind="primary" onClick={onDone} data-floor-done="">Done</Btn>}</div>
     </div>
   );
 }
