@@ -751,6 +751,15 @@ Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 5. Node: scripts/tests/takeoff-tc-loads-above.test.mjs.
 - [ ] Pass  [ ] Fail
 
+### TC-31: Snap to plan and Check against plan (Walls)
+
+1. Open a Walls item on a scaled page of a vector plan (not a scanned image). A **Snap to plan** chip shows on the toolbar, on by default. While it reads the plan it shows "Snap to plan…" and is greyed. A page with no wall lines leaves it greyed.
+2. Trace a wall near a plan corner. The tapped end jumps to the centre of the plan wall (a corner when two walls cross) and a small green ring marks it for a moment. Tap the chip off: taps land exactly where you tap.
+3. Trace a few walls with the chip off, then tap **Check against plan** on the Walls card. Each wall shows its offset in mm at each end and **on plan** (20 mm or less), **near** (up to 100 mm) or **no match**. Nothing moves.
+4. Tap **Snap all near walls (n)**: those walls move onto the plan centrelines in one edit (a corner shared with a wall that stays follows it). Tap Undo once: all of them go back.
+5. Plan lines are read on the device and never saved. Layered or heavily hatched walls can show more than one candidate centreline; check the ring before you trust a snap.
+6. Node: scripts/tests/takeoff-vector-snap.test.mjs.
+
 ### Post-test checklist
 - [ ] All test cases passed
 - [ ] No console errors observed during testing

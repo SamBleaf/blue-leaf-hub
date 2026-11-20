@@ -72,6 +72,8 @@ import { DOUBLE_TAP_MS, DOUBLE_TAP_SLOP_PX } from "./gestures.js";
 import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
+import { usePlanSnap } from "./planVectors.js";
+import { matchTraced, snapPoint } from "../../../shared/takeoff/vectorSnap.js";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
 import { COLORS, isFloorItem, withoutFloorBeams, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride , clearDoubleTopOverrides, doubleTopState, setAllDoubleTop, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop } from "./measure/tools.js";
@@ -105,6 +107,8 @@ function describeElsewhere(ms, documents) {
 const sameList = (a, b) => (a || []).length === (b || []).length && (a || []).every((x, i) => Math.abs(x - b[i]) < 1e-6);
 /** One tap burst: a double-tap window plus the trailing tap's own press (gestures.js DOUBLE_TAP_MS = 300). */
 const BURST_MS = DOUBLE_TAP_MS + 150;
+/** Snap to plan reach, in screen px. */
+const SNAP_PX = 12;
 /** "W1", "W1 and D1", "W1, W2 and D1". */
 const listNames = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
@@ -263,6 +267,14 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }, [view.contributions]);
   const materialsById = useMemo(() => new Map(view.materials.map((m) => [m.id, m])), [view.materials]);
   const calsById = useMemo(() => new Map(view.calibrations.map((c) => [c.id, c])), [view.calibrations]);
+  // Snap to plan (Walls): the architect's own wall linework, read once per page and kept in memory (never saved).
+  const wallsHere = isWallsItem(material);
+  const plan = usePlanSnap({ doc, pageIndex, cal, enabled: wallsHere && !!cal });
+  const [snapOn, setSnapOn] = useState(() => { try { return localStorage.getItem("takeoff.snapToPlan") !== "off"; } catch { return true; } });
+  const toggleSnap = () => setSnapOn((v) => { const n = !v; try { localStorage.setItem("takeoff.snapToPlan", n ? "on" : "off"); } catch { /* per-device convenience only */ } return n; });
+  const [snapMark, setSnapMark] = useState(null);          // the point the last tap snapped to, shown briefly
+  useEffect(() => { if (!snapMark) return undefined; const t = setTimeout(() => setSnapMark(null), 1800); return () => clearTimeout(t); }, [snapMark]);
+  const [checkOpen, setCheckOpen] = useState(false);       // the Check against plan card (Walls item)
   const computedBy = useMemo(() => new Map((ws.computed?.contributions || []).map((c) => [c.measurementId, c])), [ws.computed]);
   const matOf = useCallback((m) => materialsById.get(contribsOf.get(m.id)?.[0]?.jobMaterialId) || null, [materialsById, contribsOf]);
   const pointsOf = useCallback((m) => {
@@ -428,6 +440,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     const d = cur?.tool === mode ? cur : null;
     const isFlash = draftIsFlashTool();
     let at = p;
+    let onCorner = false;
     if (d?.points.length) {
       // hit priority (13): split handle → the LAST point (double-tap finishes there) → red overflow ("Split at limit")
       // → an earlier corner (close exactly onto it) → new point. Earlier corners rank BELOW the red line: corners
@@ -443,10 +456,16 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       if (hit.action === "vertex") { setMsg({ tone: "info", text: "That's the last point — double-tap it (or press Finish) to finish, or zoom in for a short leg." }); return; }
       if (hit.action === "split-at-limit") { lastSplitTap.current = performance.now(); doSplitAtLimit("draft", hit.pieceIndex); return; }
       const corner = resolvePathTap(sp, { vertices: d.points.slice(0, -1).map((q, i) => ({ ...toScreen(q), index: i })) });
-      if (corner.action === "vertex") at = d.points[corner.index]; // close exactly onto an earlier corner
+      if (corner.action === "vertex") { at = d.points[corner.index]; onCorner = true; } // close exactly onto an earlier corner
     } else if (isFlash) {
       const hit = completedOverflowHit(sp); // a finished run's red part: one tap splits it at the legal limit
       if (hit) { lastSplitTap.current = performance.now(); doSplitAtLimit({ measurement: hit.m }, hit.pieceIndex); return; }
+    }
+    if (!onCorner && snapOn && mode === "line" && wallsHere && plan.state === "ready") {
+      // Snap to plan: a wall end lands on the nearest centreline corner / centreline / face within 12 px of the tap
+      const k = Math.hypot(toScreen({ x: 1, y: 0 }).x - toScreen({ x: 0, y: 0 }).x, toScreen({ x: 1, y: 0 }).y - toScreen({ x: 0, y: 0 }).y);
+      const sn = k > 0 ? snapPoint(plan.ix, at, SNAP_PX / k) : null;
+      if (sn && pointsWithinCalibration(cal, [sn])) { at = { x: sn.x, y: sn.y }; setSnapMark({ x: sn.x, y: sn.y, kind: sn.kind }); }
     }
     const err = guardDraw(at);
     if (err) { warn(err); return; }
@@ -699,6 +718,34 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     return pageMeasurements.filter((m) => m.kind === "wall" && m.points?.length === 2 && m.inputs?.kind !== "polygon"
       && (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === material?.id))
       .map((m) => ({ id: m.id, points: m.points, cal: calsById.get(m.calibrationId) || null, shown: isShown(m) })).filter((w) => w.cal);
+  }
+  /** Check against plan (read-only): every straight wall of this item against the detected plan walls. */
+  function planChecks() {
+    if (plan.state !== "ready") return [];
+    return materialWalls().map((w) => {
+      const r = w.cal.id === cal?.id ? matchTraced(plan.ix, w.points[0], w.points[1]) : { status: "none", offsetsMm: null, target: null };
+      return { id: w.id, name: wallName(w.id), status: r.status, offsetsMm: r.offsetsMm, target: r.target };
+    });
+  }
+  /** Snap all near walls: ONE undoable edit, only walls within 100 mm; a corner shared with a wall that stays follows it. */
+  function snapAllNear(rows) {
+    const moves = rows.filter((r) => r.target && r.offsetsMm.some((o) => o > 0.5) && pointsWithinCalibration(cal, r.target));
+    if (!moves.length) return;
+    const next = new Map(moves.map((r) => [r.id, measNow(r.id)?.points.map((q, i) => ({ ...r.target[i] })) ?? null]));
+    const before = new Map();
+    for (const r of moves) {
+      const m = measNow(r.id); if (!m) { next.delete(r.id); continue; }
+      before.set(m.id, m);
+      for (const i of [0, 1]) for (const l of sharedCorners(pageMeasurements, m, i)) {
+        if (next.has(l.id) || !measNow(l.id)) continue;
+        const o = measNow(l.id); before.set(o.id, o);
+        next.set(l.id, o.points.map((q, j) => (j === l.index ? { ...r.target[i] } : q)));
+      }
+    }
+    const ids = [...next.keys()].filter((id) => before.has(id));
+    record({ redo: partial({ measurements: ids.map((id) => ({ ...before.get(id), points: next.get(id) })) }), undo: partial({ measurements: ids.map((id) => before.get(id)) }) });
+    setCheckOpen(false);
+    setMsg({ tone: "ok", text: `${moves.length} wall${moves.length === 1 ? "" : "s"} snapped to the plan. Undo puts them back.` });
   }
   /** The outline walls (Rectangle / Area, HUB 023) of THIS material on this page, with their own scale. */
   function materialOutlines() {
@@ -1674,6 +1721,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             {onPage && <Btn kind="ghost" className="min-w-[44px] shrink-0" onClick={changePage} aria-label={`Page ${pageIndex + 1}: measure on another page`} data-page-chip="">Page {pageIndex + 1} ▾</Btn>}
             <Btn kind="ghost" className="min-w-[44px] shrink-0" onClick={() => setLayersOpen((v) => !v)} aria-expanded={layersOpen} aria-haspopup="true"
               aria-label="Show or hide takeoffs on the plan" data-layers-button="">Takeoffs{hiddenHere.length ? ` (${hiddenHere.length} hidden)` : ""} ▾</Btn>
+            {wallsHere && cal && plan.state !== "off" && (
+              <button type="button" onClick={toggleSnap} aria-pressed={snapOn && plan.state === "ready"} disabled={plan.state !== "ready"} data-snap-chip=""
+                title={plan.state === "none" ? "No wall lines found on this page" : plan.state === "loading" ? "Reading the plan…" : undefined}
+                className={`min-h-[44px] shrink-0 rounded-full border px-3 text-xs font-medium disabled:opacity-50 ${snapOn && plan.state === "ready" ? "border-primary bg-primary/10 text-primary" : "border-hairline text-ink"}`}>
+                {plan.state === "loading" ? "Snap to plan…" : "Snap to plan"}</button>
+            )}
             <Btn kind="ghost" className="min-w-[44px] shrink-0" onClick={() => vpRef.current?.fit()} aria-label="Fit page">Fit</Btn>
           </div>
         </div>
@@ -1742,6 +1795,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               })}
               {floorItem && floorLayout && <FloorLayer layout={floorLayout} cal={calsById.get(floorLayout.calibrationId) || cal} toScreen={toScr} />}
               {renderDraft(toScr)}
+              {snapMark && (() => { const s = toScr(snapMark); return <g data-snap-marker={snapMark.kind} pointerEvents="none"><circle cx={s.x} cy={s.y} r={9} fill="none" stroke="#0a7d3c" strokeWidth={2.5} /><circle cx={s.x} cy={s.y} r={2.5} fill="#0a7d3c" /></g>; })()}
               {openStart && (() => { const s = toScr(openStart.at); const color = openStart.kind === "door" ? COLORS.door : COLORS.window; return (
                 <circle data-opening-start={openStart.wallId} cx={s.x} cy={s.y} r={7} fill="#fff" stroke={color} strokeWidth={3} />
               ); })()}
@@ -1962,6 +2016,34 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                       Double top plate
                     </label>
                     <LoadsAboveRows rules={material.rules || {}} onPatch={(rules) => setRule(material, rules)} />
+                    {plan.state === "ready" && materialWalls().length > 0 && (
+                      <Btn onClick={() => setCheckOpen((v) => !v)} aria-expanded={checkOpen} data-check-plan="">Check against plan</Btn>
+                    )}
+                    {checkOpen && plan.state === "ready" && (() => {
+                      const rows = planChecks();
+                      const n = (st) => rows.filter((r) => r.status === st).length;
+                      const movable = rows.filter((r) => r.target && r.offsetsMm.some((o) => o > 0.5));
+                      return (
+                        <div className="w-full space-y-1 rounded-lg bg-page px-3 py-2 text-sm" role="group" aria-label="Check against plan" data-plan-check="">
+                          <p className="font-medium text-ink">{n("on")} on plan · {n("near")} near · {n("none")} no match</p>
+                          <ul className="max-h-48 space-y-0.5 overflow-y-auto">
+                            {rows.map((r) => (
+                              <li key={r.id} className="flex items-center justify-between gap-2" data-plan-check-row={r.status}>
+                                <span className="truncate">{r.name}</span>
+                                <span className={r.status === "on" ? "text-emerald-700" : r.status === "near" ? "text-amber-800" : "text-muted"}>
+                                  {r.offsetsMm ? `${Math.round(r.offsetsMm[0])} / ${Math.round(r.offsetsMm[1])} mm · ` : ""}{r.status === "on" ? "on plan" : r.status === "near" ? "near" : "no match"}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="flex gap-2">
+                            <Btn kind="primary" disabled={!movable.length} onClick={() => snapAllNear(rows)} data-snap-all="">Snap all near walls{movable.length ? ` (${movable.length})` : ""}</Btn>
+                            <Btn kind="ghost" onClick={() => setCheckOpen(false)}>Close</Btn>
+                          </div>
+                          <p className="text-[11px] text-muted">Offsets are at each end of the wall. Only walls within 100 mm move.</p>
+                        </div>
+                      );
+                    })()}
                     {dtAsk && dtAsk.matId === material.id && (
                       <div className="w-full space-y-1 rounded-lg bg-page px-3 py-2 text-sm" role="group" aria-label="Apply to every wall?" data-double-top-ask="">
                         <p className="text-ink">Apply to every wall? {dtAsk.walls} wall{dtAsk.walls === 1 ? " has" : "s have"} a setting of {dtAsk.walls === 1 ? "its" : "their"} own.</p>
