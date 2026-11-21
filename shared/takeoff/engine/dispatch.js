@@ -408,6 +408,38 @@ export function wallJunctionPlan(wallMeasurements, ctx, opts) {
   return out;
 }
 
+/**
+ * Sam, 21 Nov 2026: the pieces of a wall split on the plan (inputs.splitOf names the wall they came from) that still meet END to START
+ * in a straight line, at the same height, on one page: they are ONE wall frame there. Returns { next, prev } (wall id → wall id). Pieces
+ * dragged apart, bent past the junction rules' in-line angle, or of different heights are just walls again. Pure.
+ */
+export function wallSplitJoins(wallMeasurements, ctx) {
+  const next = new Map(), prev = new Map();
+  const groups = new Map();
+  for (const m of wallMeasurements) {
+    const g = typeof m.inputs?.splitOf === "string" && m.inputs.splitOf ? m.inputs.splitOf : null;
+    if (!g || (m.inputs?.kind || "rect") !== "rect" || !Array.isArray(m.points) || m.points.length !== 2) continue;
+    const cal = ctx.calibrationsById?.get(m.calibrationId);
+    if (!cal || !(Number(m.inputs?.heightMm) > 0)) continue;
+    const key = `${g}|${m.documentId}|${m.pageIndex}`;
+    const o = { x: 0, y: 0 };
+    const a = pointToMm(cal, o, m.points[0]), b = pointToMm(cal, o, m.points[1]);
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!(L > 0)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ id: m.id, a, b, u: { x: (b.x - a.x) / L, y: (b.y - a.y) / L }, h: Number(m.inputs.heightMm) });
+  }
+  const colCos = Math.cos((10 * Math.PI) / 180);   // the junction rules' in-line angle (JUNCTION_DEFAULTS.collinearDeg)
+  for (const ws of groups.values()) {
+    for (const p of ws) for (const q of ws) {
+      if (p === q || next.has(p.id) || prev.has(q.id)) continue;
+      if (Math.hypot(p.b.x - q.a.x, p.b.y - q.a.y) > 1 || p.u.x * q.u.x + p.u.y * q.u.y < colCos || Math.abs(p.h - q.h) > 0.5) continue;
+      next.set(p.id, q.id); prev.set(q.id, p.id);
+    }
+  }
+  return { next, prev };
+}
+
 /** A Walls part's procurement identity, tagged with its part so each part buys on its own lines and cut list. */
 const wallPartIdentity = (p, part) => timberIdentity({ section: sectionText(p), grade: p.grade, treatment: p.treatment, species: p.species, supplier: p.supplierName, component: part });
 /**
@@ -497,7 +529,52 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const isOff = (j) => jOffKeys.has(j.id) || (jOffKeys.has(j.nodeId) && idsAtNode.get(j.nodeId).size === 1);
   const doneWalls = new Set(); // walls that were worked out (a blocked wall still gives its neighbours their junction studs, and is named in a note)
   const jWallName = (id) => { const x = walls.find((q) => q.m.id === id); return x ? tagOf(x) : "a wall"; };
-  for (const { m } of studW && stockOk ? walls : []) {
+  // Sam, 21 Nov 2026: a wall split on the plan stays ONE frame where its pieces meet in line. At equal centres the stud layout runs on
+  // through the join (no stud added there, the noggin bay across it counted once, on the first piece); where the centres change, ONE
+  // stud stands at the join (on the first piece) and the next piece's layout starts from it. Hoop iron is worked out on the whole wall.
+  const sj = studW && stockOk ? wallSplitJoins(walls.map((x) => x.m), ctx) : { next: new Map(), prev: new Map() };
+  const joinLayout = new Map();   // wall id -> { start:{…}, end:{…} } layout options at a split join
+  const hoopLenOf = new Map();    // wall id -> the length hoop iron is worked out on (the whole wall on its first piece, 0 on the rest)
+  const chainOf = (id) => { let h = id; const seen = new Set([h]); while (sj.prev.has(h) && !seen.has(sj.prev.get(h))) { h = sj.prev.get(h); seen.add(h); } const out = [h]; while (sj.next.has(out[out.length - 1]) && !out.includes(sj.next.get(out[out.length - 1]))) out.push(sj.next.get(out[out.length - 1])); return out; };
+  const order = [];
+  if (sj.next.size) {
+    const byId = new Map(walls.map((x) => [x.m.id, x]));
+    const done = new Set();
+    for (const x of walls) {
+      if (done.has(x.m.id)) continue;
+      const chain = chainOf(x.m.id).filter((id) => byId.has(id));
+      for (const id of chain) done.add(id);
+      // the later pieces are worked out first, so the piece before a join can count the noggin bay across it
+      order.push(...[...chain].reverse().map((id) => byId.get(id)));
+      if (chain.length < 2) continue;
+      const info = chain.map((id) => {
+        const r = resolveWall(byId.get(id).m, ctx);
+        const Lt = Number(r.wall.widthMm) || 0;
+        const [a0, a1] = jPlan.frameAdj.get(id) || [0, 0];
+        return { id, Lt, L: Math.round((Lt + a0 + a1) * 10) / 10, c: r.wall.studCentresMm > 0 ? r.wall.studCentresMm : itemCentresMm, hoop: !r.wall.noHoopIron };
+      });
+      let a = 0;   // where the layout's grid falls on this piece (mm from its start)
+      for (let i = 0; i < info.length; i++) {
+        const p = info[i], lo = joinLayout.get(p.id) || {};
+        joinLayout.set(p.id, lo);
+        if (i === info.length - 1) break;
+        const q = info[i + 1], ql = {};
+        joinLayout.set(q.id, ql);
+        const same = Math.abs(p.c - q.c) < 0.5;
+        let aq = same ? (((a - p.L) % p.c) + p.c) % p.c : 0;
+        if (aq < 0.5 || p.c - aq < 0.5) aq = 0;
+        if (!same || aq === 0) { ql.start = { includeStart: false }; }                       // the join stud is the first piece's end stud
+        else {
+          lo.end = { includeEnd: false };                                                       // the layout runs on: no stud at the join
+          ql.start = q.L - aq > 1 ? { startOffsetMm: Math.round(aq * 10) / 10 } : { includeStart: false };
+        }
+        a = aq;
+      }
+      if (info.every((p) => p.hoop)) { hoopLenOf.set(info[0].id, info.reduce((s, p) => { const a = (jPlan.frameAdj && jPlan.frameAdj.get(p.id)) || [0, 0]; return s + p.Lt + a[0] + a[1]; }, 0)); for (const p of info.slice(1)) hoopLenOf.set(p.id, 0); }
+    }
+  } else order.push(...walls);
+  const firstNogOf = new Map();   // wall id -> its first noggin station (for the bay across a split join, counted on the piece before)
+  for (const { m } of studW && stockOk ? order : []) {
     const w = resolveWall(m, ctx);
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
     const tag = sink.wallTags.get(m.id) || w.label;
@@ -557,7 +634,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const myCornerStuds = jPlan.corners.filter((c) => c.studWallId === m.id).map((c) => ({ id: c.id, positionMm: c.studEnd === 0 ? c.offsetMm : L - c.offsetMm, label: "corner" }));
     const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
       openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true, junctionStuds: jStuds, cornerStuds: myCornerStuds,
-      ...(dropAt(0) ? { includeStart: false } : {}), ...(dropAt(1) ? { includeEnd: false } : {}) });
+      ...(joinLayout.get(m.id)?.start?.startOffsetMm ? joinLayout.get(m.id).start : dropAt(0) ? { includeStart: false } : joinLayout.get(m.id)?.start || {}),
+      ...(dropAt(1) ? { includeEnd: false } : joinLayout.get(m.id)?.end || {}) });
     const refused = studs.problems.filter((p) => p.code === "invalid_input");
     if (refused.length) {
       // e.g. overlapping openings: this wall gets no quantities, the other walls keep theirs, and the block holds every
@@ -598,6 +676,10 @@ function runWallFraming(mat, n, items, ctx, sink) {
       joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
     // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
     const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
+    // a split join: the bay from this piece's last stud to the next piece's first is ONE noggin, counted here
+    const nextPiece = sj.next.get(m.id);
+    if (nextPiece && firstNogOf.get(nextPiece) > 0.5) nogStations.push(L + firstNogOf.get(nextPiece));
+    if (sj.prev.has(m.id) && nogStations.length) firstNogOf.set(m.id, nogStations[0]);
     const blockSpaces = jTicks.length ? junctionLayout.filter((j) => !j.off && j.studs.some((x) => x.state === "added")).map((j) => ({ id: `junction-space:${j.id}`, xLeftMm: Math.max(j.blocks.xLeftMm, 0), xRightMm: Math.min(j.blocks.xRightMm, L) })).filter((o) => o.xRightMm > o.xLeftMm + 1) : [];
     const noggins = computeNoggins({ ...part("noggins"), wallId: m.id, stations: nogStations.map((x) => ({ positionMm: x, widthMm: studW })), ...wallNogginRows(H),
       openings: [...studs.layout.openings.map((o) => ({ id: o.id, xLeftMm: o.xLeftMm, xRightMm: o.xRightMm })), ...blockSpaces], skipClosedBays: true });
@@ -655,7 +737,8 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off. Counted in
     // ROLLS (a fraction of a roll per wall; the item adds the walls up and rounds once), the cross braces' hoop iron joins the same line.
-    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(L);   // Sam, 22 Nov 2026: hoop iron and bracing follow the FRAME length
+    // Sam, 22 Nov 2026: hoop iron and bracing follow the FRAME length (a split wall: the whole wall's frame, on its first piece)
+    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(hoopLenOf.has(m.id) ? hoopLenOf.get(m.id) : L);
     const hoopProduct = hoopIronProduct(rules.hoopIronProductId);
     const rollM = hoopIronRollM(rules, hoopProduct);
     const hoopIdentity = { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM };
