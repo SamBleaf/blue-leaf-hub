@@ -279,7 +279,7 @@ t("review fixes: short void-cut pieces get no mid-span row; bad row override is 
   const cross = layoutFloor({ outline: L, voids: [{ id: "v", name: "Hole", stair: true, points: [{ x: 2000, y: 1000 }, { x: 4000, y: 1000 }, { x: 4000, y: 3000 }, { x: 2000, y: 3000 }] }], rules: {} });
   assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
 });
-t("version: the calculation is stamped takeoff-calc@13 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
+t("version: the calculation is stamped takeoff-calc@14 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/); });
 
 // ── P1 owner decisions, 18 Nov 2026 (Sam approved all six recommendations) ──────────────────────────────────
 t("tolerance: a traced width within 5 mm over a centres multiple adds no truss; 6 mm over does", () => {

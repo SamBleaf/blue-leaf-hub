@@ -395,7 +395,7 @@ export function wallJunctionPlan(wallMeasurements, ctx, opts) {
     g.cals.set(m.calibrationId, cal);
     g.walls.push({ id: m.id, a: pointToMm(cal, o, m.points[0]), b: pointToMm(cal, o, m.points[1]) });
   }
-  const out = { junctions: [], corners: [], crossings: [], skipped: [] };
+  const out = { junctions: [], corners: [], crossings: [], skipped: [], frameAdj: new Map() };
   const differs = (p, q) => Math.abs(p - q) > 0.01 * Math.max(Math.abs(p), Math.abs(q), 1e-9);
   for (const g of groups.values()) {
     const cals = [...g.cals.values()];
@@ -403,6 +403,7 @@ export function wallJunctionPlan(wallMeasurements, ctx, opts) {
     if (conflict) { if (g.walls.length > 1) out.skipped.push({ documentId: g.documentId, pageIndex: g.pageIndex, wallIds: g.walls.map((w) => w.id) }); continue; }
     const r = findJunctions(g.walls, opts);
     out.junctions.push(...r.junctions); out.corners.push(...r.corners); out.crossings.push(...r.crossings);
+    for (const [id, adj] of Object.entries(r.frameAdj || {})) out.frameAdj.set(id, adj);
   }
   return out;
 }
@@ -438,6 +439,9 @@ const isPartIdentityProblem = (p) => p.code === "timber_identity_incomplete" && 
  *  - noggins on the counted studs, clear bay = gap less half of each bordering stud (the stud's thickness), 1 row at
  *    2,700 or under and 2 rows over, none in a bay that overlaps an opening or between touching studs; they share
  *    lengths across every wall of the item (one allocator call per material).
+ * Sam, 21 Nov 2026 (takeoff-calc@14): walls are traced on their centrelines, so each wall is framed over its FRAME extent,
+ * not its traced length: a butting wall stops at the face it meets, the corner-stud wall runs through to the outer face
+ * (findJunctions' frameAdj, docs/takeoff/WALL_JUNCTIONS_PLAN.md §0D). "First traced point" above means the frame's start.
  * Kings, jacks, trimmers and lintels are never counted (one plain note says so); an explicit framing detail on an
  * opening still adds its own members. A sloped, gable or outline wall, or one with no length or height, blocks the
  * item with a line naming it. Never a structural check.
@@ -480,8 +484,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   // enter the timber section", "Plates: the longest length must be at least 1,200 mm.")
   const stockOk = ["studs", "plates", "noggins"].every((k) => wallPartLongestOk(parts[k]));
   // Wall junctions: found from where the traced walls start and finish (same page, same scale), worked out afresh each time
-  const jPlan = studW && stockOk && rules.junctionStuds !== false ? wallJunctionPlan(walls.map((x) => x.m), ctx, { thicknessMm: Number(parts.studs.section?.depthMm) || 90, studWidthMm: studW, toleranceMm: Number(rules.junctionToleranceMm) > 0 ? Number(rules.junctionToleranceMm) : undefined,
-    cornersSwapped: Array.isArray(rules.cornersSwapped) ? rules.cornersSwapped : [] }) : { junctions: [], corners: [], crossings: [], skipped: [] };
+  // Sam, 21 Nov 2026: each wall's frame ends are worked out from the same plan (walls are traced on their centrelines), even
+  // with the junction studs switched off: a butting wall still stops at the face it butts, a corner wall still runs through
+  const jFull = studW && stockOk ? wallJunctionPlan(walls.map((x) => x.m), ctx, { thicknessMm: Number(parts.studs.section?.depthMm) || 90, studWidthMm: studW, toleranceMm: Number(rules.junctionToleranceMm) > 0 ? Number(rules.junctionToleranceMm) : undefined,
+    cornersSwapped: Array.isArray(rules.cornersSwapped) ? rules.cornersSwapped : [] }) : { junctions: [], corners: [], crossings: [], skipped: [], frameAdj: new Map() };
+  const jPlan = rules.junctionStuds !== false ? jFull : { junctions: [], corners: [], crossings: [], skipped: [], frameAdj: jFull.frameAdj };
   // one switch per junction (its id: butting wall + end + continuous wall); a key for a wall that no longer exists matches nothing
   const jOffKeys = new Set(Array.isArray(rules.junctionsOff) ? rules.junctionsOff : []);
   // a key saved by the first junction build named just the butting end ("b:0"): still honoured, but only where that end makes ONE junction
@@ -495,8 +502,13 @@ function runWallFraming(mat, n, items, ctx, sink) {
     sink.measProblems.set(m.id, w.problems.filter((p) => p !== "wall_incomplete"));
     const tag = sink.wallTags.get(m.id) || w.label;
     const block = (code, message, extra = {}) => sink.problems.push({ code, message, blocking: true, refs: [{ measurementId: m.id, ...extra }], ...(extra.missing ? { scope: "wall" } : {}) });
-    const L = w.wall.widthMm;
+    const Lt = w.wall.widthMm;   // the traced length (what the wall's own page says)
     const H = Number(w.wall.heightMm);
+    // Sam, 21 Nov 2026: the FRAME runs over [-adj0, Lt + adj1] of the traced line (a centreline trace stops short of the faces at a
+    // T and of the outer face at a through corner). Every position the framing gets is in frame coordinates (from the frame's start).
+    const [adj0, adj1] = (w.wall.kind === "rect" && Lt > 0 && jPlan.frameAdj.get(m.id)) || [0, 0];
+    const L = Lt > 0 ? Math.round((Lt + adj0 + adj1) * 10) / 10 : Lt;
+    const fx = (x) => Math.round((x + adj0) * 10) / 10;   // traced position -> frame position
     // HUB 031: this wall's own centres (wet area) beat the item's
     const wallCentres = w.wall.studCentresMm > 0 ? w.wall.studCentresMm : null;
     const centresMm = wallCentres ?? itemCentresMm;
@@ -514,7 +526,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       for (let k = 2; names.has(name); k++) name = `${base} (${k})`;
       names.add(name);
       nameOf.set(o.id, name);
-      return { id: o.id, label: name, xLeftMm: o.xMm, xRightMm: o.xMm + o.widthMm, sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.fullHeight ? { fullHeight: true } : {}), ...(o.detail ? { detail: o.detail } : {}) };
+      return { id: o.id, label: name, xLeftMm: fx(o.xMm), xRightMm: fx(o.xMm + o.widthMm), sillMm: o.sillMm, headMm: o.sillMm + o.heightMm, ...(o.fullHeight ? { fullHeight: true } : {}), ...(o.detail ? { detail: o.detail } : {}) };
     });
     // "Wall 2 W1: its head …" when the note starts with an opening, else "Wall 2: …"
     const onWall = (msg) => ([...names].some((nm) => msg.startsWith(`${nm}:`) || msg.startsWith(`${nm} `)) ? `${tag} ${msg}` : `${tag}: ${msg}`);
@@ -538,7 +550,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }) : openings;
     // the junctions where this wall is the continuous one: two studs each (unless removed by hand), cut at THIS wall's height
     const myJ = jPlan.junctions.filter((j) => j.continuousId === m.id);
-    const jStuds = myJ.filter((j) => !isOff(j)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: x, spaceMm: [j.studsAtMm[0], j.studsAtMm[1]], label: `butts ${jWallName(j.buttingId)}` })));
+    const jStuds = myJ.filter((j) => !isOff(j)).flatMap((j) => j.studsAtMm.map((x, i) => ({ id: `${j.id}#${i}`, positionMm: fx(x), spaceMm: [fx(j.studsAtMm[0]), fx(j.studsAtMm[1])], label: `butts ${jWallName(j.buttingId)}` })));
     // a T on the join of two collinear legs replaces the two leg-end studs there (the junction studs stand either side of the butting wall)
     const dropAt = (end) => myJ.some((j) => !isOff(j) && j.dropEnd === end);
     // owner rule B: the corner's second stud, from the wall's own first point (or its last, when the wall ENDS at the corner)
@@ -558,13 +570,13 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const jRep = new Map((studs.layout.junctionStuds || []).map((r) => [r.junctionId, r]));
     // what the wall page lists: every junction on this wall, counted or not (off = removed by hand)
     const junctionLayout = myJ.map((j) => {
-      const sts = j.studsAtMm.map((x, i) => ({ positionMm: x, state: isOff(j) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) }));
+      const sts = j.studsAtMm.map((x, i) => ({ positionMm: fx(x), state: isOff(j) ? "off" : jRep.get(`${j.id}#${i}`)?.state || "added", ...(jRep.get(`${j.id}#${i}`)?.mergedWithMm != null ? { mergedWithMm: jRep.get(`${j.id}#${i}`).mergedWithMm } : {}) }));
       // owner rule A: blocks in the space between the two junction studs, at 900 centres up THIS wall's height, while the junction is counted
       const here = j.ownsBlocks !== false && !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged");
-      const blocks = { count: blockCountFor(H), pairs: blockCountFor(H) / 2, lengthMm: JUNCTION_BLOCK.lengthMm, centresMm: blockCentresFor(H), xLeftMm: Math.round((j.stationMm - j.halfSpanMm) * 10) / 10, xRightMm: Math.round((j.stationMm + j.halfSpanMm) * 10) / 10, counted: here,
+      const blocks = { count: blockCountFor(H), pairs: blockCountFor(H) / 2, lengthMm: JUNCTION_BLOCK.lengthMm, centresMm: blockCentresFor(H), xLeftMm: fx(j.stationMm - j.halfSpanMm), xRightMm: fx(j.stationMm + j.halfSpanMm), counted: here,
         // drawn on every leg of a two-leg wall while the junction is on (counted on one only)
         shown: !isOff(j) && sts.some((x) => x.state === "added" || x.state === "merged" || x.state === "pastEnd") };
-      return { id: j.id, nodeId: j.nodeId, buttingId: j.buttingId, buttingLabel: jWallName(j.buttingId), stationMm: j.stationMm, angleDeg: j.angleDeg, split: j.split,
+      return { id: j.id, nodeId: j.nodeId, buttingId: j.buttingId, buttingLabel: jWallName(j.buttingId), stationMm: fx(j.stationMm), angleDeg: j.angleDeg, split: j.split,
         off: isOff(j), studs: sts, blocks };
     });
     const blockJ = junctionLayout.filter((j) => j.blocks.counted);
@@ -643,7 +655,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off. Counted in
     // ROLLS (a fraction of a roll per wall; the item adds the walls up and rounds once), the cross braces' hoop iron joins the same line.
-    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(L);
+    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(Lt);
     const hoopProduct = hoopIronProduct(rules.hoopIronProductId);
     const rollM = hoopIronRollM(rules, hoopProduct);
     const hoopIdentity = { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM };
@@ -654,7 +666,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     // Sam, 18 Nov 2026: bracing marks. Ply sheets follow the wall height; each cross brace = 2 diagonals of hoop iron + 2 tensioners.
     if (w.wall.bracing?.length) {
-      const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), L);
+      const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), Lt);
       const ref = [{ measurementId: m.id, wallId: m.id, role: "bracing" }];
       if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm, ripText: b.ply.ripText ? `${tag}: ${b.ply.ripText}` : null,
         identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}${b.ply.ripText ? ` (${b.ply.ripText})` : ""}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });
@@ -673,7 +685,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
       demands,
       // the stud wall layout (so the wall page keeps drawing the studs), plus this wall's plates, noggins and totals
       layout: { ...studs.layout, openings: studs.layout.openings.map((lo) => (ruled.has(lo.id) ? { ...lo, rule: ruled.get(lo.id) } : lo)),
-        method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm, centresFrom: wallCentres ? "wall" : "item", loadBearing: wallCarries,
+        method: "wall_framing@1", wallMeasurementId: m.id, wallLabel: tag, heightMm: H, centresMm,
+        // Sam, 21 Nov 2026: the frame's extent on the traced line (every position above is from the frame's start)
+        frame: { startMm: Math.round(-adj0 * 10) / 10 || 0, lengthMm: L, tracedLengthMm: Lt, endsMm: [adj0, adj1] }, centresFrom: wallCentres ? "wall" : "item", loadBearing: wallCarries,
         doubleTop, doubleTopFrom: w.wall.doubleTopPlate === null ? "item" : "wall", plateThickMm: plateThick,
         plates: plates.layout ? { layers } : null,
         noggins: noggins.layout ? { rows: noggins.layout.rows, rowsSource: noggins.layout.rowsSource, rowsRuleRef: noggins.layout.rowsRuleRef, bays: noggins.layout.bays } : null,
@@ -693,7 +707,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
       // with no framing detail always did: it is said on the Walls line and in a note, never a silent gap
       status: { quantity: three.every((r) => r.status.quantity === "calculated") && ![...ruled.values()].some((r) => ["unsized", "engineer"].includes(r.lintel.status)) ? "calculated" : "incomplete",
         installation: studs.status.installation, procurement: "draft" },
-      explain: [`${tag}: ${fmt(L)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],
+      explain: [`${tag}: ${fmt(Lt)} mm long, ${fmt(H)} mm high (stud cut = Wall height)`, ...(L !== Lt ? [`${tag}: frame ${fmt(L)} mm long (plates and studs run to the faces of the walls it meets)`] : []), ...(wallCentres ? [`${tag}: studs at ${fmt(wallCentres)} centres (this wall's own setting; the item's is ${fmt(itemCentresMm)})`] : []), ...studs.explain, ...plates.explain, ...noggins.explain],
     });
   }
   // a wall that could not be worked out (blocked: see its own problem) still gives its neighbours their junction studs and corner

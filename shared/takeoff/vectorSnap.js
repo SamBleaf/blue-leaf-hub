@@ -3,7 +3,7 @@
 //
 // extractSegments() reads a pdf.js operator list (constructPath ops) into straight segments in PDF USER SPACE (the
 // same y-up space measurements are stored in), applying the CTM. buildSnapIndex() merges collinear pieces, pairs
-// parallel segments a wall-thickness apart into wall faces + centrelines, and answers snap / match queries.
+// parallel segments the Walls item's wall thickness apart (T, its stud depth) into centrelines, and answers snap / match queries.
 // The index lives in memory per page only — never stored. All distances here are PDF units; callers convert to mm
 // with the calibration scale (mm per unit).
 // =============================================================================
@@ -157,12 +157,32 @@ export function dropHatch(lines, mmPerUnit, { bandMm = 400, maxSiblings = 6, sho
   return lines.filter((l) => !drop.has(l));
 }
 
+// ── Sam's rule (21 Nov 2026): walls are T thick (the Walls item's stud depth, 90 most of the time) and a tap snaps to the
+// CENTRELINE of the two lines T apart, never to whatever line or crossing happens to be nearest. ────────────────────────────
+
+/** Default wall thickness (mm) when the item has no stud depth. */
+export const DEFAULT_WALL_MM = 90;
+/** A pair of parallel lines is a wall when their spacing is within T - under … T + over (plasterboard lines drawn on a 90 frame). */
+export const WALL_PAIR_TOL_MM = Object.freeze({ under: 12, over: 25 });
+/** The two lines must run side by side for at least this long (short nibs beside a powder room door still count). */
+export const WALL_MIN_OVERLAP_MM = 300;
+/** A tap inside the pair, or this far outside either face, snaps onto the centreline. */
+export const WALL_CAPTURE_MARGIN_MM = 60;
+/** A centreline crossing (L / T / X) wins only when the tap is this close to it. */
+export const CORNER_REACH_MM = 150;
+/** Generic plan snap (Rectangle, Outline, runs): nearest point on a plan line within this. */
+export const LINE_REACH_MM = 60;
+/** Generic plan snap: a line end or two lines crossing win within this. */
+export const POINT_REACH_MM = 150;
+
 /**
- * Pair parallel lines a wall-thickness apart into wall faces + centrelines.
+ * Pair parallel lines T apart (within WALL_PAIR_TOL_MM) into walls with a centreline.
  * @param {number} mmPerUnit  plan scale (mm per PDF unit)
+ * @param {{ thicknessMm?:number, minLenMm?:number }} [o]
  */
-export function detectWalls(lines, mmPerUnit, { minThickMm = 70, maxThickMm = 340, minLenMm = 600 } = {}) {
-  const tMin = minThickMm / mmPerUnit, tMax = maxThickMm / mmPerUnit, minLen = minLenMm / mmPerUnit;
+export function detectWalls(lines, mmPerUnit, { thicknessMm = DEFAULT_WALL_MM, minLenMm = WALL_MIN_OVERLAP_MM } = {}) {
+  const T = Number(thicknessMm) > 0 ? Number(thicknessMm) : DEFAULT_WALL_MM;
+  const tMin = (T - WALL_PAIR_TOL_MM.under) / mmPerUnit, tMax = (T + WALL_PAIR_TOL_MM.over) / mmPerUnit, minLen = minLenMm / mmPerUnit;
   const byAng = new Map();
   for (const l of lines) {
     const k = Math.round(l.ang / ANG_STEP) % 720;
@@ -185,16 +205,18 @@ export function detectWalls(lines, mmPerUnit, { minThickMm = 70, maxThickMm = 34
       }
     }
   }
-  return dedupeWalls(walls);
+  return dedupeWalls(walls, T / mmPerUnit, 15 / mmPerUnit);
 }
 
-function dedupeWalls(walls) {
-  walls.sort((a, b) => b.len - a.len);
+/** One wall per centreline: of pairs that overlap on (nearly) the same centreline, the one closest to T, then the longest. */
+function dedupeWalls(walls, T, sameN) {
+  const fit = (w) => Math.round(Math.abs(w.thickness - T) / (sameN / 3));
+  walls.sort((a, b) => fit(a) - fit(b) || b.len - a.len);
   const kept = [];
   for (const w of walls) {
     let dup = false;
     for (const k of kept) {
-      if (Math.abs(k.ang - w.ang) > 0.01 || Math.abs(k.n - w.n) > 0.4) continue;
+      if (Math.abs(k.ang - w.ang) > 0.01 || Math.abs(k.n - w.n) > sameN) continue;
       if (Math.min(k.t1, w.t1) - Math.max(k.t0, w.t0) > 0.6 * w.len) { dup = true; break; }
     }
     if (!dup) kept.push(w);
@@ -206,32 +228,40 @@ function dedupeWalls(walls) {
 
 const CELL = 80; // PDF units per spatial-grid cell
 const wallDir = (w) => ({ x: Math.cos(w.ang), y: Math.sin(w.ang) });
-
-/**
- * Build the per-page snap index from merged lines (see mergeCollinear).
- * @param {object[]} lines     merged lines
- * @param {number} mmPerUnit   plan scale
- */
-export function buildSnapIndex(lines, mmPerUnit) {
-  const kept = dropHatch(lines, mmPerUnit, { maxSiblings: 8 });
-  const walls = detectWalls(kept, mmPerUnit);
+const gridKey = (cx, cy) => cx * 100003 + cy;
+function gridOf(items) {
   const grid = new Map();
-  const key = (cx, cy) => cx * 100003 + cy;
-  walls.forEach((w, i) => {
-    w.i = i;
+  for (const w of items) {
     const x0 = Math.floor(Math.min(w.ax, w.bx) / CELL), x1 = Math.floor(Math.max(w.ax, w.bx) / CELL);
     const y0 = Math.floor(Math.min(w.ay, w.by) / CELL), y1 = Math.floor(Math.max(w.ay, w.by) / CELL);
-    for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) { const k = key(cx, cy); (grid.get(k) || grid.set(k, []).get(k)).push(w); }
-  });
-  return { walls, mmPerUnit, grid, key };
+    for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) { const k = gridKey(cx, cy); (grid.get(k) || grid.set(k, []).get(k)).push(w); }
+  }
+  return grid;
 }
 
-function nearWalls(ix, p, r) {
+/**
+ * Build the per-page snap index from merged lines (see mergeCollinear): the walls T apart (for the Walls Line tool and
+ * Check against plan) and the plan's own lines, hatch dropped (for every other drawing tool). Built once per page and scale.
+ * @param {object[]} lines     merged lines
+ * @param {number} mmPerUnit   plan scale
+ * @param {{ thicknessMm?:number, walls?:boolean }} [o]  the Walls item's wall thickness (its stud depth; default 90); walls: false
+ *   skips the wall pairing (a tool that only snaps to lines)
+ */
+export function buildSnapIndex(lines, mmPerUnit, { thicknessMm = DEFAULT_WALL_MM, walls: findWalls = true } = {}) {
+  const T = Number(thicknessMm) > 0 ? Number(thicknessMm) : DEFAULT_WALL_MM;
+  const kept = dropHatch(lines, mmPerUnit, { maxSiblings: 8 });
+  const walls = findWalls ? detectWalls(kept, mmPerUnit, { thicknessMm: T }) : [];
+  walls.forEach((w, i) => { w.i = i; });
+  return { walls, lines: kept, mmPerUnit, thicknessMm: T, grid: gridOf(walls), lineGrid: gridOf(kept), key: gridKey };
+}
+
+function nearIn(grid, p, r) {
   const out = new Set();
   const x0 = Math.floor((p.x - r) / CELL), x1 = Math.floor((p.x + r) / CELL), y0 = Math.floor((p.y - r) / CELL), y1 = Math.floor((p.y + r) / CELL);
-  for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) for (const w of ix.grid.get(ix.key(cx, cy)) || []) out.add(w);
+  for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) for (const w of grid.get(gridKey(cx, cy)) || []) out.add(w);
   return [...out];
 }
+const nearWalls = (ix, p, r) => nearIn(ix.grid, p, r);
 
 const distSeg = (p, w) => {
   const dx = w.bx - w.ax, dy = w.by - w.ay, l2 = dx * dx + dy * dy || 1;
@@ -239,9 +269,15 @@ const distSeg = (p, w) => {
   const q = { x: w.ax + t * dx, y: w.ay + t * dy };
   return { q, d: Math.hypot(p.x - q.x, p.y - q.y) };
 };
+/** p relative to a wall's centreline: along (t, from the origin like w.t0/t1), across (signed), and its foot on the line. */
+function rel(w, p) {
+  const u = wallDir(w);
+  const t = p.x * u.x + p.y * u.y, across = -p.x * u.y + p.y * u.x - w.n;
+  return { t, across, foot: { x: -u.y * w.n + u.x * t, y: u.x * w.n + u.y * t } };
+}
 
-/** Where two wall centrelines cross (each extended by `ext`), or null. */
-function crossing(a, b, ext) {
+/** Where two lines cross (each extended by `ext` past its ends; Infinity = the whole line), or null. */
+function crossing(a, b, ext, extB = ext) {
   const ua = wallDir(a), ub = wallDir(b);
   const den = ua.x * ub.y - ua.y * ub.x;
   if (Math.abs(den) < 0.05) return null; // near-parallel
@@ -249,45 +285,81 @@ function crossing(a, b, ext) {
   const ta = (dx * ub.y - dy * ub.x) / den; // along a from a.a
   const tb = (dx * ua.y - dy * ua.x) / den;
   const la = Math.hypot(a.bx - a.ax, a.by - a.ay), lb = Math.hypot(b.bx - b.ax, b.by - b.ay);
-  if (ta < -ext || ta > la + ext || tb < -ext || tb > lb + ext) return null;
+  if (ta < -ext || ta > la + ext || tb < -extB || tb > lb + extB) return null;
   return { x: a.ax + ua.x * ta, y: a.ay + ua.y * ta };
+}
+const sameLine = (a, b, tol) => { let d = Math.abs(a.ang - b.ang); d = Math.min(d, Math.PI - d); return d < 0.02 && Math.abs(rel(a, { x: b.ax, y: b.ay }).across) < tol; };
+
+/**
+ * Where a Walls tap lands: on the CENTRELINE of a wall T thick (a tap inside the pair or within WALL_CAPTURE_MARGIN_MM of a
+ * face), or on a centreline crossing when the tap is within CORNER_REACH_MM of it. Never on a face, never on a stray line.
+ * @param {number} floorUnits  the screen-px floor, in PDF units (screen tolerance / zoom), so it still works zoomed out
+ * @param {{ prev?: { lines: object[] } | null }} [o]  the wall(s) the previous point of this run snapped to: a tap along one of
+ *   them stays on it (and ends on a crossing with a wall across it when near one)
+ * @returns {{x:number,y:number,kind:"corner"|"centre",lines:object[]}|null}
+ */
+export function snapPoint(ix, p, floorUnits = 0, { prev = null } = {}) {
+  if (!ix?.walls.length) return null;
+  const mm = ix.mmPerUnit, T = ix.thicknessMm / mm;
+  const capture = Math.max(T / 2 + WALL_CAPTURE_MARGIN_MM / mm, floorUnits);
+  const cornerReach = Math.max(CORNER_REACH_MM / mm, floorUnits);
+  const ext = T / 2 + WALL_CAPTURE_MARGIN_MM / mm;      // a centreline stops T/2 short of the crossing at an L or T
+  const near = nearWalls(ix, p, Math.max(capture, cornerReach) + ext);
+  const captured = (w, slack = WALL_CAPTURE_MARGIN_MM / mm) => { const r = rel(w, p); return Math.abs(r.across) <= capture && r.t >= w.t0 - slack && r.t <= w.t1 + slack ? r : null; };
+  const corner = (on, others, extOn = ext) => {
+    let best = null;
+    for (const a of on) for (const b of others) {
+      if (a === b) continue;
+      const c = crossing(a, b, extOn, ext);
+      if (!c) continue;
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d <= cornerReach && (!best || d < best.d)) best = { x: c.x, y: c.y, kind: "corner", lines: [a, b], d };
+    }
+    return best;
+  };
+  // sticky: the next point of a run, tapped along the wall the last point is on, stays on that wall's centreline
+  const along = (prev?.lines || []).filter((w) => Math.abs(rel(w, p).across) <= capture);
+  if (along.length) {
+    const w = along.sort((a, b) => Math.abs(rel(a, p).across) - Math.abs(rel(b, p).across))[0];
+    const c = corner([w], near.filter((o) => !sameLine(o, w, T / 4)), Infinity);
+    if (c) return { x: c.x, y: c.y, kind: c.kind, lines: c.lines };
+    const r = rel(w, p);
+    return { x: r.foot.x, y: r.foot.y, kind: "centre", lines: [w] };
+  }
+  const hits = near.map((w) => ({ w, r: captured(w) })).filter((h) => h.r);
+  // a crossing of two walls, at least one of them under the tap, within the corner reach
+  const c = corner(hits.length ? hits.map((h) => h.w) : near, near);
+  if (c) return { x: c.x, y: c.y, kind: c.kind, lines: c.lines };
+  if (!hits.length) return null;
+  hits.sort((a, b) => Math.abs(a.r.across) - Math.abs(b.r.across) || b.w.len - a.w.len);
+  const h = hits[0];
+  return { x: h.r.foot.x, y: h.r.foot.y, kind: "centre", lines: [h.w] };
 }
 
 /**
- * The best snap for a point: a centreline corner (crossing, then end) wins, then the nearest point on a centreline, then on a wall face.
- * @param {number} tolUnits  reach in PDF units (screen tolerance ÷ zoom)
- * @returns {{x:number,y:number,kind:"corner"|"centre"|"face"}|null}
+ * Generic plan snap for the other drawing tools (Rectangle, Outline, timber / flashing runs, floor outline, voids): a line end
+ * or two lines crossing within POINT_REACH_MM, else the nearest point on a plan line within LINE_REACH_MM (hatch dropped).
+ * @returns {{x:number,y:number,kind:"point"|"line"}|null}
  */
-export function snapPoint(ix, p, tolUnits) {
-  if (!ix?.walls.length) return null;
-  const maxT = ix.walls.reduce((m, w) => Math.max(m, w.thickness), 0);
-  const near = nearWalls(ix, p, tolUnits + maxT).filter((w) => distSeg(p, w).d <= tolUnits + w.thickness);
+export function snapGeneric(ix, p, floorUnits = 0) {
+  if (!ix?.lines?.length) return null;
+  const mm = ix.mmPerUnit;
+  const pointReach = Math.max(POINT_REACH_MM / mm, floorUnits), lineReach = Math.max(LINE_REACH_MM / mm, floorUnits);
+  const near = nearIn(ix.lineGrid, p, pointReach).map((l) => ({ l, ...distSeg(p, l) })).filter((x) => x.d <= pointReach).sort((a, b) => a.d - b.d).slice(0, 30);
   if (!near.length) return null;
   let best = null;
-  const take = (c, kind, rank) => {
-    const d = Math.hypot(c.x - p.x, c.y - p.y);
-    if (d > tolUnits) return;
-    if (!best || rank < best.rank || (rank === best.rank && d < best.d)) best = { x: c.x, y: c.y, kind, rank, d };
-  };
-  for (const w of near) { take({ x: w.ax, y: w.ay }, "corner", 0.5); take({ x: w.bx, y: w.by }, "corner", 0.5); }
-  for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const c = crossing(near[i], near[j], near[i].thickness / 2 + near[j].thickness / 2); if (c) take(c, "corner", 0); }
-  if (!best) for (const w of near) take(distSeg(p, w).q, "centre", 1);
-  if (!best) {
-    for (const w of near) {
-      const u = wallDir(w), nx = -u.y, ny = u.x;
-      for (const s of [-1, 1]) {
-        const off = (s * w.thickness) / 2;
-        const f = { ...w, ax: w.ax + nx * off, ay: w.ay + ny * off, bx: w.bx + nx * off, by: w.by + ny * off };
-        take(distSeg(p, f).q, "face", 2);
-      }
-    }
-  }
-  return best ? { x: best.x, y: best.y, kind: best.kind } : null;
+  const take = (q, kind) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d <= pointReach && (!best || d < best.d)) best = { x: q.x, y: q.y, kind, d }; };
+  for (const { l } of near) { take({ x: l.ax, y: l.ay }, "point"); take({ x: l.bx, y: l.by }, "point"); }
+  const tiny = 20 / mm;   // lines drawn just short of meeting still make a corner
+  for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const c = crossing(near[i].l, near[j].l, tiny); if (c) take(c, "point"); }
+  if (best) return { x: best.x, y: best.y, kind: best.kind };
+  const on = near[0];
+  return on.d <= lineReach ? { x: on.q.x, y: on.q.y, kind: "line" } : null;
 }
 
-/** Nearest centreline corner (crossing or end) to p within tolUnits, or null — used to land wall ends on corners. */
-function nearestCorner(ix, p, tolUnits) {
-  const s = snapPoint(ix, p, tolUnits);
+/** Nearest centreline crossing to p within the corner reach, or null — used to land wall ends on corners. */
+function nearestCorner(ix, p, floorUnits) {
+  const s = snapPoint(ix, p, floorUnits);
   return s && s.kind === "corner" ? s : null;
 }
 
@@ -327,7 +399,7 @@ export function matchTraced(ix, a, b, { nearMm = NEAR_PLAN_MM } = {}) {
   for (const [s0, s1] of spans) { const from = Math.max(s0, curEnd); if (s1 > from) covered += s1 - from; curEnd = Math.max(curEnd, s1); }
   if (covered < 0.5 * (hi - lo)) return none;
   const onLine = (q) => { const t = (q.x - best.ax) * bu.x + (q.y - best.ay) * bu.y; return { x: best.ax + bu.x * t, y: best.ay + bu.y * t }; };
-  const refine = (q) => { const pr = onLine(q); return nearestCorner(ix, pr, reach) || pr; };
+  const refine = (q) => { const pr = onLine(q); const c = nearestCorner(ix, pr, 0); return c ? { x: c.x, y: c.y } : pr; };
   const target = [refine(a), refine(b)];
   const offsetsMm = [Math.hypot(target[0].x - a.x, target[0].y - a.y) * mm, Math.hypot(target[1].x - b.x, target[1].y - b.y) * mm];
   const worst = Math.max(...offsetsMm);

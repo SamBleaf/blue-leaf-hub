@@ -144,7 +144,8 @@ t("openings without the field: results byte-identical to origin/main (and a type
     const mk = (ws) => JSON.stringify(ws.computeWorkspace(snap([walls(READY(), { ...WALL_FRAMING_RULES, ...rules })], ms, [onW("w")])));
     const a = mk(oldEngine), b = mk({ computeWorkspace });
     // the only permitted difference is the new "put it in the roof or floor frame" wording and the rule's position
-    const norm = (x) => x.replace(/Lower the window, or [^"]*?\./g, "L").replace(/"position":"underTopPlate",/g, "");
+    // (and, from takeoff-calc@14, the wall layout's own frame extent: a lone wall's frame is its traced length)
+    const norm = (x) => x.replace(/Lower the window, or [^"]*?\./g, "L").replace(/"position":"underTopPlate",/g, "").replace(/"frame":\{[^}]*\},/g, "");
     assert.equal(norm(b), norm(a)); n++;
   }
   assert.equal(n, 9);

@@ -93,7 +93,7 @@ await t("PDF: the site appendix has one floor layout page with the legend, summa
     assert.ok(fp.includes(s), `missing "${s}" on the floor page`);
   }
   assert.equal(RENDERER_VERSION, "takeoff-pdf@6");
-  assert.equal(CALCULATION_VERSION, "takeoff-calc@13", "the drawing adds no number, so the calculation version is unchanged");
+  assert.equal(CALCULATION_VERSION, "takeoff-calc@14", "the drawing adds no number, so the calculation version is unchanged");
 });
 
 console.log(`takeoff-tc-floor-p4: ${pass} passed, ${fail} failed`);

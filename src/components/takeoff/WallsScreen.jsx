@@ -640,19 +640,28 @@ function supportElements(entries, bbox, polygon) {
       });
       if (!l.lines.length) notes.push(`${e.material.name}: no support pieces on this wall yet — see the problems above.`);
     } else if (l.kind === "studWall") {
+      // Sam, 21 Nov 2026: a Walls frame is laid out from its own start, which can sit before or after the traced start (a wall
+      // traced on its centreline runs through a corner to the outer face, or stops at the face it butts): drawn on the traced wall
+      const f0 = e.layout.frame?.startMm || 0;
+      const l = f0 ? { ...e.layout, wallLengthMm: f0 + (e.layout.frame.lengthMm ?? e.layout.wallLengthMm),
+        ticks: (e.layout.ticks || []).map((t) => ({ ...t, framePositionMm: t.positionMm, positionMm: t.positionMm + f0 })),
+        openings: (e.layout.openings || []).map((o) => ({ ...o, xLeftMm: o.xLeftMm + f0, xRightMm: o.xRightMm + f0 })),
+        junctions: (e.layout.junctions || []).map((j) => (j.blocks ? { ...j, blocks: { ...j.blocks, xLeftMm: j.blocks.xLeftMm + f0, xRightMm: j.blocks.xRightMm + f0 } } : j)) } : e.layout;
+      const fStart = l.frame ? f0 : 0;
       const studDemands = new Map(demandsForWall(e.result, e.wallId, e.tag).filter((d) => d.role === "stud").map((d) => [d.sourceRefs?.[0]?.station, d]));
       for (const t of l.ticks || []) {
-        const d = studDemands.get(t.positionMm);
+        const at = t.framePositionMm ?? t.positionMm;   // from the frame's start: what the crew measures and the cut list says
+        const d = studDemands.get(at);
         const a = d ? alloc.get(d.id) : null;
         const opening = t.openingId ? e.openingLabel(t.openingId) : null;
         // HUB 028: a stud beside an opening (tick state "side") is a full stud, drawn and counted like the others
         const beside = (t.besideOpeningIds || []).map((id) => e.openingLabel(id));
         const span = spanAtX(polygon, t.positionMm) || { lo: bbox.y0, hi: bbox.y1 };
         items.push({
-          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : t.state === "junction" ? "junction" : t.state === "corner" ? "corner" : beside.length ? "king" : "full",
+          id: `${prefix}${t.stationId}`, kind: "line", state: t.state === "removed" ? "removed" : t.state === "junction" ? "junction" : t.state === "corner" ? "corner" : beside.length ? "king" : "full", frame: true,
           a: { x: t.positionMm, y: span.lo }, b: { x: t.positionMm, y: span.hi },
           info: {
-            title: t.state === "junction" ? `Junction stud @ ${fmtMm(t.positionMm)} mm${t.junctionLabel ? ` (${t.junctionLabel})` : ""}` : t.state === "corner" ? `Corner stud @ ${fmtMm(t.positionMm)} mm` : beside.length ? `King stud @ ${fmtMm(t.positionMm)} mm (beside ${beside.join(", ")})` : `Stud @ ${fmtMm(t.positionMm)} mm`,
+            title: t.state === "junction" ? `Junction stud @ ${fmtMm(at)} mm${t.junctionLabel ? ` (${t.junctionLabel})` : ""}` : t.state === "corner" ? `Corner stud @ ${fmtMm(at)} mm` : beside.length ? `King stud @ ${fmtMm(at)} mm (beside ${beside.join(", ")})` : `Stud @ ${fmtMm(at)} mm`,
             rows: t.state === "removed" ? [["Status", `Removed — inside ${opening || "an opening"}`]]
               : [["Cut length", `${fmtMm(d?.lengthMm ?? l.studLengthMm)} mm`], ["Stock", a?.unavailable ? `No stock fits — ${a.message}` : a?.stockLengthMm ? `${fmtMm(a.stockLengthMm)} mm length` : "—"], ...(l.plies > 1 ? [["Plies", String(l.plies)]] : [])],
             note: t.state === "removed" ? "Kings, jacks, trimmers and lintels come from the opening's framing detail — never guessed." : null,
@@ -661,9 +670,9 @@ function supportElements(entries, bbox, polygon) {
       }
       // Sam, 18 Nov 2026: a wall with a second top plate draws it along the top of the studs (this wall only)
       if (l.doubleTop && l.plateThickMm > 0 && l.heightMm > 0) {
-        const x1 = Math.min(bbox.x1, l.wallLengthMm ?? bbox.x1);
-        items.push({ id: `${prefix}top2`, kind: "rect", state: "plate2", rect: { x0: Math.max(bbox.x0, 0), x1, y0: bbox.y0 + l.heightMm - l.plateThickMm, y1: bbox.y0 + l.heightMm },
-          info: { title: "Second top plate", rows: [["Length", `${fmtMm(x1 - Math.max(bbox.x0, 0))} mm`]], note: l.doubleTopFrom === "wall" ? "This wall's own setting." : "From the item's Double top plate." } });
+        const x0 = l.frame ? fStart : Math.max(bbox.x0, 0), x1 = l.frame ? l.wallLengthMm : Math.min(bbox.x1, l.wallLengthMm ?? bbox.x1);
+        items.push({ id: `${prefix}top2`, kind: "rect", state: "plate2", frame: true, rect: { x0, x1, y0: bbox.y0 + l.heightMm - l.plateThickMm, y1: bbox.y0 + l.heightMm },
+          info: { title: "Second top plate", rows: [["Length", `${fmtMm(Math.round((x1 - x0) * 10) / 10)} mm`]], note: l.doubleTopFrom === "wall" ? "This wall's own setting." : "From the item's Double top plate." } });
       }
       // Sam, 18 Nov 2026: a lintel put up in the roof or floor frame is drawn above the top plate, dashed and labelled
       for (const o of l.openings || []) {
@@ -683,7 +692,7 @@ function supportElements(entries, bbox, polygon) {
       for (const j of l.junctions || []) {
         if (!j.blocks?.counted && !j.blocks?.shown) continue;
         // a wall traced in two legs: each leg draws the part of the block space that falls on it
-        const bx0 = Math.max(j.blocks.xLeftMm, 0), bx1 = Math.min(j.blocks.xRightMm, l.wallLengthMm ?? j.blocks.xRightMm);
+        const bx0 = Math.max(j.blocks.xLeftMm, fStart), bx1 = Math.min(j.blocks.xRightMm, l.wallLengthMm ?? j.blocks.xRightMm);
         if (!(bx1 > bx0)) continue;
         j.blocks.centresMm.forEach((c, i) => items.push({
           id: `${prefix}jb-${j.id}-${i}`, kind: "rect", state: "block",
@@ -693,6 +702,7 @@ function supportElements(entries, bbox, polygon) {
       }
       // the count stays by the drawing; what the studs cover ("base studs only …") is a note, under More. A Walls
       // item (HUB 028) never says "opening framing incomplete": its one plain lintels note, on the wall's line, says it
+      if (l.frame && Math.abs(l.frame.lengthMm - l.frame.tracedLengthMm) > 0.05) notes.push(`${e.material.name}: frame ${fmtMm(l.frame.lengthMm)} mm long (traced ${fmtMm(Math.round(l.frame.tracedLengthMm))} mm on the centreline; the plates run to the faces of the walls it meets).`);
       notes.push(`${e.material.name}: ${plural((l.ticks || []).filter((t) => t.state !== "removed" && t.state !== "junction").length, "stud")} at ${fmtMm(l.studLengthMm)} mm${(l.ticks || []).some((t) => t.state === "junction") ? `, plus ${plural((l.ticks || []).filter((t) => t.state === "junction").length, "junction stud")}` : ""}${(l.junctions || []).some((j) => j.blocks?.counted) ? `, ${plural((l.junctions || []).filter((j) => j.blocks?.counted).reduce((n, j) => n + j.blocks.count, 0), "junction block")}` : ""}.`);
       if (l.scope && l.method !== "wall_framing@1") about.push(`${e.material.name}: ${l.scope}.`);
     } else if (l.kind === "plates") {

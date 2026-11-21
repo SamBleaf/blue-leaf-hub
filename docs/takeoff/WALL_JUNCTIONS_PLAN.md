@@ -25,6 +25,20 @@
 
 Calculation version `takeoff-calc@8`: a saved order from before offers the one-tap update.
 
+**D. Walls traced on centrelines (Sam, 21 November 2026).** "The walls are 90 mm thick most of the time … we should be snapping to the centreline of the walls … this then has to be taken into account when looking at stud placements and wall junctions." Snap to plan now puts wall lines on the centreline (`shared/takeoff/vectorSnap.js`: pairs of lines T apart, T = the item's stud depth). A wall's line is taken as its centreline; each END may stop on the other wall's centreline, its near face or its far face, and the frame is worked out so all of these give the same timber:
+- `findJunctions` returns `frameAdj[wallId] = [start, end]`, mm added to the traced length at each end. With s = the end's signed offset from the other wall's centreline (positive toward this wall's body) and theta the angle between them:
+  - T, the butting wall: stops at the continuous wall's near face, `-(T/2 - s)/sin(theta)` (centreline trace -45, traced to the near face 0).
+  - L, the wall that takes the corner studs (rule B, `studWallId`, a swap moves it): runs through to the other wall's outer face, `+(T/2 + s)/sin(theta)`.
+  - L, the other wall: butts, `-(T/2 - s)/sin(theta)`.
+  - Free ends, X crossings, the join of two collinear legs, three or more walls at a point: 0. A wall that would be shorter than two studs keeps its traced length.
+- The frame runs over `[-start, L + end]` of the traced line. `runWallFraming` frames `L + start + end` and shifts every position it hands `computeStudWall` by `+start` (openings, junction studs and their spaces, block spaces, junction stations); the corner stud stays `thickness + studW/2` (112.5) from the frame end at that corner. Plates follow the frame length. Hoop iron and bracing still use the traced length.
+- The frame ends are worked out even with `junctionStuds: false` (a butting wall still butts).
+- Layout: `frame: { startMm, lengthMm, tracedLengthMm, endsMm }`; every position in the layout is from the frame's start. The wall page draws the frame on the traced wall (shifted by `startMm`), keeps the labels in frame terms and says the frame length when it differs.
+- Totals: at an L the two walls' plates sum as before (+a - a); at a T the butting wall loses `(T/2 - s)/sin(theta)`.
+- Limit: a wall traced along one FACE for its whole length (not just its ends) is read as if that face were its centreline, so its frame sits half a wall off along the walls it meets.
+
+Calculation version `takeoff-calc@14`.
+
 ---
 
 Sam: where one wall butts into a continuous wall, two extra studs trim both sides of the butting wall. Work out automatically, positioned from where walls start and finish on the takeoff.

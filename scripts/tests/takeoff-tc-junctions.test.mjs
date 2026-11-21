@@ -240,8 +240,9 @@ const L2 = (h = 2700) => wall("b", [5000, 0], [5000, 3000], h, "Wall 2");  // ST
 t("corner: the wall that STARTS at the corner gets the second stud at 112.5; the wall that ENDS has its normal end stud only (3 in all)", () => {
   const r = run([L1(), L2()]);
   const base = (id, m) => run([m]).lay(id).totals.studs;
-  assert.equal(r.lay("a").totals.studs, base("a", L1()));
-  assert.equal(r.lay("b").totals.studs, base("b", L2()) + 1);
+  // Sam, 21 Nov 2026 (centreline traces): a butts, so its frame is 4,955; b runs through to a's outer face, so its frame is 3,045
+  assert.equal(r.lay("a").totals.studs, base("a", wall("a", [0, 0], [4955, 0], 2700, "Wall 1")));
+  assert.equal(r.lay("b").totals.studs, base("b", wall("b", [5000, -45], [5000, 3000], 2700, "Wall 2")) + 1);
   assert.deepEqual(posOf(r.lay("b"), "corner"), [112.5]);
   assert.deepEqual(posOf(r.lay("a"), "corner"), []);
   assert.equal(r.lay("b").totals.cornerStuds, 1);
@@ -258,22 +259,22 @@ t("corner: wall traced the other way round (the other wall starts): the second s
   const r = run([wall("a", [5000, 0], [0, 0], 2700, "Wall 1"), wall("b", [5000, 0], [5000, 3000], 2700, "Wall 2")]);   // both START at the corner: longer (a) takes it
   assert.deepEqual(posOf(r.lay("a"), "corner"), [112.5]); assert.deepEqual(posOf(r.lay("b"), "corner"), []);
   const r2 = run([wall("a", [0, 0], [5000, 0], 2700, "Wall 1"), wall("b", [5000, 3000], [5000, 0], 2700, "Wall 2")]);   // both END: the longer (a, 5,000) again
-  assert.deepEqual(posOf(r2.lay("a"), "corner"), [5000 - 112.5]); assert.deepEqual(posOf(r2.lay("b"), "corner"), []);
+  assert.deepEqual(posOf(r2.lay("a"), "corner"), [5045 - 112.5]); assert.deepEqual(posOf(r2.lay("b"), "corner"), []);
 });
 t("corner: both walls START at it or both END at it: the LONGER wall gets the 2 studs (either way round)", () => {
   const start = (la, lb) => run([wall("a", [0, 0], [la, 0], 2700, "Wall 1"), wall("b", [0, 0], [0, lb], 2700, "Wall 2")]);
   assert.deepEqual(posOf(start(6000, 3000).lay("a"), "corner"), [112.5]); assert.deepEqual(posOf(start(6000, 3000).lay("b"), "corner"), []);
   assert.deepEqual(posOf(start(3000, 6000).lay("b"), "corner"), [112.5]); assert.deepEqual(posOf(start(3000, 6000).lay("a"), "corner"), []);
   const end = (la, lb) => run([wall("a", [6000 - la, 0], [6000, 0], 2700, "Wall 1"), wall("b", [6000, lb], [6000, 0], 2700, "Wall 2")]);
-  assert.deepEqual(posOf(end(5000, 3000).lay("a"), "corner"), [5000 - 112.5]); assert.deepEqual(posOf(end(5000, 3000).lay("b"), "corner"), []);
-  assert.deepEqual(posOf(end(3000, 5000).lay("b"), "corner"), [5000 - 112.5]); assert.deepEqual(posOf(end(3000, 5000).lay("a"), "corner"), []);
+  assert.deepEqual(posOf(end(5000, 3000).lay("a"), "corner"), [5045 - 112.5]); assert.deepEqual(posOf(end(5000, 3000).lay("b"), "corner"), []);
+  assert.deepEqual(posOf(end(3000, 5000).lay("b"), "corner"), [5045 - 112.5]); assert.deepEqual(posOf(end(3000, 5000).lay("a"), "corner"), []);
 });
 t("corner: the per-corner swap hands the second stud to the other wall, keyed by corner (not a wall)", () => {
   const first = run([L1(), L2()]);
   const id = first.lay("b").corners[0].id;
   assert.equal(id, first.lay("a").corners[0].id);
   const sw = run([L1(), L2()], { cornersSwapped: [id] });
-  assert.deepEqual(posOf(sw.lay("a"), "corner"), [5000 - 112.5]); assert.deepEqual(posOf(sw.lay("b"), "corner"), []);
+  assert.deepEqual(posOf(sw.lay("a"), "corner"), [5045 - 112.5]); assert.deepEqual(posOf(sw.lay("b"), "corner"), []);
   assert.equal(sw.lay("a").corners[0].swapped, true);
   assert.match(cornerText(sw.lay("a").corners[0], "this wall"), /swapped by hand/);
   // a key for a wall that no longer exists matches nothing and changes nothing
@@ -364,8 +365,69 @@ t("C5: removal is per junction (continuous wall + butting wall + end): one butti
   // a key for a wall that is gone matches nothing
   assert.equal(run(two, { junctionsOff: ["zz:0@yy"] }).lay("a").totals.junctionStuds, 2);
 });
-t("version: the calculation is stamped takeoff-calc@13 so saved orders offer an update", () => {
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/);
+// D: walls traced on their centrelines (Sam, 21 Nov 2026): the frame's ends are set to the walls they meet
+const fr = (la) => la.frame;
+const opOn = (parentId, xMm) => ({ id: `o-${parentId}`, kind: "opening", parentId, documentId: null, pageIndex: null, calibrationId: null, points: null, inputs: { type: "window", label: "W1", xMm, sillMm: 900, widthMm: 900, heightMm: 1200 } });
+t("D: pure: frameAdj for a centreline L (through +45, butting -45), a T (butting -45), and 140 walls (70)", () => {
+  const l = findJunctions([W("A", 0, 0, 5000, 0), W("B", 5000, 0, 5000, 3000)], O).frameAdj;
+  assert.deepEqual(l.A, [0, -45]); assert.deepEqual(l.B, [45, 0]);
+  const tj = findJunctions([W("A", 0, 0, 6000, 0), W("B", 3000, 0, 3000, 4000)], O).frameAdj;
+  assert.deepEqual(tj.B, [-45, 0]); assert.ok(!tj.A || (tj.A[0] === 0 && tj.A[1] === 0));
+  const wide = findJunctions([W("A", 0, 0, 6000, 0), W("B", 3000, 0, 3000, 4000)], { thicknessMm: 140, studWidthMm: 45 }).frameAdj;
+  assert.deepEqual(wide.B, [-70, 0]);
+  // free ends, X crossings and two collinear legs: nothing moves
+  const x = findJunctions([W("A", 0, 0, 6000, 0), W("B", 3000, -2000, 3000, 2000)], O).frameAdj;
+  assert.ok(!x.A && !x.B);
+  const legs = findJunctions([W("A1", 0, 0, 3000, 0), W("A2", 3000, 0, 6000, 0)], O).frameAdj;
+  assert.ok(!legs.A1 && !legs.A2);
+  // a 45 degree T: the butting wall stops (T/2)/sin(45) short
+  const ang = findJunctions([W("A", 0, 0, 6000, 0), W("B", 3000, 0, 5000, 2000)], O).frameAdj;
+  near(ang.B[0], -45 / Math.sin(Math.PI / 4), 0.11);
+});
+t("D: centreline L corner: the through wall runs +45 to the outer face, the butting wall stops -45, corner stud 112.5 from the frame start", () => {
+  const r = run([L1(), L2()]);
+  const a = r.lay("a"), b = r.lay("b");
+  assert.deepEqual([fr(b).startMm, fr(b).lengthMm, fr(b).tracedLengthMm], [-45, 3045, 3000]);
+  assert.deepEqual([fr(a).startMm, fr(a).lengthMm], [0, 4955]);
+  assert.deepEqual(posOf(b, "corner"), [112.5]);
+  // plates: the two walls together are the same as before (+45 - 45)
+  assert.equal(a.totals.bottomPlateMm + b.totals.bottomPlateMm, 8000);
+  assert.equal(b.totals.bottomPlateMm, 3045); assert.equal(a.totals.bottomPlateMm, 4955);
+});
+t("D: centreline T: the butting wall loses 45 at the T; the junction studs on the continuous wall are unchanged", () => {
+  const r = run([A(), B()]);
+  assert.deepEqual([fr(r.lay("b")).startMm, fr(r.lay("b")).lengthMm], [45, 2955]);
+  assert.equal(r.lay("b").totals.bottomPlateMm, 2955);
+  assert.deepEqual(posOf(r.lay("a"), "junction"), [2932.5, 3067.5]);
+  assert.equal(fr(r.lay("a")).lengthMm, 6000);
+});
+t("D: face-traced walls frame exactly like centreline-traced ones (T to the near face, L to the outer faces)", () => {
+  const phys = (la, y0) => [y0 + fr(la).startMm, fr(la).lengthMm];            // where the frame starts on the plan, and its length
+  const c = run([A(), B()]), f = run([A(), wall("b", [3000, 45], [3000, 3000], 2700, "Wall 2")]);
+  assert.deepEqual(phys(f.lay("b"), 45), phys(c.lay("b"), 0));
+  assert.deepEqual(posOf(f.lay("b"), "full"), posOf(c.lay("b"), "full"));
+  // L traced to the outer corner: a's end on b's outer face (5,045), b's start on a's outer face (-45)
+  const cl = run([L1(), L2()]);
+  const fl = run([wall("a", [0, 0], [5045, 0], 2700, "Wall 1"), wall("b", [5000, -45], [5000, 3000], 2700, "Wall 2")]);
+  assert.equal(fr(fl.lay("a")).lengthMm, fr(cl.lay("a")).lengthMm);
+  assert.deepEqual(phys(fl.lay("b"), -45), phys(cl.lay("b"), 0));
+  assert.deepEqual(posOf(fl.lay("b"), "corner"), posOf(cl.lay("b"), "corner"));
+  assert.equal(fl.lay("a").totals.bottomPlateMm + fl.lay("b").totals.bottomPlateMm, 8000);
+});
+t("D: openings stay in the same physical place (frame positions shift with the frame's start)", () => {
+  const c = run([A(), B(), opOn("b", 1000)]), f = run([A(), wall("b", [3000, 45], [3000, 3000], 2700, "Wall 2"), opOn("b", 955)]);
+  const ol = (r) => r.lay("b").openings.find((o) => o.id === "o-b");
+  assert.equal(ol(c).xLeftMm, 955); assert.equal(ol(f).xLeftMm, 955); assert.equal(ol(c).xRightMm, ol(f).xRightMm);
+  // and on a through wall the opening moves +45 in frame terms
+  const t2 = run([L1(), L2(), opOn("b", 1000)]);
+  assert.equal(ol(t2).xLeftMm, 1045);
+});
+t("D: with junction studs switched off the frame ends still follow the walls they meet", () => {
+  const r = run([A(), B()], { junctionStuds: false });
+  assert.equal(fr(r.lay("b")).lengthMm, 2955); assert.ok(!r.lay("a").totals.junctionStuds);
+});
+t("version: the calculation is stamped takeoff-calc@14 so saved orders offer an update", () => {
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/);
 });
 
 console.log(`takeoff-tc-junctions: ${pass} passed, ${fail} failed`);

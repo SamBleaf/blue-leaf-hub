@@ -197,7 +197,7 @@ t("engine: Structaflor is still the default main floor (floorMaterial unset)", (
   assert.equal(r.groups.find((g) => g.heading === "FLOORING").rows[0].product, "STRUCTAFLOR 3600x800x19");
   assert.ok(r.groups.find((g) => g.heading === "FLOORING ACCESSORIES").rows.some((x) => /MAX BOND/.test(x.product)));
 });
-t("version: takeoff-calc@13", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
+t("version: takeoff-calc@14", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/); });
 
 console.log(`takeoff-tc-floor-p3: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -36,22 +36,26 @@ export function mmPerUnitOf(cal) {
   return v > 0 ? v : null;
 }
 
-/** The snap index for a page at its scale: { ix, state: "off" | "loading" | "ready" | "none" | "error" }. */
-export function usePlanSnap({ doc, pageIndex, cal, enabled }) {
+/**
+ * The snap index for a page at its scale: { ix, state: "off" | "loading" | "ready" | "none" | "error" }.
+ * thicknessMm: the Walls item's wall thickness (its stud depth): walls are pairs of lines that far apart. walls: true for a
+ * Walls item ("ready" needs a wall found); any other tool snaps to the plan's lines ("ready" needs a line).
+ */
+export function usePlanSnap({ doc, pageIndex, cal, enabled, thicknessMm = 90, walls = false }) {
   const mm = mmPerUnitOf(cal);
   const mmKey = mm ? Math.round(mm * 1000) / 1000 : null;
   const [res, setRes] = useState({ ix: null, state: "off", key: null });
-  const key = enabled && doc && mmKey ? `${pageIndex}|${mmKey}` : null;
+  const key = enabled && doc && mmKey ? `${pageIndex}|${mmKey}|${thicknessMm}|${walls ? "w" : "l"}` : null;
   useEffect(() => {
     if (!key) return undefined;
     let stop = false;
     setRes((r) => (r.key === key ? r : { ix: null, state: "loading", key }));
     pageLines(doc, pageIndex).then((lines) => {
       if (stop) return;
-      const ix = buildSnapIndex(lines, mmKey);
-      setRes({ ix, state: ix.walls.length ? "ready" : "none", key });
+      const ix = buildSnapIndex(lines, mmKey, { thicknessMm, walls });
+      setRes({ ix, state: (walls ? ix.walls.length : ix.lines.length) ? "ready" : "none", key });
     }).catch(() => { if (!stop) setRes({ ix: null, state: "error", key }); });
     return () => { stop = true; };
-  }, [key, doc, pageIndex, mmKey]);
+  }, [key, doc, pageIndex, mmKey, thicknessMm, walls]);
   return key ? res : { ix: null, state: "off", key: null };
 }

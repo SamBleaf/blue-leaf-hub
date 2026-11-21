@@ -243,6 +243,7 @@ You do nothing to get these. The takeoff already knows where each wall starts an
 9. **Notes.** If a butting wall is blocked (for example it has no height yet) the continuous wall still gets its junction studs, and a note says which wall isn't counted. Two walls that cross each other (X) are flagged in a note and not counted. Three or more wall ends at one point get a note and no corner stud.
 10. **Moving a wall moves its junction.** Nothing is stored except your switches: every junction and corner is worked out again each time.
 11. **Walls with no plan points** (typed lengths) have no position, so they never form junctions or corners.
+12. **Walls traced on their centrelines (Sam, 21 November 2026).** With Snap to plan on, a wall's line runs down the middle of the wall on the plan, so the frame is not simply the traced length. At a T the butting wall stops at the continuous wall's face (45 mm short of the traced end on a 90 wall). At a corner the wall that gets the corner studs runs through to the other wall's outer face (45 mm longer) and the other wall stops at its face (45 mm shorter), so the two plates together are the same length. Studs, openings and junction studs are measured from the frame's own end. A wall traced to a face instead of the centreline frames the same. The wall page draws the frame on the traced wall and says "frame 3,045 mm long (traced 3,000 mm on the centreline …)" when the two differ. The plate lengths in the Walls line are the frame's.
 
 ## 5G. Floor frame (trusses, strongbacks, ring beams and stair trimmers)
 
@@ -757,8 +758,18 @@ Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 2. Trace a wall near a plan corner. The tapped end jumps to the centre of the plan wall (a corner when two walls cross) and a small green ring marks it for a moment. Tap the chip off: taps land exactly where you tap.
 3. Trace a few walls with the chip off, then tap **Check against plan** on the Walls card. Each wall shows its offset in mm at each end and **on plan** (20 mm or less), **near** (up to 100 mm) or **no match**. Nothing moves.
 4. Tap **Snap all near walls (n)**: those walls move onto the plan centrelines in one edit (a corner shared with a wall that stays follows it). Tap Undo once: all of them go back.
-5. Plan lines are read on the device and never saved. Layered or heavily hatched walls can show more than one candidate centreline; check the ring before you trust a snap.
+5. Plan lines are read on the device and never saved. Only pairs of lines a wall thickness apart count as walls (the Walls item's stud depth, 90 by default: 78 to 115 mm apart), so tile hatch, benches, joinery and dimension lines do not.
 6. Node: scripts/tests/takeoff-vector-snap.test.mjs.
+
+### TC-31b: Centreline snapping (Sam, 21 November 2026)
+
+1. On a Walls item with 90 x 45 studs, zoom into a powder room or ensuite on a vector plan. Tap anywhere inside a 90 wall, or just outside either face: the green ring sits on the middle of the wall (45 mm from each face), never on a tile line, bench front or fixture.
+2. Tap within about 150 mm of where two walls meet (L, T or X): the ring sits on the crossing of the two centrelines. Tap further along the wall: it stays on the centreline, it does not jump to the corner.
+3. Start a run on a corner and tap the next point further along the same wall, even through a doorway: it stays on that wall's centreline. Tap near a wall across it: the point lands on that crossing.
+4. Change the Walls item's stud depth to 140 and reopen the plan: only walls drawn 140 thick snap. Put it back to 90.
+5. Rectangle, Outline, a timber or flashing run, and the floor frame outline / stair void / wet area also snap: a tap within about 150 mm of a line end or corner lands on it, else within 60 mm of a line lands on the line. The same chip turns all of it off.
+6. Trace an L and a T on centrelines and open the wall pages: the wall that takes the corner studs reads a frame 45 mm longer than traced, the butting walls 45 mm shorter, and the corner stud sits 112.5 mm from the frame end. The junction studs on the continuous wall do not move.
+7. Node: scripts/tests/takeoff-vector-snap.test.mjs and scripts/tests/takeoff-tc-junctions.test.mjs (section D).
 
 ### Post-test checklist
 - [ ] All test cases passed

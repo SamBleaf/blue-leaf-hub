@@ -73,7 +73,7 @@ import { PointHandlesLayer } from "./PointHandles.jsx";
 import { partial } from "./changeset.js";
 import { Banner, Btn, FocusedWindow, NumberField, SaveChip, Sheet } from "./ui.jsx";
 import { usePlanSnap } from "./planVectors.js";
-import { matchTraced, snapPoint } from "../../../shared/takeoff/vectorSnap.js";
+import { matchTraced, snapGeneric, snapPoint } from "../../../shared/takeoff/vectorSnap.js";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
 import { COLORS, isFloorItem, withoutFloorBeams, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride , clearDoubleTopOverrides, doubleTopState, setAllDoubleTop, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop } from "./measure/tools.js";
@@ -267,9 +267,12 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }, [view.contributions]);
   const materialsById = useMemo(() => new Map(view.materials.map((m) => [m.id, m])), [view.materials]);
   const calsById = useMemo(() => new Map(view.calibrations.map((c) => [c.id, c])), [view.calibrations]);
-  // Snap to plan (Walls): the architect's own wall linework, read once per page and kept in memory (never saved).
+  // Snap to plan: the architect's own linework, read once per page and kept in memory (never saved). A Walls item snaps to
+  // the CENTRELINE of walls its stud depth thick (Sam, 21 Nov 2026: 90 most of the time); every other tool to the plan's lines.
   const wallsHere = isWallsItem(material);
-  const plan = usePlanSnap({ doc, pageIndex, cal, enabled: wallsHere && !!cal });
+  const wallThickMm = wallsHere ? Number(material?.spec?.components?.studs?.section?.depthMm) || 90 : 90;
+  const plan = usePlanSnap({ doc, pageIndex, cal, enabled: !!material && !!cal, thicknessMm: wallThickMm, walls: wallsHere });
+  const snapRunRef = useRef(null);                          // the wall(s) the last point of this run snapped to: { pt, lines }
   const [snapOn, setSnapOn] = useState(() => { try { return localStorage.getItem("takeoff.snapToPlan") !== "off"; } catch { return true; } });
   const toggleSnap = () => setSnapOn((v) => { const n = !v; try { localStorage.setItem("takeoff.snapToPlan", n ? "on" : "off"); } catch { /* per-device convenience only */ } return n; });
   const [snapMark, setSnapMark] = useState(null);          // the point the last tap snapped to, shown briefly
@@ -461,11 +464,15 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       const hit = completedOverflowHit(sp); // a finished run's red part: one tap splits it at the legal limit
       if (hit) { lastSplitTap.current = performance.now(); doSplitAtLimit({ measurement: hit.m }, hit.pieceIndex); return; }
     }
-    if (!onCorner && snapOn && mode === "line" && wallsHere && plan.state === "ready") {
-      // Snap to plan: a wall end lands on the nearest centreline corner / centreline / face within 12 px of the tap
-      const k = Math.hypot(toScreen({ x: 1, y: 0 }).x - toScreen({ x: 0, y: 0 }).x, toScreen({ x: 1, y: 0 }).y - toScreen({ x: 0, y: 0 }).y);
-      const sn = k > 0 ? snapPoint(plan.ix, at, SNAP_PX / k) : null;
-      if (sn && pointsWithinCalibration(cal, [sn])) { at = { x: sn.x, y: sn.y }; setSnapMark({ x: sn.x, y: sn.y, kind: sn.kind }); }
+    if (!onCorner) {
+      // Snap to plan: a Walls line lands on the wall's centreline (or a centreline crossing), staying on the wall the last
+      // point is on; any other run on a plan line end / crossing / line
+      const wallTool = mode === "line" && wallsHere;
+      const last = d?.points.length ? d.points[d.points.length - 1] : null;
+      const prev = wallTool && last && snapRunRef.current && Math.hypot(snapRunRef.current.pt.x - last.x, snapRunRef.current.pt.y - last.y) < 1e-6 ? snapRunRef.current : null;
+      const sn = planSnapAt(at, { wallTool, prev });
+      if (sn) at = { x: sn.x, y: sn.y };
+      if (wallTool) snapRunRef.current = sn?.lines ? { pt: at, lines: sn.lines } : null;
     }
     const err = guardDraw(at);
     if (err) { warn(err); return; }
@@ -476,7 +483,19 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     addVertexOp(d, res.points);
   }
 
-  function lineTap(p, sp) {
+  /** Snap to plan for a tap (the chip on): the snapped point (and the green ring), or null to keep the tap as it is. */
+  function planSnapAt(p, { wallTool = false, prev = null } = {}) {
+    if (!snapOn || plan.state !== "ready" || !plan.ix || !cal) return null;
+    const floor = SNAP_PX / pxPerUnit();
+    const sn = wallTool ? snapPoint(plan.ix, p, floor, { prev }) : snapGeneric(plan.ix, p, floor);
+    if (!sn || !pointsWithinCalibration(cal, [sn])) return null;
+    setSnapMark({ x: sn.x, y: sn.y, kind: sn.kind });
+    return sn;
+  }
+
+  function lineTap(tap, sp) {
+    const sn = planSnapAt(tap);
+    const p = sn ? { x: sn.x, y: sn.y } : tap;
     const err = guardDraw(p);
     if (err) { warn(err); return; }
     const cur = draftRef.current;
@@ -573,7 +592,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (shapeNeedsScale()) return;
     const err = guardDraw(tap);
     if (err) { warn(err); return; }
-    const p = cornerAt(tap);
+    const sn = planSnapAt(tap);   // a plan corner / line, else the nearest 10 mm
+    const p = sn ? { x: sn.x, y: sn.y } : cornerAt(tap);
     const cur = draftRef.current;
     const d = cur?.tool === "rect" && cur.points.length ? cur : null;
     if (!d) { record({ draftBefore: cur ?? null, draftAfter: { tool: "rect", points: [p], splitsMm: [], measurementId: null } }); setMsg(null); setLastDone(null); return; }
@@ -591,7 +611,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     if (shapeNeedsScale()) return;
     const err = guardDraw(tap);
     if (err) { warn(err); return; }
-    const p = cornerAt(tap);
+    const sn = planSnapAt(tap);
+    const p = sn ? { x: sn.x, y: sn.y } : cornerAt(tap);
     const cur = draftRef.current;
     const d = cur?.tool === "area" ? cur : null;
     const pts = d?.points || [];
@@ -1721,9 +1742,9 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             {onPage && <Btn kind="ghost" className="min-w-[44px] shrink-0" onClick={changePage} aria-label={`Page ${pageIndex + 1}: measure on another page`} data-page-chip="">Page {pageIndex + 1} ▾</Btn>}
             <Btn kind="ghost" className="min-w-[44px] shrink-0" onClick={() => setLayersOpen((v) => !v)} aria-expanded={layersOpen} aria-haspopup="true"
               aria-label="Show or hide takeoffs on the plan" data-layers-button="">Takeoffs{hiddenHere.length ? ` (${hiddenHere.length} hidden)` : ""} ▾</Btn>
-            {wallsHere && cal && plan.state !== "off" && (
+            {cal && plan.state !== "off" && (
               <button type="button" onClick={toggleSnap} aria-pressed={snapOn && plan.state === "ready"} disabled={plan.state !== "ready"} data-snap-chip=""
-                title={plan.state === "none" ? "No wall lines found on this page" : plan.state === "loading" ? "Reading the plan…" : undefined}
+                title={plan.state === "none" ? (wallsHere ? `No ${wallThickMm} mm walls found on this page` : "No lines found on this page") : plan.state === "loading" ? "Reading the plan…" : undefined}
                 className={`min-h-[44px] shrink-0 rounded-full border px-3 text-xs font-medium disabled:opacity-50 ${snapOn && plan.state === "ready" ? "border-primary bg-primary/10 text-primary" : "border-hairline text-ink"}`}>
                 {plan.state === "loading" ? "Snap to plan…" : "Snap to plan"}</button>
             )}

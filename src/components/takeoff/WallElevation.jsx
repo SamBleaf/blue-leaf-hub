@@ -115,7 +115,9 @@ export default function WallElevation({
     // the drawing also shows any opening that sticks out past the wall (the engine clips it for areas)
     const ext = bboxOf([...polygon, ...openings.flatMap((o) => [{ x: o.xMm, y: o.sillMm }, { x: o.xMm + o.widthMm, y: o.sillMm + o.heightMm }])
       .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
-      ...items.filter((it) => it.kind === "rect" && it.state === "lintelAloft").flatMap((it) => [{ x: it.rect.x0, y: it.rect.y0 }, { x: it.rect.x1, y: it.rect.y1 }])]);
+      ...items.filter((it) => it.kind === "rect" && it.state === "lintelAloft").flatMap((it) => [{ x: it.rect.x0, y: it.rect.y0 }, { x: it.rect.x1, y: it.rect.y1 }]),
+      // a Walls frame that runs through a corner past the traced end (Sam, 21 Nov 2026): its end stud stays in view
+      ...items.filter((it) => it.frame && it.kind === "line").flatMap((it) => [{ x: it.a.x, y: bb.y0 }, { x: it.b.x, y: bb.y0 }])]);
     const ew = Math.max(ext.x1 - ext.x0, 1), eh = Math.max(ext.y1 - ext.y0, 1);
     const availW = Math.max(width - PAD.l - PAD.r, 40), availH = Math.max(maxHeightPx - PAD.t - PAD.b, 60);
     const fit = Math.min(availW / ew, availH / eh);

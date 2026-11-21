@@ -16,6 +16,17 @@
 //      Both start or both end: the LONGER wall gets the second stud. A per-corner override swaps which wall. Collinear joins
 //      (under the angle test) are not corners and are not reported.
 //   X  two walls cross each other's runs. Reported only; never counted.
+//
+// Frame ends (Sam, 21 Nov 2026: walls are snapped to their CENTRELINES, so the frame can't simply run the traced length).
+// A wall's line is taken as its centreline; each END may stop on the other wall's centreline, its near face or its far face.
+// frameAdj[wallId] = [start, end]: mm to ADD to the traced length at that end (negative = shorter), so the frame runs over
+// [-start, L + end] in traced coordinates. With s = the end's signed offset from the other wall's centreline (positive toward
+// this wall's body) and theta the angle between them:
+//   T, the butting wall's end            stops at the continuous wall's near face: -(T/2 - s)/sin(theta)
+//   L, the wall with the corner studs    runs THROUGH to the other wall's outer face: +(T/2 + s)/sin(theta)
+//   L, the other wall                    butts: stops at the through wall's near face: -(T/2 - s)/sin(theta)
+//   free ends, X crossings, the join of two collinear legs, a corner of 3+ walls: 0.
+// So a centreline trace (s = 0) and a trace to either face frame the same timber. Plan §9.
 // =============================================================================
 
 /** Defaults Sam confirms (plan §3). */
@@ -63,7 +74,7 @@ function prep(w) {
  *   thicknessMm: the wall thickness (the stud's depth, 90); studWidthMm: the stud's width along the wall (45).
  *   toleranceMm: how far a wall's end may sit off another wall's centreline and still meet it (default: the thickness,
  *   so an end traced to either face of the plan's wall counts).
- * @returns {{ junctions: object[], corners: object[], crossings: object[] }}
+ * @returns {{ junctions: object[], corners: object[], crossings: object[], frameAdj: Object<string, [number, number]> }}
  *   junction: { id, nodeId, kind:"T", continuousId, buttingId, end:0|1, stationMm, angleDeg, halfSpanMm, split, dropEnd, studsAtMm:[left,right] }
  *   (stations run along the continuous wall from its first point; id = `${buttingId}:${end}@${continuousId}` and is the override key;
  *   a wall traced in two legs gives one junction per leg with the SAME id `${buttingId}:${end}@${leg1}+${leg2}`; dropEnd = which end of
@@ -82,6 +93,8 @@ export function findJunctions(walls, o = {}) {
 
   const junctions = [];
   const seenJ = new Set();
+  const frameAdj = {};   // wallId -> [start, end] mm added to the traced length at each end (see the header)
+  const setAdj = (id, e, v) => { const a = frameAdj[id] || (frameAdj[id] = [0, 0]); if (!a[e]) a[e] = r1(v); };
   const addT = (A, B, e, p, split, legs = null, dropEnd = null) => {
     const sinT = Math.abs(cross(A.u, B.u));
     if (sinT < minSin) return;
@@ -94,6 +107,9 @@ export function findJunctions(walls, o = {}) {
     const s = split ? dot(sub(p, A.a), A.u) : dot(sub(q, A.a), A.u);
     const halfSpan = thick / 2 / sinT;
     const d = halfSpan + studW / 2;
+    // the butting wall's frame stops at A's near face (s: B's end off A's centreline, positive toward B's body)
+    const sOff = cross(A.u, sub(p, A.a)) * Math.sign(cross(A.u, dB) || 1);
+    setAdj(B.id, e, -(thick / 2 - sOff) / sinT);
     // one override key per junction: butting wall + its end + the continuous wall (a two-leg wall: both legs, so they switch together)
     const id = `${B.id}:${e}@${legs ? legs.join("+") : A.id}`;
     const seenKey = `${id}|${A.id}`;
@@ -161,6 +177,11 @@ export function findJunctions(walls, o = {}) {
     else { pick = W1.L > W2.L + EPS ? [W1, f1] : W2.L > W1.L + EPS ? [W2, f2] : (W1.id < W2.id ? [W1, f1] : [W2, f2]); why = "longer"; }
     const isSwapped = swapped.has(id);
     if (isSwapped) pick = pick[0] === W1 ? [W2, f2] : [W1, f1];
+    // frame ends: the wall with the corner studs runs through to the other's outer face, the other butts against it
+    const [P, fp] = pick, [Q, fq] = pick[0] === W1 ? [W2, f2] : [W1, f1];
+    const offFrom = (X, fx, Y) => cross(Y.u, sub(endPt(X, fx), Y.a)) * Math.sign(cross(Y.u, awayDir(X, fx)) || 1);
+    setAdj(P.id, fp, (thick / 2 + offFrom(P, fp, Q)) / sinC);
+    setAdj(Q.id, fq, -(thick / 2 - offFrom(Q, fq, P)) / sinC);
     corners.push({ ...base, angleDeg: r1((Math.asin(Math.min(1, sinC)) * 180) / Math.PI), studWallId: pick[0].id, studEnd: pick[1], why, swapped: isSwapped, multi: false });
   }
 
@@ -184,5 +205,7 @@ export function findJunctions(walls, o = {}) {
     const owner = [...list].sort((p, q) => Number(onLeg(q)) - Number(onLeg(p)) || (p.continuousId < q.continuousId ? -1 : 1))[0];
     for (const j of list) j.ownsBlocks = j === owner;
   }
-  return { junctions, corners, crossings };
+  // a wall too short to frame after its ends move (a stub between two walls) keeps its traced length
+  for (const w of ws) { const a = frameAdj[w.id]; if (a && !(w.L + a[0] + a[1] > 2 * studW)) frameAdj[w.id] = [0, 0]; }
+  return { junctions, corners, crossings, frameAdj };
 }

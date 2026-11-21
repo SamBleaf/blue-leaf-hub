@@ -86,7 +86,7 @@ t("legacy: an item saved with doubleTopPlate: true and no per-wall key keeps EVE
   assert.deepEqual(plain.c.scheduleLines.map((l) => [l.component, l.quantity, l.finishedLengthMm]), keyed.c.scheduleLines.map((l) => [l.component, l.quantity, l.finishedLengthMm]));
 });
 t("CALCULATION_VERSION is NOT bumped: no existing record gets a different count (the new key is absent on all of them)", () => {
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@13/);
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@14/);
   const before = run([wm("a", 5000), wm("b", 2400)], { doubleTopPlate: true });
   assert.equal(before.lay("a").totals.secondTopPlateMm, 5000);
   assert.equal(before.lay("b").totals.secondTopPlateMm, 2400);
@@ -140,7 +140,8 @@ t("a T junction and an L corner: studs, junction studs, junction blocks, corner 
   assert.ok(plain.layouts.find((l) => l.wallMeasurementId === "a").totals.junctionStuds > 0, "the T is really there");
   assert.ok(plain.layouts.some((l) => (l.corners || []).length), "the corner is really there");
   const a = dbl.layouts.find((l) => l.wallMeasurementId === "a");
-  assert.equal(a.totals.secondTopPlateMm, 6000);
+  // takeoff-calc@14 (centreline traces): a ENDS at the corner with c, which starts there and runs through, so a butts: 6,000 - 45
+  assert.equal(a.totals.secondTopPlateMm, 5955);
 });
 
 // ── the Select tool's helpers (what the chip does) ──────────────────────────────────────────────────────────

@@ -213,7 +213,7 @@ t("engine: a wet area outside the outline makes the order Incomplete with a plai
   assert.equal(r.res.status.quantity, "incomplete");
   assert.ok(r.res.problems.some((p) => p.code === "floor_wet_outside" && p.blocking && /outside the floor outline/.test(p.message)));
 });
-t("version: the calculation is stamped takeoff-calc@13 (a floor with an outline now gains a sheet count, so saved orders offer an update)", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
+t("version: the calculation is stamped takeoff-calc@14 (a floor with an outline now gains a sheet count, so saved orders offer an update)", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/); });
 
 console.log(`takeoff-tc-floor-sheets: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
