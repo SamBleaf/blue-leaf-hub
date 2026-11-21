@@ -90,6 +90,13 @@ function packSheets(lengths, sheetLengthMm) {
  * @returns {object|null} null when there is no main floor to sheet
  */
 export function layoutSheets(input) {
+  // Sam, 22 Nov 2026: control joints on the whole-panel grid OR evenly spaced, whichever lays the floor with fewer panels
+  if (!input.cjMode) {
+    const grid = layoutSheets({ ...input, cjMode: "grid" });
+    if (!grid || !grid.controlJoints?.length) return grid;
+    const even = layoutSheets({ ...input, cjMode: "even" });
+    return even && even.packedSheets < grid.packedSheets ? even : grid;
+  }
   const rules = input.rules || {};
   const problems = [];
   const note = (code, message) => problems.push({ code, message, blocking: false });
@@ -143,11 +150,24 @@ export function layoutSheets(input) {
   let cjMm = 0;
   if (cjLimit) {
     const cjU = new Set(), cjV = new Set();
+    // Sam, 22 Nov 2026: a joint across the trusses goes on a WHOLE-PANEL multiple from the start of the run (Hebel: every 3 panels,
+    // 5,400, under the 6.0 m limit), so the panels between joints are whole and no short, unusable offcut is made at each joint.
+    // Evenly spaced joints (the first version) cut a panel at every joint. Falls back to even spacing where no truss line is on the grid.
+    const stepMm = input.cjMode === "even" ? 0 : Math.floor(cjLimit / L) * L;
     for (const row of rows) for (const [a, b] of row.segments) if (b - a > cjLimit + 1) {
+      const inRun = us.filter((q) => q > a + 1 && q < b - 1);
       const n = Math.ceil((b - a) / cjLimit - 1e-9) - 1;
+      const onGrid = [];
+      for (let k = 1; stepMm > 0 && a + k * stepMm < b - MIN_END + 1e-6; k++) {
+        const t = a + k * stepMm;
+        const x = inRun.find((q) => Math.abs(q - t) < 2);
+        if (x === undefined) { onGrid.length = 0; break; }
+        onGrid.push(x);
+      }
+      if (onGrid.length && b - onGrid[onGrid.length - 1] <= cjLimit + 1) { for (const x of onGrid) cjU.add(x); continue; }
       for (let k = 1; k <= n; k++) {
         const t = a + ((b - a) * k) / (n + 1);
-        const x = us.filter((q) => q > a + 1 && q < b - 1).sort((p, q) => Math.abs(p - t) - Math.abs(q - t) || p - q)[0];
+        const x = inRun.sort((p, q) => Math.abs(p - t) - Math.abs(q - t) || p - q)[0];
         if (x !== undefined) cjU.add(x);
       }
     }
@@ -191,12 +211,12 @@ export function layoutSheets(input) {
   }
 
   // fill: joints on truss lines, alternate starts, adjacent rows at least STAGGER apart
-  const fill = (a, b, usArr, prevArr, startHalf) => {
+  const fill = (a, b, usArr, prevArr, startHalf, startLen = null) => {
     const own = [];
     let pos = a, first = true, off = 0, close = 0;
     const passes = (x) => prevArr.every((p) => Math.abs(p - x) >= STAGGER - 1e-6);
     while (b - pos > L + ROW_TOLERANCE_MM) {
-      const target = pos + (first && startHalf ? HALF : L);
+      const target = pos + (first && startLen ? startLen : first && startHalf ? HALF : L);
       let cands = usArr.filter((x) => x >= pos + MIN_END - 1e-6 && x <= Math.min(pos + L, b - MIN_END) + 1e-6);
       if (!cands.length) cands = usArr.filter((x) => x > pos + 1 && x <= Math.min(pos + L, b - 1) + 1e-6);
       let x;
@@ -227,16 +247,21 @@ export function layoutSheets(input) {
       // a sheet end beside a void or wet edge that is not on a truss line needs blocking there
       for (const e of [a, b]) if (!outlineEnds.some((o) => Math.abs(o - e) < 2) && !us.some((x) => Math.abs(x - e) < 2)) openingEnds++;
       // Hebel tries four lay-outs (half or full first panel, from either end) and keeps the one with the fewest bad joints, then the fewest cut panels
-      const tries = kind === "hebel" ? [[true, false], [true, true], [false, false], [false, true]] : [[parityB, false]];
+      // Sam, 22 Nov 2026 (Hebel came in ~25 panels high): also try every first-panel length on the truss grid (2 truss spaces up to a
+      // full panel), and score the lay-outs by the panel length that CAN'T be reused (a Hebel offcut under 2 truss spaces is waste)
+      const firstLens = kind === "hebel" && centres > 0 ? Array.from({ length: Math.floor(L / centres) }, (_, i) => (i + 1) * centres).filter((x) => x >= MIN_END - 1e-6 && x < L - 1e-6) : [];
+      const tries = kind === "hebel" ? [[true, false], [true, true], [false, false], [false, true], ...firstLens.flatMap((f) => [[false, false, f], [false, true, f]])] : [[parityB, false]];
       let best = null;
-      tries.forEach(([half, mir], idx) => {
-        let r = fill(a, b, us, prev, half);
-        if (mir) { const q = fill(-b, -a, negUs, prev.map((x) => -x), half); r = { ...q, own: q.own.map((x) => -x).sort((p, s) => p - s) }; }
+      tries.forEach(([half, mir, startLen], idx) => {
+        let r = fill(a, b, us, prev, half, startLen);
+        if (mir) { const q = fill(-b, -a, negUs, prev.map((x) => -x), half, startLen); r = { ...q, own: q.own.map((x) => -x).sort((p, s) => p - s) }; }
         const cuts = [a, ...r.own, b];
         const lens = cuts.slice(1).map((c, i) => c - cuts[i]);
         const bad = r.own.filter((x) => !prev.every((p) => Math.abs(p - x) >= STAGGER - 1e-6)).length + r.off;
         const short = r.own.length ? lens.filter((l) => l < MIN_END - 1).length : 0;
-        const score = [bad, short, lens.filter((l) => l < L - PACK_FIT_TOLERANCE_MM).length, idx];
+        // Hebel: the offcut of a cut panel is only reusable when it is at least the shortest piece allowed
+        const waste = kind === "hebel" ? Math.round(lens.filter((l) => l < L - PACK_FIT_TOLERANCE_MM).reduce((t, l) => t + (L - l < MIN_END - 1 ? L - l : 0), 0)) : 0;
+        const score = [bad, short, waste, lens.filter((l) => l < L - PACK_FIT_TOLERANCE_MM).length, idx];
         const lower = !best || (() => { for (let q = 0; q < score.length; q++) if (score[q] !== best.score[q]) return score[q] < best.score[q]; return false; })();
         if (lower) best = { score, r };
       });
@@ -254,10 +279,6 @@ export function layoutSheets(input) {
 
   if (openingEnds) note("floor_sheet_opening_edge", `${openingEnds} sheet end${openingEnds === 1 ? "" : "s"} beside a stair void or wet area ${openingEnds === 1 ? "isn't" : "aren't"} on a truss line. Add blocking under ${openingEnds === 1 ? "it" : "them"} on site.`);
 
-  if (closeJoints) note("floor_sheet_stagger", `${closeJoints} sheet joint${closeJoints === 1 ? " is" : "s are"} under ${STAGGER_MIN_MM} mm from the joint in the next row: this outline leaves no better truss line. Check the layout on site.`);
-  if (offTruss) note("floor_sheet_joint_off_truss", `${offTruss} sheet joint${offTruss === 1 ? " has" : "s have"} no truss line to land on at this centres. Check the layout on site.`);
-
-  if (openingEnds) note("floor_sheet_opening_edge", `${openingEnds} sheet end${openingEnds === 1 ? "" : "s"} beside a stair void or wet area ${openingEnds === 1 ? "isn't" : "aren't"} on a truss line. Add blocking under ${openingEnds === 1 ? "it" : "them"} on site.`);
 
   // counting
   const ripped = (p) => p.widthMm < W - ROW_TOLERANCE_MM;

@@ -128,15 +128,15 @@ t("Structaflor: Max Bond = bead under every sheet on each truss + tongues + butt
 });
 
 // ── control joints (length rule only) ────────────────────────────────────────────────────────────────────────
-t("Hebel: a 7.5 m run across the trusses gets one control joint at the nearest truss line, 10 mm backing rod, and sheets stop at it", () => {
+t("Hebel: a 7.5 m run across the trusses gets one control joint on the whole-panel grid (Sam 22 Nov: 3 panels = 5,400), 10 mm backing rod, and sheets stop at it", () => {
   const r = go(rect(7500, 4200), { floorMaterial: "hebel" });
   const s = r.layout.sheets;
   assert.equal(s.controlJoints.length, 1);
   const c = s.controlJoints[0];
-  assert.equal(Math.round(c.a.x), 3600); assert.equal(Math.round(c.b.x), 3600);   // 3750 snaps to the 3600 truss line
+  assert.equal(Math.round(c.a.x), 5400); assert.equal(Math.round(c.b.x), 5400);   // 3 whole panels, then the rest
   near(s.basis.controlJointLm, 4.2);
   assert.equal(acc(r, "rod").quantity, 5); assert.equal(acc(r, "rod").unit, "lm"); assert.match(acc(r, "rod").note, /Check/);
-  assert.ok(s.pieces.every((p) => { const xs = p.corners.map((q) => q.x); return !(Math.min(...xs) < 3599 && Math.max(...xs) > 3601); }), "no panel crosses the joint");
+  assert.ok(s.pieces.every((p) => { const xs = p.corners.map((q) => q.x); return !(Math.min(...xs) < 5399 && Math.max(...xs) > 5401); }), "no panel crosses the joint");
   assert.ok(r.problems.some((p) => p.code === "floor_control_joint" && p.blocking === false));
   assert.equal(r.layout.controlJoints.length, 1);
   assert.equal(go(rect(6000, 4200), { floorMaterial: "hebel" }).layout.sheets.controlJoints.length, 0);   // 6000 is not over the limit
@@ -199,5 +199,15 @@ t("engine: Structaflor is still the default main floor (floorMaterial unset)", (
 });
 t("version: takeoff-calc@14", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/); });
 
+t("Hebel (Sam 22 Nov: came in ~25 panels high): a 11.7 x 15.14 m floor at 450 packs 175, not 186: control joints on the panel grid, no unusable offcuts at each joint", () => {
+  const s = go(rect(11700, 15140), { floorMaterial: "hebel" }).layout.sheets;
+  assert.equal(s.controlJoints.length > 0, true);
+  assert.ok(s.packedSheets <= 175, `${s.packedSheets} panels packed`);
+  assert.ok(s.packedSheets >= Math.ceil(s.laidM2 / 1.08), "never under the laid area");
+  // the joints across the trusses are whole panels apart from the edge of the run
+  const xs = [...new Set(s.controlJoints.filter((c) => Math.abs(c.a.y - c.b.y) < 1 && Math.abs(c.a.x - c.b.x) > 5000).map((c) => Math.round(c.a.y)))];
+  assert.deepEqual(xs, [5400, 10800]);
+  for (const x of xs) assert.equal(x % 1800, 0, `joint at ${x}`);
+});
 console.log(`takeoff-tc-floor-p3: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
