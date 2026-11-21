@@ -166,6 +166,28 @@ Each wall has its own **Stud centres**. The Walls item's number is what a wall u
 4. Tap **Done**.
 5. One wall only: **Select** the wall, then tap **450** under **Stud centres**.
 
+#### Wet areas: every wall round a bathroom at 450 in one go (Sam, 21 Nov 2026)
+
+1. Tap **Select** (nothing selected), then **Wet-area walls at 450**.
+2. If the Floor frame already has wet areas drawn on this same plan page, tap **Use wet areas from Floor frame**. Otherwise tap **Draw a wet area** and tap two opposite corners of the bathroom, laundry or ensuite (**Outline** for an odd shape: each corner, then the first corner again). A Floor frame drawn on a different plan page can't be used here; the panel says so.
+3. Every wall of this Walls item whose centreline runs along the room's edge (within 150 mm of it, for 300 mm or more) or lies inside the room goes to 450, all in one change. The panel says, for example, "3 walls set to 450 (wet areas)". **Undo** takes the wet area and the 450s off together. A wall that only butts the room is left alone.
+4. A wall that runs only partly along the room (a hallway wall past the bathroom): the panel asks **Split** or **Leave whole**. **Split** cuts it at the room's edge (never through a window, door or brace: the cut moves to its edge, so it stays on the wet piece) and only the wet piece goes to 450.
+5. A wall whose centres you set by hand to something else is never changed silently: the panel lists it and asks **Change to 450** or **Keep mine**.
+6. **Set wet-area walls to 450** runs it again after you move or add walls. A wall the wet areas had set that no longer touches one goes back to the item's centres. **Remove** beside a wet area takes it off (and its 450s).
+
+#### Several walls at once (Sam, 21 Nov 2026)
+
+1. **Select** one wall, then tap more walls of the same Walls item: they are added ("3 walls selected"). Tap a selected wall again to take it off. **All on this page** adds every wall; **Clear** ends it.
+2. With 2 or more selected, the panel shows only **Stud centres** (450, 600, or type **Other**), **Top plate** (Double / One) and **Wall height**. Each tap changes every selected wall in one change; **Undo** puts them all back.
+3. To pick a different single wall, tap **Clear** (or an empty spot on the plan) first.
+
+#### Split a wall (Sam, 21 Nov 2026)
+
+1. **Select** the wall, then double-tap (double-click) the wall where it should be split. With **Snap to plan** on, the point snaps to a plan line or corner there; otherwise to the nearest 10 mm.
+2. It becomes two walls in a straight line with every setting of the original ("Wall 1 split at 4,990: Wall 1 and Wall 5"). Windows and doors go with the piece they are in. Tap a piece to give it its own centres.
+3. Refused, with a plain message: a window, door or brace sheet across that point, or a piece under 300 mm.
+4. The two pieces still frame as one wall: at the same centres there is no extra stud at the split and the noggin across it is counted once; where the centres change, one stud stands at the split and the 450 piece is laid out from it. **Undo** puts the wall back.
+
 > 💡 **Tip:** 450 changes the stud spacing only. Noggins and plate joins follow the studs. Blocking for vanities, grab rails and taps is not added: count it on a Timber item. The button isn't there when the Walls item is already at 450. A Studs, Plates or Noggins item ignores a wall's own centres and says so.
 
 #### Windows and doors: framing worked out for you (HUB 031)
@@ -783,6 +805,18 @@ Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 5. Rectangle, Outline, a timber or flashing run, and the floor frame outline / stair void / wet area also snap: a tap within about 150 mm of a line end or corner lands on it, else within 60 mm of a line lands on the line. The same chip turns all of it off.
 6. Trace an L and a T on centrelines and open the wall pages: the wall that takes the corner studs reads a frame 45 mm longer than traced, the butting walls 45 mm shorter, and the corner stud sits 112.5 mm from the frame end. The junction studs on the continuous wall do not move.
 7. Node: scripts/tests/takeoff-vector-snap.test.mjs and scripts/tests/takeoff-tc-junctions.test.mjs (section D).
+
+### TC-33: Several walls, wet areas to 450, and splitting a wall (Sam, 21 November 2026)
+
+Setup: `?reviewRole=admin&takeoffSeed=walls`, Timber and cladding › **Measure**, Wall height 2400, trace a closed run round the 12,000 × 6,000 box on page 1 (4 walls).
+
+1. **Select**, tap Wall 1, then Wall 2 and Wall 3: the panel reads "3 walls selected" with Stud centres, Top plate and Wall height only. Tap **450**: all three labels read "450 ctrs" and the message says "Studs at 450 centres on 3 walls". One **Undo** puts all three back to 600.
+2. Tap a selected wall: it comes off the list. Tap **Clear**: nothing is selected.
+3. Select Wall 1 only (it says "Double-tap this wall to split it there"). Double-tap it about 5 m along: "Wall 1 split at …: Wall 1 and Wall 5". Switch to **Line**: the Walls line still reads 76 studs and the same bottom and top plate metres as before the split. **Undo** puts Wall 1 back.
+4. **Select** › **Wet-area walls at 450** › **Draw a wet area**, tap two corners of the left room (x 0 to ~5 m). Expected: the wall inside the room (Wall 4) goes to 450 at once; the panel asks to split Wall 1 and Wall 3 (they run only partly along the room). Tap **Split**: the wet pieces read 450, the dry pieces stay 600, plate metres unchanged.
+5. Set one wet wall to 600 by hand, then **Set wet-area walls to 450**: the panel lists it under "centres you set by hand" with **Change to 450** / **Keep mine**; **Keep mine** leaves it at 600.
+6. Draw a wet area on the Floor frame on the same page, then on the Walls item **Use wet areas from Floor frame**: the same walls go to 450. With the Floor frame's wet area on another page, the panel says it can't be used here.
+7. Node: scripts/tests/takeoff-tc-wall-split.test.mjs (split geometry, openings, wet-area edges, hand-set walls, multi-select, and a split wall framing exactly like the unsplit wall at equal centres).
 
 ### Post-test checklist
 - [ ] All test cases passed

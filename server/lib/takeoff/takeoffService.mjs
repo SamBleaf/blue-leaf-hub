@@ -246,7 +246,11 @@ function cleanInputs(kind, inp, tracedLengthMm) {
       // save time, so seq is what brings a run back in order. Kept only as a valid pair; otherwise the wall stands alone.
       ...(isUuid(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000 ? { runId: i.runId, seq: i.seq } : {}),
       // HUB 031 (Sam, 17 Nov 2026): this wall's own stud centres (wet areas at 450). Absent = the Walls item's centres.
-      ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }) } : {}),
+      ...(i.studCentresMm != null && i.studCentresMm !== "" ? { studCentresMm: MM(i.studCentresMm, "Stud centres", { min: 100, max: 1200 }),
+        // Sam, 21 Nov 2026: "wet" = set by the wet areas (re-applying them may change it); absent = typed by hand (kept)
+        ...(i.studCentresFrom === "wet" ? { studCentresFrom: "wet" } : {}) } : {}),
+      // Sam, 21 Nov 2026: a wall split on the plan: every piece names the wall it was split from (framed as one wall where they meet in line)
+      ...(isUuid(i.splitOf) ? { splitOf: i.splitOf } : {}),
       // Sam, 18 Nov 2026: this wall's own Double top plate (true / false); absent = the Walls item's. Anything else is refused, never guessed.
       ...(i.doubleTopPlate != null && i.doubleTopPlate !== "" ? { doubleTopPlate: (must(typeof i.doubleTopPlate === "boolean", "Double top plate on a wall is on or off."), i.doubleTopPlate) } : {}),
       // HUB 031: does this wall carry the roof (true / false); absent = the Walls item's answer

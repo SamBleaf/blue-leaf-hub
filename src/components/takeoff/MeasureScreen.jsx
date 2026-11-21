@@ -76,7 +76,9 @@ import { usePlanSnap } from "./planVectors.js";
 import { matchTraced, snapGeneric, snapPoint } from "../../../shared/takeoff/vectorSnap.js";
 import { fmtM2, fmtMm, fmtRaw } from "./format.js";
 import { BRACING_RULE, addBracingMark, bracingForWall, bracingHeightMm, bracingMarkText, bracingOf, removeBracingMark, plyWholeWallOn, setPlyWholeWall } from "../../../shared/takeoff/bracing.js";
-import { COLORS, isFloorItem, withoutFloorBeams, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, withWallCentres, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride , clearDoubleTopOverrides, doubleTopState, setAllDoubleTop, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop } from "./measure/tools.js";
+import { COLORS, isFloorItem, withoutFloorBeams, fullHeightFollowers, fullHeightMm, itemCentresMm, toggleWetWall, wallOwnCentresMm, wetWallsOf, LINE_TOOLS, OPENING_TOOLS, PATH_TOOLS, SHAPE_TOOLS, distributionInputs, draftKey, familyOf, isFlashingMaterial, isOutline, isWallsItem, lastOpeningSizes, lastWallHeight, lineStartHeight, lineWallInputs, loadDraft, materialRecord, memberNoun, memberThicknessMm, nextOpeningLabel, nextWallInputs, openingRecord, outlineWallInputs, runIdOf, runLabel, saveDraft, sheetSummaryText, stockForStation, toolsFor, upgradeDraft, wallFramingText, wallFramingTotals, wallPartsToFix, wallRuns, wallsNotCounted, wallSheetIssue, wallSheetSummary, wallTagOn, withOverride , clearDoubleTopOverrides, doubleTopState, setAllDoubleTop, toggleWallDoubleTop, wallDoubleTopOn, wallOwnDoubleTop, bulkCentresChanges, bulkDoubleTopChanges, bulkSelectTap, withHandCentres } from "./measure/tools.js";
+import { pointToMm } from "../../../shared/takeoff/calibration.js";
+import { runSeqAfterSplit, splitProblem, splitWall, wallObstacles, wallStationAt, wetAreaWalls, wetCentresChanges, withWetCentres } from "../../../shared/takeoff/wallEdits.js";
 import { HIT_PX, OPENING_SLOP_MIN_MM, OPENING_SLOP_PX, anchorsFor, closedRing, distToPolyline, keepOpeningsInPlace, labelBox, legMidpoints, nearestWall, openingAboveWall, openingOnWall, openingOutsideOutline, outlineAreaM2, outlineAt, outlineFrame, outlineOpening, outlineProblem, pathLengthMm, planCavityOpening, planOpening, rectCorners, runLegs, safePointAt, screenDirectionAt, sharedCorners, snapToMmGrid, splitsInsideRun, stationNear, straightLegs } from "./measure/geometry.js";
 import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, TimberLineShape } from "./measure/Overlays.jsx";
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
@@ -119,7 +121,10 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const material = view.materials.find((m) => m.id === materialId) || null;
   const flashing = isFlashingMaterial(material);
   const floorItem = isFloorItem(material);   // Floor frame (Sam, 18 Nov 2026): the floor outline and its openings are traced areas
-  const tools = useMemo(() => toolsFor(material), [material]);
+  // Sam, 21 Nov 2026: while a wet area is drawn on a Walls page, Rectangle and Outline join the Walls item's tools (as on the Floor frame)
+  const [wetDraw, setWetDraw] = useState(null);          // the Walls item id whose wet area is being drawn
+  const wetDrawing = !!material && wetDraw === material.id && isWallsItem(material);
+  const tools = useMemo(() => (wetDrawing ? [...toolsFor(material), { k: "rect", label: "Rectangle" }, { k: "area", label: "Outline" }] : toolsFor(material)), [material, wetDrawing]);
   const wsId = view.workspace?.id || null;
   const canEdit = !!ws.capabilities?.edit;
 
@@ -234,6 +239,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const [braceNote, setBraceNote] = useState(null);
   const braceLast = useRef(null);
   const [wetNote, setWetNote] = useState(null);
+  const [wetAsk, setWetAsk] = useState(null);              // after Set to 450: { matId, hand: [ids], partial: [{ id, splitsMm, pieces }] } still to answer
+  const [multi, setMulti] = useState([]);                  // Sam, 21 Nov 2026: 2+ walls selected together in Select (ids)
   const [openMode, setOpenMode] = useState(null);            // { matId, kind: "window" | "door" }
   const openKind = OPENING_TOOLS.has(mode) && canEdit && openMode && openMode.matId === material?.id ? openMode.kind : null;
   const [openSizes, setOpenSizesState] = useState(null);     // { window: { heightMm, sillMm }, door: { heightMm, leafMm } }
@@ -583,6 +590,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   /** Save ONE outline wall on the material in use (one Undo; the drawing comes back with it). */
   function saveOutline(points, d) {
     if (floorItem) return saveFloorShape(points, d);
+    if (wetDrawing) return saveWallWetArea(points, d);
     const prob = outlineProblem(points, cal);
     if (prob) {
       warn(prob === "wall_self_intersecting" ? "The outline crosses itself. Tap the corners in order round the wall (Undo takes the last one off)."
@@ -1144,7 +1152,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   }
   /** Select → Stud centres on a wall (HUB 031): this wall only. Back to the item's centres DELETES the key. One edit, one Undo. */
   function setWallCentres(m, mm) {
-    record({ redo: partial({ measurements: [{ ...m, inputs: withWallCentres(m.inputs, mm) }] }), undo: partial({ measurements: [m] }) });
+    // Sam, 21 Nov 2026: a hand choice clears the wet areas' mark, so re-applying the wet areas asks before changing it
+    record({ redo: partial({ measurements: [{ ...m, inputs: withHandCentres(m.inputs, mm, itemCentresMm(matOf(m))) }] }), undo: partial({ measurements: [m] }) });
   }
   /** Select → Carries the roof on a wall (HUB 031): this wall only; matching the item's answer deletes the key. */
   function setWallCarries(m, v) {
@@ -1281,6 +1290,156 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   function removeBrace(m, id) {
     record({ redo: partial({ measurements: [{ ...m, inputs: removeBracingMark(m.inputs, id) }] }), undo: partial({ measurements: [m] }) });
   }
+  // ── Walls bulk edits (Sam, 21 Nov 2026): several walls at once, split a wall, wet areas → 450 ─────────────────
+  /** Can this measurement join a multi-selection / be split? A straight traced wall of a Walls item. */
+  const bulkable = (m) => !!m && m.kind === "wall" && m.points?.length === 2 && !isOutline(m) && (m.inputs?.kind || "rect") === "rect" && isWallsItem(matOf(m));
+  const multiWalls = () => multi.map(measNow).filter(Boolean);
+  function bulkRecord(ch, note) {
+    if (!ch.length) { setMsg({ tone: "info", text: "Those walls already have that." }); return; }
+    record({ redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) });
+    setMsg({ tone: "ok", text: `${note} on ${ch.length} wall${ch.length === 1 ? "" : "s"}. Undo puts ${ch.length === 1 ? "it" : "them"} back.` });
+  }
+  const bulkCentres = (mm) => bulkRecord(bulkCentresChanges(multiWalls(), matOf(multiWalls()[0]), mm), `Studs at ${fmtMm(mm)} centres`);
+  const bulkDoubleTop = (on) => bulkRecord(bulkDoubleTopChanges(multiWalls(), matOf(multiWalls()[0]), on), on ? "Double top plate" : "One top plate");
+  function bulkHeight(n) {
+    if (!(n > 0)) return;
+    const ch = [];
+    for (const m of multiWalls()) {
+      if (m.inputs?.heightMm === n) continue;
+      const nextInputs = { ...(m.inputs || {}), heightMm: n };
+      ch.push({ before: m, next: { ...m, inputs: nextInputs } }, ...fullHeightFollowers(openingsByWall.get(m.id), nextInputs));
+    }
+    bulkRecord(ch, `Wall height ${fmtMm(n)}`);
+  }
+
+  /** The records that split walls make, all in ONE edit: [{ wall, stationsMm, wetPieces? }] → { redo, undo, made } or { error }. */
+  function splitEdit(jobs) {
+    const cur = new Map(view.measurements.filter((m) => !m.archived).map((m) => [m.id, m]));
+    const before = new Map();   // id -> the record as it was (for Undo)
+    const touch = (rec) => { if (!before.has(rec.id) && cur.has(rec.id)) before.set(rec.id, cur.get(rec.id)); cur.set(rec.id, rec); };
+    const newIds = [], newCids = [], contributions = [], made = [];
+    for (const job of jobs) {
+      const m = cur.get(job.wall.id);
+      const c = calsById.get(m?.calibrationId);
+      if (!m || !c) return { error: "That wall has no scale. Scale the page first." };
+      const count = job.stationsMm.length;
+      const names = [];
+      for (let i = 0; i < count; i++) names.push(nextWallInputs([...cur.values(), ...names.map((n) => ({ kind: "wall", inputs: { name: n } }))]).name);
+      const r = splitWall({ wall: m, openings: (openingsByWall.get(m.id) || []).map((o) => cur.get(o.id) || o), cal: c, stationsMm: job.stationsMm, newId, names });
+      if (!r.ok) return { error: `${m.inputs?.name || "Wall"}: ${r.error}` };
+      const run = runIdOf(m) ? [...cur.values()].filter((w) => w.kind === "wall" && runIdOf(w) === runIdOf(m)) : [];
+      const sq = runSeqAfterSplit(run, m, count);
+      for (const b of sq.bumped) touch(b.next);
+      r.pieces.forEach((p, i) => {
+        let inputs = i > 0 && sq.seqs.length ? { ...p.inputs, seq: sq.seqs[i - 1] } : p.inputs;
+        if (job.wetPieces) inputs = withWetCentres(inputs, job.wetPieces[i]);
+        const rec = i === 0 ? { ...m, points: p.points, inputs } : { id: p.id, kind: "wall", documentId: m.documentId, pageIndex: m.pageIndex, calibrationId: m.calibrationId, points: p.points, inputs };
+        if (i === 0) touch(rec); else { cur.set(rec.id, rec); newIds.push(rec.id); }
+        made.push(rec);
+        if (i > 0) for (const cc of contribsOf.get(m.id) || []) { const id = newId(); newCids.push(id); contributions.push({ id, measurementId: rec.id, jobMaterialId: cc.jobMaterialId, role: cc.role }); }
+      });
+      for (const o of r.openings) touch(o.next);
+    }
+    const changed = [...before.keys()].map((id) => cur.get(id));
+    return { redo: partial({ measurements: [...changed, ...newIds.map((id) => cur.get(id))], contributions }), undo: partial({ measurements: [...before.values()], archive: { measurements: newIds, contributions: newCids } }), made };
+  }
+  /** Double-tap on the ONE selected wall: split it there (snapped to the wall's line, and to the plan when Snap to plan is on). */
+  function splitTap(p, sp) {
+    const m = sel;
+    const c = calsById.get(m?.calibrationId);
+    if (!bulkable(m) || !c || distToPolyline(sp, m.points.map(toScreen)) > HIT_PX + 4) { onTap(p, sp); return; }
+    const sn = planSnapAt(p);
+    const st = wallStationAt(m.points, c, sn ? { x: sn.x, y: sn.y } : p);
+    const atMm = sn ? Math.round(st.stationMm) : Math.round(st.stationMm / 10) * 10;
+    const err = splitProblem(atMm, st.lengthMm, wallObstacles(m.inputs, openingsByWall.get(m.id) || []));
+    if (err) { warn(err); return; }
+    const e = splitEdit([{ wall: m, stationsMm: [atMm] }]);
+    if (e.error) { warn(e.error); return; }
+    record({ redo: e.redo, undo: e.undo });
+    setSelected(null); setHandleSel(null);
+    setMsg({ tone: "ok", text: `${m.inputs?.name || "Wall"} split at ${fmtMm(atMm)}: ${e.made.map((x) => x.inputs?.name).join(" and ")}, same settings. Tap a piece to change it. Undo puts the wall back.` });
+  }
+
+  /** Wet areas on THIS page for a Walls item: its own (drawn here or taken from the Floor frame). */
+  const wallWetAreas = (mat) => (Array.isArray(mat?.rules?.wetAreas) ? mat.rules.wetAreas : []).filter((a) => a.documentId === planDoc?.id && a.pageIndex === pageIndex && Array.isArray(a.points) && a.points.length >= 3);
+  /** The Floor frame's wet areas: on this page (usable here) and elsewhere (not: another sheet has no common frame). */
+  const floorWetHere = () => view.measurements.filter((m) => m.kind === "area" && !m.archived && m.inputs?.role === "wet" && (contribsOf.get(m.id) || []).some((c) => isFloorItem(materialsById.get(c.jobMaterialId))));
+  /** Which walls of `mat` on this page are wet-area walls, worked out in real mm with each wall's own scale. */
+  function wetPlan(mat, areas) {
+    const walls = pageMeasurements.filter((m) => bulkable(m) && (contribsOf.get(m.id) || []).some((c) => c.jobMaterialId === mat.id));
+    const rows = [];
+    const byCal = new Map();
+    for (const m of walls) if (calsById.get(m.calibrationId)) byCal.set(m.calibrationId, [...(byCal.get(m.calibrationId) || []), m]);
+    for (const [cid, ms] of byCal) {
+      const c = calsById.get(cid), o = { x: 0, y: 0 };
+      rows.push(...wetAreaWalls({ walls: ms.map((m) => ({ id: m.id, a: pointToMm(c, o, m.points[0]), b: pointToMm(c, o, m.points[1]), obstacles: wallObstacles(m.inputs, openingsByWall.get(m.id) || []) })),
+        areas: areas.map((a) => ({ id: a.id, points: a.points.map((q) => pointToMm(c, o, q)) })) }));
+    }
+    return rows;
+  }
+  /** Set wet-area walls to 450 (with the Walls item's wet areas changed to `rules` in the SAME edit): one Undo. */
+  function wetApply(mat, rules) {
+    const rows = wetPlan(mat, wallWetAreas({ rules }));
+    const ch = wetCentresChanges(rows, new Map(rows.map((r) => [r.id, measNow(r.id)?.inputs || {}])));
+    const edits = [...ch.set.map((id) => [id, true]), ...ch.revert.map((id) => [id, false])].map(([id, on]) => { const m = measNow(id); return { before: m, next: { ...m, inputs: withWetCentres(m.inputs, on) } }; });
+    const matChange = rules !== mat.rules;
+    if (matChange || edits.length) {
+      record({ redo: partial({ measurements: edits.map((x) => x.next), materials: matChange ? [materialRecord({ ...mat, rules })] : [] }),
+        undo: partial({ measurements: edits.map((x) => x.before), materials: matChange ? [materialRecord(mat)] : [] }) });
+    }
+    const n = (k) => `${k} wall${k === 1 ? "" : "s"}`;
+    const parts = [ch.set.length ? `${n(ch.set.length)} set to ${WET_WALL_CENTRES_MM} (wet areas)` : `No more walls to set to ${WET_WALL_CENTRES_MM}`];
+    if (ch.already.length) parts.push(`${n(ch.already.length)} already at ${WET_WALL_CENTRES_MM}`);
+    if (ch.revert.length) parts.push(`${n(ch.revert.length)} back to ${itemCentresMm(mat)} (no longer by a wet area)`);
+    setWetNote(`${parts.join(", ")}`);
+    setWetAsk(ch.hand.length || ch.partial.length ? { matId: mat.id, hand: ch.hand, partial: rows.filter((r) => ch.partial.includes(r.id)) } : null);
+  }
+  /** "Use wet areas from Floor frame": the floor's wet areas on this page are copied onto the Walls item (taken again, they replace the copies). */
+  function wetFromFloor(mat) {
+    const floor = floorWetHere().filter((m) => m.documentId === planDoc?.id && m.pageIndex === pageIndex);
+    const mine = (mat.rules?.wetAreas || []).filter((a) => !(a.fromFloor && a.documentId === planDoc?.id && a.pageIndex === pageIndex));
+    const copies = floor.map((m) => ({ id: m.id, name: m.inputs?.name || "Wet area", documentId: m.documentId, pageIndex: m.pageIndex, fromFloor: true, points: m.points.map((q) => ({ x: q.x, y: q.y })) }));
+    wetApply(mat, { ...(mat.rules || {}), wetAreas: [...mine, ...copies] });
+  }
+  /** A wet area drawn on the Walls page (Rectangle / Outline): saved on the item and the walls set, in one edit. */
+  function saveWallWetArea(points, d) {
+    const prob = outlineProblem(points, cal);
+    if (prob) { warn(prob === "wall_self_intersecting" ? "The outline crosses itself. Tap the corners in order round the room (Undo takes the last one off)." : "That outline has no area. Tap the corners round the room."); return false; }
+    if (points.length > 50) { warn("A wet area can have 50 corners at most."); return false; }
+    const list = material.rules?.wetAreas || [];
+    if (list.length >= 50) { warn("This Walls item has 50 wet areas already."); return false; }
+    const used = new Set(list.map((a) => a.name));
+    let name = "Wet area 1";
+    for (let i = 1; used.has(name); i++) name = `Wet area ${i + 1}`;
+    // the drawing ends here (not part of the edit: Undo takes the wet area off and leaves no half-drawn rectangle behind)
+    if (d) applyDraft(null);
+    wetApply(material, { ...(material.rules || {}), wetAreas: [...list, { id: newId(), name, documentId: planDoc.id, pageIndex, points: points.map((q) => ({ x: q.x, y: q.y })) }] });
+    setWetDraw(null); setModeSel("select"); setWetMat(material.id); setLastDone(null);
+    return true;
+  }
+  function wetRemove(mat, id) {
+    wetApply(mat, { ...(mat.rules || {}), wetAreas: (mat.rules?.wetAreas || []).filter((a) => a.id !== id) });
+  }
+  /** The answers after Set to 450: split the walls only partly along a wet area (the wet pieces at 450), or change hand-set walls too. */
+  function wetSplitYes() {
+    const ask = wetAsk;
+    if (!ask?.partial?.length) return;
+    const jobs = ask.partial.map((r) => ({ wall: measNow(r.id), stationsMm: r.splitsMm, wetPieces: r.pieces.map((p) => p.wet) })).filter((j) => j.wall);
+    const ok = [], skipped = [];
+    for (const j of jobs) { const e = splitEdit([j]); if (e.error) skipped.push(e.error); else ok.push(j); }
+    const e = ok.length ? splitEdit(ok) : null;
+    if (e && !e.error) record({ redo: e.redo, undo: e.undo });
+    setWetAsk((a) => (a ? { ...a, partial: [] } : a));
+    setWetNote(`${ok.length} wall${ok.length === 1 ? "" : "s"} split at the wet-area edge, the wet part${ok.length === 1 ? "" : "s"} at ${WET_WALL_CENTRES_MM}${skipped.length ? `. Not split: ${skipped.join(" ")}` : ""}`);
+  }
+  function wetHandYes() {
+    const ask = wetAsk;
+    const ch = (ask?.hand || []).map(measNow).filter(Boolean).map((m) => ({ before: m, next: { ...m, inputs: withWetCentres(m.inputs, true) } }));
+    if (ch.length) record({ redo: partial({ measurements: ch.map((c) => c.next) }), undo: partial({ measurements: ch.map((c) => c.before) }) });
+    setWetAsk((a) => (a ? { ...a, hand: [] } : a));
+    setWetNote(`${ch.length} wall${ch.length === 1 ? "" : "s"} you had set by hand now at ${WET_WALL_CENTRES_MM}`);
+  }
+
   function insertPoint(m, k, p) {
     const r = geometryEdit(m, [...m.points.slice(0, k), p, ...m.points.slice(k)]);
     if (r.error) { warn(r.error); return; }
@@ -1376,7 +1535,16 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       if (d < bestD) { bestD = d; best = m.id; }
     }
     // a member tick wins over its own run line, and over another line only when it is at least as close
-    if (t && (best === t.measurementId || !best || t.d <= bestD)) { setSelected(t.measurementId); setSelTick(t.stationId); setHandleSel(null); setActiveSplit(null); return; }
+    if (t && (best === t.measurementId || !best || t.d <= bestD)) { setMulti([]); setSelected(t.measurementId); setSelTick(t.stationId); setHandleSel(null); setActiveSplit(null); return; }
+    // Sam, 21 Nov 2026: with a wall of a Walls item selected, tapping another wall of that item ADDS it (tap a selected one to take it off)
+    const bm = best ? measNow(best) : null;
+    const first = multi.length ? measNow(multi[0]) : s;
+    if (canEdit && bulkable(bm) && bulkable(first) && matOf(first)?.id === matOf(bm)?.id) {
+      const r = bulkSelectTap({ selected, multi }, best);
+      setMulti(r.multi); setSelected(r.selected); setSelTick(null); setHandleSel(null); setActiveSplit(null);
+      return;
+    }
+    setMulti([]);
     setSelected(best); setSelTick(null); setHandleSel(null); setActiveSplit(null);
   }
   /** "+" markers of a finished run — never on its red overflow (the red tap means "Split at limit"). */
@@ -1479,6 +1647,17 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const braceOn = mode === "select" && canEdit && wallsItem && braceMat === material?.id && !wetOn && !dtOn;
   useEffect(() => { if (braceMat && (mode !== "select" || braceMat !== material?.id)) setBraceMat(null); }, [mode, material?.id, braceMat]);
   const wetWalls = wallsItem ? wetWallsOf(view.measurements, view.contributions, material.id) : [];
+  // Sam, 21 Nov 2026: several walls selected (Select only); a wall that is gone comes off the list
+  const multiSet = useMemo(() => new Set(mode === "select" ? multi : []), [multi, mode]);
+  const multiOn = mode === "select" && multi.length >= 2;
+  useEffect(() => {
+    if (!multi.length) return;
+    const live = multi.filter((id) => view.measurements.some((m) => m.id === id && !m.archived));
+    if (mode !== "select" || wetOn || dtOn || braceOn) setMulti([]);
+    else if (live.length !== multi.length) { setMulti(live.length >= 2 ? live : []); if (live.length === 1) setSelected(live[0]); }
+  }, [multi, mode, wetOn, dtOn, braceOn, view.measurements]);
+  useEffect(() => { if (wetDraw && (!wetDrawing || (mode !== "rect" && mode !== "area"))) setWetDraw(null); }, [wetDraw, wetDrawing, mode]);
+  useEffect(() => { if (wetAsk && (!material || wetAsk.matId !== material.id)) setWetAsk(null); }, [material, wetAsk]);
   const blocking = (results?.problems || []).filter((p) => p.blocking !== false && !(wallsItem && p.code === "material_incomplete" && p.part));
   // a wall the calculation blocked is named on the line ("· Wall 1 not counted"), its reason straight under it
   const wallsText = wallsItem ? wallFramingText(wallFramingTotals(results), material.name, wallsNotCounted(results, view.measurements, view.contributions, material.id)) : "";
@@ -1505,7 +1684,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const isHiddenItem = (id) => hidden.has(HIDE_ALL) || hidden.has(id);
   /** On the plan? The run being drawn, the selected one and "Show on plan" highlights always are. */
   const isShown = (m) => {
-    if (m.id === selected || hlSet.has(m.id) || m.id === draft?.measurementId) return true;
+    if (m.id === selected || hlSet.has(m.id) || multiSet.has(m.id) || m.id === draft?.measurementId) return true;
     const cs = contribsOf.get(m.id) || [];
     if (!cs.length) return !isHiddenItem(UNASSIGNED);
     return cs.some((c) => !isHiddenItem(c.jobMaterialId));
@@ -1578,7 +1757,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
   const renderMeasurement = (m, toScr) => {
     if (m.id === draft?.measurementId) return null; // drawn as the drawing below
     const pts = pointsOf(m) || [];
-    const isSel = m.id === selected || hlSet.has(m.id); // highlighted from the schedule: same halo as a selection
+    const isSel = m.id === selected || hlSet.has(m.id) || multiSet.has(m.id); // highlighted from the schedule: same halo as a selection
     const c = computedBy.get(m.id);
     const cs = contribsOf.get(m.id) || [];
     if (m.kind === "area" && m.inputs?.role) {
@@ -1638,7 +1817,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
       const wc = calsById.get(m.calibrationId);
       const len = pathLengthMm(pts, wc);
       // HUB 031: on a Walls item a wall with its own centres is drawn cyan and says so ("450 ctrs"): colour is never the only cue
-      const own = isWallsItem(matOf(m)) ? wallOwnCentresMm(m) : null;
+      const own = isWallsItem(matOf(m)) && wallOwnCentresMm(m) !== itemCentresMm(matOf(m)) ? wallOwnCentresMm(m) : null;
       // Sam, 18 Nov 2026: a wall with a second top plate carries a small "2T" tag, next to its centres tag (text, never colour alone)
       const twoT = isWallsItem(matOf(m)) && wallDoubleTopOn(m, matOf(m));
       // a short wall on a phone can't fit "Wall 2 · 4,000 · 450 ctrs": short on screen keeps the name and the centres, the length drops
@@ -1812,7 +1991,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         <PdfViewport
           ref={vpRef} doc={doc} pageIndex={pageIndex} displayRotation={displayRotation}
           mode={mode === "pan" ? "pan" : "tap"} onTap={mode === "pan" ? undefined : onTap}
-          onDoubleTap={(PATH_TOOLS.has(mode) || mode === "area") && canMeasure && !openKind ? onDoubleTap : undefined}
+          onDoubleTap={(PATH_TOOLS.has(mode) || mode === "area") && canMeasure && !openKind ? onDoubleTap : mode === "select" && canEdit && !multiOn && bulkable(sel) ? splitTap : undefined}
           focus={focus}
           viewKey={planDoc ? `${wsId}|${planDoc.id}|${pageIndex}` : null}
           className="min-h-0 flex-1"
@@ -1829,6 +2008,8 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
                 return el && other ? <g key={m.id} opacity={0.45} data-other-layer="">{el}</g> : el;
               })}
               {floorItem && floorLayout && <FloorLayer layout={floorLayout} cal={calsById.get(floorLayout.calibrationId) || cal} toScreen={toScr} />}
+              {wallsItem && wallWetAreas(material).map((a) => (
+                <g key={a.id} data-wall-wet-area={a.id} pointerEvents="none"><PolylineShape kind="area" points={a.points} toScreen={toScr} color={COLORS.floorWet} closed dashed label={a.name} /></g>))}
               {renderDraft(toScr)}
               {snapMark && (() => { const s = toScr(snapMark); return <g data-snap-marker={snapMark.kind} pointerEvents="none"><circle cx={s.x} cy={s.y} r={9} fill="none" stroke="#0a7d3c" strokeWidth={2.5} /><circle cx={s.x} cy={s.y} r={2.5} fill="#0a7d3c" /></g>; })()}
               {openStart && (() => { const s = toScr(openStart.at); const color = openStart.kind === "door" ? COLORS.door : COLORS.window; return (
@@ -1859,7 +2040,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
         />
       </div>
       {/* phone portrait: the plan keeps most of the screen; the sheet scrolls (desktop/landscape: side panel) */}
-      <Sheet title={floorItem ? "Floor frame" : mode === "select" ? (sel ? "Selected" : "Select") : openKind ? `${openKind === "door" ? "Door" : "Window"} · ${material?.name || ""}` : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
+      <Sheet title={floorItem ? "Floor frame" : mode === "select" ? (sel || multiOn ? "Selected" : "Select") : openKind ? `${openKind === "door" ? "Door" : "Window"} · ${material?.name || ""}` : SHEET_TITLE[mode] || "Measure"} initialFocus={false} className="portrait:max-lg:!max-h-[42vh]">
         <div onFocusCapture={keepFieldInView} className="space-y-2">
           {msg && <Banner tone={msg.tone}>{msg.text}</Banner>}
           {hl.ids.length > 0 && (
@@ -2124,7 +2305,17 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             );
           })()}
 
-          {SHAPE_TOOLS.has(mode) && !openKind && !floorItem && (() => {
+          {SHAPE_TOOLS.has(mode) && wetDrawing && (
+            <div className="space-y-2 text-sm" data-wet-draw="">
+              <p className="font-medium text-ink">Draw a wet area · {material.name}</p>
+              <p className="text-muted">{mode === "rect" ? "Tap two opposite corners of the bathroom, laundry or ensuite." : "Tap each corner round the room, then tap the first corner again (or press Finish)."} Walls around it go to {WET_WALL_CENTRES_MM} centres.</p>
+              <div className="flex flex-wrap gap-2">
+                {mode === "area" && draft?.tool === "area" && draft.points.length >= 3 && <Btn kind="primary" onClick={() => finishDraft()}>Finish</Btn>}
+                <Btn onClick={() => { setWetDraw(null); setModeSel("select"); setWetMat(material.id); if (draft?.points?.length) record({ draftBefore: draft, draftAfter: null }); }}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+          {SHAPE_TOOLS.has(mode) && !openKind && !floorItem && !wetDrawing && (() => {
             // HUB 023: Rectangle / Area straight onto a scaled elevation — one outline wall on this material
             const rect = mode === "rect";
             const drawing = draft?.tool === mode && draft.points.length > 0;
@@ -2232,7 +2423,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             </div>
           )}
 
-          {mode === "select" && !sel && !wetOn && !braceOn && !dtOn && (
+          {mode === "select" && !sel && !wetOn && !braceOn && !dtOn && !multiOn && (
             <div className="space-y-2">
               <p className="text-sm text-muted">Tap a run, line, wall or count mark to select it.{ticksBy.size ? " Tap a tick to change one member." : ""}</p>
               {wallsItem && canEdit && itemCentresMm(material) !== WET_WALL_CENTRES_MM && (
@@ -2246,15 +2437,45 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               )}
             </div>
           )}
-          {wetOn && !sel && (
+          {wetOn && !sel && (() => {
+            const areas = wallWetAreas(material);
+            const floorAll = floorWetHere();
+            const floorHere = floorAll.filter((m) => m.documentId === planDoc?.id && m.pageIndex === pageIndex);
+            const ask = wetAsk && wetAsk.matId === material.id ? wetAsk : null;
+            return (
             <div className="space-y-2 text-sm" data-wet-panel="">
               <p className="font-medium text-ink">Wet-area walls · {material.name}</p>
-              <p className="text-muted">Tap each wet-area wall. It turns blue and its studs go to {WET_WALL_CENTRES_MM} centres. Tap it again to put it back to {itemCentresMm(material)}.</p>
+              {/* Sam, 21 Nov 2026: mark the wet areas and every wall around them goes to 450 in one go */}
+              <div className="flex flex-wrap gap-2" data-wet-areas="">
+                {floorHere.length > 0 && <Btn kind="primary" onClick={() => wetFromFloor(material)} data-wet-from-floor="">Use wet areas from Floor frame ({floorHere.length})</Btn>}
+                {canMeasure && cal && <Btn onClick={() => { setWetDraw(material.id); setWetAsk(null); setModeSel("rect"); setMsg(null); }} data-wet-draw-start="">Draw a wet area</Btn>}
+                {areas.length > 0 && <Btn onClick={() => wetApply(material, material.rules || {})} data-wet-apply="">Set wet-area walls to {WET_WALL_CENTRES_MM}</Btn>}
+              </div>
+              {!floorHere.length && floorAll.length > 0 && <p className="text-[12px] text-muted" data-wet-floor-elsewhere="">The Floor frame&apos;s wet areas are on another plan page, so they can&apos;t be used here. Draw them on this page.</p>}
+              {areas.length > 0 && (
+                <ul className="space-y-1" data-wet-area-list="">{areas.map((a) => (
+                  <li key={a.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 text-ink">{a.name}{a.fromFloor ? " (from Floor frame)" : ""}</span>
+                    <Btn kind="ghost" onClick={() => wetRemove(material, a.id)} aria-label={`Remove ${a.name}`}>Remove</Btn></li>))}</ul>
+              )}
+              {ask?.partial?.length > 0 && (
+                <div className="space-y-1 rounded-lg border border-hairline p-2" data-wet-ask-split="">
+                  <p className="text-ink">{ask.partial.map((r) => measNow(r.id)?.inputs?.name || "Wall").join(", ")} {ask.partial.length === 1 ? "runs" : "run"} only partly along a wet area. Split {ask.partial.length === 1 ? "it" : "them"} at the edge so only the wet part goes to {WET_WALL_CENTRES_MM}?</p>
+                  <div className="flex gap-2"><Btn kind="primary" onClick={wetSplitYes} data-wet-split-yes="">Split</Btn><Btn onClick={() => setWetAsk((a) => ({ ...a, partial: [] }))}>Leave whole</Btn></div>
+                </div>
+              )}
+              {ask?.hand?.length > 0 && (
+                <div className="space-y-1 rounded-lg border border-hairline p-2" data-wet-ask-hand="">
+                  <p className="text-ink">{ask.hand.map((id) => { const m = measNow(id); return `${m?.inputs?.name || "Wall"} (${fmtMm(wallOwnCentresMm(m) || 0)})`; }).join(", ")}: centres you set by hand, by a wet area. Change {ask.hand.length === 1 ? "it" : "them"} to {WET_WALL_CENTRES_MM}?</p>
+                  <div className="flex gap-2"><Btn onClick={wetHandYes} data-wet-hand-yes="">Change to {WET_WALL_CENTRES_MM}</Btn><Btn onClick={() => setWetAsk((a) => ({ ...a, hand: [] }))}>Keep mine</Btn></div>
+                </div>
+              )}
+              <p className="text-muted">Or tap each wet-area wall. It turns blue and its studs go to {WET_WALL_CENTRES_MM} centres. Tap it again to put it back to {itemCentresMm(material)}.</p>
               <p data-wet-count="">{wetWalls.length ? `${wetWalls.length} wall${wetWalls.length === 1 ? "" : "s"} at ${WET_WALL_CENTRES_MM}: ${wetWalls.slice(0, 6).map((w) => w.name).join(", ")}${wetWalls.length > 6 ? ` … and ${wetWalls.length - 6} more` : ""}` : `No walls at ${WET_WALL_CENTRES_MM} yet.`}</p>
               {wetNote && <p className="text-[12px] text-muted" data-wet-last="">{wetNote}. Undo puts it back.</p>}
-              <Btn kind="primary" onClick={() => { setWetMat(null); setWetNote(null); }}>Done</Btn>
+              <Btn kind="primary" onClick={() => { setWetMat(null); setWetNote(null); setWetAsk(null); }}>Done</Btn>
             </div>
-          )}
+            );
+          })()}
 
           {dtOn && !sel && (
             <div className="space-y-2 text-sm" data-dt-panel="">
@@ -2292,6 +2513,45 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
               <Btn kind="primary" onClick={() => { setBraceMat(null); setBraceNote(null); }}>Done</Btn>
             </div>
           )}
+
+          {multiOn && (() => {
+            const ws = multiWalls();
+            const mat = matOf(ws[0]);
+            const item = itemCentresMm(mat);
+            const cents = ws.map((w) => wallOwnCentresMm(w) ?? item);
+            const allAt = (mm) => cents.every((c) => c === mm);
+            const dts = ws.map((w) => wallDoubleTopOn(w, mat));
+            const hs = [...new Set(ws.map((w) => w.inputs?.heightMm ?? null))];
+            const pageWalls = pageMeasurements.filter((m) => bulkable(m) && isShown(m) && matOf(m)?.id === mat?.id);
+            const chip = (on) => `min-h-[44px] min-w-[64px] rounded-lg border px-3 text-sm font-medium focus-ring ${on ? "border-primary bg-primary/10 text-primary" : "border-hairline bg-surface text-ink"}`;
+            return (
+            <div className="space-y-2 text-sm" data-bulk-walls={ws.length}>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 flex-1 font-medium text-ink" data-bulk-count="">{ws.length} walls selected</p>
+                {pageWalls.length > ws.length && <Btn kind="ghost" onClick={() => setMulti(pageWalls.map((m) => m.id))} data-bulk-all="">All on this page</Btn>}
+                <Btn onClick={() => { setMulti([]); setSelected(null); }} data-bulk-clear="">Clear</Btn>
+              </div>
+              <p className="text-[11px] text-muted">{ws.map((w) => w.inputs?.name || "Wall").join(", ")}. Tap another wall to add it, or a selected one to take it off.</p>
+              <div className="space-y-1" data-bulk-centres="">
+                <p className="text-[11px] text-muted">Stud centres (these walls){new Set(cents).size > 1 ? " · mixed now" : ""}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {[...new Set([WET_WALL_CENTRES_MM, 600, item])].sort((a, b) => a - b).map((mm) => (
+                    <button key={mm} type="button" aria-pressed={allAt(mm)} onClick={() => bulkCentres(mm)} data-bulk-centres-chip={mm} className={chip(allAt(mm))}>{mm}</button>))}
+                  <div className="w-36"><NumberField key={`bc-${multi.join(",")}`} inline label="Other" value={null} min={100} max={1200} optional onCommit={(n) => { if (n) bulkCentres(n); }} /></div>
+                </div>
+              </div>
+              <div className="space-y-1" data-bulk-doubletop="">
+                <p className="text-[11px] text-muted">Top plate (these walls){dts.some((x) => x) && dts.some((x) => !x) ? " · mixed now" : ""}</p>
+                <div className="flex gap-2">
+                  <button type="button" aria-pressed={dts.every((x) => x)} onClick={() => bulkDoubleTop(true)} data-bulk-dt="on" className={chip(dts.every((x) => x))}>Double top plate</button>
+                  <button type="button" aria-pressed={dts.every((x) => !x)} onClick={() => bulkDoubleTop(false)} data-bulk-dt="off" className={chip(dts.every((x) => !x))}>One top plate</button>
+                </div>
+              </div>
+              <div className="w-48" data-bulk-height=""><NumberField key={`bh-${multi.join(",")}-${hs.join(",")}`} label="Wall height" value={hs.length === 1 ? hs[0] : null} min={1} max={MAX_WALL_MM} optional onCommit={(n) => bulkHeight(n)} help={hs.length > 1 ? "Mixed now. Type one height for all of them." : "All these walls."} /></div>
+              <p className="text-[11px] text-muted">What is above these walls is set for the whole item (Line panel).</p>
+            </div>
+            );
+          })()}
 
           {mode === "select" && sel && selUnfinished && (
             <div className="space-y-2 text-sm">
@@ -2383,6 +2643,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             <div className="space-y-2 text-sm" data-selected-wall="">
               <p className="font-medium text-ink">{sel.inputs?.name || "Wall"} — {fmtRaw(pathLengthMm(sel.points, calsById.get(sel.calibrationId)))} mm along the plan</p>
               {run && run.walls.length > 1 && <p className="text-[11px] text-muted">{runLabel(run)} · wall {run.walls.findIndex((w) => w.id === sel.id) + 1} of {run.walls.length}</p>}
+              {canEdit && isWallsItem(selMat) && sel.points?.length === 2 && <p className="text-[11px] text-muted" data-wall-bulk-hint="">Tap more walls to change several at once. Double-tap this wall to split it there.</p>}
               {ops.length > 0 && <p className="text-[11px] text-muted" data-wall-openings="">{ops.map((o) => o.inputs?.label || "Opening").join(", ")} in this wall. Change {ops.length === 1 ? "it" : "them"} on the elevation.</p>}
               {/* HUB 022: the height of THIS wall only — the rest of its run keeps theirs */}
               {rect && canEdit && isWallsItem(selMat) && (

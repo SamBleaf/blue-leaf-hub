@@ -615,6 +615,7 @@ export const wallOwnCentresMm = (wall) => (Number(wall?.inputs?.studCentresMm) >
  */
 export function toggleWetWall(inputs) {
   const { studCentresMm: own, ...rest } = inputs || {};
+  delete rest.studCentresFrom;
   return Number(own) > 0 ? rest : { ...rest, studCentresMm: WET_WALL_CENTRES_MM };
 }
 /** Set a wall's own centres to `mm`, or back to the item's (null). Same rule: clearing deletes the key. */
@@ -629,6 +630,40 @@ export function wetWallsOf(measurements, contributions, materialId) {
   return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && wallOwnCentresMm(m))
     .map((m) => ({ id: m.id, name: m.inputs?.name || "Wall", centresMm: wallOwnCentresMm(m) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+}
+
+/**
+ * Sam, 21 Nov 2026: centres typed or chosen BY HAND on a wall. The wet areas' mark ("wet") comes off, so re-applying the wet areas never
+ * overrides it without asking. Back to the item's centres deletes the key, except on a wall the wet areas had set: there the hand choice
+ * is kept as its own value (so the next "Set wet-area walls to 450" asks first).
+ */
+export function withHandCentres(inputs, mm, itemMm) {
+  const rest = { ...(inputs || {}) };
+  const from = rest.studCentresFrom;
+  delete rest.studCentresMm; delete rest.studCentresFrom;
+  if (!(Number(mm) > 0)) return rest;
+  if (Number(mm) === Number(itemMm) && from !== "wet") return rest;
+  return { ...rest, studCentresMm: Number(mm) };
+}
+const sameCentres = (a, b) => (a?.studCentresMm ?? null) === (b?.studCentresMm ?? null) && (a?.studCentresFrom ?? null) === (b?.studCentresFrom ?? null);
+
+// ── several walls at once (Select: tap walls to add them; Sam, 21 Nov 2026) ──────────────────────────────────
+
+/** A tap on a wall in Select while walls are selected: { selected, multi } after it (2+ = multi; back to one = a single selection). */
+export function bulkSelectTap({ selected, multi }, id) {
+  const cur = multi?.length ? multi : selected ? [selected] : [];
+  if (cur.length === 1 && cur[0] === id) return { selected: id, multi: [] };
+  const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+  return next.length >= 2 ? { selected: null, multi: next } : { selected: next[0] ?? null, multi: [] };
+}
+/** Stud centres on every selected wall, by hand: only the walls that change, as { before, next }. */
+export function bulkCentresChanges(walls, material, mm) {
+  const item = itemCentresMm(material);
+  return (walls || []).map((w) => ({ before: w, next: { ...w, inputs: withHandCentres(w.inputs, mm, item) } })).filter((c) => !sameCentres(c.before.inputs, c.next.inputs));
+}
+/** Double top plate on or off on every selected wall: only the walls that change. */
+export function bulkDoubleTopChanges(walls, material, on) {
+  return (walls || []).filter((w) => wallDoubleTopOn(w, material) !== on).map((w) => ({ before: w, next: { ...w, inputs: withWallDoubleTop(w.inputs, on, material) } }));
 }
 
 // ── Double top plate per wall (Sam, 18 Nov 2026) ────────────────────────────────────────────────────────────

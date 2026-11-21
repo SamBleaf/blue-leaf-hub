@@ -338,13 +338,15 @@ const fail = (status, error, code) => ({ __status: status, body: { ok: false, er
  * Wall inputs exactly as the server keeps them (takeoffService.mjs cleanInputs): known keys only, so a field the
  * server would drop is dropped here too. HUB 022: runId + seq are kept only as a valid pair (a uuid and 1–1,000).
  */
-const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon", "studCentresMm", "loadBearing", "noHoopIron", "bracing"];
+const WALL_INPUT_KEYS = ["kind", "widthMm", "heightMm", "startHeightMm", "endHeightMm", "eavesHeightMm", "apexXMm", "apexHeightMm", "heightSource", "name", "floor", "polygon", "studCentresMm", "studCentresFrom", "doubleTopPlate", "loadBearing", "noHoopIron", "bracing"];
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function serverWallInputs(i) {
   if (!i) return i;
   const out = {};
   for (const key of WALL_INPUT_KEYS) if (i[key] !== undefined) out[key] = i[key];
   if (typeof i.runId === "string" && UUID_RX.test(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000) { out.runId = i.runId; out.seq = i.seq; }
+  if (typeof i.splitOf === "string" && UUID_RX.test(i.splitOf)) out.splitOf = i.splitOf;   // Sam, 21 Nov 2026: a wall split on the plan
+  if (out.studCentresFrom !== "wet" || out.studCentresMm == null) delete out.studCentresFrom;
   return out;
 }
 
