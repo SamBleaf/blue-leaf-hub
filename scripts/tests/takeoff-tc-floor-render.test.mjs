@@ -64,7 +64,7 @@ try {
   ok("the truss count is said in one line", /15 trusses/.test(html) && /15 × 4,200/.test(html));
   ok("a normal job has an outline summary line with area and size", /25\.20 m²/.test(html) && /6\.00 × 4\.20 m/.test(html));
   ok("beams: one row per truss-end edge (2 on a rectangle), No beam by default, Select all ends offered", (html.match(/data-floor-edge-row="/g) || []).length === 2 && /No beam/.test(html) && /Select all ends/.test(html) && !/data-size-chips/.test(html));
-  ok("beams: with no beam, the 120 x 35 strongback line is said", /A 120 × 35 strongback ties these truss ends/.test(html));
+  ok("beams: with no beam, the 140 x 35 strongback line is said", /A 140 × 35 strongback ties these truss ends/.test(html));
   ok("strongbacks are one summary line (More hides the rows and size)", /data-floor-strongback-summary/.test(html) && /18\.00 lm/.test(html) && !/data-floor-strongback-more/.test(html));
   ok("no stair void: no trimmer step", !/data-floor-step="trimmers"/.test(html));
   ok("no Add to order step to tap before the order exists: Done only", /data-floor-done/.test(html));
@@ -75,7 +75,7 @@ try {
   const custom = panel({ rules: { beams: { e0: "360x63" } } });
   ok("a typed size shows as its own chip", pressed(custom, "360 × 63 LVL"));
   const stair = panel({ voids: [{ id: "v1", name: "Stair void 1", stair: true }] });
-  ok("a stair void adds the trimmer step with 445 × 63 on by default and 400 × 63 beside it", /data-floor-step="trimmers"/.test(stair) && pressed(stair, "445 × 63 LVL") && /400 × 63 LVL/.test(stair) && /Stair void 1/.test(stair));
+  ok("a stair void adds the stair beam step with 400 × 63 on by default and 400 × 45 beside it", /data-floor-step="trimmers"/.test(stair) && pressed(stair, "400 × 63 LVL") && /400 × 45 LVL/.test(stair) && /Stair void 1/.test(stair));
   ok("openings: + Stair void and + Opening, one at a time", /\+ Stair void/.test(stair) && /\+ Opening/.test(stair));
   const drawing = panel({ floorDraw: { stair: true } });
   ok("while a stair void is being drawn, its hint replaces the buttons", /Draw the stair void on the plan/.test(drawing) && !/\+ Stair void/.test(drawing));

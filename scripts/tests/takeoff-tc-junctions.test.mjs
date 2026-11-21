@@ -364,8 +364,8 @@ t("C5: removal is per junction (continuous wall + butting wall + end): one butti
   // a key for a wall that is gone matches nothing
   assert.equal(run(two, { junctionsOff: ["zz:0@yy"] }).lay("a").totals.junctionStuds, 2);
 });
-t("version: the calculation is stamped takeoff-calc@13 so saved orders offer an update", () => {
-  assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/);
+t("version: the calculation is stamped takeoff-calc@14 so saved orders offer an update", () => {
+  assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/);
 });
 
 console.log(`takeoff-tc-junctions: ${pass} passed, ${fail} failed`);

@@ -82,6 +82,7 @@ import { FlashingPathShape, OpeningMark, OutlineOpeningMark, PolylineShape, Timb
 import { PathExplain, PathResult, SplitList, StatusRow } from "./measure/PathPanel.jsx";
 import { DistributionPanel, MemberPanel, TickPanel, TimberResult } from "./measure/TimberPanel.jsx";
 import FloorPanel from "./measure/FloorPanel.jsx";
+import { strongbackSizeForDepth } from "../../../shared/takeoff/engine/floor/geometry.js";
 import { FloorLayer } from "./measure/FloorLayer.jsx";
 import { buildSupplierGroups } from "../../../shared/takeoff/supplierOrder.js";
 import { keepFieldInView, useKeyboardInset } from "./measure/useKeyboardInset.js";
@@ -529,10 +530,23 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
     for (const k of Object.keys(rules)) if (rules[k] === null) delete rules[k];
     record({ redo: partial({ materials: [{ ...material, rules }] }), undo: partial({ materials: [material] }) });
   }
+  /** An explicitly chosen strongback size wins over the truss depth's Table 9 size from then on (rules.strongbackSizeSet). */
   function setStrongbackSize(size) {
     const [depthMm, widthMm] = size.split("x").map(Number);
     const comps = material.spec.components;
-    record({ redo: partial({ materials: [{ ...material, spec: { ...material.spec, components: { ...comps, strongback: { ...comps.strongback, section: { depthMm, widthMm } } } } }] }), undo: partial({ materials: [material] }) });
+    record({ redo: partial({ materials: [{ ...material, rules: { ...(material.rules || {}), strongbackSizeSet: true }, spec: { ...material.spec, components: { ...comps, strongback: { ...comps.strongback, section: { depthMm, widthMm } } } } }] }), undo: partial({ materials: [material] }) });
+  }
+  /** Truss depth chip (Sam, 21 Nov 2026): one change; the strongback size follows Pryda Table 9 unless a size was chosen by hand. */
+  function setTrussDepth(depth) {
+    const rules = { ...(material.rules || {}) };
+    if (depth === 400) delete rules.trussDepthMm; else rules.trussDepthMm = depth;
+    let spec = material.spec;
+    if (rules.strongbackSizeSet !== true) {
+      const [depthMm, widthMm] = strongbackSizeForDepth(depth).split("x").map(Number);
+      const comps = spec.components;
+      spec = { ...spec, components: { ...comps, strongback: { ...comps.strongback, section: { depthMm, widthMm } } } };
+    }
+    record({ redo: partial({ materials: [{ ...material, rules, spec }] }), undo: partial({ materials: [material] }) });
   }
   function removeFloorShape(m) {
     const cs = (contribsOf.get(m.id) || []).filter((c) => c.jobMaterialId === material.id);
@@ -1840,7 +1854,7 @@ export default function MeasureScreen({ ws, doc, document: planDoc, pageIndex, d
             <FloorPanel material={material} layout={floorLayout} results={results} floor={floorMeasure} voids={floorVoids} wets={floorWets} canEdit={canEdit} canDraw={canMeasure && !!cal}
               mode={mode} floorDraw={floorDraw} drawing={draft?.tool === mode && draft.points.length > 0} needScale={!cal && !stale && canMeasure} onScale={onScale ? scalePage : null}
               onDraw={(stair, wet) => { setFloorDraw({ stair, wet: !!wet }); if (mode === "pan") setModeSel("rect"); setMsg(null); }} onCancelDraw={() => { setFloorDraw(null); discardDraft(); }}
-              onRule={setFloorRules} onStrongbackSize={setStrongbackSize} onRemoveShape={removeFloorShape} onRedrawFloor={redrawFloor} orderGroups={floorOrder} onDone={close} />
+              onRule={setFloorRules} onStrongbackSize={setStrongbackSize} onTrussDepth={setTrussDepth} onRemoveShape={removeFloorShape} onRedrawFloor={redrawFloor} orderGroups={floorOrder} onDone={close} />
           )}
 
           {mode === "run" && flashing && (

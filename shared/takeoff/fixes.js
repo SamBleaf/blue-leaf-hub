@@ -80,7 +80,7 @@ export const NOTE_CODES = Object.freeze([
   // Sam, 18 Nov 2026: bracing marks that cannot be counted (no height, no stocked sheet that long) or look odd (never blocking)
   "bracing_note",
   // Floor frame (Sam, 18 Nov 2026): what the layout did that the user should know (never blocking)
-  "floor_truss_short_piece", "floor_truss_interrupted", "floor_beam_stale", "floor_sheet_waste_invalid", "floor_sheet_centres", "floor_sheet_stagger", "floor_sheet_joint_off_truss", "floor_sheet_opening_edge", "floor_opening_no_trimmers", "floor_strongback_joined", "floor_supplier_layout", "floor_strongback_rows_invalid", "floor_hebel_height", "floor_hebel_min_width", "floor_reentrant_corner", "floor_control_joint", "floor_wet_centres", "floor_support_width",
+  "floor_truss_short_piece", "floor_truss_interrupted", "floor_beam_stale", "floor_sheet_waste_invalid", "floor_sheet_centres", "floor_sheet_stagger", "floor_sheet_joint_off_truss", "floor_sheet_opening_edge", "floor_opening_no_trimmers", "floor_strongback_joined", "floor_supplier_layout", "floor_strongback_rows_invalid", "floor_hebel_height", "floor_hebel_min_width", "floor_reentrant_corner", "floor_control_joint", "floor_wet_centres", "floor_support_width", "floor_long_span", "floor_strongback_size_table",
   // installation notes (cladding.js inst(): axis installation, never blocking)
   "assembly_coverage_unstated", "installation_selectors_missing", "installation_rule_ambiguous", "installation_rule_missing",
   "project_detail_incomplete", "narrow_strip", "cut_panel_needs_review", "component_out_of_scope", "fixing_row_missing",

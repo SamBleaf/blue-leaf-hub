@@ -88,10 +88,10 @@ t("a void outside the outline, or crossing itself, blocks with a plain message (
   assert.ok(bow.problems.some((p) => p.code === "floor_outline_invalid" && /crosses itself/.test(p.message)));
   assert.equal(bow.totals, null);
 });
-t("mid-span strongback rows by the longest truss: none to 3.5 m, one over 3.5 to 6.5 m, three over 6.5 m (exact edges)", () => {
+t("mid-span strongback rows by the longest truss: none to 3.5 m, one over 3.5 to 6.0 m, three over 6.0 m (exact edges; Pryda p27, Sam 21 Nov 2026)", () => {
   const rows = (span) => layoutFloor({ outline: rect(9000, span), rules: { centresMm: 600 } }).totals.strongbackRows;
-  assert.equal(rows(3500), 0); assert.equal(rows(3600), 1); assert.equal(rows(6500), 1); assert.equal(rows(6600), 3);
-  assert.deepEqual(STRONGBACK_SPAN_RULE, { noneMaxMm: 3500, oneMaxMm: 6500 });
+  assert.equal(rows(3500), 0); assert.equal(rows(3600), 1); assert.equal(rows(6000), 1); assert.equal(rows(6200), 3);
+  assert.deepEqual(STRONGBACK_SPAN_RULE, { noneMaxMm: 3500, oneMaxMm: 6000 });
   near(layoutFloor({ outline: rect(7000, 6600), rules: { centresMm: 600 } }).totals.midStrongbackLm, 21);   // three rows of 7 m
 });
 t("per-job strongback rows override (0 to 3) beats the span rule; 2 rows sit at the thirds", () => {
@@ -149,11 +149,11 @@ t("engine: the worked example order: trusses by length, strongbacks 18 lm, nothi
   assert.equal(r.res.methodKey, "floor_framing");
   assert.equal(r.res.status.quantity, "calculated", JSON.stringify(r.res.problems.filter((p) => p.blocking)));
   assert.equal(r.lay.totals.trussCount, 15);
-  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING", "FLOORING ACCESSORIES"]);
+  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "FLOORING", "FLOORING ACCESSORIES", "FLOOR FIXINGS"]);
   const tr = group(r, "FLOOR TRUSSES");
   assert.equal(tr.rows.length, 1); assert.equal(tr.rows[0].unit, "EA"); assert.equal(tr.rows[0].quantity, 15); assert.match(tr.rows[0].product, /FLOOR TRUSS 4200 mm/);
   const sb = group(r, "STRONGBACKS");
-  near(sb.totalLm, 18); assert.match(sb.rows[0].product, /120x35/);
+  near(sb.totalLm, 18); assert.match(sb.rows[0].product, /140x35/);
   assert.equal(r.res.demands.filter((d) => d.role === "floor strongback").reduce((a, d) => a + d.lengthMm * d.quantity, 0), 18000);
 });
 t("engine: 600 centres gives 11 trusses", () => { assert.equal(run([floorArea()], { centresMm: 600 }).lay.totals.trussCount, 11); });
@@ -181,23 +181,23 @@ t("engine: LVL beams are bought in 300 mm steps (a 4,250 edge buys 4,500)", () =
   assert.equal(r.lay.edges.find((e) => e.id === "e1").kind, "end");
   assert.deepEqual(group(r, "BEAMS").rows[0].cuts, [{ count: 1, lengthMm: 4500 }]);
 });
-t("engine: stair trimmers are LVL 445 x 63 by default, 400 x 63 by chip, under TRIMMERS (never HD & SILL TR)", () => {
+t("engine: stair beams are LVL 400 x 63 by default (P5), 400 x 45 by chip, under STAIR BEAMS (never HD & SILL TR)", () => {
   const v = voidArea("v1", rect(1000, 2400, 2500, 900), "Stair void 1");
   const r = run([floorArea(), v]);
   assert.equal(r.res.status.quantity, "calculated");
-  const tm = group(r, "TRIMMERS");
-  assert.ok(tm && tm.rows.length === 1 && /445X63/.test(tm.rows[0].product));
+  const tm = group(r, "STAIR BEAMS");
+  assert.ok(tm && tm.rows.length === 1 && /400X63/.test(tm.rows[0].product));
   assert.ok(!r.groups.some((g) => g.heading === "HD & SILL TR"));
   near(tm.totalLm, 1.5 + 1.5 + 2.7 + 2.7, 3.0, "stock lm, rounded up to the grid");
-  const r2 = run([floorArea(), v], { trimmerSizes: { v1: "400x63" } });
-  assert.ok(/400X63/.test(group(r2, "TRIMMERS").rows[0].product));
+  const r2 = run([floorArea(), v], { trimmerSizes: { v1: "400x45" } });
+  assert.ok(/400X45/.test(group(r2, "STAIR BEAMS").rows[0].product));
   assert.equal(r.lay.totals.trussCount, 17);
   assert.equal(group(r, "FLOOR TRUSSES").rows.length, 2);
   assert.deepEqual(group(r, "FLOOR TRUSSES").rows.map((x) => [x.quantity, x.product]), [[13, "FLOOR TRUSS 4200 mm"], [4, "FLOOR TRUSS 900 mm"]]);
 });
 t("engine: floor roles file under their own headings, in the supplier's order, after the wall groups", () => {
   const r = run([floorArea(), voidArea("v1", rect(1000, 2400, 2500, 900), "Stair void 1")], { beams: { e0: "445x63" } });
-  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "BEAMS", "TRIMMERS", "FLOORING", "FLOORING ACCESSORIES"]);
+  assert.deepEqual(r.groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "BEAMS", "STAIR BEAMS", "FLOORING", "FLOORING ACCESSORIES", "FLOOR FIXINGS"]);
 });
 t("engine: a strongback longer than the longest stock is cut into stock-length pieces and says so", () => {
   const r = run([floorArea(rect(7000, 4200))], { centresMm: 600 });
@@ -252,7 +252,7 @@ t("server: the Floor frame item is accepted (method, spec parts) and its rules k
   assert.equal(out.spec.purpose, "floor");
   assert.deepEqual(out.rules, rules);
   assert.deepEqual(Object.keys(out.spec.components), ["strongback", "beam", "trimmer"]);
-  assert.deepEqual(out.spec.components.strongback.section, { depthMm: 120, widthMm: 35 });
+  assert.deepEqual(out.spec.components.strongback.section, { depthMm: 140, widthMm: 35 });
   assert.equal(out.spec.components.beam.section.depthMm, null, "no default beam size");
   assert.equal(_test.cleanGenericRules({ a: 1 }).a, 1);
 });
@@ -279,7 +279,7 @@ t("review fixes: short void-cut pieces get no mid-span row; bad row override is 
   const cross = layoutFloor({ outline: L, voids: [{ id: "v", name: "Hole", stair: true, points: [{ x: 2000, y: 1000 }, { x: 4000, y: 1000 }, { x: 4000, y: 3000 }, { x: 2000, y: 3000 }] }], rules: {} });
   assert.ok(cross.problems.some((p) => p.code === "floor_void_outside"));
 });
-t("version: the calculation is stamped takeoff-calc@13 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@13$/); });
+t("version: the calculation is stamped takeoff-calc@14 so saved orders offer an update", () => { assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/); });
 
 // ── P1 owner decisions, 18 Nov 2026 (Sam approved all six recommendations) ──────────────────────────────────
 t("tolerance: a traced width within 5 mm over a centres multiple adds no truss; 6 mm over does", () => {

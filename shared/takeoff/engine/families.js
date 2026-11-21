@@ -272,13 +272,13 @@ export function wallFramingDefaults(presets = []) {
 // ── Floor frame (Sam, 18 Nov 2026): one timber item, three parts ─────────────────────────────────────────────────
 /** The Floor frame purpose (method floor_framing@1). Like Walls it is never a Purpose chip. */
 export const FLOOR_PURPOSE = "floor";
-/** Parts of a Floor frame item: the 120 x 35 strongbacks, the ring/perimeter beams (LVL, size set per beam) and the stair trimmers (LVL, size set per void). */
+/** Parts of a Floor frame item: the 140 x 35 strongbacks, the ring/perimeter beams (LVL, size set per beam) and the perimeter stair beams (role "trimmer", LVL 400x45 / 400x63 per void). */
 export const FLOOR_PARTS = Object.freeze(["strongback", "beam", "trimmer"]);
-export const FLOOR_PART_LABELS = Object.freeze({ strongback: "Strongbacks", beam: "Beams", trimmer: "Trimmers" });
-/** Defaults [need Sam's confirmation where marked in the plan]: strongback 120 x 35 MGP10 H2 (editable per job), LVL Smart 10 H2 for beams and trimmers.
+export const FLOOR_PART_LABELS = Object.freeze({ strongback: "Strongbacks", beam: "Beams", trimmer: "Stair beams" });
+/** Defaults [need Sam's confirmation where marked in the plan]: strongback 140 x 35 MGP10 H2 (Sam 21 Nov 2026: 400 deep trusses, Pryda Table 9; editable per job), LVL Smart 10 H2 for beams and trimmers.
  *  Beam and trimmer sections are NOT part defaults: each beam / stair void carries its own size (the engineer sets them). */
 export const FLOOR_PART_DEFAULTS = Object.freeze({
-  strongback: Object.freeze({ depthMm: 120, widthMm: 35, grade: "MGP10", treatment: "H2", maxMm: 6000 }),
+  strongback: Object.freeze({ depthMm: 140, widthMm: 35, grade: "MGP10", treatment: "H2", maxMm: 6000 }),
   beam: Object.freeze({ depthMm: null, widthMm: null, grade: "LVL Smart 10", treatment: "H2", maxMm: 11000 }),
   trimmer: Object.freeze({ depthMm: null, widthMm: null, grade: "LVL Smart 10", treatment: "H2", maxMm: 11000 }),
 });
@@ -536,7 +536,7 @@ export function familyProblems(spec, { usesLongPlates = false } = {}) {
       const p = n.components[k], label = FLOOR_PART_LABELS[k];
       const needPart = (cond, field, message) => { if (!cond) out.push({ code: "material_incomplete", message: `${label}: ${message}`, part: k, field }); };
       // beams and trimmers take their size per beam / per stair void, so only the strongback has a section here
-      if (k === "strongback") needPart(p.section.depthMm && p.section.widthMm, "section", "enter the timber section (e.g. 120 × 35).");
+      if (k === "strongback") needPart(p.section.depthMm && p.section.widthMm, "section", "enter the timber section (e.g. 140 × 35).");
       needPart(p.grade || p.species, "grade", "enter the grade or species.");
       needPart(p.treatment, "treatment", "enter the treatment (or \"untreated\").");
       needPart(wallPartLongestOk(p), "stock.maxMm", `the longest length must be at least ${TIMBER_GRID.minMm.toLocaleString("en-AU")} mm.`);

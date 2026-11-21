@@ -172,7 +172,7 @@ export function floorDrawing(layout, opts = {}) {
   if ((layout.trusses || []).some((t) => t.interrupted)) add("trussCut", "Truss cut short by an opening", { kind: "line", color: C.trussCut });
   if ((layout.beams || []).length) add("beam", "Beam (letter and size)", { kind: "line", color: C.beam, w: 4 });
   if ((layout.endStrongbacks || []).length || (layout.midRows || []).some((r) => r.runs.length)) add("strongback", "Strongback, end (SB) and mid-span", { kind: "line", color: C.strongback, dash: true });
-  if ((layout.trimmers || []).length) add("trimmer", "Stair trimmer (LVL)", { kind: "line", color: C.trimmer, w: 3 });
+  if ((layout.trimmers || []).length) add("trimmer", "Stair beam (LVL)", { kind: "line", color: C.trimmer, w: 3 });
   if (counts.controlJoints) add("controlJoint", "Control joint (CJ)", { kind: "line", color: C.controlJoint, dash: true });
 
   const byMat = [];
@@ -182,7 +182,7 @@ export function floorDrawing(layout, opts = {}) {
     `${T.trussCount} trusses at ${T.centresMm} crs · ${T.trussLines} truss lines · longest ${(T.longestSpanMm / 1000).toFixed(2)} m`,
     `Floor ${T.floorAreaM2} m² (main ${T.mainAreaM2} m², wet ${T.wetM2} m², openings ${T.openingsM2} m²) · ${r1(layout.frame.widthMm / 1000)} × ${r1(layout.frame.spanMm / 1000)} m`,
     ...byMat,
-    `Strongbacks ${T.strongbackLm} lm${(layout.beams || []).length ? ` · beams ${T.beamLm} lm` : ""}${(layout.trimmers || []).length ? ` · trimmers ${T.trimmerLm} lm` : ""}`,
+    `Strongbacks ${T.strongbackLm} lm${(layout.beams || []).length ? ` · beams ${T.beamLm} lm` : ""}${(layout.trimmers || []).length ? ` · stair beams ${T.trimmerLm} lm` : ""}`,
   ];
 
   return { width: r1(bw + padL + pad), height: r1(bh + pad * 2), title: opts.name || "Floor frame layout", items, legend, summary, counts };
