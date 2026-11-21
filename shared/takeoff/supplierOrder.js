@@ -27,8 +27,8 @@ const GROUPS = Object.freeze([
   ["plates", "T&B PLATES"], ["studs", "STUDS"], ["jambs", "JAMB STUDS"], ["junction", "JUNCT. BLK"],
   ["trimmers", "HD & SILL TR"], ["lintels", "LINTELS"], ["noggins", "NOGGINS"], ["bracing", "BRACING"], ["tempbr", "TEMP BR"], ["sbscrew", "SB SCREW"],
   // Floor frame (Sam, 18 Nov 2026): the floor roles are named "floor truss", "floor strongback", "floor beam", "floor trimmer" so they match here first
-  // and a floor beam never lands in LINTELS nor a floor trimmer in HD & SILL TR
-  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "TRIMMERS"], ["floorsheet", "FLOORING"], ["flooracc", "FLOORING ACCESSORIES"],
+  // (the trimmer role is the stair beams, Sam 21 Nov 2026) and a floor beam never lands in LINTELS nor a floor trimmer in HD & SILL TR
+  ["floortruss", "FLOOR TRUSSES"], ["floorsb", "STRONGBACKS"], ["floorbeam", "BEAMS"], ["floortrim", "STAIR BEAMS"], ["floorsheet", "FLOORING"], ["flooracc", "FLOORING ACCESSORIES"], ["floorfix", "FLOOR FIXINGS"],
 ]);
 const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", trim: "TRIM", other: "OTHER TIMBER" };
 
@@ -42,7 +42,7 @@ const OTHER_HEADING = { rafter: "RAFTERS", joist: "JOISTS", member: "MEMBERS", t
 export function memberGroup(role) {
   const r = String(role || "other").toLowerCase().trim();
   const pick = (key) => ({ key, heading: GROUPS.find(([k]) => k === key)[1], rank: GROUPS.findIndex(([k]) => k === key) });
-  if (/^floor /.test(r)) return pick(/accessor/.test(r) ? "flooracc" : /truss/.test(r) ? "floortruss" : /sheet/.test(r) ? "floorsheet" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
+  if (/^floor /.test(r)) return pick(/accessor/.test(r) ? "flooracc" : /fixing/.test(r) ? "floorfix" : /truss/.test(r) ? "floortruss" : /sheet/.test(r) ? "floorsheet" : /strongback/.test(r) ? "floorsb" : /beam/.test(r) ? "floorbeam" : /trimmer/.test(r) ? "floortrim" : "floorsb");
   if (r === "tempbr") return pick("tempbr");
   if (r === "sbscrew") return pick("sbscrew");
   if (/hoop|brac|strap|tension/.test(r)) return pick("bracing");
@@ -145,6 +145,7 @@ export function buildSupplierGroups(items, manualLines = []) {
         const row = grp.rows.get(rowKey) || { product: `FLOOR TRUSS ${L ? `${L} mm` : ""}`.trim(), unit: "EA", order: -L, quantity: 0, problem: false, lvl: false, stock: L || null, cutsByLength: new Map(), lmDirect: 0 };
         grp.rows.set(rowKey, row);
         row.quantity += n; row.problem = row.problem || !!l.problem;
+        if (l.note && !grp.note) grp.note = l.note;   // Sam 21 Nov 2026: the wet-area set-down note rides on the truss heading
         continue;
       }
       // floor sheets (Sam, 18 Nov 2026): one EA row per sheet product, "STRUCTAFLOR 3600x800x19", counted in sheets
@@ -158,7 +159,7 @@ export function buildSupplierGroups(items, manualLines = []) {
         continue;
       }
       // floor accessories (Sam, 19 Nov 2026): screws, adhesive, sealant, nails, backing rod: one row per product, its own unit (EA or LM) and a short basis note
-      if (g.key === "flooracc") {
+      if (g.key === "flooracc" || g.key === "floorfix") {
         const name = String(l.description || "FLOOR ACCESSORY");
         const grp = groups.get(g.key) || { key: g.key, heading: g.heading, rank: g.rank, rows: new Map() };
         groups.set(g.key, grp);
@@ -206,7 +207,7 @@ export function buildSupplierGroups(items, manualLines = []) {
       const totalLm = Number((mm / 1000 + r.lmDirect).toFixed(2));
       return { product: r.product, unit: "LM", cuts, cutText: [cuts.length ? formatCuts(cuts) : "", r.quantity ? `${r.quantity} with no stock length` : ""].filter(Boolean).join(", "), totalLm, ...(r.quantity ? { uncounted: r.quantity } : {}), problem: r.problem };
     });
-    return { key: g.key, heading: g.heading, rows,
+    return { key: g.key, heading: g.heading, rows, ...(g.note ? { note: g.note } : {}),
       totalLm: Number(rows.reduce((a, r) => a + (r.unit === "LM" ? r.totalLm : 0), 0).toFixed(2)), totalEa: rows.reduce((a, r) => a + (r.unit === "EA" ? r.quantity : 0), 0) };
   });
 }

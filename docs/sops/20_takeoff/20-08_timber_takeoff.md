@@ -267,6 +267,7 @@ For a floor built on floor trusses. The truss supplier designs the real layout a
 16. **Control joints, length rule only.** A straight run over 6.0 m of Hebel or over 5.4 m of tiled Scyon (4.8 m for 22 mm) gets joints at even spacing, snapped to the nearest truss line (a run across the trusses; sheets stop at the joint) or the nearest sheet-row edge (a run along them). They show dashed on the plan and 10 mm backing rod is ordered by the metre with a "check" note. A re-entrant corner only gets the note "Check for a control joint at the re-entrant corner"; nothing is placed there.
 17. **Not built in phase 3:** support-width setting (a 35 mm chord warning only fires if a width under 45 mm is set in the rules), control joints at openings or penetrations, Hebel perimeter gap, wet-area membrane (by others), pooled offcuts between separate wet areas.
 18. **Layout drawing (phase 4).** Once a floor outline is drawn, tap **Layout** (next to Done). A full-screen scaled plan shows the outline and overall sizes, openings (a stair void hatched), truss lines with a direction arrow and the centres, beams (letter and size), strongbacks (dashed; SB on an end edge with no beam), stair trimmers (LVL size), wet areas (hatched, named Scyon), every sheet outlined in a light fill (Structaflor, Hebel, Scyon each different), cut pieces marked with a red corner tick and their size, and control joints (dashed, CJ). The summary (trusses, sheets by material, m2) and the legend are under it. On a phone the drawing scrolls sideways: pinch to zoom. Tap **Close** to return. Nothing to set; it only reads what is already worked out.
+20. **Pryda rules (phase 5, Sam 21 Nov 2026).** Three strongback rows over 6.0 m (was 6.5); truss depth chip row 300/350/400 under Strongbacks > More (400 default) and the strongback size 140 × 35 by Pryda Table 9; strongback joins lapped two truss spaces; the stair trimmers are now **Stair beams** (LVL 400 × 45 or 400 × 63, default 400 × 63, heading STAIR BEAMS); **FLOOR FIXINGS** (Pryda FB94152 joist brackets with Pryda 35 x 3.15 nails, 75 x 3.15 framing nails as counts, SB103 strap braces); a wet-area set-down note on the truss heading; a long-span note over 6 m; **No ceiling under** (More) adds 90 x 35 lateral ties. Calculation version takeoff-calc@14. See TC-32.
 19. **Same drawing in the site appendix PDF (renderer `takeoff-pdf@6`).** Each floor frame item gets one page titled "layout drawing" with the drawing, summary and legend, in the site appendix of an export (not in the supplier order PDF). The order PDF already carries the floor order lines (FLOORING, FLOORING ACCESSORIES, trusses, beams, trimmers). Calculation version is unchanged (`takeoff-calc@13`).
 
 ## 6. What happens next
@@ -742,6 +743,18 @@ Node: scripts/tests/takeoff-tc-junctions.test.mjs.
 5. **Redraw** the outline: beams clear; Undo brings the outline and beams back. Strongbacks **More**: rows Auto (1), 0 to 3, size 90 / 120 / 140 x 35.
 6. Draw an L-shaped outline with **Outline**: the trusses are clipped to the shape, and the step edge has its own truss.
 7. Node: scripts/tests/takeoff-tc-floor.test.mjs (engine, order headings, server whitelist), scripts/tests/takeoff-tc-floor-render.test.mjs (the sheet and the overlay).
+- [ ] Pass  [ ] Fail
+
+**TC-32 — Floor frame, phase 5 (Pryda rules; Sam, 21 Nov 2026)**
+1. Floor frame, 9.0 x 6.0 m at 600 centres. Expected: one mid-span row; change to 9.0 x 6.2: three rows. A new item's strongbacks read 140 × 35 (400 deep trusses).
+2. Strongbacks > More > Truss depth **300 / 350 / 400** (400 default): the size follows Pryda Table 9 unless you tap a size by hand (that size then stays). A depth under 250 says so in a note when the size disagrees.
+3. 9.0 m end and mid strongbacks: each join adds two truss spaces (1,200 mm at 600). Expected: STRONGBACKS lm is longer than the plain lengths and the note says each join is lapped two truss spaces.
+4. 6.0 x 4.2 at 450, no beams. Expected: FLOOR FIXINGS: 165 nails 75 x 3.15 (60 skew + 60 end strongback + 45 mid-span), 4 strap braces SB103 30 x 1.0 (cut from a coil); no brackets. Put a beam on Edge A: 15 Pryda FB94152 brackets, 315 Pryda 35 x 3.15 nails, 105 framing nails, 2 braces.
+5. **+ Stair void** 1.0 x 2.4: the step reads **6 · Stair beams**, 400 × 63 LVL on by default, 400 × 45 beside it, Other to type one; the order heading is **STAIR BEAMS**; 4 brackets for the 4 truss ends at the beams. A size saved on an older job is kept.
+6. **+ Wet area**: a note under FLOOR TRUSSES reads "Wet areas: set-down trusses 355 deep (45 mm set-down) — <names>"; the quantities do not change.
+7. A truss span over 6,000: the note "Spans over 6 m: check the truss depth and chords with the supplier."
+8. More > **No ceiling under** on: 90 × 35 lateral ties at 3,000 max centres (rows = span over 3,000, rounded up, less one) appear as 90x35 lm in STRONGBACKS.
+9. Node: scripts/tests/takeoff-tc-floor-p5.test.mjs (also scripts/tests/takeoff-tc-floor*.test.mjs).
 - [ ] Pass  [ ] Fail
 
 **TC-30 — Above these walls: Roof, Floor + roof, Engineer (Sam, 18 Nov 2026)**

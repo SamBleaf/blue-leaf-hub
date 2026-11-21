@@ -14,16 +14,40 @@
 //              at the header trimmers (flagged for the truss supplier). Lengths are rounded UP to the next 10 mm.
 //   Beams      ring / perimeter beams are marked per edge, each with a size the user picks (no default): an edge marked with no size
 //              is a blocking problem, never a guess.
-//   Strongback 120 x 35 along every truss end with no beam (one run per edge); mid-span rows from the span rule:
-//              up to 3.5 m none, over 3.5 up to 6.5 m one row at midspan, over 6.5 m three rows (quarter points); 0 to 3 rows
-//              can be set per job (rules.strongbackRows).
-//   Trimmers   a stair void gets 2 header trimmers (across the trusses, snapped outward to the truss lines either side) and 2 side
-//              trimmers (the void's length plus a bearing allowance each end). A plain opening gets none.
+//   Strongback along every truss end with no beam (one run per edge); mid-span rows from the span rule (Pryda p27, Sam 21 Nov 2026):
+//              up to 3.5 m none, over 3.5 up to 6.0 m one row at midspan, over 6.0 m three rows (quarter points); 0 to 3 rows
+//              can be set per job (rules.strongbackRows). The size comes from the truss depth (Pryda Table 9; strongbackSizeForDepth).
+//   Stair beams (role "floor trimmer", id kept so saved jobs load) a stair void gets 2 header beams (across the trusses, snapped
+//              outward to the truss lines either side) and 2 side beams (the void's length plus a bearing allowance each end).
+//              A plain opening gets none. LVL 400x45 or 400x63 per void (Sam 21 Nov 2026).
+//   Truss ends each truss end is classed: on a wall plate (edge with no beam), on a beam, at a stair beam (an interrupted truss), or at a
+//              plain opening (unsupported; noted). The fixings (engine/floor/fixings.js) are counted from these.
+//   No ceiling rules.noCeiling adds lateral ties at 3,000 mm centres max (Pryda p13, p28), laid like the mid-span rows.
 // =============================================================================
 
 export const FLOOR_LIMITS = Object.freeze({ centresMinMm: 200, centresMaxMm: 1200, outlinePoints: 200 });
 /** Mid-span strongback span rule (the supplier's guide; settings, not hard-coded in the maths). */
-export const STRONGBACK_SPAN_RULE = Object.freeze({ noneMaxMm: 3500, oneMaxMm: 6500 });
+/** Pryda p27: one row over 3.5 m, three rows OVER 6 m (Sam, 21 Nov 2026: 6.0 m, not 6.5). */
+export const STRONGBACK_SPAN_RULE = Object.freeze({ noneMaxMm: 3500, oneMaxMm: 6000 });
+/** Truss depth (Sam, 21 Nov 2026: "almost always 400 mm"; wet areas are set down to 355). */
+export const TRUSS_DEPTH_DEFAULT_MM = 400;
+export const TRUSS_DEPTH_CHIPS = Object.freeze([300, 350, 400]);
+export const WET_SET_DOWN_DEPTH_MM = 355;
+/** Pryda Table 9 (p27), F5/MGP10: strongback size by truss depth. Up to 200 deep 90x35, 250 deep 120x35, 300 and over 140x35. */
+export function strongbackSizeForDepth(depthMm) {
+  const d = Number(depthMm);
+  if (!(d > 0)) return "140x35";
+  return d <= 200 ? "90x35" : d < 300 ? "120x35" : "140x35";
+}
+/** The truss depth in use: the item's rule, or 400. */
+export const trussDepthOf = (rules = {}) => { const d = Number(rules.trussDepthMm); return d >= 100 && d <= 800 ? d : TRUSS_DEPTH_DEFAULT_MM; };
+/** Pryda p13 and p28: lateral ties on the bottom chord at 3,000 mm centres at most when there is no ceiling under. */
+export const NO_CEILING_TIE_CENTRES_MM = 3000;
+export const NO_CEILING_TIE_SIZE = "90x35";
+/** A strongback join is lapped over two truss spaces (Pryda p27: "overlapped by two truss spacing for best performance"). */
+export const STRONGBACK_LAP_SPACES = 2;
+/** Over this longest truss span a note asks to check the depth and chords with the supplier (Sam, 21 Nov 2026; no table values here). */
+export const LONG_SPAN_NOTE_MM = 6000;
 /** A stair trimmer bears on its headers by this much each end (the plan's default allowance). */
 export const TRIMMER_BEARING_MM = 45;
 /** Truss lengths are ordered in whole 10 mm steps (rounded up; within 0.5 mm of a step counts as on it). */
@@ -36,9 +60,10 @@ export const MIN_TRUSS_MM = 300;
 export const SIDE_EDGE_DEG = 3;
 /** The beam sizes offered as chips (LVL, set per beam by the user; the engineer decides). */
 export const BEAM_SIZE_CHIPS = Object.freeze(["400x63", "445x63"]);
-/** The stair trimmer sizes offered as chips (default 445 x 63). */
-export const TRIMMER_SIZE_CHIPS = Object.freeze(["445x63", "400x63"]);
-export const TRIMMER_DEFAULT_SIZE = "445x63";
+/** The perimeter stair beam sizes offered as chips (Sam, 21 Nov 2026: LVL 400x45 or 400x63 "depending on span"). Internal names say "trimmer" so saved jobs load. */
+export const TRIMMER_SIZE_CHIPS = Object.freeze(["400x45", "400x63"]);
+/** Default for a void with no saved size: 400x63 (assumed — confirm the span at which 400x45 is enough). */
+export const TRIMMER_DEFAULT_SIZE = "400x63";
 /** A beam marked with no size yet. */
 export const BEAM_UNSIZED = "unsized";
 /** Sam, 18 Nov 2026: a traced width within this of a centres multiple does not add a truss (tracing noise: 5,405 mm at 450 is 12 bays, not 13). */
@@ -180,7 +205,7 @@ export function layoutFloor(input) {
   const fail = (code, message) => problems.push({ code, message, blocking: true });
   const note = (code, message) => problems.push({ code, message, blocking: false });
   const outline = input.outline || [];
-  const empty = (extra = {}) => ({ problems, edges: [], lines: [], trusses: [], trussesByLength: [], voids: [], wets: [], beams: [], endStrongbacks: [], midRows: [], trimmers: [], totals: null, ...extra });
+  const empty = (extra = {}) => ({ problems, edges: [], lines: [], trusses: [], trussesByLength: [], voids: [], wets: [], beams: [], endStrongbacks: [], midRows: [], trimmers: [], tieRows: [], totals: null, ...extra });
   if (outline.length < 3) { fail("floor_outline_missing", "Draw the floor outline first."); return empty(); }
   if (outline.length > FLOOR_LIMITS.outlinePoints) { fail("floor_outline_invalid", `A floor outline can have ${FLOOR_LIMITS.outlinePoints} corners at most.`); return empty(); }
   if (ringSelfIntersects(outline)) { fail("floor_outline_invalid", "The floor outline crosses itself. Redraw it, tapping the corners in order."); return empty(); }
@@ -273,22 +298,22 @@ export function layoutFloor(input) {
       return { v, spans: mergeIntervals([...spansAt(v.ring, s - 1e-3), ...spansAt(v.ring, s + 1e-3)]) };
     });
     for (const [a, b] of base) {
-      let cur = a, startCut = false;
-      const hits = cuts.flatMap((c) => c.spans.filter(([c0, c1]) => c0 < b - TOL && c1 > a + TOL).map(([c0, c1]) => ({ c0, c1, id: c.v.id }))).sort((x, y) => x.c0 - y.c0);
-      const add = (v0, v1, sC, eC) => {
+      let cur = a, prevId = null;
+      const hits = cuts.flatMap((c) => c.spans.filter(([c0, c1]) => c0 < b - TOL && c1 > a + TOL).map(([c0, c1]) => ({ c0, c1, id: c.v.id ?? "void" }))).sort((x, y) => x.c0 - y.c0);
+      const add = (v0, v1, sId, eId) => {
         const len = v1 - v0;
         if (len < MIN_TRUSS_MM) { if (len > TOL) note("floor_truss_short_piece", `A piece of truss line ${ln.k + 1} only ${Math.round(len)} mm long beside an opening isn't counted as a truss; the trimmer carries the floor there.`); return; }
-        ln.pieces.push({ v0, v1, lengthMm: ceil10(len), interrupted: sC || eC });
+        ln.pieces.push({ v0, v1, lengthMm: ceil10(len), interrupted: !!(sId || eId), startCutId: sId || null, endCutId: eId || null });
       };
       for (const h of hits) {
-        if (h.c0 > cur + TOL) add(cur, h.c0, startCut, true);
-        cur = Math.max(cur, h.c1); startCut = true;
+        if (h.c0 > cur + TOL) add(cur, h.c0, prevId, h.id);
+        cur = Math.max(cur, h.c1); prevId = h.id;
       }
-      if (cur < b - TOL) add(cur, b, startCut, false);
+      if (cur < b - TOL) add(cur, b, prevId, null);
     }
     for (const pc of ln.pieces) {
       const a = F.fromLocal({ u: ln.u, v: pc.v0 }), b = F.fromLocal({ u: ln.u, v: pc.v1 });
-      trusses.push({ line: ln.k + 1, a, b, lengthMm: pc.lengthMm, interrupted: pc.interrupted });
+      trusses.push({ line: ln.k + 1, a, b, lengthMm: pc.lengthMm, interrupted: pc.interrupted, startCutId: pc.startCutId, endCutId: pc.endCutId });
     }
   }
   const byLen = new Map();
@@ -331,29 +356,39 @@ export function layoutFloor(input) {
   const rows = Number.isInteger(ruleRows) && ruleRows >= 0 && ruleRows <= 3 ? ruleRows : autoRows;
   const rowFractions = rows === 0 ? [] : rows === 1 ? [0.5] : rows === 2 ? [1 / 3, 2 / 3] : [0.25, 0.5, 0.75];
   const ruleOverride = Number.isInteger(ruleRows) && ruleRows >= 0 && ruleRows <= 3;
-  const midRows = [];
-  for (const f of rowFractions) {
-    let open = [];
-    const runs = [];
-    for (const ln of lines) {
-      const pts = ln.pieces.filter((pc) => ruleOverride || pc.v1 - pc.v0 > STRONGBACK_SPAN_RULE.noneMaxMm).map((pc) => ({ line: ln.k, u: ln.u, v: pc.v0 + f * (pc.v1 - pc.v0) }));
-      const next = [];
-      const used = new Set();
-      for (const pt of pts) {
-        const run = open.find((r, idx) => !used.has(idx) && r.lastLine === ln.k - 1 && Math.abs(r.lastV - pt.v) <= ROW_TOLERANCE_MM);
-        if (run) { used.add(open.indexOf(run)); run.pts.push(pt); run.lastLine = ln.k; run.lastV = pt.v; next.push(run); } else { const r = { pts: [pt], lastLine: ln.k, lastV: pt.v }; runs.push(r); next.push(r); }
+  /** Rows across the trusses at fraction f of each truss piece that passes `keep`; one run per unbroken stretch of neighbouring trusses. */
+  const rowsAt = (fractions, keep) => {
+    const out = [];
+    for (const f of fractions) {
+      let open = [];
+      const runs = [];
+      for (const ln of lines) {
+        const pts = ln.pieces.filter(keep).map((pc) => ({ line: ln.k, u: ln.u, v: pc.v0 + f * (pc.v1 - pc.v0) }));
+        const next = [];
+        const used = new Set();
+        for (const pt of pts) {
+          const run = open.find((r, idx) => !used.has(idx) && r.lastLine === ln.k - 1 && Math.abs(r.lastV - pt.v) <= ROW_TOLERANCE_MM);
+          if (run) { used.add(open.indexOf(run)); run.pts.push(pt); run.lastLine = ln.k; run.lastV = pt.v; next.push(run); } else { const r = { pts: [pt], lastLine: ln.k, lastV: pt.v }; runs.push(r); next.push(r); }
+        }
+        open = next;
       }
-      open = next;
+      const rr = runs.filter((r) => r.pts.length >= 2).map((r) => {
+        let len = 0;
+        for (let i = 1; i < r.pts.length; i++) len += hypot(r.pts[i].u - r.pts[i - 1].u, r.pts[i].v - r.pts[i - 1].v);
+        return { fraction: f, lengthMm: round3(len), crossings: r.pts.length, points: r.pts.map((p) => F.fromLocal({ u: p.u, v: p.v })) };
+      });
+      out.push({ fraction: f, runs: rr });
     }
-    const rr = runs.filter((r) => r.pts.length >= 2).map((r) => {
-      let len = 0;
-      for (let i = 1; i < r.pts.length; i++) len += hypot(r.pts[i].u - r.pts[i - 1].u, r.pts[i].v - r.pts[i - 1].v);
-      return { fraction: f, lengthMm: round3(len), points: r.pts.map((p) => F.fromLocal({ u: p.u, v: p.v })) };
-    });
-    midRows.push({ fraction: f, runs: rr });
-  }
+    return out;
+  };
+  const midRows = rowsAt(rowFractions, (pc) => ruleOverride || pc.v1 - pc.v0 > STRONGBACK_SPAN_RULE.noneMaxMm);
 
-  // ── trimmers (stair voids) ──
+  // ── no ceiling under (Sam, 21 Nov 2026; Pryda p13, p28): lateral ties on the bottom chord at 3,000 mm centres at most ──
+  const noCeiling = rules.noCeiling === true || rules.noCeiling === "true";
+  const tieRowCount = noCeiling && longest > NO_CEILING_TIE_CENTRES_MM ? Math.max(1, Math.ceil(longest / NO_CEILING_TIE_CENTRES_MM - 1e-9) - 1) : 0;
+  const tieRows = tieRowCount ? rowsAt(Array.from({ length: tieRowCount }, (_, j) => (j + 1) / (tieRowCount + 1)), (pc) => pc.v1 - pc.v0 > NO_CEILING_TIE_CENTRES_MM) : [];
+
+  // ── stair beams (stair voids; internal name "trimmers") ──
   const trimmers = [];
   const trimSizes = rules.trimmerSizes && typeof rules.trimmerSizes === "object" ? rules.trimmerSizes : {};
   for (const v of voids) {
@@ -375,6 +410,28 @@ export function layoutFloor(input) {
     if (!v.stair && trusses.some((t) => t.interrupted)) note("floor_opening_no_trimmers", `${v.name} has no trimmers, so the trusses cut by it end unsupported. Make it a stair void, or add trimmers by hand.`);
   }
 
+  // ── truss ends (Pryda p29-30 fixings): wall plate (an end edge with no beam), beam, stair beam (an interrupted truss), or a plain opening (unsupported) ──
+  const distToSeg = (p, a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+    return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  };
+  const END_EDGE_TOL_MM = 25;
+  const endEdges = edges.filter((e) => e.kind === "end");
+  const stairIds = new Set(voids.filter((v) => v.stair).map((v) => v.id ?? "void"));
+  const truss = { plateEnds: 0, beamEnds: 0, stairBeamEnds: 0, openingEnds: 0, byEdge: {} };
+  const edgeEnds = (e) => (truss.byEdge[e.id] = truss.byEdge[e.id] || { label: e.label, beam: !!e.beam, n: 0 });
+  for (const t of trusses) {
+    for (const [pt, cutId] of [[t.a, t.startCutId], [t.b, t.endCutId]]) {
+      if (cutId) { if (stairIds.has(cutId)) truss.stairBeamEnds++; else truss.openingEnds++; continue; }
+      let best = null, bd = Infinity;
+      for (const e of endEdges) { const d = distToSeg(pt, e.a, e.b); if (d < bd) { bd = d; best = e; } }
+      const on = best && bd <= END_EDGE_TOL_MM ? best : null;
+      if (on) edgeEnds(on).n++;
+      if (on && on.beam) truss.beamEnds++; else truss.plateEnds++;
+    }
+  }
+
   const outlineArea = ringAreaMm2(outline);
   const voidArea = voids.reduce((a, v) => a + v.areaMm2, 0);
   const wetArea = wets.reduce((a, w) => a + w.areaMm2, 0);
@@ -385,6 +442,8 @@ export function layoutFloor(input) {
     trussCount: trusses.length, trussLines: lines.length, centresMm: centres, longestSpanMm: longest,
     floorAreaM2: round3((outlineArea - voidArea) / 1e6),
     mainAreaM2: round3((outlineArea - voidArea - wetArea) / 1e6), wetM2: round3(wetArea / 1e6), outlineAreaM2: round3(outlineArea / 1e6), openingsM2: round3(voidArea / 1e6),
+    trussDepthMm: trussDepthOf(rules), endStrongbackCount: endStrongbacks.length, midCrossings: midRows.reduce((a, r) => a + r.runs.reduce((s2, x) => s2 + x.crossings, 0), 0),
+    tieRows: tieRowCount, tieLm: round3(tieRows.reduce((a, r) => a + r.runs.reduce((s2, x) => s2 + x.lengthMm, 0), 0) / 1000),
     endStrongbackLm: endLm, midStrongbackLm: midLm, strongbackLm: round3(endLm + midLm), strongbackRows: rows, strongbackRowsAuto: autoRows,
     beamLm: round3(beams.reduce((a, b) => a + b.lengthMm, 0) / 1000), beamsBySize: sumBy(beams, "size"),
     trimmerLm: round3(trimmers.reduce((a, t) => a + t.lengthMm, 0) / 1000), trimmersBySize: sumBy(trimmers, "size"),
@@ -394,7 +453,7 @@ export function layoutFloor(input) {
     edges, lines: lines.map((l) => ({ k: l.k + 1, uMm: round3(l.u - minU), pieces: l.pieces.length })), trusses, trussesByLength,
     voids: voids.map((v) => ({ id: v.id, name: v.name, stair: v.stair, points: v.points, areaM2: round3(v.areaMm2 / 1e6) })),
     wets: wets.map((w) => ({ id: w.id, name: w.name, points: w.points, areaM2: round3(w.areaMm2 / 1e6) })),
-    beams, endStrongbacks, midRows, trimmers, totals,
+    beams, endStrongbacks, midRows, tieRows, trimmers, trussEnds: truss, totals,
   };
 }
 

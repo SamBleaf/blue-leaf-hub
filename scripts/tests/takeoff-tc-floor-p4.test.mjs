@@ -36,7 +36,7 @@ await t("drawing, Structaflor 6.0 x 4.2 at 450 with a stair void and a wet area:
   assert.equal(count(svg, /data-fl="beam"/g), 1);
   assert.ok(count(svg, /data-fl="end-strongback"/g) >= 1); assert.ok(count(svg, /data-fl="mid-strongback"/g) >= 1);
   assert.equal(count(svg, /data-fl="truss-arrow"/g), 5, "one double-headed direction arrow");
-  assert.match(svg, /Trusses 450 crs/); assert.match(svg, /A 445x63/); assert.match(svg, /LVL 445x63/); assert.match(svg, /Scyon 2700x600x19/);
+  assert.match(svg, /Trusses 450 crs/); assert.match(svg, /A 445x63/); assert.match(svg, /LVL 400x63/); assert.match(svg, /Scyon 2700x600x19/);
   assert.match(svg, /6,000 mm/); assert.match(svg, /4,200 mm/);
   assert.deepEqual(m.counts.legendKeys, ["structaflor", "scyon", "wet", "stair", "cut", "truss", "trussCut", "beam", "strongback", "trimmer"]);
   assert.equal(m.summary.length, 5);

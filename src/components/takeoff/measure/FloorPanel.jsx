@@ -7,14 +7,14 @@
 //   2 Openings     + Stair void / + Opening (drawn the same way, one at a time; skip with no openings)
 //   3 Trusses      "Span the short way" (default) / "Span the long way"; centres 450 / 600 / Other
 //   4 Beams        one row per truss-end edge: Beam on/off, size chips 400x63 / 445x63 / Other (the last size used is the next beam's); no size = Incomplete
-//   5 Strongbacks  120 x 35 along truss ends with no beam + mid-span rows from the span rule: a summary line, rows and size under More
-//   6 Trimmers     one chip row per stair void (445x63 default / 400x63)
+//   5 Strongbacks  140 x 35 (400 deep trusses, Pryda Table 9) along truss ends with no beam + mid-span rows from the span rule: a summary line; rows, truss depth, size and "No ceiling under" under More
+//   6 Stair beams  one chip row per stair void (LVL 400x63 default / 400x45 / type one)
 //   7 Flooring     main floor (outline less openings and wet areas): chips Structaflor / Hebel, "N sheets (M m² laid, waste W%)"; Scyon Secura in each wet area; sheet width, Scyon 19/22 mm, nails 50/75 mm, waste % and offcut reuse under More
-//   Order          FLOORING ACCESSORIES (screws, adhesive, sealant, nails, backing rod) each with a one-line basis; control joints are drawn on the plan
+//   Order          FLOORING ACCESSORIES (screws, adhesive, sealant, nails, backing rod) and FLOOR FIXINGS (brackets, nails, strap braces) each with a one-line basis; control joints are drawn on the plan
 // =============================================================================
 import { useState } from "react";
 import FloorLayoutView from "./FloorLayoutView.jsx";
-import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
+import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, TRUSS_DEPTH_CHIPS, TRUSS_DEPTH_DEFAULT_MM, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
 import { Banner, Btn, NumberField } from "../ui.jsx";
 import { fmtM2 } from "../format.js";
 
@@ -67,7 +67,7 @@ const Line = ({ label, children, testId }) => (
   </div>
 );
 
-export default function FloorPanel({ material, layout, results, floor, voids, wets = [], canEdit, canDraw, mode, floorDraw, drawing, onDraw, onCancelDraw, onRule, onStrongbackSize, onRemoveShape, onRedrawFloor,
+export default function FloorPanel({ material, layout, results, floor, voids, wets = [], canEdit, canDraw, mode, floorDraw, drawing, onDraw, onCancelDraw, onRule, onStrongbackSize, onTrussDepth, onRemoveShape, onRedrawFloor,
   orderGroups, onDone, needScale, onScale }) {
   const rules = material?.rules || {};
   const beams = rules.beams && typeof rules.beams === "object" ? rules.beams : {};
@@ -77,6 +77,9 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
   const totals = layout?.totals || null;
   const ends = (layout?.edges || []).filter((e) => e.kind === "end");
   const stairs = (voids || []).filter((v) => v.stair);
+  const sbSec = material?.spec?.components?.strongback?.section;
+  const strongbackLabel = sbSec?.depthMm && sbSec?.widthMm ? `${sbSec.depthMm} × ${sbSec.widthMm}` : "strongback";
+  const trussDepth = Number(rules.trussDepthMm) > 0 ? Number(rules.trussDepthMm) : TRUSS_DEPTH_DEFAULT_MM;
   const [more, setMore] = useState(false);
   const [showLayout, setShowLayout] = useState(false);
   const [moreSheets, setMoreSheets] = useState(false);
@@ -137,7 +140,7 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
               {voids.length === 0 && wets.length === 0 && <p className="text-muted">No openings or wet areas.</p>}
               {voids.map((v) => (
                 <div key={v.m.id} className="flex items-center gap-2" data-floor-void={v.m.id}>
-                  <p className="min-w-0 flex-1 truncate text-ink">{v.name}{v.stair ? "" : " (no trimmers)"}</p>
+                  <p className="min-w-0 flex-1 truncate text-ink">{v.name}{v.stair ? "" : " (no stair beams)"}</p>
                   {canEdit && <Btn kind="ghost" onClick={() => onRemoveShape(v.m)} aria-label={`Remove ${v.name}`}>Remove</Btn>}
                 </div>
               ))}
@@ -198,7 +201,7 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
                   </div>
                   {on && <SizeChips chips={BEAM_SIZE_CHIPS} value={size} disabled={!canEdit} onPick={(s) => setBeam(e.id, s)} ariaLabel={`Edge ${e.label} beam size`} testId={e.id} />}
                   {on && !size && <p className="text-[11px] font-medium text-amber-800" data-floor-beam-needs-size="">Choose this beam&apos;s size. It&apos;s set by the engineer.</p>}
-                  {!on && <p className="text-[11px] text-muted">A 120 × 35 strongback ties these truss ends.</p>}
+                  {!on && <p className="text-[11px] text-muted">{`A ${strongbackLabel} strongback ties these truss ends.`}</p>}
                 </div>
               );
             })}
@@ -218,11 +221,16 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
                 <Chip on={rules.strongbackRows == null} onClick={() => onRule({ strongbackRows: null })}>Auto ({totals.strongbackRowsAuto})</Chip>
                 {[0, 1, 2, 3].map((n) => <Chip key={n} on={rules.strongbackRows === n} onClick={() => onRule({ strongbackRows: n })}>{n}</Chip>)}
               </div>
+              <div role="group" aria-label="Truss depth" className="flex flex-wrap items-center gap-2" data-floor-truss-depth="">
+                <span className="text-xs text-muted">Truss depth</span>
+                {TRUSS_DEPTH_CHIPS.map((d) => <Chip key={d} on={trussDepth === d} onClick={() => onTrussDepth(d)}>{d}</Chip>)}
+              </div>
+              <Chip on={rules.noCeiling === true} onClick={() => onRule({ noCeiling: rules.noCeiling === true ? null : true })} data-floor-no-ceiling="">No ceiling under {rules.noCeiling === true ? "on" : "off"}</Chip>
               <div role="group" aria-label="Strongback size" className="flex flex-wrap items-center gap-2" data-floor-strongback-size="">
                 <span className="text-xs text-muted">Size</span>
                 {SB_SIZES.map((s) => <Chip key={s} on={`${material.spec.components.strongback.section.depthMm}x${material.spec.components.strongback.section.widthMm}` === s} onClick={() => onStrongbackSize(s)}>{s.replace("x", " × ")}</Chip>)}
               </div>
-              <p className="text-[11px] text-muted">Set from the truss layout. Confirm the size and the end strongbacks with the truss supplier.</p>
+              <p className="text-[11px] text-muted">Size follows the truss depth (Pryda Table 9). Confirm it and the end strongbacks with the truss supplier.{rules.noCeiling === true ? ` Lateral ties 90 × 35: ${totals.tieLm} lm.` : ""}</p>
             </div>
           )}
         </Line>
@@ -230,17 +238,16 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
 
       {/* 6 Trimmers */}
       {floor && stairs.length > 0 && (
-        <Line label="6 · Stair trimmers" testId="trimmers">
+        <Line label="6 · Stair beams" testId="trimmers">
           <div className="space-y-2">
             {stairs.map((v) => (
               <div key={v.m.id} className="space-y-1" data-floor-trimmer-row={v.m.id}>
                 <p className="text-ink"><b>{v.name}</b></p>
-                <div className="flex flex-wrap gap-2" role="group" aria-label={`${v.name} trimmer size`}>
-                  {TRIMMER_SIZE_CHIPS.map((c) => <Chip key={c} on={(rules.trimmerSizes?.[v.m.id] || TRIMMER_DEFAULT_SIZE) === c} disabled={!canEdit} onClick={() => onRule({ trimmerSizes: { ...(rules.trimmerSizes || {}), [v.m.id]: c } })}>{c.replace("x", " × ")} LVL</Chip>)}
-                </div>
+                <SizeChips chips={TRIMMER_SIZE_CHIPS} value={parseSize(rules.trimmerSizes?.[v.m.id]) || TRIMMER_DEFAULT_SIZE} disabled={!canEdit} ariaLabel={`${v.name} stair beam size`} testId={v.m.id}
+                  onPick={(c) => onRule({ trimmerSizes: { ...(rules.trimmerSizes || {}), [v.m.id]: c } })} />
               </div>
             ))}
-            <p className="text-[11px] text-muted">Sizes by engineer.</p>
+            <p className="text-[11px] text-muted">Perimeter stair beams, LVL 400 × 45 or 400 × 63 depending on span. Sizes by engineer.</p>
           </div>
         </Line>
       )}
@@ -299,7 +306,8 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
             <ul className="divide-y divide-hairline" data-floor-order="">
               {orderGroups.map((g) => (
                 <li key={g.key} className="py-1" data-floor-order-group={g.heading}>
-                  <p className="text-[11px] font-bold tracking-wide text-ink">{g.heading} {g.heading !== "FLOORING ACCESSORIES" && <span className="font-normal text-muted">{[g.totalLm ? `${g.totalLm.toFixed(2)} LM` : null, g.totalEa ? `${g.totalEa} EA` : null].filter(Boolean).join(" · ")}</span>}</p>
+                  <p className="text-[11px] font-bold tracking-wide text-ink">{g.heading} {g.heading !== "FLOORING ACCESSORIES" && g.heading !== "FLOOR FIXINGS" && <span className="font-normal text-muted">{[g.totalLm ? `${g.totalLm.toFixed(2)} LM` : null, g.totalEa ? `${g.totalEa} EA` : null].filter(Boolean).join(" · ")}</span>}</p>
+                  {g.note && <p className="text-[11px] text-muted" data-floor-group-note="">{g.note}</p>}
                   {g.rows.map((r) => (
                     <div key={`${r.product}|${r.unit}`} className="text-xs text-muted">
                       <p>{g.heading === "FLOORING" ? `${r.product} — ${r.quantity} sheets` : r.accessory ? `${r.product} — ${r.unit === "EA" ? r.quantity : `${r.totalLm} lm`}` : <>{r.product} · {r.unit === "EA" ? `${r.quantity} EA` : `${r.cutText} = ${r.totalLm.toFixed(2)} LM`}</>}</p>
