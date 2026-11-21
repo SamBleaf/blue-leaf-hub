@@ -655,7 +655,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     // Sam, 18 Nov 2026: hoop iron from this wall's length (2 straps of 0.7 m per 1,200 mm), unless this wall's switch is off. Counted in
     // ROLLS (a fraction of a roll per wall; the item adds the walls up and rounds once), the cross braces' hoop iron joins the same line.
-    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(Lt);
+    const hoop = w.wall.noHoopIron ? null : hoopIronForWall(L);   // Sam, 22 Nov 2026: hoop iron and bracing follow the FRAME length
     const hoopProduct = hoopIronProduct(rules.hoopIronProductId);
     const rollM = hoopIronRollM(rules, hoopProduct);
     const hoopIdentity = { family: "hoopIron", id: hoopProduct.id, name: hoopProduct.name, rollM };
@@ -666,7 +666,7 @@ function runWallFraming(mat, n, items, ctx, sink) {
     }
     // Sam, 18 Nov 2026: bracing marks. Ply sheets follow the wall height; each cross brace = 2 diagonals of hoop iron + 2 tensioners.
     if (w.wall.bracing?.length) {
-      const b = bracingForWall(w.wall.bracing, bracingHeightMm(w.wall), Lt);
+      const b = bracingForWall(w.wall.bracing.map((bm) => ({ ...bm, xMm: fx(Number(bm.xMm) || 0) })), bracingHeightMm(w.wall), L);
       const ref = [{ measurementId: m.id, wallId: m.id, role: "bracing" }];
       if (b.ply) demands.push({ id: demandId(mat.id, "brace-ply", m.id), materialId: mat.id, role: "bracing sheet", kind: "count", unit: "piece", quantity: b.ply.count, lengthMm: b.ply.product.lengthMm, ripText: b.ply.ripText ? `${tag}: ${b.ply.ripText}` : null,
         identity: { family: "bracing", id: b.ply.product.id, name: b.ply.product.name }, label: `${tag} brace sheets: ${b.ply.count} × ${b.ply.product.name}${b.ply.ripText ? ` (${b.ply.ripText})` : ""}`, itemDescription: b.ply.product.name, sourceRefs: ref, provenance: "calculated" });

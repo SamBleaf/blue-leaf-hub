@@ -426,6 +426,12 @@ t("D: with junction studs switched off the frame ends still follow the walls the
   const r = run([A(), B()], { junctionStuds: false });
   assert.equal(fr(r.lay("b")).lengthMm, 2955); assert.ok(!r.lay("a").totals.junctionStuds);
 });
+t("D: hoop iron follows the FRAME length (Sam, 22 Nov 2026): a butting wall traced 3,630 on the centreline frames 3,585 = 3 spans", () => {
+  const r = run([A(), wall("b", [3000, 0], [3000, 3630], 2700, "Wall 2")]);
+  assert.equal(fr(r.lay("b")).lengthMm, 3585);
+  // Wall 1 6,000 = 5 spans x 2 x 0.7 = 7 m; Wall 2 frame 3,585 = 3 spans = 4.2 m (traced 3,630 would be 4 spans = 5.6 m)
+  assert.equal(r.c.scheduleLines.find((l) => l.hoop).item.hoopMetres, 11.2);
+});
 t("version: the calculation is stamped takeoff-calc@14 so saved orders offer an update", () => {
   assert.match(CALCULATION_VERSION, /^takeoff-calc@14$/);
 });
