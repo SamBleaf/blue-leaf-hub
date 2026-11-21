@@ -121,8 +121,8 @@ export function floorDrawing(layout, opts = {}) {
   for (const t of layout.trimmers || []) line(t.a, t.b, { stroke: C.trimmer, sw: fs * 0.3, data: "trimmer" });
   for (const b of layout.beams || []) line(b.a, b.b, { stroke: C.beam, sw: fs * 0.45, data: "beam" });
   for (const v of (layout.voids || []).filter((x) => x.stair)) {
-    const t = (layout.trimmers || []).find((x) => x.voidId === v.id);
-    if (t) label({ x: centroid(v.points).x, y: centroid(v.points).y + fs * 1.1 }, `LVL ${t.size}`, { size: fs * 0.65, fill: C.trimmer, bold: true });
+    const sizes = [...new Set((layout.trimmers || []).filter((x) => x.voidId === v.id).map((x) => x.size))];
+    if (sizes.length) label({ x: centroid(v.points).x, y: centroid(v.points).y + fs * 1.1 }, sizes.map((z) => (z === "Engineer" ? "engineer" : `LVL ${z}`)).join(" / "), { size: fs * 0.65, fill: C.trimmer, bold: true });
   }
 
   // 6  edge labels outside the outline: beam letter and size, or the strongback it carries

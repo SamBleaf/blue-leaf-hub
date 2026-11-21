@@ -75,7 +75,9 @@ try {
   const custom = panel({ rules: { beams: { e0: "360x63" } } });
   ok("a typed size shows as its own chip", pressed(custom, "360 × 63 LVL"));
   const stair = panel({ voids: [{ id: "v1", name: "Stair void 1", stair: true }] });
-  ok("a stair void adds the stair beam step with 400 × 63 on by default and 400 × 45 beside it", /data-floor-step="trimmers"/.test(stair) && pressed(stair, "400 × 63 LVL") && /400 × 45 LVL/.test(stair) && /Stair void 1/.test(stair));
+  ok("a stair void adds the stair beam step with Auto on by default (P5b) and 400 × 45 / 400 × 63 beside it", /data-floor-step="trimmers"/.test(stair) && pressed(stair, "Auto") && !pressed(stair, "400 × 63 LVL") && /400 × 63 LVL/.test(stair) && /400 × 45 LVL/.test(stair) && /Stair void 1/.test(stair));
+  const picked = panel({ voids: [{ id: "v1", name: "Stair void 1", stair: true, m: { id: "v1" } }], rules: { trimmerSizes: { v1: "400x45" } } });
+  ok("a size picked by hand shows pressed and Auto is off", pressed(picked, "400 × 45 LVL") && !pressed(picked, "Auto"));
   ok("openings: + Stair void and + Opening, one at a time", /\+ Stair void/.test(stair) && /\+ Opening/.test(stair));
   const drawing = panel({ floorDraw: { stair: true } });
   ok("while a stair void is being drawn, its hint replaces the buttons", /Draw the stair void on the plan/.test(drawing) && !/\+ Stair void/.test(drawing));

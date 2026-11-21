@@ -20,6 +20,7 @@ import { timberIdentity, timberStockPolicy } from "../timber.js";
 import { FLOOR_PART_LABELS } from "../families.js";
 import { formatMm } from "../../units.js";
 import { floorFrame, layoutFloor, sizeParts, strongbackSizeForDepth, trussDepthOf, NO_CEILING_TIE_SIZE, STRONGBACK_LAP_SPACES, LONG_SPAN_NOTE_MM, WET_SET_DOWN_DEPTH_MM } from "./geometry.js";
+import { sizePlies, STAIR_BEAM_TABLE_LABEL } from "./stairBeams.js";
 import { floorFixings } from "./fixings.js";
 import { DEFAULT_WASTE_PCT, layoutSheets } from "./sheets.js";
 import { floorAccessories } from "./accessories.js";
@@ -94,7 +95,11 @@ export function computeFloorFraming(input) {
   // beams: one demand per marked edge, its own size
   for (const b of lay.beams) demands.push(linear("beam", "floor beam", b.edgeId, b.lengthMm, 1, b.size, "floorBeam", `Beam on edge ${b.label} (${b.size})`, false));
   // stair beams (internal role "floor trimmer"): per stair void
-  for (const t of lay.trimmers) demands.push(linear("trimmer", "floor trimmer", `${t.voidId}-${t.kind}-${t.at}`, t.lengthMm, 1, t.size, "floorTrimmer", `${t.voidName} ${t.kind} stair beam (${t.size})`, false));
+  // P5b: "Engineer" (no table size spans) carries no LVL quantity; a 2/400x45 is two 400x45 pieces side by side
+  for (const t of lay.trimmers) {
+    const pl = sizePlies(t.size);
+    if (pl) demands.push(linear("trimmer", "floor trimmer", `${t.voidId}-${t.kind}-${t.at}`, t.lengthMm, pl.plies, pl.section, "floorTrimmer", `${t.voidName} ${t.at} ${t.kind} stair beam (${t.size})`, false));
+  }
 
   // Phase 2 (Sam, 18 Nov 2026): the main floor (outline less openings and wet areas) is Structaflor, or Hebel PowerFloor (Phase 3, Sam 19 Nov 2026)
   const hebel = rules.floorMaterial === "hebel";
@@ -149,6 +154,7 @@ export function computeFloorFraming(input) {
   explain.push(`Strongbacks: ${lay.totals.endStrongbackLm} lm at truss ends with no beam, ${lay.totals.midStrongbackLm} lm mid-span (${lay.totals.strongbackRows} row${lay.totals.strongbackRows === 1 ? "" : "s"}${rules.strongbackRows == null ? ", from the span" : ", set for this job"})`);
   if (lay.beams.length) explain.push(`Beams: ${lay.beams.map((b) => `edge ${b.label} ${b.size} ${(b.lengthMm / 1000).toFixed(2)} m`).join(", ")}`);
   if (lay.trimmers.length) explain.push(`Stair beams: ${lay.voids.filter((v) => v.stair).length} stair void(s), ${lay.totals.trimmerLm} lm`);
+  for (const t of lay.trimmers) if (t.sizing?.auto) explain.push(`Stair beams: sized from ${STAIR_BEAM_TABLE_LABEL}: ${t.voidName} ${t.at} ${t.kind} beam span ${Math.round(t.sizing.spanMm)}, FLW ${Math.round(t.sizing.flwMm)}${t.sizing.flwColumnMm != null ? ` (table column ${t.sizing.flwColumnMm})` : ""} → ${t.size}${t.sizing.engineer ? " (size from the engineer, no LVL counted)" : ""}`);
   if (lay.totals.longestSpanMm > LONG_SPAN_NOTE_MM) problems.push({ code: "floor_long_span", message: "Spans over 6 m: check the truss depth and chords with the supplier.", blocking: false });
   if (sbSection && sbSection !== strongbackSizeForDepth(depthMm) && rules.strongbackSizeSet !== true) problems.push({ code: "floor_strongback_size_table", message: `Pryda Table 9 gives ${strongbackSizeForDepth(depthMm).replace("x", " x ")} strongbacks for ${depthMm} deep trusses; this item has ${sbSection.replace("x", " x ")}. Check with the truss supplier.`, blocking: false });
   problems.push({ code: "floor_supplier_layout", message: "The truss supplier designs the floor truss layout and spans. These counts are for ordering and checking, and the supplier confirms the final lengths.", blocking: false });

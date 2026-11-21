@@ -64,6 +64,8 @@ export const BEAM_SIZE_CHIPS = Object.freeze(["400x63", "445x63"]);
 export const TRIMMER_SIZE_CHIPS = Object.freeze(["400x45", "400x63"]);
 /** Default for a void with no saved size: 400x63 (assumed — confirm the span at which 400x45 is enough). */
 export const TRIMMER_DEFAULT_SIZE = "400x63";
+/** P5b (Sam, 21 Nov 2026): the stair beam size is "Auto" (sized from the SmartLVL 13 floor bearer table, stairBeams.js) unless a size is picked by hand. */
+export const TRIMMER_AUTO = "auto";
 /** A beam marked with no size yet. */
 export const BEAM_UNSIZED = "unsized";
 /** Sam, 18 Nov 2026: a traced width within this of a centres multiple does not add a truss (tracing noise: 5,405 mm at 450 is 12 bays, not 13). */
@@ -76,7 +78,7 @@ export function edgeLabel(n) {
 }
 
 import { pointToMm } from "../../calibration.js";
-
+import { sizeStairBeam, STAIR_BEAM_SIDE_NOTE } from "./stairBeams.js";
 const TOL = 1e-6;
 const hypot = Math.hypot;
 const round3 = (n) => Math.round(n * 1000) / 1000;
@@ -393,18 +395,33 @@ export function layoutFloor(input) {
   const trimSizes = rules.trimmerSizes && typeof rules.trimmerSizes === "object" ? rules.trimmerSizes : {};
   for (const v of voids) {
     if (!v.stair) continue;
-    const size = parseSize(trimSizes[v.id]) || TRIMMER_DEFAULT_SIZE;
+    const vid = v.id ?? "void";
+    const manual = parseSize(trimSizes[v.id]);   // a size picked by hand (or saved before P5b) wins; otherwise Auto
     let uA = minU, uB = maxU;
     for (const ln of lines) { if (ln.u <= v.u0 + 0.5) uA = ln.u; }
     for (const ln of [...lines].reverse()) { if (ln.u >= v.u1 - 0.5) uB = ln.u; }
     const headerLen = uB - uA;
     const sideLen = v.v1 - v.v0 + 2 * TRIMMER_BEARING_MM;
+    // the longest truss piece each header carries: head = pieces that end at this void, foot = pieces that start from it. FLW = half that span.
+    const longestAt = (tag) => lines.reduce((m, ln) => ln.pieces.reduce((m2, pc) => ((tag === "head" ? pc.endCutId === vid : pc.startCutId === vid) ? Math.max(m2, pc.lengthMm) : m2), m), 0);
+    const flwOf = { head: longestAt("head") / 2, foot: longestAt("foot") / 2 };
+    const sizing = (kind, tag) => {
+      if (manual) return { size: manual, auto: false };
+      const spanMm = kind === "header" ? v.u1 - v.u0 : v.v1 - v.v0;
+      const flwMm = kind === "header" ? flwOf[tag] : Math.max(flwOf.head, flwOf.foot);   // side beams: the headers' FLW (conservative)
+      const r = sizeStairBeam({ spanMm, flwMm });
+      if (r.outcome === "engineer") note("floor_stair_beam_engineer", `${v.name} ${tag === "head" || tag === "foot" ? `${tag} header` : `${tag} side`} stair beam: ${r.reason}. Size from the engineer (no LVL counted for it).`);
+      return { size: r.size, auto: true, spanMm, flwMm, flwColumnMm: r.flwColumnMm, maxSpanMm: r.maxSpanMm, extraBearingMm: r.extraBearingMm, engineer: r.outcome === "engineer" };
+    };
     for (const [vv, tag] of [[v.v0, "head"], [v.v1, "foot"]]) {
-      trimmers.push({ voidId: v.id, voidName: v.name, kind: "header", at: tag, size, lengthMm: round3(headerLen), a: F.fromLocal({ u: uA, v: vv }), b: F.fromLocal({ u: uB, v: vv }) });
+      const z = sizing("header", tag);
+      trimmers.push({ voidId: v.id, voidName: v.name, kind: "header", at: tag, size: z.size, sizing: z, lengthMm: round3(headerLen), a: F.fromLocal({ u: uA, v: vv }), b: F.fromLocal({ u: uB, v: vv }) });
     }
     for (const [uu, tag] of [[v.u0, "left"], [v.u1, "right"]]) {
-      trimmers.push({ voidId: v.id, voidName: v.name, kind: "side", at: tag, size, lengthMm: round3(sideLen), a: F.fromLocal({ u: uu, v: v.v0 - TRIMMER_BEARING_MM }), b: F.fromLocal({ u: uu, v: v.v1 + TRIMMER_BEARING_MM }) });
+      const z = sizing("side", tag);
+      trimmers.push({ voidId: v.id, voidName: v.name, kind: "side", at: tag, size: z.size, sizing: z, lengthMm: round3(sideLen), a: F.fromLocal({ u: uu, v: v.v0 - TRIMMER_BEARING_MM }), b: F.fromLocal({ u: uu, v: v.v1 + TRIMMER_BEARING_MM }) });
     }
+    note("floor_stair_side_point_load", `${v.name}: ${STAIR_BEAM_SIDE_NOTE}`);
   }
   for (const v of voids) {
     if (!v.stair && trusses.some((t) => t.interrupted)) note("floor_opening_no_trimmers", `${v.name} has no trimmers, so the trusses cut by it end unsupported. Make it a stair void, or add trimmers by hand.`);

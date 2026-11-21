@@ -76,21 +76,22 @@ t("5a 6.0 x 4.2 at 450, no beams: 15 trusses, 30 wall-plate ends -> 60 skew + 60
   assert.deepEqual([r.layout.trussEnds.plateEnds, r.layout.trussEnds.beamEnds, r.layout.trussEnds.stairBeamEnds], [30, 0, 0]);
   assert.equal(fix(r, "nail75").quantity, 60 + 60 + 45);
   assert.match(fix(r, "nail75").note, /60 skew nails.*60 end strongback.*45 mid-span strongbacks \(3 × 15 truss crossings at 400 deep/);
-  assert.equal(fix(r, "bracket"), undefined); assert.equal(fix(r, "nail35"), undefined);
+  assert.equal(fix(r, "bracket"), undefined);
+  assert.equal(fix(r, "nail35").nailCount, 16);   // P5b: 4 braces x 4 strap nails; no brackets (was no connector nails in P5)
 });
-t("5b a beam on edge A: 15 brackets, 15 x (18 + 3) = 315 connector nails; the other edge keeps 15 plate ends -> 30 + 30 + 45 = 105 nails", () => {
+t("5b a beam on edge A: 15 brackets, 15 x (18 + 3) = 315 bracket nails + 2 braces x 4 = 8 strap nails = 323 connector nails = 1 box of 9000; the other edge keeps 15 plate ends -> 30 + 30 + 45 = 105 nails", () => {
   const r = go(rect(6000, 4200), { beams: { e0: "445x63" } });
   assert.deepEqual([r.layout.trussEnds.plateEnds, r.layout.trussEnds.beamEnds], [15, 15]);
   assert.equal(fix(r, "bracket").quantity, 15); assert.match(fix(r, "bracket").product, /FB94152/);
-  assert.equal(fix(r, "nail35").quantity, 315); assert.match(fix(r, "nail35").note, /18 into the carrying beam \+ 3 into the truss/);
+  assert.equal(fix(r, "nail35").nailCount, 323); assert.equal(fix(r, "nail35").quantity, 1); assert.match(fix(r, "nail35").note, /18 into the carrying beam \+ 3 into the truss/);
   assert.equal(fix(r, "nail75").quantity, 105);
   assert.equal(fix(r, "brace").quantity, 2);
 });
-t("5c a stair void interrupts 2 truss lines: 4 truss ends at the stair beams get brackets (4 x 21 = 84 nails); 13 crossings x 3 + 60 + 60 = 159 framing nails", () => {
+t("5c a stair void interrupts 2 truss lines: 4 truss ends at the stair beams get brackets (4 x 21 = 84 nails + 16 brace nails = 100); 13 crossings x 3 + 60 + 60 = 159 framing nails", () => {
   const r = go(rect(6000, 4200), {}, { voids: [stairVoid()] });
   assert.equal(r.layout.totals.trussCount, 17);
   assert.equal(r.layout.trussEnds.stairBeamEnds, 4); assert.equal(r.layout.trussEnds.plateEnds, 30);
-  assert.equal(fix(r, "bracket").quantity, 4); assert.equal(fix(r, "nail35").quantity, 84);
+  assert.equal(fix(r, "bracket").quantity, 4); assert.equal(fix(r, "nail35").nailCount, 100);
   assert.equal(r.layout.totals.midCrossings, 13);
   assert.equal(fix(r, "nail75").quantity, 60 + 60 + 39);
 });
@@ -149,7 +150,7 @@ t("order: FLOOR FIXINGS heading after the flooring groups, one row per product w
   assert.equal(res.status.quantity, "calculated", JSON.stringify(res.problems.filter((p) => p.blocking)));
   assert.deepEqual(groups.map((g) => g.heading), ["FLOOR TRUSSES", "STRONGBACKS", "BEAMS", "FLOORING", "FLOORING ACCESSORIES", "FLOOR FIXINGS"]);
   const g = groups.find((x) => x.heading === "FLOOR FIXINGS");
-  assert.deepEqual(g.rows.map((r) => [r.unit, r.quantity]).sort(), [["EA", 105], ["EA", 15], ["EA", 2], ["EA", 315]].sort());
+  assert.deepEqual(g.rows.map((r) => [r.unit, r.quantity]).sort(), [["EA", 105], ["EA", 15], ["EA", 2], ["EA", 1]].sort());
   assert.ok(g.rows.every((r) => r.accessory && r.note));
 });
 t("order: wet areas add a note on the FLOOR TRUSSES heading, no quantity change", () => {

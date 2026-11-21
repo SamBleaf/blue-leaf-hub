@@ -14,7 +14,7 @@
 // =============================================================================
 import { useState } from "react";
 import FloorLayoutView from "./FloorLayoutView.jsx";
-import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_DEFAULT_SIZE, TRIMMER_SIZE_CHIPS, TRUSS_DEPTH_CHIPS, TRUSS_DEPTH_DEFAULT_MM, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
+import { BEAM_SIZE_CHIPS, BEAM_UNSIZED, TRIMMER_AUTO, TRIMMER_SIZE_CHIPS, TRUSS_DEPTH_CHIPS, TRUSS_DEPTH_DEFAULT_MM, parseSize } from "../../../../shared/takeoff/engine/floor/geometry.js";
 import { Banner, Btn, NumberField } from "../ui.jsx";
 import { fmtM2 } from "../format.js";
 
@@ -32,7 +32,7 @@ function Chip({ on, onClick, children, disabled, ...p }) {
 }
 
 /** Size chips (two quick sizes + Other, which opens a box). `value` is the current size ("445x63"), or null / "unsized". */
-function SizeChips({ chips, value, onPick, disabled, ariaLabel, testId }) {
+function SizeChips({ chips, value, onPick, disabled, ariaLabel, testId, onAuto }) {
   const [other, setOther] = useState(false);
   const [text, setText] = useState("");
   const [err, setErr] = useState(null);
@@ -45,6 +45,7 @@ function SizeChips({ chips, value, onPick, disabled, ariaLabel, testId }) {
   return (
     <div className="space-y-1" role="group" aria-label={ariaLabel} data-size-chips={testId}>
       <div className="flex flex-wrap gap-2">
+        {onAuto && <Chip on={!value} disabled={disabled} onClick={onAuto} data-size-auto="">Auto</Chip>}
         {chips.map((c) => <Chip key={c} on={value === c} disabled={disabled} onClick={() => onPick(c)}>{c.replace("x", " × ")} LVL</Chip>)}
         <Chip on={other || !!custom} disabled={disabled} onClick={() => setOther((o) => !o)}>{custom ? `${value.replace("x", " × ")} LVL` : "Other"}</Chip>
       </div>
@@ -243,11 +244,16 @@ export default function FloorPanel({ material, layout, results, floor, voids, we
             {stairs.map((v) => (
               <div key={v.m.id} className="space-y-1" data-floor-trimmer-row={v.m.id}>
                 <p className="text-ink"><b>{v.name}</b></p>
-                <SizeChips chips={TRIMMER_SIZE_CHIPS} value={parseSize(rules.trimmerSizes?.[v.m.id]) || TRIMMER_DEFAULT_SIZE} disabled={!canEdit} ariaLabel={`${v.name} stair beam size`} testId={v.m.id}
+                <SizeChips chips={TRIMMER_SIZE_CHIPS} value={parseSize(rules.trimmerSizes?.[v.m.id]) || null} disabled={!canEdit} ariaLabel={`${v.name} stair beam size`} testId={v.m.id}
+                  onAuto={() => onRule({ trimmerSizes: { ...(rules.trimmerSizes || {}), [v.m.id]: TRIMMER_AUTO } })}
                   onPick={(c) => onRule({ trimmerSizes: { ...(rules.trimmerSizes || {}), [v.m.id]: c } })} />
+                {!parseSize(rules.trimmerSizes?.[v.m.id]) && (() => {
+                  const sz = [...new Set((layout?.trimmers || []).filter((t) => t.voidId === v.m.id).map((t) => t.size))];
+                  return sz.length ? <p className="text-[11px] text-muted" data-stair-auto-size="">Auto: {sz.map((z) => (z === "Engineer" ? "engineer to size" : `${z.replace("x", " × ")} LVL`)).join(", ")}</p> : null;
+                })()}
               </div>
             ))}
-            <p className="text-[11px] text-muted">Perimeter stair beams, LVL 400 × 45 or 400 × 63 depending on span. Sizes by engineer.</p>
+            <p className="text-[11px] text-muted">Auto sizes each stair beam from the SmartLVL 13 span table (guide p13); pick a size to override it. Side beams carry the headers as point loads: check with the engineer or LVL supplier.</p>
           </div>
         </Line>
       )}
