@@ -216,6 +216,20 @@ t("engine: where the centres change, ONE stud stands at the join and the 450 pie
   near(two.plates, one.plates, 0.01, "plate length unchanged");
   assert.equal(b.centresMm, 450);
 });
+t("engine: plates run THROUGH the split (Sam, 22 Nov): the same plate pieces as the unsplit wall, all on the first piece", () => {
+  const platePieces = (r) => r.res.demands.filter((d) => /plate$/.test(d.role)).map((d) => `${d.role}:${d.lengthMm}x${d.quantity}`).sort();
+  for (const [atMm, extraB] of [[2000, {}], [3000, { studCentresMm: 450 }], [4500, {}]]) {
+    const one = run([wall("a", [0, 0], [6000, 0])]);
+    const two = run(pieces(atMm, extraB));
+    assert.deepEqual(platePieces(two), platePieces(one), `split at ${atMm}`);
+    const b = two.lays.find((l) => l.wallMeasurementId === "b");
+    assert.equal(b.totals.bottomPlateMm + b.totals.topPlateMm, 0, "the later piece adds no plate");
+    assert.ok(two.res.demands.filter((d) => /plate$/.test(d.role)).every((d) => d.sourceRefs.every((r) => r.wallId === "a")), "counted on the first piece");
+  }
+  // different Double top plate settings: each piece keeps its own plates (cut at the split)
+  const mixed = run(pieces(3000, { doubleTopPlate: true }));
+  assert.ok(mixed.lays.find((l) => l.wallMeasurementId === "b").totals.bottomPlateMm > 0);
+});
 t("engine: no join when the pieces were dragged apart, bent, or differ in height (plain walls again)", () => {
   const [p, q] = pieces(2000);
   const ctx = { calibrationsById: new Map([["cal", cal]]) };

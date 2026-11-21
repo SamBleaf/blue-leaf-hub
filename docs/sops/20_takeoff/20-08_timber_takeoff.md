@@ -186,7 +186,7 @@ Each wall has its own **Stud centres**. The Walls item's number is what a wall u
 1. **Select** the wall, then double-tap (double-click) the wall where it should be split. With **Snap to plan** on, the point snaps to a plan line or corner there; otherwise to the nearest 10 mm.
 2. It becomes two walls in a straight line with every setting of the original ("Wall 1 split at 4,990: Wall 1 and Wall 5"). Windows and doors go with the piece they are in. Tap a piece to give it its own centres.
 3. Refused, with a plain message: a window, door or brace sheet across that point, or a piece under 300 mm.
-4. The two pieces still frame as one wall: at the same centres there is no extra stud at the split and the noggin across it is counted once; where the centres change, one stud stands at the split and the 450 piece is laid out from it. **Undo** puts the wall back.
+4. The two pieces still frame as one wall: at the same centres there is no extra stud at the split and the noggin across it is counted once; where the centres change, one stud stands at the split and the 450 piece is laid out from it. The plates run straight through the split (no plate joint there): they are counted on the first piece over the whole wall, and the later piece reads "plates run through the split". (Pieces with different Double top plate settings keep their own plates.) **Undo** puts the wall back.
 
 > 💡 **Tip:** 450 changes the stud spacing only. Noggins and plate joins follow the studs. Blocking for vanities, grab rails and taps is not added: count it on a Timber item. The button isn't there when the Walls item is already at 450. A Studs, Plates or Noggins item ignores a wall's own centres and says so.
 

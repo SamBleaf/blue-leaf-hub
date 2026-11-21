@@ -535,6 +535,11 @@ function runWallFraming(mat, n, items, ctx, sink) {
   const sj = studW && stockOk ? wallSplitJoins(walls.map((x) => x.m), ctx) : { next: new Map(), prev: new Map() };
   const joinLayout = new Map();   // wall id -> { start:{…}, end:{…} } layout options at a split join
   const hoopLenOf = new Map();    // wall id -> the length hoop iron is worked out on (the whole wall on its first piece, 0 on the rest)
+  // Sam, 22 Nov 2026: the plates run THROUGH a split (it only changes the stud centres): worked out once over the whole wall, on its
+  // first piece; the later pieces add no plate. Pieces with different Double top plate settings keep their own plates.
+  const plateChainOf = new Map(); // first piece id -> [{ id, offsetMm }] (every piece, from the frame start of the first)
+  const platesOn = new Map();     // later piece id -> the first piece id that carries its plates
+  const centresOf = new Map();    // wall id -> its counted stud centres (frame mm), for the first piece's plate joins
   const chainOf = (id) => { let h = id; const seen = new Set([h]); while (sj.prev.has(h) && !seen.has(sj.prev.get(h))) { h = sj.prev.get(h); seen.add(h); } const out = [h]; while (sj.next.has(out[out.length - 1]) && !out.includes(sj.next.get(out[out.length - 1]))) out.push(sj.next.get(out[out.length - 1])); return out; };
   const order = [];
   if (sj.next.size) {
@@ -551,8 +556,13 @@ function runWallFraming(mat, n, items, ctx, sink) {
         const r = resolveWall(byId.get(id).m, ctx);
         const Lt = Number(r.wall.widthMm) || 0;
         const [a0, a1] = jPlan.frameAdj.get(id) || [0, 0];
-        return { id, Lt, L: Math.round((Lt + a0 + a1) * 10) / 10, c: r.wall.studCentresMm > 0 ? r.wall.studCentresMm : itemCentresMm, hoop: !r.wall.noHoopIron };
+        return { id, Lt, L: Math.round((Lt + a0 + a1) * 10) / 10, c: r.wall.studCentresMm > 0 ? r.wall.studCentresMm : itemCentresMm, hoop: !r.wall.noHoopIron, dt: wallHasDoubleTop(r.wall.doubleTopPlate, rules) };
       });
+      if (info.every((p) => p.dt === info[0].dt && p.L > 0)) {
+        let off = 0;
+        plateChainOf.set(info[0].id, info.map((p) => { const o = { id: p.id, offsetMm: off, lenMm: p.L }; off = Math.round((off + p.L) * 10) / 10; return o; }));
+        for (const p of info.slice(1)) platesOn.set(p.id, info[0].id);
+      }
       let a = 0;   // where the layout's grid falls on this piece (mm from its start)
       for (let i = 0; i < info.length; i++) {
         const p = info[i], lo = joinLayout.get(p.id) || {};
@@ -669,11 +679,19 @@ function runWallFraming(mat, n, items, ctx, sink) {
     });
     const myCrossings = jPlan.crossings.filter((c) => c.wallIds.includes(m.id));
     const centres = counted.map((t) => t.positionMm);
+    centresOf.set(m.id, centres);
     // Sam, 18 Nov 2026: a second top plate on THIS wall: its own setting beats the item's Double top plate
     const doubleTop = wallHasDoubleTop(w.wall.doubleTopPlate, rules);
-    const plates = computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: L,
-      layers: [{ tag: "bottom" }, { tag: "top" }, ...(doubleTop ? [{ tag: "top-2" }] : [])],
-      joinOverStuds: { studCentresMm: centres, wallLabel: tag }, longPlates });
+    // Sam, 22 Nov 2026: a split wall's plates run through the split, worked out on its first piece over the whole wall
+    const chain = plateChainOf.get(m.id);
+    const plateRunMm = chain ? Math.round((chain[chain.length - 1].offsetMm + chain[chain.length - 1].lenMm) * 10) / 10 : L;
+    const plateStuds = chain ? chain.flatMap((p) => (p.id === m.id ? centres : (centresOf.get(p.id) || []).map((x) => Math.round((x + p.offsetMm) * 10) / 10))).sort((a, b) => a - b) : centres;
+    const carriedBy = platesOn.get(m.id);
+    const plates = carriedBy
+      ? { demands: [], problems: [], layout: null, status: { quantity: "calculated" }, explain: [`${tag}: plates run through the split, counted on ${jWallName(carriedBy)}`] }
+      : computePlates({ ...part("plates"), wallId: m.id, measurementId: m.id, runMm: plateRunMm,
+        layers: [{ tag: "bottom" }, { tag: "top" }, ...(doubleTop ? [{ tag: "top-2" }] : [])],
+        joinOverStuds: { studCentresMm: plateStuds, wallLabel: tag }, longPlates });
     // the counted junction studs are framing too: noggins run to them, and not across the block space between a pair
     const nogStations = [...centres, ...jTicks.map((t) => t.positionMm)].sort((p, q) => p - q);
     // a split join: the bay from this piece's last stud to the next piece's first is ONE noggin, counted here
