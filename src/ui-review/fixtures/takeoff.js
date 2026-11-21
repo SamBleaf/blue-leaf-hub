@@ -50,6 +50,7 @@ import { aluminiumPreset, productGroups, specFromGroup } from "../../../shared/t
 import { profileSizeText, sameAluminiumProfile } from "../../../shared/takeoff/companyProducts.js";
 import { BLUE_LEAF_JH_DEFAULTS } from "../../../shared/takeoff/companyDefaults.js";
 import planMeta from "./takeoff/synthetic-plan-set.json";
+import { cleanCentreZones } from "../../../shared/takeoff/centreZones.js";
 
 // Binary fixtures are fetched from the Vite DEV server path (ui-review always runs on `vite`),
 // never imported with ?url — that would emit the PDFs into a production build.
@@ -346,6 +347,7 @@ function serverWallInputs(i) {
   for (const key of WALL_INPUT_KEYS) if (i[key] !== undefined) out[key] = i[key];
   if (typeof i.runId === "string" && UUID_RX.test(i.runId) && Number.isInteger(i.seq) && i.seq >= 1 && i.seq <= 1000) { out.runId = i.runId; out.seq = i.seq; }
   if (typeof i.splitOf === "string" && UUID_RX.test(i.splitOf)) out.splitOf = i.splitOf;   // Sam, 21 Nov 2026: a wall split on the plan
+  if (Array.isArray(i.centreZones) && i.centreZones.length) { const z = cleanCentreZones(i.centreZones); if (z.ok) out.centreZones = z.zones; }   // Sam, 22 Nov 2026
   if (out.studCentresFrom !== "wet" || out.studCentresMm == null) delete out.studCentresFrom;
   return out;
 }

@@ -21,6 +21,7 @@ import {
   SECTIONS, lineSection, flashingNeeds, refreshDraftLines, compareFlashingGroups, withoutBasis, manualLinesOf, normaliseManualLines, cleanBracing, DEFAULT_SUPPLIER_NAME_HINT, buildSupplierGroups, SUPPLIER_ORDER_FORMAT,
 } from "../../../shared/takeoff/index.js";
 import { verificationReusesReference } from "../../../shared/takeoff/calibration.js";
+import { cleanCentreZones } from "../../../shared/takeoff/centreZones.js";
 import { describeFamilySpec, normaliseFamilySpec } from "../../../shared/takeoff/engine/families.js";
 import { methodReads } from "../../../shared/takeoff/engine/dispatch.js";
 import { leftOffItems, leftOffProblem } from "../../../shared/takeoff/leftOff.js";
@@ -251,6 +252,8 @@ function cleanInputs(kind, inp, tracedLengthMm) {
         ...(i.studCentresFrom === "wet" ? { studCentresFrom: "wet" } : {}) } : {}),
       // Sam, 21 Nov 2026: a wall split on the plan: every piece names the wall it was split from (framed as one wall where they meet in line)
       ...(isUuid(i.splitOf) ? { splitOf: i.splitOf } : {}),
+      // Sam, 22 Nov 2026: stud centres for sections of this wall (450 along a wet area), checked with the client's own function
+      ...(Array.isArray(i.centreZones) && i.centreZones.length ? { centreZones: (() => { const z = cleanCentreZones(i.centreZones); must(z.ok, z.error); return z.zones; })() } : {}),
       // Sam, 18 Nov 2026: this wall's own Double top plate (true / false); absent = the Walls item's. Anything else is refused, never guessed.
       ...(i.doubleTopPlate != null && i.doubleTopPlate !== "" ? { doubleTopPlate: (must(typeof i.doubleTopPlate === "boolean", "Double top plate on a wall is on or off."), i.doubleTopPlate) } : {}),
       // HUB 031: does this wall carry the roof (true / false); absent = the Walls item's answer

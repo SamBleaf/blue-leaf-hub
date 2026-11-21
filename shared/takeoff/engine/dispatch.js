@@ -18,6 +18,7 @@ import { TakeoffValidationError, formatMm, stableStringify } from "../units.js";
 import { calibrationOrderReady, pointToMm, pointsWithinCalibration, polylineLengthMm } from "../calibration.js";
 import { EPS_MM, demandId, identityKey } from "./contract.js";
 import { hoopIronForWall, hoopIronProduct, hoopIronRollM } from "../hoopIron.js";
+import { centreZonesOf } from "../centreZones.js";
 import { TENSIONER_PRODUCT, bracingForWall, bracingHeightMm, bracingOf } from "../bracing.js";
 import { FAMILIES, isMgp10Grade, timberGridFor, WALL_FRAMING_RULES, WALL_PARTS, WALL_PART_LABELS, WALL_STUDS_EACH_SIDE, familyIdentity, familyProblems, longPlateStockLengths,
   SUPPORT_BATTEN_DEFAULTS, isOwnerBatten, normaliseFamilySpec, stockIdentityKey, wallPartLongestOk, wallPinePlateMaxMm , wallHasDoubleTop } from "./families.js";
@@ -193,6 +194,8 @@ function resolveWall(m, ctx) {
     eavesHeightMm: inp.eavesHeightMm, apexXMm: inp.apexXMm, apexHeightMm: inp.apexHeightMm, points: inp.polygon,
     // HUB 031 (Sam, 17 Nov 2026): a wall's own stud centres (e.g. 450 for a wet-area wall) beat the item's
     studCentresMm: Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null,
+    // Sam, 22 Nov 2026: stud centres for sections of this wall (mm along the trace)
+    centreZones: centreZonesOf(inp, Number(widthMm) > 0 ? Number(widthMm) : Infinity),
     // Sam, 18 Nov 2026: this wall's own Double top plate (true / false), or the item's (null)
     doubleTopPlate: inp.doubleTopPlate === true ? true : inp.doubleTopPlate === false ? false : null,
     // HUB 031: does THIS wall carry the roof (true / false), or follow the item (null)
@@ -642,7 +645,9 @@ function runWallFraming(mat, n, items, ctx, sink) {
     const dropAt = (end) => myJ.some((j) => !isOff(j) && j.dropEnd === end);
     // owner rule B: the corner's second stud, from the wall's own first point (or its last, when the wall ENDS at the corner)
     const myCornerStuds = jPlan.corners.filter((c) => c.studWallId === m.id).map((c) => ({ id: c.id, positionMm: c.studEnd === 0 ? c.offsetMm : L - c.offsetMm, label: "corner" }));
-    const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H },
+    // the sections in frame mm (a section reaching a traced end runs on to the frame end)
+    const frameZones = (w.wall.centreZones || []).map((z) => ({ ...z, fromMm: z.fromMm <= 0.5 ? 0 : fx(z.fromMm), toMm: z.toMm >= Lt - 0.5 ? L : fx(z.toMm) }));
+    const studs = computeStudWall({ ...part("studs"), wallId: m.id, measurementId: m.id, wallLengthMm: L, centresMm, height: { mode: "studCut", studLengthMm: H }, ...(frameZones.length ? { centreZones: frameZones } : {}),
       openings: framed, openingSideStuds: { studWidthMm: studW, perSide: WALL_STUDS_EACH_SIDE }, clipOpeningLevels: true, junctionStuds: jStuds, cornerStuds: myCornerStuds,
       ...(joinLayout.get(m.id)?.start?.startOffsetMm ? joinLayout.get(m.id).start : dropAt(0) ? { includeStart: false } : joinLayout.get(m.id)?.start || {}),
       ...(dropAt(1) ? { includeEnd: false } : joinLayout.get(m.id)?.end || {}) });

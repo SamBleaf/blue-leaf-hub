@@ -9,6 +9,7 @@
 
 import { pointToMm, polylineLengthMm } from "./calibration.js";
 import { bracingOf, plyWidthOf, setPlyWholeWall } from "./bracing.js";
+import { centreZonesOf, hasWetZones, withCentreZones } from "./centreZones.js";
 
 export const WALL_SPLIT_RULE = Object.freeze({
   /** Each piece of a split wall is at least this long (a sliver is never a wall). */
@@ -206,26 +207,32 @@ export function wetAreaWalls({ walls, areas, bandMm = WET_AREA_RULE.bandMm, minO
 }
 
 /**
- * What "Set wet-area walls to 450" does to each wall, from wetAreaWalls' answer and each wall's own centres:
+ * What "Set wet-area walls to 450" does to each wall, from wetAreaWalls' answer and each wall's own inputs:
  *   set:     a wet wall following the item → 450 (marked as set by the wet areas)
  *   hand:    a wet wall with centres set by hand to something else → kept, and asked about (never changed silently)
  *   revert:  a wall set to 450 by the wet areas that no longer touches one → back to the item's centres
- *   partial: walls only partly along a wet area → offered a split at the edge
- * @param {Array<{ id:string, status:string }>} plan  @param {Map<string,{ studCentresMm?:number, studCentresFrom?:string }>} inputsById
+ *   zone:    Sam, 22 Nov 2026: a wall only partly along a wet area → [{ id, wetMm }]: 450 along the wet stretch only, the wall stays
+ *            ONE wall (no split, so an opening such as a cavity slider can still sit anywhere along it)
+ *   clearZones: walls whose wet-area sections no longer match a wet area (whole now, or dry) → those sections come off
+ * @param {Array<{ id:string, status:string, wetMm?:Array<[number,number]> }>} plan
+ * @param {Map<string,{ studCentresMm?:number, studCentresFrom?:string, centreZones?:object[] }>} inputsById
  */
 export function wetCentresChanges(plan, inputsById, { centresMm = WET_AREA_RULE.centresMm } = {}) {
-  const out = { set: [], hand: [], revert: [], partial: [], already: [] };
+  const out = { set: [], hand: [], revert: [], zone: [], clearZones: [], already: [] };
   for (const r of plan) {
     const inp = inputsById.get(r.id) || {};
     const own = Number(inp.studCentresMm) > 0 ? Number(inp.studCentresMm) : null;
     const byWet = inp.studCentresFrom === "wet";
+    const wetZ = hasWetZones(inp);
     if (r.status === "whole") {
+      if (wetZ) out.clearZones.push(r.id);
       if (own === centresMm) out.already.push(r.id);
       else if (own == null || byWet) out.set.push(r.id);
       else out.hand.push(r.id);
     } else {
       if (byWet) out.revert.push(r.id);
-      if (r.status === "partial") out.partial.push(r.id);
+      if (r.status === "partial" && !(own === centresMm && !byWet)) out.zone.push({ id: r.id, wetMm: r.wetMm });
+      else if (wetZ) out.clearZones.push(r.id);
     }
   }
   return out;
@@ -236,4 +243,64 @@ export function withWetCentres(inputs, on, centresMm = WET_AREA_RULE.centresMm) 
   const rest = { ...(inputs || {}) };
   delete rest.studCentresMm; delete rest.studCentresFrom;
   return on ? { ...rest, studCentresMm: centresMm, studCentresFrom: "wet" } : rest;
+}
+
+// ── joining walls back into one ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sam, 22 Nov 2026: join walls that meet end to start in a straight line (e.g. pieces of a split) back into ONE wall, so an opening
+ * (a cavity slider) can sit across where they met. The joined wall keeps the first piece's settings; a piece at other centres keeps
+ * them as a centre section of the joined wall (so the studs come out the same); each piece's own sections, bracing marks and
+ * openings move along by where the piece starts. Pieces of different heights are refused (that is two walls).
+ * @param {{ walls:Array<{ id:string, points:Array<{x,y}>, inputs:object }>, openingsByWall?:Map<string, object[]>, cal:object, itemCentresMm:number }} o
+ * @returns {{ ok:true, wall:object, openings:Array<{ before, next }>, removed:string[], notes:string[] } | { ok:false, error:string }}
+ */
+export function joinWalls({ walls, openingsByWall = new Map(), cal, itemCentresMm }) {
+  const ws = (walls || []).filter((w) => w && Array.isArray(w.points) && w.points.length === 2);
+  if (ws.length < 2) return { ok: false, error: "Select two or more walls in a line to join them." };
+  const o = { x: 0, y: 0 };
+  const seg = ws.map((w) => { const a = pointToMm(cal, o, w.points[0]), b = pointToMm(cal, o, w.points[1]); const L = Math.hypot(b.x - a.x, b.y - a.y); return { w, a, b, L, u: { x: (b.x - a.x) / L, y: (b.y - a.y) / L } }; });
+  if (seg.some((s) => !(s.L > 0))) return { ok: false, error: "A wall with no length can't be joined." };
+  const meets = (p, q) => Math.hypot(p.b.x - q.a.x, p.b.y - q.a.y) <= 5 && p.u.x * q.u.x + p.u.y * q.u.y >= Math.cos((10 * Math.PI) / 180);
+  const heads = seg.filter((q) => !seg.some((p) => p !== q && meets(p, q)));
+  if (heads.length !== 1) return { ok: false, error: "Those walls don't meet end to end in one straight line, so they can't be one wall." };
+  const chain = [heads[0]];
+  while (chain.length < seg.length) {
+    const nx = seg.find((q) => !chain.includes(q) && meets(chain[chain.length - 1], q));
+    if (!nx) return { ok: false, error: "Those walls don't meet end to end in one straight line, so they can't be one wall." };
+    chain.push(nx);
+  }
+  const h0 = Number(chain[0].w.inputs?.heightMm);
+  if (chain.some((s) => Number(s.w.inputs?.heightMm) !== h0)) return { ok: false, error: "Those walls have different heights. Set them the same first (a height change is two walls)." };
+  const first = chain[0].w;
+  const ownC = (w) => (Number(w.inputs?.studCentresMm) > 0 ? Number(w.inputs.studCentresMm) : itemCentresMm);
+  const baseC = ownC(first);
+  const notes = [];
+  const zones = [];
+  const marks = [];
+  const moved = [];
+  let off = 0;
+  for (const [i, s] of chain.entries()) {
+    const w = s.w;
+    const c = ownC(w);
+    const pieceZones = centreZonesOf(w.inputs, s.L).map((z) => ({ ...z, fromMm: z.fromMm + off, toMm: z.toMm + off }));
+    if (c !== baseC) {
+      // the piece's own centres become a section, around any sections it already had
+      let at = off;
+      for (const z of [...pieceZones].sort((p, q) => p.fromMm - q.fromMm)) { if (z.fromMm - at >= 1) zones.push({ fromMm: at, toMm: z.fromMm, centresMm: c, ...(w.inputs?.studCentresFrom === "wet" ? { from: "wet" } : {}) }); at = z.toMm; }
+      if (off + s.L - at >= 1) zones.push({ fromMm: at, toMm: off + s.L, centresMm: c, ...(w.inputs?.studCentresFrom === "wet" ? { from: "wet" } : {}) });
+    }
+    zones.push(...pieceZones);
+    if (i > 0 && (w.inputs?.doubleTopPlate ?? null) !== (first.inputs?.doubleTopPlate ?? null)) notes.push(`${w.inputs?.name || "A wall"} had its own top plate setting; the joined wall takes ${first.inputs?.name || "the first wall"}'s.`);
+    for (const m of bracingOf(w.inputs)) if (!(m.type === "ply" && m.whole)) marks.push({ ...m, xMm: Math.round(m.xMm + off) });
+    if (i > 0) for (const op of openingsByWall.get(w.id) || []) moved.push({ before: op, next: { ...op, parentId: first.id, inputs: { ...op.inputs, xMm: Math.round(((Number(op.inputs?.xMm) || 0) + off) * 1000) / 1000 } } });
+    off += s.L;
+  }
+  const merged = zones.map((z) => ({ ...z, fromMm: Math.round(z.fromMm * 10) / 10, toMm: Math.round(z.toMm * 10) / 10 })).filter((z) => z.toMm - z.fromMm >= 1);
+  let inputs = { ...(first.inputs || {}) };
+  delete inputs.bracing;
+  if (marks.length) inputs.bracing = marks;
+  inputs = withCentreZones(inputs, merged);
+  if (bracingOf(first.inputs).some((m) => m.type === "ply" && m.whole)) { const r = setPlyWholeWall(inputs, off, true); if (r.ok) inputs = r.inputs; }
+  return { ok: true, wall: { ...first, points: [first.points[0], chain[chain.length - 1].w.points[1]], inputs }, openings: moved, removed: chain.slice(1).map((s) => s.w.id), notes, lengthMm: off };
 }

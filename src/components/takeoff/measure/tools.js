@@ -627,8 +627,10 @@ export function withWallCentres(inputs, mm) {
 /** The traced walls of one material with their own centres: [{ id, name, centresMm }], in name order. */
 export function wetWallsOf(measurements, contributions, materialId) {
   const mine = new Set((contributions || []).filter((c) => !c.archived && c.jobMaterialId === materialId).map((c) => c.measurementId));
-  return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && wallOwnCentresMm(m))
-    .map((m) => ({ id: m.id, name: m.inputs?.name || "Wall", centresMm: wallOwnCentresMm(m) }))
+  // Sam, 22 Nov 2026: a wall with a section at its own centres (450 along a wet area) counts too, named "(part)"
+  const hasZone = (m) => Array.isArray(m.inputs?.centreZones) && m.inputs.centreZones.length > 0;
+  return (measurements || []).filter((m) => !m.archived && m.kind === "wall" && mine.has(m.id) && (wallOwnCentresMm(m) || hasZone(m)))
+    .map((m) => ({ id: m.id, name: `${m.inputs?.name || "Wall"}${!wallOwnCentresMm(m) ? " (part)" : ""}`, centresMm: wallOwnCentresMm(m) || m.inputs.centreZones[0].centresMm, part: !wallOwnCentresMm(m) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
 }
 

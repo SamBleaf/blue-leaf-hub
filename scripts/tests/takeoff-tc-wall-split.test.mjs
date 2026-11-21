@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { buildCalibration, computeWorkspace, methodFor, wallFramingDefaults, WALL_FRAMING_RULES } from "../../shared/takeoff/index.js";
 import { pointAtStation, runSeqAfterSplit, splitProblem, splitWall, wallObstacles, wallStationAt, wetAreaWalls, wetCentresChanges, withWetCentres, WET_AREA_RULE } from "../../shared/takeoff/wallEdits.js";
 import { wallSplitJoins } from "../../shared/takeoff/engine/dispatch.js";
+import { joinWalls } from "../../shared/takeoff/wallEdits.js";
+import { cleanCentreZones, withWetZones, zonedStations } from "../../shared/takeoff/centreZones.js";
 import { cleanMeasurementInputs } from "../../server/lib/takeoff/takeoffService.mjs";
 import { bulkCentresChanges, bulkDoubleTopChanges, bulkSelectTap, withHandCentres } from "../../src/components/takeoff/measure/tools.js";
 
@@ -130,10 +132,10 @@ t("wet areas: overlap under 300 mm along the band doesn't count", () => {
   assert.equal(r.status, "none");
 });
 t("what Set to 450 does: follows-item → set; hand-set other value → asked; already 450 → left; wet-set no longer wet → back", () => {
-  const p = [{ id: "a", status: "whole" }, { id: "b", status: "whole" }, { id: "c", status: "whole" }, { id: "d", status: "none" }, { id: "e", status: "partial" }, { id: "f", status: "whole" }];
+  const p = [{ id: "a", status: "whole" }, { id: "b", status: "whole" }, { id: "c", status: "whole" }, { id: "d", status: "none" }, { id: "e", status: "partial", wetMm: [[0, 2000]] }, { id: "f", status: "whole" }];
   const inp = new Map([["a", {}], ["b", { studCentresMm: 600 }], ["c", { studCentresMm: 450 }], ["d", { studCentresMm: 450, studCentresFrom: "wet" }], ["e", {}], ["f", { studCentresMm: 300, studCentresFrom: "wet" }]]);
   const ch = wetCentresChanges(p, inp);
-  assert.deepEqual(ch, { set: ["a", "f"], hand: ["b"], revert: ["d"], partial: ["e"], already: ["c"] });
+  assert.deepEqual(ch, { set: ["a", "f"], hand: ["b"], revert: ["d"], zone: [{ id: "e", wetMm: [[0, 2000]] }], clearZones: [], already: ["c"] });
   assert.deepEqual(withWetCentres({ name: "x" }, true), { name: "x", studCentresMm: WET_AREA_RULE.centresMm, studCentresFrom: "wet" });
   assert.deepEqual(withWetCentres({ name: "x", studCentresMm: 450, studCentresFrom: "wet" }, false), { name: "x" });
 });
@@ -249,6 +251,73 @@ t("engine: a T on the split join still gets its junction studs either side", () 
   const r = run(ms);
   const js = r.lays.filter((l) => ["a", "b"].includes(l.wallMeasurementId)).reduce((s, l) => s + (l.totals.junctionStuds || 0), 0);
   assert.equal(js, 2);
+});
+
+
+// ── Sam, 22 Nov 2026: centre sections (wet area at 450 WITHOUT splitting the wall) and joining walls back ─────
+t("engine: a 450 section on ONE wall frames exactly like the wall split there (studs, plates, noggins)", () => {
+  for (const [from, to] of [[3000, 6000], [0, 3000], [1500, 4200]]) {
+    const zoned = run([wall("a", [0, 0], [6000, 0], { centreZones: [{ fromMm: from, toMm: to, centresMm: 450, from: "wet" }] })]);
+    const a = zoned.lays[0];
+    const pos = a.ticks.filter((x) => x.state !== "removed").map((x) => x.positionMm);
+    // the same stations zonedStations gives, and the 450 stretch really at 450
+    const inZone = pos.filter((x) => x > from + 1 && x < to - 1);
+    for (let i = 1; i < inZone.length; i++) near(inZone[i] - inZone[i - 1], 450, 0.01, `450 bay at ${inZone[i]}`);
+    assert.ok(pos.includes(from) || from === 0, `a stud where the centres change (${from})`);
+    assert.equal(zoned.res.problems.filter((p) => p.blocking !== false).length, 0);
+    const one = run([wall("a", [0, 0], [6000, 0])]);
+    near(zoned.plates, one.plates, 0.01, "plates unchanged");
+    assert.ok(zoned.studs > one.studs, "more studs at 450");
+  }
+  // same studs as splitting at 3000 with the second piece at 450
+  const zoned = run([wall("a", [0, 0], [6000, 0], { centreZones: [{ fromMm: 3000, toMm: 6000, centresMm: 450 }] })]);
+  const split = run(pieces(3000, { studCentresMm: 450 }));
+  assert.equal(zoned.studs, split.studs); assert.deepEqual(zoned.studsAt, split.studsAt); near(zoned.nogMm, split.nogMm, 0.5, "noggins");
+});
+t("engine: a cavity slider can sit across where the centres change (one wall)", () => {
+  const ms = [wall("a", [0, 0], [6000, 0], { centreZones: [{ fromMm: 0, toMm: 3000, centresMm: 450, from: "wet" }] }),
+    { id: "o", kind: "opening", parentId: "a", documentId: "d", pageIndex: 0, calibrationId: "cal", points: [], inputs: { type: "door", label: "D1", xMm: 2400, sillMm: 0, widthMm: 820, heightMm: 2100, cavityLeafMm: 820, cavityPocket: "left" } }];
+  const r = run(ms);
+  assert.equal(r.lays.length, 1);
+  assert.ok(!r.res.problems.some((p) => p.blocking !== false && p.code !== "opening_framing_incomplete"), JSON.stringify(r.res.problems.filter((p) => p.blocking !== false)));
+});
+t("zonedStations: grid from each section's start, a stud at each change, end kept", () => {
+  const base = [0, 600, 1200, 1800, 2400, 3000, 3600, 4200, 4800, 5400, 6000];
+  assert.deepEqual(zonedStations({ runMm: 6000, baseCentresMm: 600, zones: [{ fromMm: 1000, toMm: 3000, centresMm: 450 }], basePositions: base }),
+    [0, 600, 1000, 1450, 1900, 2350, 2800, 3000, 3600, 4200, 4800, 5400, 6000]);
+  assert.deepEqual(zonedStations({ runMm: 6000, baseCentresMm: 600, zones: [], basePositions: base }), base);
+});
+t("wet sections: hand sections stay, old wet ones are replaced, a wet stretch over a hand section is left", () => {
+  const inp = { centreZones: [{ fromMm: 0, toMm: 1000, centresMm: 300 }, { fromMm: 4000, toMm: 5000, centresMm: 450, from: "wet" }] };
+  assert.deepEqual(withWetZones(inp, [[2000, 3000], [500, 1500]]).centreZones, [{ fromMm: 0, toMm: 1000, centresMm: 300 }, { fromMm: 2000, toMm: 3000, centresMm: 450, from: "wet" }]);
+  assert.equal(withWetZones({ centreZones: [{ fromMm: 0, toMm: 900, centresMm: 450, from: "wet" }] }, []).centreZones, undefined);
+});
+t("server: centreZones are checked (overlaps / silly centres refused, kept sorted)", () => {
+  const ok = cleanMeasurementInputs("wall", { kind: "rect", heightMm: 2400, centreZones: [{ fromMm: 3000, toMm: 6000, centresMm: 450, from: "wet" }, { fromMm: 0, toMm: 1000, centresMm: 300 }] }, 6000);
+  assert.deepEqual(ok.centreZones.map((z) => z.fromMm), [0, 3000]);
+  assert.equal(ok.centreZones[1].from, "wet");
+  assert.equal(cleanCentreZones([{ fromMm: 0, toMm: 2000, centresMm: 450 }, { fromMm: 1000, toMm: 3000, centresMm: 450 }]).ok, false);
+  assert.equal(cleanCentreZones([{ fromMm: 0, toMm: 2000, centresMm: 50 }]).ok, false);
+  assert.throws(() => cleanMeasurementInputs("wall", { kind: "rect", heightMm: 2400, centreZones: [{ fromMm: 0, toMm: 50, centresMm: 450 }] }, 6000));
+});
+t("join: split pieces go back to ONE wall; a piece at other centres becomes a section; openings and bracing move along", () => {
+  const [p, q] = pieces(3000, { studCentresMm: 450, studCentresFrom: "wet", bracing: [{ id: "x1", type: "cross", xMm: 500, spanMm: 2400 }] });
+  const op = { id: "o", kind: "opening", parentId: "b", inputs: { xMm: 700, widthMm: 820 } };
+  const r = joinWalls({ walls: [q, p], openingsByWall: new Map([["b", [op]]]), cal, itemCentresMm: 600 });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(r.removed, ["b"]);
+  assert.equal(r.wall.id, "a");
+  assert.deepEqual(r.wall.inputs.centreZones, [{ fromMm: 3000, toMm: 6000, centresMm: 450, from: "wet" }]);
+  assert.equal(r.openings[0].next.parentId, "a"); near(r.openings[0].next.inputs.xMm, 3700, 0.01, "opening moved along");
+  assert.equal(r.wall.inputs.bracing[0].xMm, 3500);
+  near(r.lengthMm, 6000, 0.01, "joined length");
+  // the joined wall frames like the two pieces did
+  const joined = run([{ ...r.wall, inputs: { ...r.wall.inputs, splitOf: undefined, bracing: undefined } }]);
+  const two = run(pieces(3000, { studCentresMm: 450 }));
+  assert.equal(joined.studs, two.studs);
+  // refused: not in line / different heights
+  assert.equal(joinWalls({ walls: [p, wall("z", [0, 1000], [3000, 1000])], cal, itemCentresMm: 600 }).ok, false);
+  assert.equal(joinWalls({ walls: [p, { ...q, inputs: { ...q.inputs, heightMm: 2700 } }], cal, itemCentresMm: 600 }).ok, false);
 });
 
 console.log(`takeoff-tc-wall-split: ${pass} passed, ${fail} failed`);

@@ -31,6 +31,7 @@
 // Sizes are manual (or from an attached project schedule) and are never reported as structurally verified.
 // =============================================================================
 import { TakeoffValidationError, formatMm, isFiniteNumber } from "../units.js";
+import { zonedStations } from "../centreZones.js";
 import { EPS_MM, LENGTH_KINDS, demandId, emptyResult, identityKey, problem } from "./contract.js";
 import { permittedStockLengths } from "./stock.js";
 import { MGP10_DEFAULT_MAX_MM, TIMBER_GRID, isMgp10Grade, onGrid as onGridFor, timberGridFor } from "./families.js";
@@ -901,10 +902,15 @@ export function computeStudWall(input) {
       if (height.bottomPlateMm === undefined) fail("Opening levels from the frame base need frame-height mode (with its bottom plate).", "levelsFrom");
       datumMm = height.bottomPlateMm;
     } else if (input.levelsFrom !== undefined && input.levelsFrom !== "studBase") fail('Opening levels are from "studBase" or "frameBase".', "levelsFrom");
-    const run = layoutRun({
+    const run0 = layoutRun({
       runMm: num(input.wallLengthMm, "Wall length", { above: true }), centresMm: input.centresMm, spacing: input.spacing ?? "fixed",
       startOffsetMm: input.startOffsetMm, endOffsetMm: input.endOffsetMm, includeStart: input.includeStart, includeEnd: input.includeEnd,
     });
+    // Sam, 22 Nov 2026: centre sections of the wall (e.g. 450 along a wet area), each laid out from its own start
+    const zones = Array.isArray(input.centreZones) ? input.centreZones : [];
+    const run = zones.length ? { ...run0, positions: zonedStations({ runMm: run0.runMm, baseCentresMm: input.centresMm, zones, basePositions: run0.positions,
+      keepStart: !run0.excluded.includes("start"), keepEnd: !run0.excluded.includes("end") }) } : run0;
+    for (const z of zones) ctx.explain.push(`Studs at ${fmt(z.centresMm)} centres from ${fmt(z.fromMm)} to ${fmt(z.toMm)} mm (a section of this wall${z.from === "wet" ? ", by a wet area" : ""})`);
     const listed = wallOpenings(input.openings, run.runMm, height.studLengthMm, datumMm, clip ? { ctx, wallId } : null);
     const openings = listed.filter((o) => !o.aboveStuds);
     const aboveStuds = listed.filter((o) => o.aboveStuds);
